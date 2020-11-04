@@ -1,4 +1,8 @@
+html, body {
+	height: 100%; /* so background color covers whole page */
+}
 body {
 	color: #ddd;
 	background: #222;
+	margin: 0; /* eliminate margins around body */
 }
