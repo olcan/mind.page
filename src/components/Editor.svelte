@@ -4,6 +4,7 @@
         height: 49px; /* exact size with one-line placeholder, to avoid content shift below */
         min-height: 1.2em;
         width: 100%;
+        cursor: text;
     }
     #backdrop {
         color: transparent; 
@@ -50,9 +51,10 @@
 </style>
 
 <script lang="ts">
-    export let newTextHandler = (text) => alert(text)
+    export let text = ""
+    export let onDone = (text)=>{}
 
-    const placeholder = "What's happening?";
+    const placeholder = " ";
     let textarea: HTMLTextAreaElement;
     let editor: HTMLDivElement;
     let backdrop: HTMLDivElement;
@@ -72,7 +74,7 @@
     function handleKeyPress(e: KeyboardEvent) {
         if (e.code == "Enter" && e.shiftKey) {
             e.preventDefault()
-            newTextHandler(textarea.value)
+            onDone(textarea.value.trim())
             textarea.value = ""
             updateTextDivs()
         }
@@ -85,7 +87,7 @@
 
 <div bind:this={editor} id="editor">
     <div bind:this={backdrop} id="backdrop"><div bind:this={highlights}>{placeholder}</div></div>
-    <textarea bind:this={textarea} placeholder={placeholder} on:input={updateTextDivs} on:keypress={handleKeyPress} autocapitalize=off/>
+    <textarea bind:this={textarea} placeholder={placeholder} on:input={updateTextDivs} on:keypress={handleKeyPress} autocapitalize=off>{text}</textarea>
 </div>
 
 <!-- disable cmd/ctrl-S and update editor on window resize -->
