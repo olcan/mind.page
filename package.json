@@ -3,7 +3,8 @@
   "description": "Sapper SSR on Firebase",
   "scripts": {
     "lint": "eslint .",
-    "serve": "npm run build && node __sapper__/build",
+    "serve": "npm run build && firebase serve",
+    "serve_node": "npm run build && node __sapper__/build",
     "serve_functions": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "start_functions": "npm run shell",
