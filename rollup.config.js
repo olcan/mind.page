@@ -44,8 +44,8 @@ export default {
 				browser: true,
 				dedupe: ['svelte']
 			}),
-			commonjs(),
-			typescript({ sourceMap: dev }),
+
+			typescript({ sourceMap: dev }),		
 
 			legacy && babel({
 				extensions: ['.js', '.mjs', '.html', '.svelte'],

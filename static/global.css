@@ -1,8 +1,8 @@
-html, body {
-	height: 100%; /* so background color covers whole page */
-}
+/* NOTE: this "static" file is not hot-reloaded by development server. Try _layout.svelte for styles that require live reload. */
 body {
 	color: #ddd;
-	background: #222;
-	margin: 0; /* eliminate margins around body */
+	background: #111;
+	margin: 0; /* eliminate default margins around body */	
+	/* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
+	touch-action: manipulation;
 }

@@ -9,8 +9,10 @@
     "start_functions": "npm run shell",
     "deploy": "npm run build && firebase deploy",
     "logs": "firebase functions:log",
-    "dev": "sapper dev",
-    "build": "tsc firebase-functions.ts && sapper build",
+    "build_ts": "tsc src/firebase/*.ts --outDir lib/firebase --esModuleInterop",
+    "build_sapper": "sapper build",
+    "build": "npm run build_ts && sapper build",
+    "dev": "npm run build_ts && sapper dev",
     "export": "sapper export",
     "serve_export": "npx serve __sapper__/export",
     "start": "node __sapper__/build",
@@ -19,11 +21,13 @@
   "engines": {
     "node": "12"
   },
-  "main": "firebase-functions.js",
+  "main": "lib/firebase/functions.js",
   "dependencies": {
+    "@firebase/app": "^0.6.11",
     "compression": "^1.7.1",
     "express": "4.17.1",
-    "firebase-admin": "^9.2.0",
+    "firebase": "^7.24.0",
+    "firebase-admin": "^9.3.0",
     "firebase-functions": "^3.11.0",
     "sapper": "^0.28.10",
     "sirv": "^1.0.0"
