@@ -1,5 +1,5 @@
 <style>
-	.item {
+	:global(.items > div) {
 		color: #ddd;
 		width: 100%;
 		background: transparent;
@@ -14,7 +14,7 @@
 	}
 </style>
 
-<script context="module">
+<script context="module" lang="ts">
 	// Preload function can be called on either client or server
 	// See https://sapper.svelte.dev/docs#Preloading
 	import { firebaseConfig } from '../../firebase.config.js'	
@@ -24,15 +24,31 @@
 		let items =	await firebase.firestore().collection("items").orderBy("time","desc").get();	
 		return {"items": items.docs.map((item)=>item.data())}
 	}
+	
+	let itemsdiv: HTMLDivElement	
+	function addNewItem(text) {
+		var div = document.createElement('div');
+		div.innerText = text;
+		div.style.opacity = "0.5";
+		itemsdiv.insertBefore(div, itemsdiv.firstChild);
+		const item = {time:Date.now(), text:text};
+		if (window.firebase.apps.length == 0) window.firebase.initializeApp(firebaseConfig);
+		window.firebase.firestore().collection("items").add(item)
+		.then(()=>div.style.opacity="1")
+		.catch((error)=>console.error(error))
+	}
+	
 </script>
 
-<script>
+<script lang="ts">
 	import Editor from '../components/Editor.svelte';
 	export let items = [];
 </script>
 
-<Editor/>
+<Editor newTextHandler={addNewItem}/>
 
-{#each items as item}
-<div class="item">{item.text}</div>
-{/each}
+<div class="items" bind:this={itemsdiv}>
+	{#each items as item}
+	<div>{item.text}</div>
+	{/each}
+</div>

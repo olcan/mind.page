@@ -49,7 +49,9 @@
     }
 </style>
 
-<script lang="ts">    
+<script lang="ts">
+    export let newTextHandler = (text) => alert(text)
+
     const placeholder = "What's happening?";
     let textarea: HTMLTextAreaElement;
     let editor: HTMLDivElement;
@@ -60,17 +62,19 @@
     function updateTextDivs() {
         highlights.innerText = textarea.value || placeholder; /*innerText escapes html*/
         highlights.innerHTML = applyHighlights(highlights.innerText);
-        textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px';        
+        textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
     }
     function disableSaveShortcut(e: KeyboardEvent) { // disable Ctrl/Cmd+S
         if (e.code == "KeyS" && (window.navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)) {
-            e.preventDefault();
+            e.preventDefault()
         }
     }
     function handleKeyPress(e: KeyboardEvent) {
         if (e.code == "Enter" && e.shiftKey) {
-            e.preventDefault();
-            alert(textarea.value)
+            e.preventDefault()
+            newTextHandler(textarea.value)
+            textarea.value = ""
+            updateTextDivs()
         }
     }
 
@@ -82,7 +86,6 @@
 <div bind:this={editor} id="editor">
     <div bind:this={backdrop} id="backdrop"><div bind:this={highlights}>{placeholder}</div></div>
     <textarea bind:this={textarea} placeholder={placeholder} on:input={updateTextDivs} on:keypress={handleKeyPress} autocapitalize=off/>
-    <slot></slot>
 </div>
 
 <!-- disable cmd/ctrl-S and update editor on window resize -->
