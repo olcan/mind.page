@@ -3,7 +3,7 @@
 		color: #ddd;
 		width: 100%;
 		background: transparent;
-		margin: 0;
+        margin: 2px 0;
 		padding: 10px;
 		box-sizing: border-box;
 		/* white-space: pre-wrap; */
@@ -59,7 +59,8 @@
         const item = {time:time, text:text};
         
         if (text.trim().length == 0) { // delete
-            firestore().collection("items").doc(id).delete().then(()=>{saving=false;deleted=true})
+            deleted=true /* reflect immediately, since failure is not too serious */
+            firestore().collection("items").doc(id).delete().then(()=>{saving=false})
             .catch((error)=>{console.error(error);error=true})
         } else { // update
             firestore().collection("items").doc(id).update(item).then(()=>{saving=false})

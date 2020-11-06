@@ -5,13 +5,14 @@
         min-height: 1.2em;
         width: 100%;
         cursor: text;
+        margin: 2px 0;
     }
     #backdrop {
         color: transparent; 
         position: absolute;
         overflow: auto;
         width: 100%;
-        background: #222;
+        background: #1b1b1b;
         min-height: 49px;
         width: 100%;
         margin: 0;
