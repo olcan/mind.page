@@ -19,16 +19,20 @@
         box-sizing: border-box;
         white-space: pre-wrap;
         word-wrap: break-word;
-        font-family: "menlo", monospace;
-        font-size: 1.2em;
+        /* font-family: "menlo", monospace;
+        font-size: 1.2em; */
+        font-family: Helvetica;
+        font-size: 1.3em;
         line-height: 1.4em;
     }
     textarea {
         position: absolute;
         background: transparent;
         color: #ddd;
-        font-family: "menlo", monospace;
-        font-size: 1.2em;
+        /* font-family: "menlo", monospace;
+        font-size: 1.2em; */
+        font-family: Helvetica;
+        font-size: 1.3em;
         line-height: 1.4em;
         min-height: 49px;
         width: 100%;
