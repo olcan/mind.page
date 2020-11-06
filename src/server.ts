@@ -1,6 +1,7 @@
 import sirv from 'sirv';
 import express from 'express';
 import compression from 'compression';
+import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server';
 
 const { PORT, NODE_ENV } = process.env;
@@ -10,7 +11,16 @@ const sapperServer = express()
 	.use(
 		compression({ threshold: 0 }),
 		sirv('static', { dev }),
-		sapper.middleware()
+		cookieParser(),
+		(req, res, next) => {
+			res.cookie = req.cookies["__session"] || ''
+			next()
+		},
+		sapper.middleware({
+			session: (req, res) => ({
+				cookie: res.cookie
+			})
+		})
 	);
 
 if (!("FIREBASE_CONFIG" in process.env)) { // firebase handles the listening

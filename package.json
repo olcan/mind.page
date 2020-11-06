@@ -26,9 +26,11 @@
   "dependencies": {
     "@firebase/app": "^0.6.11",
     "compression": "^1.7.1",
+    "cookie-parser": "^1.4.5",
     "express": "4.17.1",
     "firebase": "^7.24.0",
     "firebase-admin": "^9.3.0",
+    "firebase-auth": "^0.1.2",
     "firebase-functions": "^3.11.0",
     "sapper": "^0.28.10",
     "sirv": "^1.0.0"

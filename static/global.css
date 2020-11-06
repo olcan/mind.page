@@ -1,4 +1,7 @@
 /* NOTE: this "static" file is not hot-reloaded by development server. Try _layout.svelte for styles that require live reload. */
+html {
+	-webkit-text-size-adjust: 100%; /* prevent font scaling in landscape in ios safari */
+}
 body {
 	color: #ddd;
 	background: #111;

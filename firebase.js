@@ -9,9 +9,17 @@ export const firebaseConfig = {
     measurementId: "G-L48G2D72Q9"
 }
 
+export const isClient = typeof window !== 'undefined'
+
 export function firebase() {
-    let lib = typeof window !== 'undefined' ? window.firebase: require("firebase");
+    let lib = isClient ? window.firebase : require("firebase");
     return lib.apps.length > 0 ? lib.apps[0] : lib.initializeApp(firebaseConfig)
 }
 
 export function firestore() { return firebase().firestore() }
+
+export function firebaseAdmin() {
+    let admin = require("firebase-admin")
+    if (admin.apps.length == 0) admin.initializeApp(firebaseConfig)
+    return admin
+}
