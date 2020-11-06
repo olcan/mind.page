@@ -26,6 +26,7 @@ import type { write } from 'fs';
 	let user = null
 	
 	function onEditorDone(text:string) {
+		if (text.trim() == "") return
 		if (text == "/signout") {
 			firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
 			document.cookie = '__session=signed_out;max-age=0'; // delete cookie for server

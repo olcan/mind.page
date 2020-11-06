@@ -1,7 +1,7 @@
 <style>
     #editor {
         position: relative;
-        height: 49px; /* exact size with one-line placeholder, to avoid content shift below */
+        height: 49px; /*  */
         min-height: 1.2em;
         width: 100%;
         cursor: text;
@@ -12,25 +12,25 @@
         overflow: auto;
         width: 100%;
         background: #222;
-        min-height: 1.2em;
+        min-height: 49px;
         width: 100%;
         margin: 0;
         padding: 10px;
         box-sizing: border-box;
         white-space: pre-wrap;
         word-wrap: break-word;
-        font-family: Helvetica;
-        font-size: 1.3em;
+        font-family: "menlo", monospace;
+        font-size: 1.2em;
         line-height: 1.4em;
     }
     textarea {
         position: absolute;
         background: transparent;
         color: #ddd;
-        font-family: Helvetica;
-        font-size: 1.3em;
+        font-family: "menlo", monospace;
+        font-size: 1.2em;
         line-height: 1.4em;
-        min-height: 1.2em;
+        min-height: 49px;
         width: 100%;
         margin: 0;
         padding: 10px;
