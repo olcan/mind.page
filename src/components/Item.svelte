@@ -1,7 +1,10 @@
 <style>
     .item-container {
         margin: 5px 0;
-        border-left: 2px solid #ddd;
+        border-left: 2px solid #444;
+    }
+    .item-container.editing {        
+        border-left: 2px solid #aaa;
     }
 	.item {
 		color: #ddd;
@@ -102,7 +105,7 @@
 
 </script>
 
-<div class="item-container">
+<div class="item-container" class:editing>
     {#if editing}
         <Editor bind:text={text} onDone={onEditorDone}/>
     {:else}

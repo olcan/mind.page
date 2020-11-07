@@ -1,6 +1,6 @@
 <style>
 	.editor {
-		border-left: 2px solid #eee;
+		border-left: 2px solid #aaa;
 		margin-bottom: 5px;
 	}
 </style>
