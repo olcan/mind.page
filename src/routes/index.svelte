@@ -37,7 +37,7 @@
 	}
 	
 	function onEditorChange(text:string) {		
-		items = stableSort(items, (a,b) => {
+		items = stableSort(items.filter((item)=>!item.deleted), (a,b) => {
 			return (b.editing - a.editing) ||
 			(b.text.indexOf(text)<0?0:1) - (a.text.indexOf(text)<0?0:1) ||
 			(b.time - a.time) 
@@ -102,7 +102,7 @@
 	<Editor onChange={onEditorChange} onDone={onEditorDone}/>
 </div>
 {#each items as item}
-<Item onTagClick={onTagClick} bind:text={item.text} bind:editing={item.editing} {...item}/>
+<Item onTagClick={onTagClick} bind:text={item.text} bind:editing={item.editing} bind:deleted={item.deleted} {...item}/>
 {/each}
 {:else if user}
 User {user.email} not allowed.
