@@ -63,7 +63,8 @@
 	if (isClient) { // on client
 		if (error) { // error from server, attempt reload
 			console.log(error)
-			location.reload()
+			// NOTE: reload is disabled for now as it causes an infinite loop in production, possibly due to reload being too disruptive
+			// location.reload()
 		}
 		// user = JSON.parse(window.localStorage.getItem("user"))
 		firebase().auth().onAuthStateChanged(authUser => {
