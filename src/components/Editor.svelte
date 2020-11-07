@@ -5,7 +5,6 @@
         min-height: 1.2em;
         width: 100%;
         cursor: text;
-        margin: 2px 0;
     }
     #backdrop {
         color: transparent; 
@@ -57,6 +56,7 @@
 
 <script lang="ts">
     export let text = ""
+    export let onChange = (text)=>{}
     export let onDone = (text)=>{}
 
     const placeholder = " ";
@@ -76,7 +76,7 @@
             e.preventDefault()
         }
     }
-    function handleKeyPress(e: KeyboardEvent) {
+    function onKeyPress(e: KeyboardEvent) {
         if (e.code == "Enter" && e.shiftKey) {
             e.preventDefault()
             onDone(textarea.value.trim())
@@ -85,14 +85,20 @@
         }
     }
 
-    import { onMount } from 'svelte';
-    onMount(updateTextDivs); // perform initial sizing for divs below editor
+    function onInput() {
+        text = textarea.value.trim()
+        updateTextDivs()
+        onChange(textarea.value.trim())
+    }
+
+    import { afterUpdate } from 'svelte';
+    afterUpdate(updateTextDivs);
     
 </script>
 
 <div bind:this={editor} id="editor">
     <div bind:this={backdrop} id="backdrop"><div bind:this={highlights}>{placeholder}</div></div>
-    <textarea bind:this={textarea} placeholder={placeholder} on:input={updateTextDivs} on:keypress={handleKeyPress} autocapitalize=off>{text}</textarea>
+    <textarea bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keypress={onKeyPress} autocapitalize=off>{text}</textarea>
 </div>
 
 <!-- disable cmd/ctrl-S and update editor on window resize -->
