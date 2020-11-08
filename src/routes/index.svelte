@@ -144,9 +144,12 @@
 	function onItemEditing(index:number, editing:boolean) {
 		if (editing) {
 			editingItems.push(index)
-			setTimeout(()=>{
-				textArea(index).focus()
-				onEditorChange(editorText)
+			let item = items[index] // since index may change
+			onEditorChange(editorText)
+			setTimeout(()=>{ // allow textarea to be created
+				// NOTE: this focus does not work on iOS, even though focusOnNearestEditingItem (below) works, possibly because the keyboard is already visible in that case. In any case, the overall behavior on iOS is reasonable since user gets better context after reodering and can manually focus.
+				textArea(item.index).focus()
+				window.top.scrollTo(0,0)
 			},0) // trigger resort
 		} else {
 			editingItems.splice(editingItems.indexOf(index), 1)
