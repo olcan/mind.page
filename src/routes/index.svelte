@@ -1,7 +1,8 @@
 <style>
 	.editor {
-		border-left: 2px solid #aaa;
-		margin-bottom: 5px;
+		border-left: 2px solid #69f;
+		margin-top: 2px;
+		margin-bottom: 4px;
 	}
 </style>
 

@@ -1,6 +1,6 @@
 <style>
     .item-container {
-        margin: 5px 0;
+        margin: 4px 0;
         border-left: 2px solid #444;
     }
     .item-container.editing {        
