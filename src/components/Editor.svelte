@@ -55,15 +55,17 @@
 </style>
 
 <script lang="ts">
+    export let id = "editor"
     export let text = ""
+    export let onFocused = (focused:boolean)=>{}
     export let onChange = (text)=>{}
     export let onDone = (text)=>{}
 
-    const placeholder = " ";
-    let textarea: HTMLTextAreaElement;
-    let editor: HTMLDivElement;
-    let backdrop: HTMLDivElement;
-    let highlights: HTMLDivElement;
+    const placeholder = " "
+    let editor: HTMLDivElement
+    let backdrop: HTMLDivElement
+    let highlights: HTMLDivElement
+    let textarea: HTMLTextAreaElement
     let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(#\w+?\b|#)/g, '<mark>$1</mark>');
     
     function updateTextDivs() {
@@ -71,17 +73,10 @@
         highlights.innerHTML = applyHighlights(highlights.innerText);
         textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
     }
-    function disableSaveShortcut(e: KeyboardEvent) { // disable Ctrl/Cmd+S
-        if (e.code == "KeyS" && (window.navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)) {
-            e.preventDefault()
-        }
-    }
     function onKeyPress(e: KeyboardEvent) {
         if (e.code == "Enter" && e.shiftKey) {
             e.preventDefault()
             onDone(textarea.value.trim())
-            textarea.value = ""
-            updateTextDivs()
         }
     }
 
@@ -98,8 +93,9 @@
 
 <div bind:this={editor} id="editor">
     <div bind:this={backdrop} id="backdrop"><div bind:this={highlights}>{placeholder}</div></div>
-    <textarea bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keypress={onKeyPress} autocapitalize=off>{text}</textarea>
+    <!-- use autocapitalize=off to disable capitalization -->
+    <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keypress={onKeyPress} on:focus={()=>onFocused(true)} on:blur={()=>onFocused(false)}>{text}</textarea>
 </div>
 
-<!-- disable cmd/ctrl-S and update editor on window resize -->
-<svelte:window on:keydown={disableSaveShortcut} on:resize={updateTextDivs}/>
+<!-- update editor on window resize (height changes due to text reflow) -->
+<svelte:window on:resize={updateTextDivs}/>

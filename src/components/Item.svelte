@@ -58,8 +58,10 @@
     let itemdiv: HTMLDivElement
     import { afterUpdate } from 'svelte';
     afterUpdate(()=>{
-        if (itemdiv != null) // null if item is removed
-         window["MathJax"].typesetPromise([itemdiv])
+        // if (itemdiv != null) // null if item is removed
+        //  window["MathJax"].typesetPromise([itemdiv]).then(()=>{
+        //     itemdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
+        //  }).catch(console.error)
     });
 
     export let onTagClick = (tag:string)=>{}
@@ -74,23 +76,29 @@
     export let editing = false
     export let saving = false
     export let deleted = false
+    export let index: number
     export let id: string
     export let time: number
     export let text = ""
-    let lastText = null
+    export let lastText = ""
     const placeholder = " "
     let error = false
+    export let onEditing = (index:number, editing:boolean)=>{}
+    export let onFocused = (index:number, focused:boolean)=>{}
+    export let onDeleted = (index:number)=>{}
 
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
         editing = false
+        onEditing(index, false)
         if (text.length > 0 && text == lastText) return /* no change */
         // time = Date.now()
         saving = true
         const item = {time:time, text:text};
         
         if (text.trim().length == 0) { // delete
-            deleted=true /* reflect immediately, since failure is not too serious */
+            deleted = true /* reflect immediately, since failure is not too serious */
+            onDeleted(index)
             firestore().collection("items").doc(id).delete().then(()=>{saving=false})
             .catch((error)=>{console.error(error);error=true})
         } else { // update
@@ -99,15 +107,16 @@
         }
     }
     function onClick() { 
-        editing = !editing
-        if (editing) lastText = text
+        lastText = text
+        editing = true
+        onEditing(index, true)
     }
 
 </script>
 
 <div class="item-container" class:editing>
     {#if editing}
-        <Editor bind:text={text} onDone={onEditorDone}/>
+        <Editor id={id} bind:text={text} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
     {:else}
         <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
     {/if}
