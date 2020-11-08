@@ -1,8 +1,10 @@
 <style>
 	.editor {
-		border-left: 2px solid #69f;
-		margin-top: 2px;
-		margin-bottom: 4px;
+		border-left: 2px solid #444;
+		margin: 4px 0;
+	}
+	.editor.focused {
+		border-left: 2px solid #aaa;
 	}
 </style>
 
@@ -32,6 +34,7 @@
 	let user = null
 	let editingItems = []
 	let focusedItem = -1
+	let focused = false
 	
 	items.forEach((item, index)=>item.index=index)
 	
@@ -47,11 +50,13 @@
 		items.forEach((item, index)=>{
 			item.index = index
 			if (item.editing) editingItems.push(index)
-			// TODO: does this work? speed it up by using index instead of id?
+			// if (item.focused) focusedItem = index;
 			if (document.activeElement == textArea(index)) focusedItem = index;
 		})
-		textArea(focusedItem).focus() // ensure correct focus
-		console.log(`editingItems:${editingItems}, focusedItem:${focusedItem}`)
+		setTimeout(()=>{ // allow dom updated before re-focus
+			textArea(focusedItem).focus() // ensure correct focus
+			// console.log(`editingItems:${editingItems}, focusedItem:${focusedItem}`)
+		},0)
 	}
 
 	function onEditorChange(text:string) {
@@ -133,19 +138,25 @@
 					//localStorage.setItem("user",JSON.stringify(user))
 				}).catch(console.error)
 			}
-		})
+		})		
 	}
 	
 	function onItemEditing(index:number, editing:boolean) {
 		if (editing) {
 			editingItems.push(index)
+			setTimeout(()=>{
+				textArea(index).focus()
+				onEditorChange(editorText)
+			},0) // trigger resort
 		} else {
 			editingItems.splice(editingItems.indexOf(index), 1)
 			if (focusedItem == index) {
 				focusedItem = -1
 				// textArea(-1).focus()
-				if (items[index].text.length > 0) // otherwise handled in onItemDeleted()
+				if (items[index].text.length > 0) { // otherwise handled in onItemDeleted()
 					focusOnNearestEditingItem(index)
+					onEditorChange(editorText)
+				}
 			}
 		}
 		// console.log(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`)
@@ -168,21 +179,15 @@
 	}
 
 	function onKeyDown(e:KeyboardEvent) {
-		// console.log(e.code)
-		// disable cmd/ctrl-S
 		// For codes, see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
-		if (e.code == "KeyS" && (window.navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)) {
-			e.stopPropagation()
-			e.preventDefault()
-			return
-		}
-		// Handle arrow keys
 		switch (e.code) {
 			case "ArrowDown": {
 				if (focusedItem < items.length-1) {
 					const index = focusedItem
 					const textarea = textArea(index)
-					if (textarea.selectionStart == textarea.value.length && textarea.selectionEnd == textarea.value.length) {
+					const updownline = parseInt(textarea.getAttribute("updownline"))
+					const lines = parseInt(textarea.getAttribute("lines"))
+					if (updownline == lines && (textarea.selectionStart == textarea.selectionEnd)) {
 						if(!items[index+1].editing) editItem(index+1)
 						setTimeout(()=>textArea(index+1).focus(),0)
 						e.stopPropagation()
@@ -195,7 +200,8 @@
 				if (focusedItem >= 0) {
 					const index = focusedItem
 					const textarea = textArea(index)
-					if (textarea.selectionStart == 0 && textarea.selectionEnd == 0) {
+					const updownline = parseInt(textarea.getAttribute("updownline"))
+					if (updownline == 1 && (textarea.selectionStart == textarea.selectionEnd)) {
 						if (index == 0) textArea(-1).focus()
 						else {
 							if(!items[index-1].editing) editItem(index-1)
@@ -212,11 +218,11 @@
 </script>
 
 {#if user && allowedUsers.includes(user.uid)}
-<div class="editor">
-	<Editor bind:text={editorText} onChange={onEditorChange} onDone={onEditorDone}/>
+<div class="editor" class:focused>
+	<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} autofocus={true}/>
 </div>
 {#each items as item}
-<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} bind:text={item.text} bind:editing={item.editing} bind:deleted={item.deleted} {...item}/>
+<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} bind:text={item.text} bind:lastText={item.lastText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} {...item}/>
 {/each}
 {:else if user}
 User {user.email} not allowed.
