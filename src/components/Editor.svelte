@@ -123,8 +123,7 @@
 <div bind:this={editor} id="editor">
     <div class="backdrop"><div id="partial" bind:this={partial}></div></div>
     <div class="backdrop" class:focused bind:this={backdrop}><div id="highlights" bind:this={highlights}>{placeholder}</div></div>
-    <!-- use autocapitalize=off to disable capitalization -->
-    <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keydown={onKeyDown} on:keypress={onKeyPress} on:focus={()=>onFocused(focused=true)} on:blur={()=>onFocused(focused=false)}>{text}</textarea>
+    <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keydown={onKeyDown} on:keypress={onKeyPress} on:focus={()=>onFocused(focused=true)} on:blur={()=>onFocused(focused=false)} autocapitalize=off>{text}</textarea>
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->
