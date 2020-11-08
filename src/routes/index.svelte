@@ -184,6 +184,8 @@
 					if (textarea.selectionStart == textarea.value.length && textarea.selectionEnd == textarea.value.length) {
 						if(!items[index+1].editing) editItem(index+1)
 						setTimeout(()=>textArea(index+1).focus(),0)
+						e.stopPropagation()
+						e.preventDefault()
 					}
 				}
 				return 
@@ -198,6 +200,8 @@
 							if(!items[index-1].editing) editItem(index-1)
 							setTimeout(()=>textArea(index-1).focus(),0)
 						}
+						e.stopPropagation()
+						e.preventDefault()
 					}
 				}
 				return 
