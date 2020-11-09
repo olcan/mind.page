@@ -1,8 +1,8 @@
-
 <style>
 	.editor {
 		border-left: 2px solid #444;
-		margin: 4px 0;
+		margin-bottom: 4px;
+        break-inside: avoid-column;
 	}
 	.editor.focused {
 		border-left: 2px solid #aaa;
@@ -10,7 +10,7 @@
 	.items {
 		column-count: auto;
 		column-width: 480px;
-		column-gap: 8px;
+		column-gap: 4px;
 		column-fill: auto;
 	}
 </style>
@@ -26,6 +26,7 @@
 		const user:any = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error)
 		if (user && allowedUsers.includes(user.uid)) {
 			let items =	await firebaseAdmin().firestore().collection("items").orderBy("time","desc").get()
+			// return {}
 			return {items: items.docs.map((doc)=>Object.assign(doc.data(),{id:doc.id}))}
 		} else {
 			return {error: "invalid session cookie"}
@@ -50,7 +51,7 @@
 		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
 		.map(({item}) => item)
 	}
-
+	
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
@@ -65,7 +66,7 @@
 			// console.log(`editingItems:${editingItems}, focusedItem:${focusedItem}`)
 		},0)
 	}
-
+	
 	function onEditorChange(text:string) {
 		const lowercaseText = text.toLowerCase()
 		items = stableSort(items, (a,b) => {
@@ -75,16 +76,31 @@
 		})
 		updateItemIndices()
 	}
-	function onTagClick(tag:string) { onEditorChange(tag) }
+	function onTagClick(tag:string) { 
+		editorText = tag + " "
+		onEditorChange(editorText)
+		textArea(-1).focus()
+	}
 	
 	let editorText = ""
-	function onEditorDone(text:string) {
-		if (text.length == 0) { focusOnNearestEditingItem(-1); return }
-		if (text == "/signout") {
-			firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
-			document.cookie = '__session=signed_out;max-age=0'; // delete cookie for server
-			location.reload()
-			return
+	function onEditorDone(origText:string, e:KeyboardEvent) {
+		let text = origText
+		// if empty, then we trigger chain saving (e.g. Cmd+S) but not chain backspace
+		if (text.length == 0) { 
+			if (e.code != "Backspace") focusOnNearestEditingItem(-1); 
+			return 
+		}
+		switch (text) {
+			case '/signout': {
+				firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
+				document.cookie = '__session=signed_out;max-age=0'; // delete cookie for server
+				location.reload()
+				return
+			}
+			case '/count': {
+				text = `${editingItems.length} items are selected`
+				break
+			}
 		}
 		// reset editor/query _before_ adding new item
 		editorText = ""
@@ -103,12 +119,13 @@
 		textArea(near).focus()
 		focusedItem = near
 	}
-
+	
 	function onItemDeleted(index:number) {
 		items.splice(index, 1)
 		updateItemIndices()
 		items = items // trigger dom update
-		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
+		//setTimeout(()=>focusOnNearestEditingItem(index-1),0)
+		textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
 	}
 	
 	// Sign in user as needed ...
@@ -165,7 +182,7 @@
 				// textArea(-1).focus()
 				if (items[index].text.length > 0) { // otherwise handled in onItemDeleted()
 					focusOnNearestEditingItem(index)
-					onEditorChange(editorText)
+					onEditorChange(editorText) // update sorting of items
 				}
 			}
 		}
@@ -183,58 +200,44 @@
 		items[index].editing=true
 		editingItems.push(index)
 	}
-
+	
 	function textArea(index:number) : HTMLTextAreaElement {
 		return document.getElementById("textarea-" + (index<0 ? "editor" : items[index].id)) as HTMLTextAreaElement
 	}
-
-	function onKeyDown(e:KeyboardEvent) {
-		// For codes, see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
-		switch (e.code) {
-			case "ArrowDown": {
-				if (focusedItem < items.length-1) {
-					const index = focusedItem
-					const textarea = textArea(index)
-					const updownline = parseInt(textarea.getAttribute("updownline"))
-					const lines = parseInt(textarea.getAttribute("lines"))
-					if (updownline == lines && (textarea.selectionStart == textarea.selectionEnd)) {
-						if(!items[index+1].editing) editItem(index+1)
-						setTimeout(()=>textArea(index+1).focus(),0)
-						e.stopPropagation()
-						e.preventDefault()
-					}
-				}
-				return 
-			}
-			case "ArrowUp": {
-				if (focusedItem >= 0) {
-					const index = focusedItem
-					const textarea = textArea(index)
-					const updownline = parseInt(textarea.getAttribute("updownline"))
-					if (updownline == 1 && (textarea.selectionStart == textarea.selectionEnd)) {
-						if (index == 0) textArea(-1).focus()
-						else {
-							if(!items[index-1].editing) editItem(index-1)
-							setTimeout(()=>textArea(index-1).focus(),0)
-						}
-						e.stopPropagation()
-						e.preventDefault()
-					}
-				}
-				return 
+	
+	function onPrevItem() {
+		if (focusedItem >= 0) {
+			const index = focusedItem
+			const textarea = textArea(index)
+			if (index == 0) textArea(-1).focus()
+			else {
+				if(!items[index-1].editing) editItem(index-1)
+				setTimeout(()=>textArea(index-1).focus(),0)
 			}
 		}
 	}
+
+	function onNextItem() {
+		if (focusedItem < items.length-1) {
+			const index = focusedItem
+			const textarea = textArea(index)
+			if(!items[index+1].editing) editItem(index+1)
+			setTimeout(()=>textArea(index+1).focus(),0)
+		}
+	}
+
 </script>
 
 {#if user && allowedUsers.includes(user.uid)}
-<div class="editor" class:focused>
-	<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} autofocus={true}/>
-</div>
+
 <div class="items">
-{#each items as item}
-<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} bind:text={item.text} bind:lastText={item.lastText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} {...item}/>
-{/each}
+	<div style="height:4px"/><!--spacer that does not spill over to other column-->
+	<div class="editor" class:focused>
+		<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+	</div>
+	{#each items as item}
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:lastText={item.lastText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} {...item}/>
+	{/each}
 </div>
 
 {:else if user}
@@ -248,5 +251,3 @@ User {user.email} not allowed.
 	}
 </script>
 {/if}
-
-<svelte:window on:keydown={onKeyDown}/>

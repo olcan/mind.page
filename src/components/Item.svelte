@@ -29,7 +29,10 @@
     .saving { opacity: 0.5; }
     .error { color:red; }
     .deleted { display: none; }
+
+    /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
     .item :global(p) { margin: 0; padding: 0; }
+    .item :global(li) { text-indent: -3px; }
     .item :global(ul) {
         margin: 0;
         padding: 0;
@@ -143,7 +146,7 @@
     
     function toHTML(text: string) {
         // wrap #tags inside clickable <mark></mark>
-        text = text.replace(/(#[#\w]*)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
+        text = text.replace(/(#\w+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
         // preserve line breaks by inserting <br> outside of code blocks
         let insideBlock = false;
         text = text.split('\n').map(str => {
@@ -168,7 +171,9 @@
     export let onEditing = (index:number, editing:boolean)=>{}
     export let onFocused = (index:number, focused:boolean)=>{}
     export let onDeleted = (index:number)=>{}
-    
+    export let onPrev = ()=>{}
+    export let onNext = ()=>{}
+
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
         editing = false
@@ -198,7 +203,7 @@
 
 <div class="item-container" class:editing class:focused>
     {#if editing}
-    <Editor id={id} bind:text={text} bind:focused={focused} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
+    <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
         {:else}
         <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
         {/if}
