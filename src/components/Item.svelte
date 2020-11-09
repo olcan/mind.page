@@ -77,11 +77,22 @@
     // Markdown library requires import as ESM (ECMAScript module)
     // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
     import marked from 'marked'
-    import hljs from 'highlight.js' // NOTE: needs npm i @types/highlight.js -s
+
     import 'highlight.js/styles/monokai-sublime.css';
-    //import * as javascript from 'highlight.js/lib/languages/javascript';
-    //hljs.registerLanguage('javascript', javascript);
-    
+    import hljs from 'highlight.js/lib/core' // NOTE: needs npm i @types/highlight.js -s
+    import plaintext from 'highlight.js/lib/languages/plaintext.js';
+    hljs.registerLanguage('plaintext', plaintext);
+    import javascript from 'highlight.js/lib/languages/javascript.js';
+    hljs.registerLanguage('javascript', javascript);
+    import typescript from 'highlight.js/lib/languages/typescript.js';
+    hljs.registerLanguage('typescript', typescript);
+    import css from 'highlight.js/lib/languages/css.js';
+    hljs.registerLanguage('css', css);
+    import json from 'highlight.js/lib/languages/json.js';
+    hljs.registerLanguage('json', json);
+    import xml from 'highlight.js/lib/languages/xml.js';
+    hljs.registerLanguage('xml', xml); // including html
+
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
         return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
@@ -137,7 +148,7 @@
             if (str.match(/^```/)) { insideBlock = !insideBlock; }
             return insideBlock || str.match(/^```|^    /) ? str : str + "<br>\n"
         }).join('\n');
-        return marked(text)
+        return marked(text);
     }
     
     import Editor from './Editor.svelte'

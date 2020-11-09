@@ -78,11 +78,11 @@
     let partial: HTMLDivElement
     let highlights: HTMLDivElement    
     let textarea: HTMLTextAreaElement
+    let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
     let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(#[#\w]*)/g, '<mark>$1</mark>');
-    
+
     function updateTextDivs() {
-        highlights.innerText = textarea.value || placeholder; /*innerText escapes html*/
-        highlights.innerHTML = applyHighlights(highlights.innerText);
+        highlights.innerHTML = applyHighlights(escapeHTML(textarea.value || placeholder));
         textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
     }
     function onKeyDown(e: KeyboardEvent) {
