@@ -148,9 +148,10 @@
             e.preventDefault()
             return
         }
-        // delete item with backspace (safer on KeyUp)
+        // delete item with backspace (safer if done on KeyUp)
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
-            deleteOnBackspaceUp = true
+            // deleteOnBackspaceUp = true
+            onDone(textarea.value.trim(), e)
             return
         }
     }

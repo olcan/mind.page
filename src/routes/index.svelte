@@ -46,19 +46,19 @@
 	
 	items.forEach((item, index)=>item.index=index)
 	
+	function itemTimeString(delta:number) {
+		if (delta < 60) return ""//"<1m"
+		if (delta < 3600) return Math.floor(delta/60).toString() + "m"
+		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
+		return Math.floor(delta/(24*3600)).toString() + "d"
+	}
+
 	function stableSort(array, compare) {
 		return array.map((item, index) => ({item, index}))
 		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
 		.map(({item}) => item)
 	}
 
-	function itemTimeString(delta:number) {
-		if (delta < 60) return ""
-		if (delta < 3600) return Math.floor(delta/60).toString() + "m"
-		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
-		return Math.floor(delta/(24*3600)).toString() + "d"
-	}
-	
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
@@ -70,24 +70,21 @@
 			// if (item.focused) focusedItem = index;
 			if (document.activeElement == textArea(index)) focusedItem = index;
 			let timeString = itemTimeString((Date.now() - item.time)/1000)
-			item.timeString = (timeString == prevTimeString) ? "" : timeString
 			item.timeOutOfOrder = (item.time > prevTime) // for special styling
+			item.timeString = (timeString == prevTimeString && !item.timeOutOfOrder) ? "" : timeString
 			prevTimeString = timeString
 			prevTime = item.time
 		})
-		setTimeout(()=>{ // allow dom updated before re-focus
-			textArea(focusedItem).focus() // ensure correct focus
-			// console.log(`editingItems:${editingItems}, focusedItem:${focusedItem}`)
-		},0)
+		const textarea = textArea(focusedItem)
+		if (textarea) setTimeout(()=>textarea.focus(),0) // allow dom update before refocus
 	}
-	
-	function onEditorChange(text:string) {
-		const lowercaseText = text.toLowerCase()
-		items = stableSort(items, (a,b) => {
-			return (b.editing - a.editing) ||
-			(b.text.toLowerCase().indexOf(lowercaseText)<0?0:1) - (a.text.toLowerCase().indexOf(lowercaseText)<0?0:1) ||
-			(b.time - a.time) 
-		})
+	function lowercaseContains(str, part) : number { return str.toLowerCase().indexOf(part)>=0 ? 1:0 }
+	function onEditorChange(origText:string) {
+		const text = origText.toLowerCase()
+		items = stableSort(items, (a,b) => 
+			(b.editing - a.editing) || // NaN (~0) if either undefined
+			(lowercaseContains(b.text, text) - lowercaseContains(a.text, text)) ||
+			(b.time - a.time))
 		updateItemIndices()
 	}
 	function onTagClick(tag:string) { 
@@ -99,11 +96,8 @@
 	let editorText = ""
 	function onEditorDone(origText:string, e:KeyboardEvent) {
 		let text = origText
-		// if empty, then we trigger chain saving (e.g. Cmd+S) but not chain backspace
-		if (text.length == 0) { 
-			if (e.code != "Backspace") focusOnNearestEditingItem(-1); 
-			return 
-		}
+		// if empty, then we trigger chain saving (e.g. Cmd+S) except backspace
+		if (text.length == 0) { if (e.code != "Backspace") focusOnNearestEditingItem(-1); return }
 		switch (text) {
 			case '/signout': {
 				firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
@@ -116,14 +110,20 @@
 				break
 			}
 		}
-		// reset editor/query _before_ adding new item
+
+		let tmpid = Date.now().toString()
+		let itemToSave = {time:Date.now(), text:text}
+		let item = {...itemToSave, id:tmpid, saving:true, editing:false};
+		items = [item, ...items]
 		editorText = ""
-		onEditorChange("")
+		onEditorChange(editorText)
 		textArea(-1).focus()
-		const item = {time:Date.now(), text:text};
-		items = [{...item, saving:true}, ...items]
-		updateItemIndices() // for new item
-		firestore().collection("items").add(item).then((doc)=>{items[0].saving=false;items[0].id=doc.id})
+
+		firestore().collection("items").add(itemToSave).then((doc)=>{
+			let index = items.findIndex((item)=>item.id=tmpid) // since index can change
+			items[index].saving = false; // assigning to item object in array triggers dom update for item
+			items[index].id = doc.id
+		})
 		.catch((error)=>{console.error(error);items[0].error=true})
 	}
 	
@@ -138,8 +138,8 @@
 		items.splice(index, 1)
 		updateItemIndices()
 		items = items // trigger dom update
-		//setTimeout(()=>focusOnNearestEditingItem(index-1),0)
-		textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
+		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
+		//textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
 	}
 	
 	// Sign in user as needed ...

@@ -13,20 +13,24 @@
         margin: -1px 0; */
         border-left: 2px solid #aaa;
     }
+    .item-container.timeOutOfOrder {
+        border-top: 1px solid #666;
+    }
     .time {
         color: #666;
         display: inline-block;
         padding-left: 5px;
+        padding-right: 5px;
         margin-bottom: 4px;
         font-family: Helvetica;
         font-size: 15px;
     }
     .time.timeOutOfOrder {
         background: #666;
-        padding-left: 15px;
-        padding-right: 5px;
+        /* padding-left: 15px; */
+        padding-bottom: 1px;
         color: black;
-        border-radius: 0 4px 4px 0;
+        border-radius: 0 /*4px*/0 4px 0;
     }
     .item {
         color: #ddd;
@@ -46,31 +50,20 @@
     .deleted { display: none; }
     
     /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
-    .item :global(p) { margin: 0; padding: 0; }
+    .item :global(h1,h2,h3,h4,h5,h6,p,ul,blockquote,pre) { margin: 0 }
     .item :global(li) { text-indent: -3px; }
     .item :global(ul) {
-        margin: 0;
-        padding: 0;
         padding-left: 30px;
-        /* margin-left: 5px; */
-        /* margin-bottom: 1em; */
         border-left: 1px solid #333;
     }
     .item :global(blockquote) {
-        margin: 0;
-        padding: 0;
         padding-left: 15px;
-        /* margin-left: 5px; */
-        margin-bottom: 10px; /* consistent w/ spacing while editing */
+        margin-bottom: 10px;
         border-left: 1px solid #333;
     }
     .item :global(pre) {
-        margin: 0;
-        padding: 0;
         padding-left: 15px;
-        /* margin-left: 5px; */
-        margin-bottom: 10px; /* consistent w/ spacing while editing */
-        /* margin-bottom: 1em; */
+        margin-bottom: 10px;
         border-left: 1px solid #333;
     }
     .item :global(br:last-child) { display: none; }
@@ -217,7 +210,7 @@
     
 </script>
 
-<div class="item-container" class:editing class:focused>
+<div class="item-container" class:editing class:focused class:timeOutOfOrder>
     {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
     {#if editing}
     <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
