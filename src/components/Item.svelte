@@ -59,6 +59,11 @@
     .item :global(:first-child) { margin-top: 0; }
     .item :global(:last-child) { margin-bottom: 0; }
     :global(.MathJax) { margin-bottom: 0 !important; }
+    :global(blockquote .MathJax) { 
+        display: block; 
+        padding-top: 5px;
+        padding-bottom: 5px;
+    }
     
 </style>
 
@@ -70,20 +75,18 @@
     import 'highlight.js/styles/monokai-sublime.css';
     //import * as javascript from 'highlight.js/lib/languages/javascript';
     //hljs.registerLanguage('javascript', javascript);
-
-    // const renderer = {
-    //     link: (href, title, text) => {
-    //         return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
-    //     }
-    // }
+    
+    let renderer = new marked.Renderer()
+    renderer.link = (href, title, text) => {
+        return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
+    }
     // marked.use({ renderer });
     marked.setOptions({
-        renderer: new marked.Renderer(),
+        renderer: renderer,
         highlight: function(code, language) {
             // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
             //if (language=="") return hljs.highlightAuto(code).value;
             const validLanguage = hljs.getLanguage(language) ? language : 'plaintext';
-            console.log(validLanguage)
             return hljs.highlight(validLanguage, code).value;
         }
     })
@@ -92,6 +95,17 @@
     import { afterUpdate } from 'svelte';
     afterUpdate(()=>{
         if (!itemdiv) return
+        // remove <code></code> wrapper block
+        Array.from(document.getElementsByTagName('code')).forEach((code)=>{
+            if (code.textContent.startsWith('$') && code.textContent.endsWith('$'))
+                code.outerHTML = code.innerHTML;
+        })
+        // replace <pre></pre> wrapper with <blockquote>
+        Array.from(document.getElementsByTagName('pre')).forEach((pre)=>{
+            if (pre.textContent.startsWith('$') && pre.textContent.endsWith('$'))
+                pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
+        })
+
         window["MathJax"].typesetPromise([itemdiv]).then(()=>{
             itemdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
         }).catch(console.error)
