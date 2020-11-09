@@ -7,6 +7,12 @@
 	.editor.focused {
 		border-left: 2px solid #aaa;
 	}
+	.items {
+		column-count: auto;
+		column-width: 480px;
+		column-gap: 8px;
+		column-fill: auto;
+	}
 </style>
 
 <script context="module" lang="ts">	
@@ -225,9 +231,12 @@
 <div class="editor" class:focused>
 	<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} autofocus={true}/>
 </div>
+<div class="items">
 {#each items as item}
 <Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} bind:text={item.text} bind:lastText={item.lastText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} {...item}/>
 {/each}
+</div>
+
 {:else if user}
 User {user.email} not allowed.
 {:else}

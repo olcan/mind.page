@@ -2,6 +2,8 @@
     .item-container {
         margin: 4px 0;
         border-left: 2px solid #444;
+        break-inside: avoid-column;
+        /* max-width: 480px; */
     }
     /* .item-container.editing {        
         border-left: 2px solid #aaa;
