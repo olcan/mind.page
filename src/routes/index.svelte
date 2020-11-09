@@ -120,7 +120,7 @@
 		textArea(-1).focus()
 
 		firestore().collection("items").add(itemToSave).then((doc)=>{
-			let index = items.findIndex((item)=>item.id=tmpid) // since index can change
+			let index = items.findIndex((item)=>item.id == tmpid) // since index can change
 			items[index].saving = false; // assigning to item object in array triggers dom update for item
 			items[index].id = doc.id
 		})

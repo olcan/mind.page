@@ -138,20 +138,22 @@
         //     return
         // }
 
-        // fix (Safari only?) deletion of extra space from input
-        if (e.code == "Backspace" && textarea.selectionStart > 0) {
-            const pos = textarea.selectionStart
-            textarea.value = textarea.value.substring(0, pos-1) + textarea.value.substring(pos)
-            textarea.selectionStart = textarea.selectionEnd = pos - 1
-            onInput() // since we prevent default handler
-            e.stopPropagation()
-            e.preventDefault()
-            return
-        }
+        // // fix (Safari only?) deletion of extra space from input
+        // if (e.code == "Backspace" && textarea.selectionStart > 0) {
+        //     console.log("here")
+        //     const pos = textarea.selectionStart
+        //     textarea.value = textarea.value.substring(0, pos-1) + textarea.value.substring(pos)
+        //     textarea.selectionStart = textarea.selectionEnd = pos - 1
+        //     onInput() // since we prevent default handler
+        //     e.stopPropagation()
+        //     e.preventDefault()
+        //     return
+        // }
+
         // delete item with backspace (safer if done on KeyUp)
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
             // deleteOnBackspaceUp = true
-            onDone(textarea.value.trim(), e)
+            onDone(text = textarea.value.trim(), e)
             return
         }
     }
@@ -159,7 +161,7 @@
     function onKeyUp(e: KeyboardEvent) {
         if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
         if (deleteOnBackspaceUp && e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
-            onDone(textarea.value.trim(), e)
+            onDone(text = textarea.value.trim(), e)
             return
         }
     }
@@ -169,15 +171,15 @@
         // add/save item with Cmd/Ctrl/Shift+Enter or Cmd/Ctrl+S
         if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
             e.preventDefault()
-            onDone(textarea.value.trim(), e)
+            onDone(text = textarea.value.trim(), e)
             return
         }
     }
     
     function onInput() {
-        text = textarea.value.trim()        
+        text = textarea.value // no trimming until onDone
         updateTextDivs()
-        onChange(textarea.value.trim())
+        onChange(textarea.value)
     }
     
     import { onMount, afterUpdate } from 'svelte';
