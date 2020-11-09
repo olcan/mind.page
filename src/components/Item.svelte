@@ -13,6 +13,21 @@
         margin: -1px 0; */
         border-left: 2px solid #aaa;
     }
+    .time {
+        color: #666;
+        display: inline-block;
+        padding-left: 5px;
+        margin-bottom: 4px;
+        font-family: Helvetica;
+        font-size: 15px;
+    }
+    .time.timeOutOfOrder {
+        background: #666;
+        padding-left: 15px;
+        padding-right: 5px;
+        color: black;
+        border-radius: 0 4px 4px 0;
+    }
     .item {
         color: #ddd;
         width: 100%;
@@ -29,7 +44,7 @@
     .saving { opacity: 0.5; }
     .error { color:red; }
     .deleted { display: none; }
-
+    
     /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
     .item :global(p) { margin: 0; padding: 0; }
     .item :global(li) { text-indent: -3px; }
@@ -82,7 +97,7 @@
     // Markdown library requires import as ESM (ECMAScript module)
     // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
     import marked from 'marked'
-
+    
     import 'highlight.js/styles/monokai-sublime.css';
     import hljs from 'highlight.js/lib/core' // NOTE: needs npm i @types/highlight.js -s
     import plaintext from 'highlight.js/lib/languages/plaintext.js';
@@ -97,7 +112,7 @@
     hljs.registerLanguage('json', json);
     import xml from 'highlight.js/lib/languages/xml.js';
     hljs.registerLanguage('xml', xml); // including html
-
+    
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
         return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
@@ -120,14 +135,13 @@
         // remove <code></code> wrapper block
         Array.from(document.getElementsByTagName('code')).forEach((code)=>{
             if (code.textContent.startsWith('$') && code.textContent.endsWith('$'))
-                code.outerHTML = code.innerHTML;
+            code.outerHTML = code.innerHTML;
         })
-        // replace <pre></pre> wrapper with <blockquote>
         Array.from(document.getElementsByTagName('pre')).forEach((pre)=>{
             if (pre.textContent.startsWith('$') && pre.textContent.endsWith('$'))
-                pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
+            pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
         })
-
+        
         window["MathJax"].typesetPromise([itemdiv]).then(()=>{
             itemdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
         }).catch(console.error)
@@ -164,6 +178,8 @@
     export let index: number
     export let id: string
     export let time: number
+    export let timeString = ""
+    export let timeOutOfOrder = false
     export let text = ""
     export let lastText = ""
     const placeholder = " "
@@ -173,7 +189,7 @@
     export let onDeleted = (index:number)=>{}
     export let onPrev = ()=>{}
     export let onNext = ()=>{}
-
+    
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
         editing = false
@@ -202,6 +218,7 @@
 </script>
 
 <div class="item-container" class:editing class:focused>
+    {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
     {#if editing}
     <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
         {:else}

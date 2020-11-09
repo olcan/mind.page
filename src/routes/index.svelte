@@ -51,15 +51,29 @@
 		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
 		.map(({item}) => item)
 	}
+
+	function itemTimeString(delta:number) {
+		if (delta < 60) return ""
+		if (delta < 3600) return Math.floor(delta/60).toString() + "m"
+		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
+		return Math.floor(delta/(24*3600)).toString() + "d"
+	}
 	
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
+		let prevTime = Infinity
+		let prevTimeString = ""
 		items.forEach((item, index)=>{
 			item.index = index
 			if (item.editing) editingItems.push(index)
 			// if (item.focused) focusedItem = index;
 			if (document.activeElement == textArea(index)) focusedItem = index;
+			let timeString = itemTimeString((Date.now() - item.time)/1000)
+			item.timeString = (timeString == prevTimeString) ? "" : timeString
+			item.timeOutOfOrder = (item.time > prevTime) // for special styling
+			prevTimeString = timeString
+			prevTime = item.time
 		})
 		setTimeout(()=>{ // allow dom updated before re-focus
 			textArea(focusedItem).focus() // ensure correct focus
@@ -163,6 +177,9 @@
 				}).catch(console.error)
 			}
 		})		
+
+		// assign initial item indices
+		updateItemIndices()
 	}
 	
 	function onItemEditing(index:number, editing:boolean) {
