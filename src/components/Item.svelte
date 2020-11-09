@@ -54,8 +54,14 @@
         border-left: 1px solid #333;
     }
     .item :global(br:last-child) { display: none; }
-    .item :global(a) { color: #69f; }
-    .item :global(mark) { color: #bbb; }
+    .item :global(a) { color: #69f; text-decoration: none;}
+    .item :global(mark) { 
+        color: black; 
+        background: #999;
+        padding: 1px 2px;
+        margin: -1px -2px;
+        border: 0;
+    }
     .item :global(:first-child) { margin-top: 0; }
     .item :global(:last-child) { margin-bottom: 0; }
     :global(.MathJax) { margin-bottom: 0 !important; }
