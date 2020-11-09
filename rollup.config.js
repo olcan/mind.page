@@ -16,10 +16,10 @@ const dev = mode === 'development';
 const legacy = !!process.env.SAPPER_LEGACY_BUILD;
 
 const onwarn = (warning, onwarn) =>
-	(warning.code === 'MISSING_EXPORT' && /'preload'/.test(warning.message)) ||
-	(warning.code === 'CIRCULAR_DEPENDENCY' && /[/\\]@sapper[/\\]/.test(warning.message)) ||
-	(warning.code === 'THIS_IS_UNDEFINED') ||
-	onwarn(warning);
+(warning.code === 'MISSING_EXPORT' && /'preload'/.test(warning.message)) ||
+(warning.code === 'CIRCULAR_DEPENDENCY' && /[/\\]@sapper[/\\]/.test(warning.message)) ||
+(warning.code === 'THIS_IS_UNDEFINED') ||
+onwarn(warning);
 
 export default {
 	client: {
@@ -44,9 +44,10 @@ export default {
 				browser: true,
 				dedupe: ['svelte']
 			}),
+			commonjs(),
 
 			typescript({ sourceMap: dev }),		
-
+			
 			legacy && babel({
 				extensions: ['.js', '.mjs', '.html', '.svelte'],
 				babelHelpers: 'runtime',
@@ -63,16 +64,16 @@ export default {
 					}]
 				]
 			}),
-
+			
 			!dev && terser({
 				module: true
 			})
 		],
-
+		
 		preserveEntrySignatures: false,
 		onwarn,
 	},
-
+	
 	server: {
 		input: { server: config.server.input().server.replace(/\.js$/, ".ts") },
 		output: config.server.output(),
@@ -99,11 +100,11 @@ export default {
 			typescript({ sourceMap: dev })
 		],
 		external: Object.keys(pkg.dependencies).concat(require('module').builtinModules),
-
+		
 		preserveEntrySignatures: 'strict',
 		onwarn,
 	},
-
+	
 	serviceworker: {
 		input: config.serviceworker.input().replace(/\.js$/, '.ts'),
 		output: config.serviceworker.output(),
@@ -117,7 +118,7 @@ export default {
 			typescript({ sourceMap: dev }),
 			!dev && terser()
 		],
-
+		
 		preserveEntrySignatures: false,
 		onwarn,
 	}

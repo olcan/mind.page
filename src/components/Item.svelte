@@ -24,44 +24,69 @@
         line-height: 1.4em;
         /* cursor: pointer; */
     }
-    .saving {
-        opacity: 0.5;
-    }
-    .error {
-        color:red;
-    }
-    .deleted {
-        display: none;
-    }
-    .item :global(p) {
+    .saving { opacity: 0.5; }
+    .error { color:red; }
+    .deleted { display: none; }
+    .item :global(p) { margin: 0; padding: 0; }
+    .item :global(ul) {
         margin: 0;
         padding: 0;
+        padding-left: 30px;
+        /* margin-left: 5px; */
+        /* margin-bottom: 1em; */
+        border-left: 1px solid #333;
     }
-    .item :global(a) {
-        color: #69f;
+    .item :global(blockquote) {
+        margin: 0;
+        padding: 0;
+        padding-left: 15px;
+        /* margin-left: 5px; */
+        margin-bottom: 10px; /* consistent w/ spacing while editing */
+        border-left: 1px solid #333;
     }
-    .item :global(mark) {
-        color: #bbb;
+    .item :global(pre) {
+        margin: 0;
+        padding: 0;
+        padding-left: 15px;
+        /* margin-left: 5px; */
+        margin-bottom: 10px; /* consistent w/ spacing while editing */
+        /* margin-bottom: 1em; */
+        border-left: 1px solid #333;
     }
+    .item :global(br:last-child) { display: none; }
+    .item :global(a) { color: #69f; }
+    .item :global(mark) { color: #bbb; }
     .item :global(:first-child) { margin-top: 0; }
     .item :global(:last-child) { margin-bottom: 0; }
-    :global(.MathJax) {
-        margin-bottom: 0; /* unnecessary given break using <br> */
-    }
+    :global(.MathJax) { margin-bottom: 0 !important; }
     
 </style>
 
 <script lang="ts">
     // Markdown library requires import as ESM (ECMAScript module)
     // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
-    import marked from 'marked/lib/marked.esm.js'
-    marked.setOptions({ breaks: true, smartLists: true })
-    const renderer = {
-        link: (href, title, text) => {
-            return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
+    import marked from 'marked'
+    import hljs from 'highlight.js' // NOTE: needs npm i @types/highlight.js -s
+    import 'highlight.js/styles/monokai-sublime.css';
+    //import * as javascript from 'highlight.js/lib/languages/javascript';
+    //hljs.registerLanguage('javascript', javascript);
+
+    // const renderer = {
+    //     link: (href, title, text) => {
+    //         return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
+    //     }
+    // }
+    // marked.use({ renderer });
+    marked.setOptions({
+        renderer: new marked.Renderer(),
+        highlight: function(code, language) {
+            // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
+            //if (language=="") return hljs.highlightAuto(code).value;
+            const validLanguage = hljs.getLanguage(language) ? language : 'plaintext';
+            console.log(validLanguage)
+            return hljs.highlight(validLanguage, code).value;
         }
-    }
-    marked.use({ renderer });
+    })
     
     let itemdiv: HTMLDivElement
     import { afterUpdate } from 'svelte';
@@ -75,8 +100,23 @@
     export let onTagClick = (tag:string)=>{}
     window["handleTagClick"] = (tag:string) => { onTagClick(tag) }
     
+    const textReplace = (str, subStr, newSubStr) => {
+        let mdBlock = false;
+        return str.split('\n').map(str => {
+            if (str.match(/^```/)) { mdBlock = !mdBlock; }
+            return mdBlock || str.match(/^```|^    /) ? str : str + "<br>\n"
+        }).join('\n');
+    };
+    
     function toHTML(text: string) {
+        // wrap #tags inside clickable <mark></mark>
         text = text.replace(/(#[#\w]*)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
+        // preserve line breaks by inserting <br> outside of code blocks
+        let insideBlock = false;
+        text = text.split('\n').map(str => {
+            if (str.match(/^```/)) { insideBlock = !insideBlock; }
+            return insideBlock || str.match(/^```|^    /) ? str : str + "<br>\n"
+        }).join('\n');
         return marked(text)
     }
     
