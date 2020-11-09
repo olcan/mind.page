@@ -43,9 +43,7 @@
 	let editingItems = []
 	let focusedItem = -1
 	let focused = false
-	
-	items.forEach((item, index)=>item.index=index)
-	
+		
 	function itemTimeString(delta:number) {
 		if (delta < 60) return ""//"<1m"
 		if (delta < 3600) return Math.floor(delta/60).toString() + "m"
@@ -78,6 +76,8 @@
 		const textarea = textArea(focusedItem)
 		if (textarea) setTimeout(()=>textarea.focus(),0) // allow dom update before refocus
 	}
+	if (isClient) updateItemIndices() // assign initial indices
+
 	function lowercaseContains(str, part) : number { return str.toLowerCase().indexOf(part)>=0 ? 1:0 }
 	function onEditorChange(origText:string) {
 		const text = origText.toLowerCase()
@@ -141,15 +141,10 @@
 		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
 		//textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
 	}
-	
+
 	// Sign in user as needed ...
-	if (isClient) { // on client
-		if (error) { // error from server, attempt reload
-			console.log(error)
-			// NOTE: reload is disabled for now as it causes an infinite loop in production, possibly due to reload being too disruptive
-			// location.reload()
-		}
-		// user = JSON.parse(window.localStorage.getItem("user"))
+	if (isClient) { // on client w/o server error
+		// NOTE: test server-side error with document.cookie = '__session=signed_out;max-age=0';
 		firebase().auth().onAuthStateChanged(authUser => {
 			if (authUser) { // user logged in
 				user = authUser;				
@@ -161,7 +156,6 @@
 					document.cookie = '__session=' + token + ';max-age=86400';
 					if (isNew) location.reload() // trigger preload w/ cookie
 				}).catch(console.error)
-				//localStorage.setItem("user",JSON.stringify(user))
 				
 			} else {
 				// return // test signed out state
@@ -176,10 +170,7 @@
 					//localStorage.setItem("user",JSON.stringify(user))
 				}).catch(console.error)
 			}
-		})		
-
-		// assign initial item indices
-		updateItemIndices()
+		})
 	}
 	
 	function onItemEditing(index:number, editing:boolean) {
@@ -245,7 +236,8 @@
 
 </script>
 
-{#if user && allowedUsers.includes(user.uid)}
+{#if user && allowedUsers.includes(user.uid) && !error}
+<!-- all good! user logged in, has permissions, and no error from server -->
 
 <div class="items">
 	<div style="height:4px"/><!--spacer that does not spill over to other column-->
@@ -257,14 +249,16 @@
 	{/each}
 </div>
 
-{:else if user}
+{:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
 User {user.email} not allowed.
-{:else}
-<!-- Signing in ... -->
-<script>
-	if (document.cookie.indexOf("__session")<0) { 
-		console.log("Signing in ...")
-		document.querySelector('#sapper').innerHTML = "Signing in ..."
-	}
-</script>
+
+{:else if error} <!-- user logged in, has permissions, but server returned error -->
+Signing in <i>again</i> ...
+
+{:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
+Signing in ...
+
+{:else} <!-- should not happen -->
+?
+
 {/if}
