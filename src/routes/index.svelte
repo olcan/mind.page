@@ -128,10 +128,12 @@
 	}
 	
 	function focusOnNearestEditingItem(index:number) {
+		// console.log("focusOnNearestEditingItem, editingItems",editingItems)
 		let near = Math.min.apply(null, editingItems.filter((i)=>i>index))
 		if (near == Infinity) near = Math.max.apply(null, [-1, ...editingItems])
 		textArea(near).focus()
 		focusedItem = near
+		// console.log("focusing on ",near,"from",index)
 	}
 	
 	function onItemDeleted(index:number) {
@@ -189,8 +191,8 @@
 				focusedItem = -1
 				// textArea(-1).focus()
 				if (items[index].text.length > 0) { // otherwise handled in onItemDeleted()
-					focusOnNearestEditingItem(index)
 					onEditorChange(editorText) // update sorting of items
+					focusOnNearestEditingItem(index)
 				}
 			}
 		}
