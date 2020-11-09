@@ -5,32 +5,25 @@
         break-inside: avoid-column;
         /* max-width: 480px; */
     }
-    /* .item-container.editing {        
-        border-left: 2px solid #aaa;
-    } */
     .item-container.focused {
-        /* border: 1px solid #777;        
-        margin: -1px 0; */
         border-left: 2px solid #aaa;
-    }
-    .item-container.timeOutOfOrder {
-        border-top: 1px solid #666;
     }
     .time {
-        color: #666;
+        color: #444;
         display: inline-block;
         padding-left: 5px;
         padding-right: 5px;
-        margin-bottom: 4px;
+        /* margin-bottom: 4px; */
         font-family: Helvetica;
         font-size: 15px;
     }
     .time.timeOutOfOrder {
         background: #666;
-        /* padding-left: 15px; */
+        padding-left: 15px;
         padding-bottom: 1px;
         color: black;
-        border-radius: 0 /*4px*/0 4px 0;
+        border-radius: 0 4px 4px 0;
+        /* display: block; */
     }
     .item {
         color: #ddd;
@@ -210,8 +203,8 @@
     
 </script>
 
+{#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
 <div class="item-container" class:editing class:focused class:timeOutOfOrder>
-    {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
     {#if editing}
     <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
         {:else}
