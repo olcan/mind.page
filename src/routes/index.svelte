@@ -27,7 +27,7 @@
 		background: gray;
 		cursor: pointer;
 	}
-	.header.focused {
+	#header.focused {
 		border-left: 2px solid #aaa;
 	}
 	.items {
