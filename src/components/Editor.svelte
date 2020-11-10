@@ -7,6 +7,11 @@
         cursor: text;
         break-inside: avoid-column;
     }
+    .backdrop, textarea {
+        font-family: Helvetica;
+        font-size: 1.25em;
+        line-height: 1.4em;
+    }
     .backdrop {
         color: transparent; 
         position: absolute;
@@ -21,9 +26,6 @@
         box-sizing: border-box;
         white-space: pre-wrap;
         word-wrap: break-word;
-        font-family: Helvetica;
-        font-size: 1.25em;
-        line-height: 1.4em;
     }
     .backdrop.focused {
         background: #222;        
@@ -35,9 +37,6 @@
         position: absolute;
         background: transparent;
         color: #ddd;
-        font-family: Helvetica;
-        font-size: 1.25em;
-        line-height: 1.4em;
         min-height: 48px;
         width: 100%;
         margin: 0;
@@ -59,6 +58,10 @@
         margin: -2px -2px;
         cursor: pointer;
     }
+	/* adapt to smaller windows/devices */
+	@media only screen and (max-width: 600px) {
+        .backdrop, textarea { font-size: 1.15em; line-height: 1.35em; }
+	}    
 </style>
 
 <script lang="ts">
@@ -79,7 +82,7 @@
     let highlights: HTMLDivElement    
     let textarea: HTMLTextAreaElement
     let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
-    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(#\w+)/g, '<mark>$1</mark>');
+    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(?:^|\s)(#\w+)/g, '<mark>$1</mark>');
     
     function updateTextDivs() {
         highlights.innerHTML = applyHighlights(escapeHTML(textarea.value || placeholder));

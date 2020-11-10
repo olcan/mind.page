@@ -4,12 +4,13 @@
 		width: 100%;
 		/* margin-right:8px; */
 		box-sizing: border-box;
-		margin: 4px 0;
+		padding: 4px 0;
 		border-left: 2px solid #444;
 		background: #1b1b1b; /* matches unfocused editor */
 	}
 	#header.focused {
-		background: transparent;
+		background: #1b1b1b;
+		border-left: 2px solid #aaa;
 	}
 	#editor {
 		max-width: 600px;
@@ -27,9 +28,6 @@
 		background: gray;
 		cursor: pointer;
 	}
-	#header.focused {
-		border-left: 2px solid #aaa;
-	}
 	.items {
 		column-count: auto;
 		column-width: 480px;
@@ -45,6 +43,11 @@
 		border-top: 1px dashed #444;
 		margin: 20px 0;
 	}
+	/* adapt to smaller windows/devices */
+	@media only screen and (max-width: 600px) {
+		.items { column-count: 1 }
+		.page-separator { display: none }
+	}    
 </style>
 
 <script context="module" lang="ts">
@@ -59,7 +62,7 @@
 		if (user && allowedUsers.includes(user.uid)) {
 			let items =	await firebaseAdmin().firestore().collection("items").orderBy("time","desc").get()
 			// return {}
-			return {items: items.docs.map((doc)=>Object.assign(doc.data(),{id:doc.id}))}
+			return {items: items.docs.map((doc)=>Object.assign(doc.data(),{id:doc.id, updateTime:doc.updateTime.seconds, createTime:doc.createTime.seconds}))}
 		} else {
 			return {error: "invalid session cookie"}
 		}
@@ -83,20 +86,14 @@
 		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
 		return Math.floor(delta/(24*3600)).toString() + "d"
 	}
-	
-	function stableSort(array, compare) {
-		return array.map((item, index) => ({item, index}))
-		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
-		.map(({item}) => item)
-	}
-	
+		
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
 		let prevTime = Infinity
 		let prevTimeString = ""
 		items.forEach((item, index)=>{
-			item.index = index			
+			item.index = index
 			if (item.editing) editingItems.push(index)
 			if (item.focused) focusedItem = index;
 			// if (document.activeElement == textArea(index)) focusedItem = index;
@@ -104,6 +101,7 @@
 			let timeString = itemTimeString((Date.now() - item.time)/1000)
 			item.timeOutOfOrder = (item.time > prevTime) // for special styling
 			item.timeString = (timeString == prevTimeString && !item.timeOutOfOrder) ? "" : timeString
+			// item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
 			prevTimeString = timeString
 			prevTime = item.time
 			
@@ -125,16 +123,24 @@
 		items.forEach((item)=>item.savedText = item.text)
 	}
 	
+	function stableSort(array, compare) {
+		return array.map((item, index) => ({item, index}))
+		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
+		.map(({item}) => item)
+	}
+
 	function matches(str, terms) {
 		const lcstr = str.toLowerCase()
 		return terms.map((t)=>lcstr.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
 	}
-	function onEditorChange(text:string) {
+
+	function onEditorChange(text:string) {		
 		const terms = [... new Set(text.toLowerCase().trim().split(/\s+/))]
-		items = stableSort(items, (a,b) =>
-		(b.editing - a.editing) || // NaN (~0) if either undefined
-		(matches(b.text, terms) - matches(a.text, terms)) ||
-		(b.time - a.time))
+		items = stableSort(items, (a,b) => {
+			return (b.editing - a.editing) || // NaN (~0) if either undefined
+			(matches(b.text, terms) - matches(a.text, terms)) ||
+			(b.time - a.time)
+		})
 		updateItemIndices()
 	}
 	function onTagClick(tag:string) {
@@ -156,13 +162,24 @@
 		// NOTE: text is already trimmed for onDone
 		// if empty, then we trigger chain saving (e.g. Cmd+S) except backspace
 		if (text.length == 0) { if (e.code != "Backspace") focusOnNearestEditingItem(-1); return }
+		let editing = true // created item can be editing or not
 		switch (text) {
 			case '/signout': { signOut(); return }
 			case '/count': { text = `${editingItems.length} items are selected`; break }
-		}		
+			case '/times': { 
+				if (editingItems.length == 0) { text="no item selected"; break }
+				let item = items[editingItems[0]];
+				text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
+				break
+			}
+			default: {
+				if (text.startsWith("/")) { text = `unknown command ${text}`; break }
+				editing = false
+			}
+		}
 		let tmpid = Date.now().toString()
 		let itemToSave = {time:Date.now(), text:text}
-		let item = {...itemToSave, id:tmpid, saving:true, editing:false};
+		let item = {...itemToSave, id:tmpid, saving:true, editing:editing};
 		items = [item, ...items]
 		editorText = ""
 		onEditorChange(editorText)
@@ -236,7 +253,7 @@
 	}
 	
 	function onItemEditing(index:number, editing:boolean) {
-		if (editing) {
+		if (editing) { // started editing
 			editingItems.push(index)
 			let item = items[index] // since index may change
 			onEditorChange(editorText)
@@ -245,7 +262,8 @@
 				textArea(item.index).focus()
 				window.top.scrollTo(0,0)
 			},0) // trigger resort
-		} else {
+			
+		} else { // stopped editing
 			editingItems.splice(editingItems.indexOf(index), 1)
 			if (focusedItem == index) {
 				focusedItem = -1
@@ -314,7 +332,7 @@
 <div class="items">
 	{#each items as item}
 	{#if item.page}<div class="page-separator"/>{/if}
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} id={item.id} index={item.index} time={item.time} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder}/>
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
 	{/each}
 	<!-- {/each} -->
 </div>
@@ -324,11 +342,9 @@ User {user.email} not allowed.
 
 {:else if error} <!-- user logged in, has permissions, but server returned error -->
 Signing in <i>again</i> ...
-<script> if (!window.firebase) document.write("(missing firebase!)") </script>
 
 {:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
 Signing in ...
-<script> if (!window.firebase) document.write("(missing firebase!)") </script>
 
 {:else} <!-- should not happen -->
 ?

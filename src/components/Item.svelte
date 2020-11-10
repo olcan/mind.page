@@ -37,6 +37,12 @@
         border-radius: 0 4px 4px 0;
         /* display: block; */
     }
+    .debug {
+        /* display: inline-block; */
+        display: none;
+        color: #444;
+        font-family: Helvetica;
+    }
     .item {
         color: #ddd;
         width: 100%;
@@ -88,7 +94,10 @@
         padding-top: 5px;
         padding-bottom: 5px;
     }
-    
+	/* adapt to smaller windows/devices */
+	@media only screen and (max-width: 600px) {
+		.item { font-size: 1.15em; line-height: 1.35em; }
+	}    
 </style>
 
 <script lang="ts">
@@ -157,13 +166,18 @@
     };
     
     function toHTML(text: string) {
-        // wrap #tags inside clickable <mark></mark>
-        text = text.replace(/(#\w+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
-        // preserve line breaks by inserting <br> outside of code blocks
+        // NOTE: modifications (e.g. <mark>, <br>, etc) should only happen outside of code blocks
         let insideBlock = false;
-        text = text.split('\n').map(str => {
+        text = text.split('\n').map(line => {
+            let str = line;
             if (str.match(/^```/)) { insideBlock = !insideBlock; }
-            return insideBlock || str.match(/^```|^    /) ? str : str + "<br>\n"
+            // preserve line breaks by inserting <br> outside of code blocks
+            if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n" 
+            // wrap #tags inside clickable <mark></mark>
+            if (!insideBlock) {
+                str = str.replace(/(?:^|\s)(#\w+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
+            }
+            return str
         }).join('\n');
         return marked(text);
     }
@@ -179,6 +193,9 @@
     export let time: number
     export let timeString: string
     export let timeOutOfOrder: boolean
+    export let updateTime: number
+    export let createTime: number
+    let debugString = `${time}, ${updateTime}, ${createTime}`
     export let text: string
     export let savedText: string
     export let height = 0;
@@ -192,36 +209,33 @@
     
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
+        time = Date.now() // update modified time before invoking onEditing for sorting        
+        onEditing(index, editing = false) // can be deletion or update
         // NOTE: text is already trimmed for onDone
-        editing = false
-        onEditing(index, false)
-        if (text.length > 0 && text == savedText) return /* no change, no deletion */
-        
-        time = Date.now() // we track last modified time
-        saving = true
-        const item = {time:time, text:text};
-
         if (text.length == 0) { // delete
+            saving = true
             deleted = true /* reflect immediately, since failure is not too serious */
+            console.log("deleting item",id)
             onDeleted(index)
-            firestore().collection("items").doc(id).delete().then(()=>{saving=false;savedText=item.text})
+            firestore().collection("items").doc(id).delete().then(()=>{saving=false})
             .catch((error)=>{console.error(error);error=true})
-        } else { // update
+        } else if (text != savedText) { // update
+            saving = true
+            const item = {time:time, text:text};
+            console.log("updating item",item)
             firestore().collection("items").doc(id).update(item).then(()=>{saving=false;savedText=item.text})
             .catch((error)=>{console.error(error);error=true})
             // also save to items-history ...
             firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
         }
     }
-    function onClick() {
-        editing = true
-        onEditing(index, true)
-    }
+    function onClick() { onEditing(index, editing = true) }
     
 </script>
 
 <div class="super-container">
     {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
+    <div class="debug">{debugString}</div>
     <div class="container" class:editing class:focused class:timeOutOfOrder>
         <div class="index">{index}</div>
         {#if editing}
