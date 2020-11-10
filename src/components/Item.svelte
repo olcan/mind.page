@@ -1,12 +1,24 @@
 <style>
-    .item-container {
-        margin: 4px 0;
-        border-left: 2px solid #444;
-        break-inside: avoid-column;
-        /* max-width: 480px; */
+    .super-container {
+        break-inside: avoid;
+        padding: 4px 0;
     }
-    .item-container.focused {
+    .container {
+        margin-top: 4px; /* spacing from time */
+        /* border: 1px solid transparent; */
+        border-left: 2px solid #444;
+        /* overflow: hidden; */
+        /* max-width: 600px; */
+    }
+    .container.focused {
+        /* border: 1px solid #666; */
         border-left: 2px solid #aaa;
+    }
+    .index {
+        float: right;
+        color: #333;
+        padding-right: 4px;
+        font-family: Helvetica;
     }
     .time {
         color: #444;
@@ -34,7 +46,7 @@
         /* white-space: pre-wrap; */
         word-wrap: break-word; 
         font-family: Helvetica;
-        font-size: 1.3em;
+        font-size: 1.25em;
         line-height: 1.4em;
         /* cursor: pointer; */
     }
@@ -127,9 +139,9 @@
             if (pre.textContent.startsWith('$') && pre.textContent.endsWith('$'))
             pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
         })
-        
         window["MathJax"].typesetPromise([itemdiv]).then(()=>{
             itemdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
+            height = itemdiv.clientHeight
         }).catch(console.error)
     });
     
@@ -161,13 +173,15 @@
     export let focused = false
     export let saving = false
     export let deleted = false
+    // NOTE: required props should not have default values
     export let index: number
     export let id: string
     export let time: number
-    export let timeString = ""
-    export let timeOutOfOrder = false
+    export let timeString: string
+    export let timeOutOfOrder: boolean
     export let text = ""
-    export let lastText = ""
+    export let savedText = ""
+    export let height = 0;
     const placeholder = " "
     let error = false
     export let onEditing = (index:number, editing:boolean)=>{}
@@ -178,36 +192,39 @@
     
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
+        // NOTE: text is already trimmed before onDone is invoked
         editing = false
         onEditing(index, false)
-        if (text.length > 0 && text == lastText) return /* no change */
+        if (text.length > 0 && text == savedText) return /* no change, no deletion */
         // time = Date.now()
         saving = true
         const item = {time:time, text:text};
         
-        if (text.trim().length == 0) { // delete
+        if (text.length == 0) { // delete
             deleted = true /* reflect immediately, since failure is not too serious */
             onDeleted(index)
-            firestore().collection("items").doc(id).delete().then(()=>{saving=false})
+            firestore().collection("items").doc(id).delete().then(()=>{saving=false;savedText=item.text})
             .catch((error)=>{console.error(error);error=true})
         } else { // update
-            firestore().collection("items").doc(id).update(item).then(()=>{saving=false})
+            firestore().collection("items").doc(id).update(item).then(()=>{saving=false;savedText=item.text})
             .catch((error)=>{console.error(error);error=true})
         }
     }
-    function onClick() { 
-        lastText = text
+    function onClick() {
         editing = true
         onEditing(index, true)
     }
     
 </script>
 
-{#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
-<div class="item-container" class:editing class:focused class:timeOutOfOrder>
-    {#if editing}
-    <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}/>
+<div class="super-container">
+    {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
+    <div class="container" class:editing class:focused class:timeOutOfOrder>
+        <div class="index">{index}</div>
+        {#if editing}
+        <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}></Editor>
         {:else}
         <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
         {/if}
     </div>
+</div>

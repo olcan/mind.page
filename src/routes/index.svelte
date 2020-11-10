@@ -1,21 +1,44 @@
 <style>
-	.editor {
+	.header {
+		display: flex;
+		width: 100%;
+		/* margin-right:8px; */
+		box-sizing: border-box;
+		max-width: 600px;
+		margin-top: 4px;
 		border-left: 2px solid #444;
-		margin-bottom: 4px;
-        break-inside: avoid-column;
 	}
-	.editor.focused {
+	#user {
+		display: flexbox;
+		flex: 0 0 48px;
+		max-height: 48px;
+		margin-left: 4px;
+		margin-right: 4px;
+		border-radius: 24px;
+		background-size: cover !important;
+		background: gray;
+	}
+	.header.focused {
 		border-left: 2px solid #aaa;
 	}
 	.items {
 		column-count: auto;
 		column-width: 480px;
-		column-gap: 4px;
+		column-gap: 8px;
 		column-fill: auto;
+		/* margin-top: 4px; */
+		/* column-width: 600px; */
+	}
+	.page-separator {
+		column-span: all;	
+		display: block;
+		height: 1px;
+		border-top: 1px dashed #444;
+		margin: 10px 0;
 	}
 </style>
 
-<script context="module" lang="ts">	
+<script context="module" lang="ts">
 	import { isClient, firebase, firestore, firebaseConfig, firebaseAdmin } from '../../firebase.js'
 	const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"] // user.uid for olcans@gmail.com
 	
@@ -35,7 +58,8 @@
 </script>
 
 <script lang="ts">
-	import Editor from '../components/Editor.svelte'
+	import type { write } from 'fs'
+import Editor from '../components/Editor.svelte'
 	import Item from '../components/Item.svelte'
 	export let items = []
 	export let error = null
@@ -43,59 +67,75 @@
 	let editingItems = []
 	let focusedItem = -1
 	let focused = false
-		
+	
 	function itemTimeString(delta:number) {
 		if (delta < 60) return ""//"<1m"
 		if (delta < 3600) return Math.floor(delta/60).toString() + "m"
 		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
 		return Math.floor(delta/(24*3600)).toString() + "d"
 	}
-
+	
 	function stableSort(array, compare) {
 		return array.map((item, index) => ({item, index}))
 		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
 		.map(({item}) => item)
 	}
-
+	
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
 		let prevTime = Infinity
 		let prevTimeString = ""
 		items.forEach((item, index)=>{
-			item.index = index
+			item.index = index			
 			if (item.editing) editingItems.push(index)
-			// if (item.focused) focusedItem = index;
-			if (document.activeElement == textArea(index)) focusedItem = index;
+			if (item.focused) focusedItem = index;
+			// if (document.activeElement == textArea(index)) focusedItem = index;
+			
 			let timeString = itemTimeString((Date.now() - item.time)/1000)
 			item.timeOutOfOrder = (item.time > prevTime) // for special styling
 			item.timeString = (timeString == prevTimeString && !item.timeOutOfOrder) ? "" : timeString
 			prevTimeString = timeString
 			prevTime = item.time
+			
+			// NOTE: although we have heights, the ideal algorithm is unclear so we use simple count-based splitting for now
+			// NOTE: one option is to use screen size and split by total height, but it is not obvious we want to fill the screen
+			// console.log(item.height)			
+			item.page = (index > 0 && index % 10 == 0)
 		})
-		const textarea = textArea(focusedItem)
-		if (textarea) setTimeout(()=>textarea.focus(),0) // allow dom update before refocus
+		
+		if (focusedItem >= 0) { // maintain focused item
+			const textarea = textArea(focusedItem)
+			if (textarea) setTimeout(()=>textarea.focus(),0) // allow dom update before refocus
+		}
 	}
-	if (isClient) updateItemIndices() // assign initial indices
-
+	
+	// initialize indices and savedText (as original text returned by server)
+	if (isClient) {
+		updateItemIndices() // assign initial indices
+		items.forEach((item)=>item.savedText = item.text)
+	}
+	
 	function lowercaseContains(str, part) : number { return str.toLowerCase().indexOf(part)>=0 ? 1:0 }
 	function onEditorChange(origText:string) {
 		const text = origText.toLowerCase()
-		items = stableSort(items, (a,b) => 
-			(b.editing - a.editing) || // NaN (~0) if either undefined
-			(lowercaseContains(b.text, text) - lowercaseContains(a.text, text)) ||
-			(b.time - a.time))
+		items = stableSort(items, (a,b) =>
+		(b.editing - a.editing) || // NaN (~0) if either undefined
+		(lowercaseContains(b.text, text) - lowercaseContains(a.text, text)) ||
+		(b.time - a.time))
 		updateItemIndices()
 	}
-	function onTagClick(tag:string) { 
+	function onTagClick(tag:string) {
 		editorText = tag + " "
 		onEditorChange(editorText)
-		textArea(-1).focus()
+		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
+		// textArea(-1).focus()
+		window.top.scrollTo(0,0)
 	}
 	
 	let editorText = ""
 	function onEditorDone(origText:string, e:KeyboardEvent) {
-		let text = origText
+		let text = origText.trim()
 		// if empty, then we trigger chain saving (e.g. Cmd+S) except backspace
 		if (text.length == 0) { if (e.code != "Backspace") focusOnNearestEditingItem(-1); return }
 		switch (text) {
@@ -110,7 +150,7 @@
 				break
 			}
 		}
-
+		
 		let tmpid = Date.now().toString()
 		let itemToSave = {time:Date.now(), text:text}
 		let item = {...itemToSave, id:tmpid, saving:true, editing:false};
@@ -118,7 +158,7 @@
 		editorText = ""
 		onEditorChange(editorText)
 		textArea(-1).focus()
-
+		
 		firestore().collection("items").add(itemToSave).then((doc)=>{
 			let index = items.findIndex((item)=>item.id == tmpid) // since index can change
 			items[index].saving = false; // assigning to item object in array triggers dom update for item
@@ -143,20 +183,24 @@
 		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
 		//textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
 	}
-
+	
 	// Sign in user as needed ...
-	if (isClient) { // on client w/o server error
-		// NOTE: test server-side error with document.cookie = '__session=signed_out;max-age=0';
+	if (isClient) {
+		if (error) console.log(error) // log server-side error
+		// NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
 		firebase().auth().onAuthStateChanged(authUser => {
 			if (authUser) { // user logged in
-				user = authUser;				
+				user = authUser;
+				console.log("signed in", user.email)
+
 				// Store user's ID token as a 1-hour __session cookie to send to server for preload
 				// NOTE: __session is the only cookie allowed by firebase for efficient caching
 				//       (see https://stackoverflow.com/a/44935288)
 				user.getIdToken(false/*force refresh*/).then((token)=>{
-					const isNew = (document.cookie.indexOf("__session") < 0)
 					document.cookie = '__session=' + token + ';max-age=86400';
-					if (isNew) location.reload() // trigger preload w/ cookie
+					console.log("updated cookie", error || ", no error")
+					// reload with new cookie if we are on error page
+					if (error) location.reload()
 				}).catch(console.error)
 				
 			} else {
@@ -169,7 +213,11 @@
 				firebase().auth().signInWithRedirect(provider)
 				firebase().auth().getRedirectResult().then((result) => {
 					user = result.user
-					//localStorage.setItem("user",JSON.stringify(user))
+					console.log("signed in after redirect", error || ", no error")
+					// reload if we are on an error page
+					// NOTE: this can lead to infinite loop if done without some delay
+					// if (error) location.reload()
+					// setTimeout(()=>{if (error) location.reload()}, 1000)					
 				}).catch(console.error)
 			}
 		})
@@ -206,7 +254,6 @@
 	}
 	
 	function editItem(index:number) {
-		items[index].lastText = items[index].text
 		items[index].editing=true
 		editingItems.push(index)
 	}
@@ -226,7 +273,7 @@
 			}
 		}
 	}
-
+	
 	function onNextItem() {
 		if (focusedItem < items.length-1) {
 			const index = focusedItem
@@ -235,20 +282,22 @@
 			setTimeout(()=>textArea(index+1).focus(),0)
 		}
 	}
-
+	
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
 <!-- all good! user logged in, has permissions, and no error from server -->
 
+<div class="header" class:focused>
+	<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+	<div id="user" style="background-image: url({user.photoURL})"/>
+</div>
 <div class="items">
-	<div style="height:4px"/><!--spacer that does not spill over to other column-->
-	<div class="editor" class:focused>
-		<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
-	</div>
 	{#each items as item}
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:lastText={item.lastText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} {...item}/>
+	{#if item.page}<div class="page-separator"/>{/if}
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} id={item.id} index={item.index} time={item.time} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder}/>
 	{/each}
+	<!-- {/each} -->
 </div>
 
 {:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
@@ -256,9 +305,11 @@ User {user.email} not allowed.
 
 {:else if error} <!-- user logged in, has permissions, but server returned error -->
 Signing in <i>again</i> ...
+<script> if (!window.firebase) document.write("(missing firebase!)") </script>
 
 {:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
 Signing in ...
+<script> if (!window.firebase) document.write("(missing firebase!)") </script>
 
 {:else} <!-- should not happen -->
 ?
