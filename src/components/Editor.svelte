@@ -47,7 +47,7 @@
         border-radius: 0;
         display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
         resize: none;
-    }    
+    }
     :global(mark) {
         color: transparent;
         /* background: rgba(30,90,255,.25); */
@@ -82,7 +82,7 @@
     let highlights: HTMLDivElement    
     let textarea: HTMLTextAreaElement
     let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
-    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(?:^|\s)(#\w+)/g, '<mark>$1</mark>');
+    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(^|\s)(#\w+)/g, '$1<mark>$2</mark>');
     
     function updateTextDivs() {
         highlights.innerHTML = applyHighlights(escapeHTML(textarea.value || placeholder));
