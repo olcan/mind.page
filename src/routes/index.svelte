@@ -1,15 +1,23 @@
 <style>
-	.header {
+	#header {
 		display: flex;
 		width: 100%;
 		/* margin-right:8px; */
 		box-sizing: border-box;
-		max-width: 600px;
-		margin-top: 4px;
+		margin: 4px 0;
 		border-left: 2px solid #444;
+		background: #1b1b1b; /* matches unfocused editor */
 	}
+	#header.focused {
+		background: transparent;
+	}
+	#editor {
+		max-width: 600px;
+		width: 100%;
+	}
+	.spacer { flex-grow: 1; }
 	#user {
-		display: flexbox;
+		/* display: flexbox; */
 		flex: 0 0 48px;
 		max-height: 48px;
 		margin-left: 4px;
@@ -17,6 +25,7 @@
 		border-radius: 24px;
 		background-size: cover !important;
 		background: gray;
+		cursor: pointer;
 	}
 	.header.focused {
 		border-left: 2px solid #aaa;
@@ -34,7 +43,7 @@
 		display: block;
 		height: 1px;
 		border-top: 1px dashed #444;
-		margin: 10px 0;
+		margin: 20px 0;
 	}
 </style>
 
@@ -59,7 +68,7 @@
 
 <script lang="ts">
 	import type { write } from 'fs'
-import Editor from '../components/Editor.svelte'
+	import Editor from '../components/Editor.svelte'
 	import Item from '../components/Item.svelte'
 	export let items = []
 	export let error = null
@@ -116,12 +125,15 @@ import Editor from '../components/Editor.svelte'
 		items.forEach((item)=>item.savedText = item.text)
 	}
 	
-	function lowercaseContains(str, part) : number { return str.toLowerCase().indexOf(part)>=0 ? 1:0 }
-	function onEditorChange(origText:string) {
-		const text = origText.toLowerCase()
+	function matches(str, terms) {
+		const lcstr = str.toLowerCase()
+		return terms.map((t)=>lcstr.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
+	}
+	function onEditorChange(text:string) {
+		const terms = [... new Set(text.toLowerCase().trim().split(/\s+/))]
 		items = stableSort(items, (a,b) =>
 		(b.editing - a.editing) || // NaN (~0) if either undefined
-		(lowercaseContains(b.text, text) - lowercaseContains(a.text, text)) ||
+		(matches(b.text, terms) - matches(a.text, terms)) ||
 		(b.time - a.time))
 		updateItemIndices()
 	}
@@ -129,28 +141,25 @@ import Editor from '../components/Editor.svelte'
 		editorText = tag + " "
 		onEditorChange(editorText)
 		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
-		// textArea(-1).focus()
-		window.top.scrollTo(0,0)
+		textArea(-1).focus()
+		// window.top.scrollTo(0,0)
+	}
+	
+	function signOut() {
+		firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
+		document.cookie = '__session=signed_out;max-age=0'; // delete cookie for server
+		location.reload()		
 	}
 	
 	let editorText = ""
-	function onEditorDone(origText:string, e:KeyboardEvent) {
-		let text = origText.trim()
+	function onEditorDone(text:string, e:KeyboardEvent) {
+		// NOTE: text is already trimmed for onDone
 		// if empty, then we trigger chain saving (e.g. Cmd+S) except backspace
 		if (text.length == 0) { if (e.code != "Backspace") focusOnNearestEditingItem(-1); return }
 		switch (text) {
-			case '/signout': {
-				firebase().auth().signOut().then(()=>{console.log("signed out")}).catch(console.error)
-				document.cookie = '__session=signed_out;max-age=0'; // delete cookie for server
-				location.reload()
-				return
-			}
-			case '/count': {
-				text = `${editingItems.length} items are selected`
-				break
-			}
-		}
-		
+			case '/signout': { signOut(); return }
+			case '/count': { text = `${editingItems.length} items are selected`; break }
+		}		
 		let tmpid = Date.now().toString()
 		let itemToSave = {time:Date.now(), text:text}
 		let item = {...itemToSave, id:tmpid, saving:true, editing:false};
@@ -162,7 +171,10 @@ import Editor from '../components/Editor.svelte'
 		firestore().collection("items").add(itemToSave).then((doc)=>{
 			let index = items.findIndex((item)=>item.id == tmpid) // since index can change
 			items[index].saving = false; // assigning to item object in array triggers dom update for item
+			items[index].savedText = text;
 			items[index].id = doc.id
+			// also save to items-history ...
+			firestore().collection("items-history").add({item:doc.id, ...itemToSave}).catch(console.error)		
 		})
 		.catch((error)=>{console.error(error);items[0].error=true})
 	}
@@ -192,7 +204,7 @@ import Editor from '../components/Editor.svelte'
 			if (authUser) { // user logged in
 				user = authUser;
 				console.log("signed in", user.email)
-
+				
 				// Store user's ID token as a 1-hour __session cookie to send to server for preload
 				// NOTE: __session is the only cookie allowed by firebase for efficient caching
 				//       (see https://stackoverflow.com/a/44935288)
@@ -283,19 +295,26 @@ import Editor from '../components/Editor.svelte'
 		}
 	}
 	
+	function disableSaveShortcut(e:KeyboardEvent) {
+		if (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) e.preventDefault()
+	}
+	
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
 <!-- all good! user logged in, has permissions, and no error from server -->
 
-<div class="header" class:focused>
-	<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
-	<div id="user" style="background-image: url({user.photoURL})"/>
+<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
+	<div id="editor">
+		<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+	</div>
+	<div class="spacer"/>
+	<div id="user" style="background-image: url({user.photoURL})" on:click={signOut}/>
 </div>
 <div class="items">
 	{#each items as item}
 	{#if item.page}<div class="page-separator"/>{/if}
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} id={item.id} index={item.index} time={item.time} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder}/>
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} id={item.id} index={item.index} time={item.time} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder}/>
 	{/each}
 	<!-- {/each} -->
 </div>
@@ -315,3 +334,5 @@ Signing in ...
 ?
 
 {/if}
+
+<svelte:window on:keypress={disableSaveShortcut}/>

@@ -1,7 +1,7 @@
 <style>
     .super-container {
-        break-inside: avoid;
-        padding: 4px 0;
+        /* break-inside: avoid; */
+        padding: 2px 0;
     }
     .container {
         margin-top: 4px; /* spacing from time */
@@ -179,8 +179,8 @@
     export let time: number
     export let timeString: string
     export let timeOutOfOrder: boolean
-    export let text = ""
-    export let savedText = ""
+    export let text: string
+    export let savedText: string
     export let height = 0;
     const placeholder = " "
     let error = false
@@ -192,14 +192,15 @@
     
     import { firestore } from '../../firebase.js'
     function onEditorDone() {
-        // NOTE: text is already trimmed before onDone is invoked
+        // NOTE: text is already trimmed for onDone
         editing = false
         onEditing(index, false)
         if (text.length > 0 && text == savedText) return /* no change, no deletion */
-        // time = Date.now()
+        
+        time = Date.now() // we track last modified time
         saving = true
         const item = {time:time, text:text};
-        
+
         if (text.length == 0) { // delete
             deleted = true /* reflect immediately, since failure is not too serious */
             onDeleted(index)
@@ -208,6 +209,8 @@
         } else { // update
             firestore().collection("items").doc(id).update(item).then(()=>{saving=false;savedText=item.text})
             .catch((error)=>{console.error(error);error=true})
+            // also save to items-history ...
+            firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
         }
     }
     function onClick() {
