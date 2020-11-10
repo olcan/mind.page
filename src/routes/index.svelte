@@ -86,7 +86,7 @@
 		if (delta < 24*3600) return Math.floor(delta/3600).toString() + "h"
 		return Math.floor(delta/(24*3600)).toString() + "d"
 	}
-		
+	
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
@@ -128,12 +128,12 @@
 		.sort((a, b) => compare(a.item, b.item) || a.index - b.index)
 		.map(({item}) => item)
 	}
-
+	
 	function matches(str, terms) {
 		const lcstr = str.toLowerCase()
 		return terms.map((t)=>lcstr.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
 	}
-
+	
 	function onEditorChange(text:string) {		
 		const terms = [... new Set(text.toLowerCase().trim().split(/\s+/))]
 		items = stableSort(items, (a,b) => {
@@ -316,7 +316,18 @@
 	function disableSaveShortcut(e:KeyboardEvent) {
 		if (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) e.preventDefault()
 	}
-	
+
+	function resizeEditor() {
+		let editor = document.getElementById("editor");
+		let firstItem = document.getElementsByClassName("item")[0];
+		if (editor && firstItem && firstItem.clientWidth > 0) {
+			editor.style.maxWidth = firstItem.clientWidth + 'px'
+		}
+	}
+
+	import { afterUpdate } from 'svelte';
+    afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
+
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
@@ -334,7 +345,6 @@
 	{#if item.page}<div class="page-separator"/>{/if}
 	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
 	{/each}
-	<!-- {/each} -->
 </div>
 
 {:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
@@ -351,4 +361,4 @@ Signing in ...
 
 {/if}
 
-<svelte:window on:keypress={disableSaveShortcut}/>
+<svelte:window on:keypress={disableSaveShortcut} on:resize={resizeEditor}/>
