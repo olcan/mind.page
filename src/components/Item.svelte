@@ -1,11 +1,10 @@
 <style>
     .super-container {
         /* break-inside: avoid; */
-        padding: 2px 0;
+        margin: 4px 0;
         margin-right: 8px;
     }
     .container {
-        margin-top: 4px; /* spacing from time */
         /* border: 1px solid transparent; */
         border-left: 2px solid #444;
         /* overflow: hidden; */
@@ -26,6 +25,7 @@
         display: inline-block;
         padding-left: 5px;
         padding-right: 5px;
+        margin-bottom: 4px; /* should match vertical margin of .super-container */
         /* margin-bottom: 4px; */
         font-family: Helvetica;
         font-size: 15px;

@@ -23,7 +23,7 @@
         width: 100%;
         margin: 0;
         padding: 10px;
-        box-sizing: border-box;
+        box-sizing: border-box; /* essential for proper sizing of textarea */
         white-space: pre-wrap;
         word-wrap: break-word;
     }
@@ -41,7 +41,7 @@
         width: 100%;
         margin: 0;
         padding: 10px;
-        box-sizing: border-box; /* include padding/border in sizing for 100% width*/
+        box-sizing: border-box; /* essential for proper sizing of textarea */
         outline: none;
         border: 0;
         border-radius: 0;

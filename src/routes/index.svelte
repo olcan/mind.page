@@ -12,7 +12,7 @@
 		border-left: 2px solid #aaa;
 	}
 	#editor {
-		max-width: 600px;
+		/* max-width: 600px; */
 		width: 100%;
 	}
 	.spacer { flex-grow: 1; }
