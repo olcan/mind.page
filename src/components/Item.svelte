@@ -2,6 +2,7 @@
     .super-container {
         /* break-inside: avoid; */
         padding: 2px 0;
+        margin-right: 8px;
     }
     .container {
         margin-top: 4px; /* spacing from time */

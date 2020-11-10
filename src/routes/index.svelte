@@ -3,7 +3,6 @@
 		display: flex;
 		width: 100%;
 		/* margin-right:8px; */
-		box-sizing: border-box;
 		padding: 4px 0;
 		border-left: 2px solid #444;
 		background: #1b1b1b; /* matches unfocused editor */
@@ -31,7 +30,7 @@
 	.items {
 		column-count: auto;
 		column-width: 480px;
-		column-gap: 8px;
+		column-gap: 0;
 		column-fill: auto;
 		/* margin-top: 4px; */
 		/* column-width: 600px; */
@@ -318,29 +317,38 @@
 	}
 
 	function resizeEditor() {
+		console.log("resizing editor ...")
 		let editor = document.getElementById("editor");
 		let firstItem = document.getElementsByClassName("item")[0];
 		if (editor && firstItem && firstItem.clientWidth > 0) {
-			editor.style.maxWidth = firstItem.clientWidth + 'px'
+			let maxWidth = firstItem.clientWidth + 'px'
+			if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
 		}
 	}
 
-	import { afterUpdate } from 'svelte';
-    afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
+	// NOTE: editor maxWidth must be managed if it is placed outside .items
+	// NOTE: periodic resize is the only simple and reliable way to handle iOS font size changes
+	// import { onMount, onDestroy, afterUpdate } from 'svelte';
+	// afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
+	// let resizeIntervalID;
+	// onMount(()=>{resizeIntervalID = setInterval(resizeEditor, 1000)})
+	// onDestroy(()=>{clearInterval(resizeIntervalID)})
+
 
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
 <!-- all good! user logged in, has permissions, and no error from server -->
 
-<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
-	<div id="editor">
-		<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
-	</div>
-	<div class="spacer"/>
-	<div id="user" style="background-image: url({user.photoURL})" on:click={signOut}/>
-</div>
 <div class="items">
+	<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
+		<div id="editor">
+			<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+		</div>
+		<div class="spacer"/>
+		<div id="user" style="background-image: url({user.photoURL})" on:click={signOut}/>
+	</div>
+	
 	{#each items as item}
 	{#if item.page}<div class="page-separator"/>{/if}
 	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
