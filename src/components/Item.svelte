@@ -80,13 +80,16 @@
         border-left: 1px solid #333;
     }
     .item :global(br:last-child) { display: none; }
-    .item :global(a) { color: #69f; text-decoration: none;}
+    .item :global(a) { color: #79e; text-decoration: none;}
     .item :global(mark) { 
         color: black; 
         background: #999;
         padding: 0px 2px;
         margin: 0px -2px;
         border: 0;
+    }
+    .item :global(.vertical-bar) {
+        color: #444;
     }
     .item :global(:first-child) { margin-top: 0; }
     .item :global(:last-child) { margin-bottom: 0; }
@@ -179,13 +182,13 @@
             if (str.match(/^```/)) { insideBlock = !insideBlock; }
             // preserve line breaks by inserting <br> outside of code blocks
             if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n"
-            // hide #pin and #pin/* (not useful visually or for clicking)
             if (!insideBlock) {
+                // hide #pin and #pin/* (not useful visually or for clicking)
                 str = str.replace(/(?:^|\s)#pin(?:\s|$)/, "")
                 str = str.replace(/(?:^|\s)#pin\/[\/\w]*(?:\s|$)/, "")
-            }
-            // wrap #tags inside clickable <mark></mark>
-            if (!insideBlock) {
+                // style vertical separator bar │
+                str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
+                // wrap #tags inside clickable <mark></mark>
                 str = str.replace(/(?:^|\s)(#[\/\w]+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
             }
             return str
