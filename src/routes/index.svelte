@@ -138,7 +138,7 @@
 
 	function onEditorChange(origText:string) {
 		const text = origText.toLowerCase().trim()
-		const terms = [... new Set(text.split(/\s+/))]
+		const terms = [... new Set(text.split(/\s+/))].filter((t)=>t.length>0)
 		let listing = []
 		items.forEach((item)=>{
 			const lctext = item.text.toLowerCase()
