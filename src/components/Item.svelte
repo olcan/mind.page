@@ -220,7 +220,7 @@
             if (text.length == 0) { // delete
                 saving = true
                 deleted = true /* reflect immediately, since failure is not too serious */
-                console.log("deleting item",id)
+                // console.log("deleting item",id)
                 onDeleted(index)
                 // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
                 const savedid = id // capture for async callback
@@ -231,7 +231,7 @@
                 // NOTE: we do not update time for #log items
                 if (!text.match(/(?:^|\s)#log(?:\s|$)/)) time = Date.now()
                 const item = {time:time, text:text};
-                console.log("updating item",item)
+                // console.log("updating item",item)
                 const savedid = id // capture for async callback
                 // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
                 firestore().collection("items").doc(id).update(item).then(()=>{onSavedAsync(savedid)})
