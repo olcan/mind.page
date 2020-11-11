@@ -142,13 +142,16 @@
 		let listing = []
 		items.forEach((item)=>{
 			const lctext = item.text.toLowerCase()
-			item.pinned = lctext.match(/(?:^|\s)#pin(?:\s|$)/) ? true : false
+			item.pinned = lctext.match(/(?:^|\s)#pin(?:\/|\s|$)/) ? true : false
+			// NOTE: alphanumeric ordering must always be preceded with a prefix match condition
+			//       (otherwise the default "" would always be on top unless you use something like "ZZZ")
+			item.pinTerm = (lctext.match(/(?:^|\s)#pin\/[\/\w]*(?:\s|$)/) || [""])[0].trim()
 			item.prefixMatch = lctext.startsWith(terms[0])
-			item.prefixMatchExtended = ""
+			item.prefixMatchTerm = ""
 			if (item.prefixMatch)
-				item.prefixMatchExtended = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
+				item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
 			// use first exact-match item as listing
-			if (item.prefixMatchExtended == terms[0] && listing.length == 0)
+			if (item.prefixMatchTerm == terms[0] && listing.length == 0)
 				listing = lctext.match(/(:?^|\s)(#[\/\w]+)/g).map((t)=>t.trim()).reverse()
 			item.matches = matches(lctext, terms)
 		})
@@ -156,12 +159,14 @@
 		items = stableSort(items, (a, b) => {
 			// pinned (contains #pin)
 			return (b.pinned - a.pinned) ||
+			// alphanumeric ordering on #pin/* term
+			(a.pinTerm.localeCompare(b.pinTerm)) ||
 			// position in item with exact match on first term
-			(listing.indexOf(b.prefixMatchExtended) - listing.indexOf(a.prefixMatchExtended)) ||
+			(listing.indexOf(b.prefixMatchTerm) - listing.indexOf(a.prefixMatchTerm)) ||
 			// prefix match on first term
 			(b.prefixMatch - a.prefixMatch) ||
 			// alphanumeric ordering on prefix-matching term			
-			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) ||
+			(a.prefixMatchTerm.localeCompare(b.prefixMatchTerm)) ||
 			// editing mode
 			(b.editing - a.editing) ||
 			// # of matching words
