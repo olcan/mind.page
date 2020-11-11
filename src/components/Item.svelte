@@ -65,8 +65,8 @@
     .item :global(h1,h2,h3,h4,h5,h6,p,ul,blockquote,pre) { margin: 0 }
     .item :global(li) { text-indent: -3px; }
     .item :global(ul) {
-        padding-left: 30px;
-        border-left: 1px solid #333;
+        padding-left: 21px;
+        /* border-left: 1px solid #333; */
     }
     .item :global(blockquote) {
         padding-left: 15px;
