@@ -397,15 +397,15 @@
 
 	// global helper functions for javascript:... shortcuts
 	if (isClient) { // functions for client use
-		window["_replace"] = function(text:string) { 
+		window["_replace"] = function(text:string) {
 			onEditorChange(editorText = text)
 		}
 		window["_replace_edit"] = function(text:string) { 
-			onEditorChange(editorText = text + " ")
+			onEditorChange(editorText = (text + " ").trimStart())
 			textArea(-1).focus()
 		}
 		window["_append"] = function(text:string) {			
-			onEditorChange(editorText = (editorText.trim() + " " + text).trim())
+			onEditorChange(editorText = (editorText.trim() + " " + text).trimStart())
 		}
 		window["_append_edit"] = function(text:string) {
 			onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
@@ -413,6 +413,15 @@
 		}
 		window["_enter"] = function(text:string) {
 			onEditorDone(text, null)
+		}
+		window["_text"] = function() { return editorText.trim() }
+		window["_encoded_text"] = function() { return encodeURIComponent(editorText.trim()) }
+		window["_google"] = function() { 
+			window.open('https://google.com/search?q='+encodeURIComponent(editorText.trim()))
+		}
+		window["_tweet"] = function() {
+			if (editorText.trim() == "") { onEditorDone("/tweet", null) } 
+			else { location.href = "twitter://post?message=" + encodeURIComponent(editorText.trim()) }
 		}
 	}
 
