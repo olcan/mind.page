@@ -205,6 +205,13 @@
 				text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
 				break
 			}
+			case '/tweet': {
+				if (editingItems.length == 0) { alert("/tweet: no item selected"); return }
+				if (editingItems.length > 1) { alert("/tweet: too many items selected"); return }
+				let item = items[editingItems[0]]
+				location.href = "twitter://post?message=" + encodeURIComponent(item.text)
+				return
+			}
 			default: {
 				if (text.startsWith("/")) { text = `unknown command ${text}`; break }
 				editing = false
@@ -383,6 +390,26 @@
 	// onMount(()=>{resizeIntervalID = setInterval(resizeEditor, 1000)})
 	// onDestroy(()=>{clearInterval(resizeIntervalID)})
 
+	// global helper functions for javascript:... shortcuts
+	if (isClient) { // functions for client use
+		window["_replace"] = function(text:string) { 
+			onEditorChange(editorText = text)
+		}
+		window["_replace_edit"] = function(text:string) { 
+			onEditorChange(editorText = text + " ")
+			textArea(-1).focus()
+		}
+		window["_append"] = function(text:string) {			
+			onEditorChange(editorText = (editorText.trim() + " " + text).trim())
+		}
+		window["_append_edit"] = function(text:string) {
+			onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
+			textArea(-1).focus()
+		}
+		window["_enter"] = function(text:string) {
+			onEditorDone(text, null)
+		}
+	}
 
 </script>
 
