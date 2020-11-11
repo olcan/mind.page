@@ -5,6 +5,7 @@
 		/* margin-right:8px; */
 		padding: 4px 0;
 		border-left: 2px solid #444;
+		margin-bottom: 8px; /* matches right margin of items for column spacing */
 		background: #1b1b1b; /* matches unfocused editor */
 	}
 	#header.focused {
@@ -86,13 +87,16 @@
 		return Math.floor(delta/(24*3600)).toString() + "d"
 	}
 	
+	let indexFromId;
 	function updateItemIndices() {
 		editingItems = []
 		focusedItem = -1
 		let prevTime = Infinity
 		let prevTimeString = ""
+		indexFromId = new Map()
 		items.forEach((item, index)=>{
 			item.index = index
+			indexFromId.set(item.id, index)
 			if (item.editing) editingItems.push(index)
 			if (item.focused) focusedItem = index;
 			// if (document.activeElement == textArea(index)) focusedItem = index;
@@ -118,8 +122,8 @@
 	
 	// initialize indices and savedText (as original text returned by server)
 	if (isClient) {
-		updateItemIndices() // assign initial indices
-		items.forEach((item)=>item.savedText = item.text)
+		onEditorChange("") // initial sort, index assignment, etc
+		items.forEach((item)=>{ item.savedText = item.text })
 	}
 	
 	function stableSort(array, compare) {
@@ -129,21 +133,30 @@
 	}
 	
 	function matches(str, terms) {
-		const lcstr = str.toLowerCase()
-		return terms.map((t)=>lcstr.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
+		return terms.map((t)=>str.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
 	}
-	
-	function onEditorChange(text:string) {		
-		const terms = [... new Set(text.toLowerCase().trim().split(/\s+/))]
-		items = stableSort(items, (a,b) => {
-			return (b.editing - a.editing) || // NaN (~0) if either undefined
-			(matches(b.text, terms) - matches(a.text, terms)) ||
+
+	function onEditorChange(origText:string) {
+		const text = origText.toLowerCase().trim()
+		const terms = [... new Set(text.split(/\s+/))]
+		items.forEach((item)=>{
+			const lctext = item.text.toLowerCase()
+			item.prefixMatch = lctext.startsWith(terms[0])
+			item.prefixMatchExtended = ""
+			if (item.prefixMatch) item.prefixMatchExtended = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
+			item.matches = matches(lctext, terms)
+		})
+		items = stableSort(items, (a, b) => {
+			return (b.prefixMatch - a.prefixMatch) || // exact prefix match on first term is top priority (even over editing)
+			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) || // alphanumeric ordering on extension is second-highest priority
+			(b.editing - a.editing) || // NaN (~0) if either undefined
+			(b.matches - a.matches) ||
 			(b.time - a.time)
 		})
 		updateItemIndices()
 	}
 	function onTagClick(tag:string) {
-		editorText = tag + " "
+		editorText = editorText.trim() + " " + tag + " "
 		onEditorChange(editorText)
 		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
 		textArea(-1).focus()
@@ -185,10 +198,12 @@
 		textArea(-1).focus()
 		
 		firestore().collection("items").add(itemToSave).then((doc)=>{
-			let index = items.findIndex((item)=>item.id == tmpid) // since index can change
-			items[index].saving = false; // assigning to item object in array triggers dom update for item
-			items[index].savedText = text;
+			let index = indexFromId.get(tmpid) // since index can change
+			items[index].saving = false // assigning to item object in array triggers dom update for item
+			items[index].savedText = text
 			items[index].id = doc.id
+			indexFromId.set(doc.id, index)
+			indexFromId.delete(tmpid)
 			// also save to items-history ...
 			firestore().collection("items-history").add({item:doc.id, ...itemToSave}).catch(console.error)		
 		})
@@ -210,6 +225,19 @@
 		items = items // trigger dom update
 		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
 		//textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
+	}
+
+	function onItemSaved(id:string) {
+		const index = indexFromId.get(id)
+		if (index == undefined) return // item was deleted
+		items[index].savedText = items[index].text
+		items[index].saving = false
+	}
+
+	function onItemHeight(id:string, height:number) {
+		const index = indexFromId.get(id)
+		if (index == undefined) return // item was deleted
+		items[index].height = height
 	}
 	
 	// Sign in user as needed ...
@@ -259,7 +287,7 @@
 			setTimeout(()=>{ // allow textarea to be created
 				// NOTE: this focus does not work on iOS, even though focusOnNearestEditingItem (below) works, possibly because the keyboard is already visible in that case. In any case, the overall behavior on iOS is reasonable since user gets better context after reodering and can manually focus.
 				textArea(item.index).focus()
-				window.top.scrollTo(0,0)
+				if (item.index > index) window.top.scrollTo(0,0) // scroll to top if item was moved up (TODO: test this)
 			},0) // trigger resort
 			
 		} else { // stopped editing
@@ -317,13 +345,13 @@
 	}
 
 	function resizeEditor() {
-		console.log("resizing editor ...")
-		let editor = document.getElementById("editor");
-		let firstItem = document.getElementsByClassName("item")[0];
-		if (editor && firstItem && firstItem.clientWidth > 0) {
-			let maxWidth = firstItem.clientWidth + 'px'
-			if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
-		}
+		// console.log("resizing editor ...")
+		// let editor = document.getElementById("editor");
+		// let firstItem = document.getElementsByClassName("item")[0];
+		// if (editor && firstItem && firstItem.clientWidth > 0) {
+		// 	let maxWidth = firstItem.clientWidth + 'px'
+		// 	if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
+		// }
 	}
 
 	// NOTE: editor maxWidth must be managed if it is placed outside .items
@@ -351,7 +379,9 @@
 	
 	{#each items as item}
 	{#if item.page}<div class="page-separator"/>{/if}
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:savedText={item.savedText} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
+	<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
+	<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onSavedAsync={onItemSaved} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:saving={item.saving} bind:savedText={item.savedText} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
 	{/each}
 </div>
 

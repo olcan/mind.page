@@ -60,7 +60,7 @@
     }
 	/* adapt to smaller windows/devices */
 	@media only screen and (max-width: 600px) {
-        .backdrop, textarea { font-size: 1.15em; line-height: 1.35em; }
+        .backdrop, textarea { font-size: 1.15em; line-height: 1.4em; }
 	}    
 </style>
 
@@ -82,7 +82,7 @@
     let highlights: HTMLDivElement    
     let textarea: HTMLTextAreaElement
     let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
-    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(^|\s)(#\w+)/g, '$1<mark>$2</mark>');
+    let applyHighlights = (t) => t.replace(/\n$/g,'\n\n').replace(/(^|\s)(#[\/\w]+)/g, '$1<mark>$2</mark>');
     
     function updateTextDivs() {
         highlights.innerHTML = applyHighlights(escapeHTML(textarea.value || placeholder));
@@ -155,6 +155,7 @@
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
             // deleteOnBackspaceUp = true
             onDone(text = textarea.value.trim(), e)
+            e.preventDefault()
             return
         }
     }
@@ -163,6 +164,7 @@
         if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
         if (deleteOnBackspaceUp && e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
             onDone(text = textarea.value.trim(), e)
+            e.preventDefault()
             return
         }
     }

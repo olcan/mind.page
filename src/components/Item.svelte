@@ -17,7 +17,7 @@
     .index {
         float: right;
         color: #333;
-        padding-right: 4px;
+        /* padding-right: 4px; */
         font-family: Helvetica;
     }
     .time {
@@ -95,10 +95,10 @@
         padding-top: 5px;
         padding-bottom: 5px;
     }
-	/* adapt to smaller windows/devices */
-	@media only screen and (max-width: 600px) {
-		.item { font-size: 1.15em; line-height: 1.35em; }
-	}    
+    /* adapt to smaller windows/devices */
+    @media only screen and (max-width: 600px) {
+        .item { font-size: 1.15em; line-height: 1.4em; }
+    }    
 </style>
 
 <script lang="ts">
@@ -149,9 +149,13 @@
             if (pre.textContent.startsWith('$') && pre.textContent.endsWith('$'))
             pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
         })
+        const prevheight = height
+        const heightid = id // capture for async callback
+        const typesetdiv = itemdiv // capture for async callback
+        // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
         window["MathJax"].typesetPromise([itemdiv]).then(()=>{
-            itemdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
-            height = itemdiv.clientHeight
+            typesetdiv.querySelectorAll(".MathJax").forEach((elem)=>elem.setAttribute("tabindex", "-1"))
+            onHeightAsync(heightid, typesetdiv.clientHeight, prevheight)
         }).catch(console.error)
     });
     
@@ -168,81 +172,87 @@
     
     function toHTML(text: string) {
         // NOTE: modifications (e.g. <mark>, <br>, etc) should only happen outside of code blocks
-        let insideBlock = false;
-        text = text.split('\n').map(line => {
-            let str = line;
-            if (str.match(/^```/)) { insideBlock = !insideBlock; }
-            // preserve line breaks by inserting <br> outside of code blocks
-            if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n" 
-            // wrap #tags inside clickable <mark></mark>
-            if (!insideBlock) {
-                str = str.replace(/(?:^|\s)(#\w+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
-            }
-            return str
-        }).join('\n');
-        return marked(text);
-    }
-    
-    import Editor from './Editor.svelte'
-    export let editing = false
-    export let focused = false
-    export let saving = false
-    export let deleted = false
-    // NOTE: required props should not have default values
-    export let index: number
-    export let id: string
-    export let time: number
-    export let timeString: string
-    export let timeOutOfOrder: boolean
-    export let updateTime: number
-    export let createTime: number
-    let debugString = `${time}, ${updateTime}, ${createTime}`
-    export let text: string
-    export let savedText: string
-    export let height = 0;
-    const placeholder = " "
-    let error = false
-    export let onEditing = (index:number, editing:boolean)=>{}
-    export let onFocused = (index:number, focused:boolean)=>{}
-    export let onDeleted = (index:number)=>{}
-    export let onPrev = ()=>{}
-    export let onNext = ()=>{}
-    
-    import { firestore } from '../../firebase.js'
-    function onEditorDone() {
-        time = Date.now() // update modified time before invoking onEditing for sorting        
-        onEditing(index, editing = false) // can be deletion or update
-        // NOTE: text is already trimmed for onDone
-        if (text.length == 0) { // delete
-            saving = true
-            deleted = true /* reflect immediately, since failure is not too serious */
-            console.log("deleting item",id)
-            onDeleted(index)
-            firestore().collection("items").doc(id).delete().then(()=>{saving=false})
-            .catch((error)=>{console.error(error);error=true})
-        } else if (text != savedText) { // update
-            saving = true
-            const item = {time:time, text:text};
-            console.log("updating item",item)
-            firestore().collection("items").doc(id).update(item).then(()=>{saving=false;savedText=item.text})
-            .catch((error)=>{console.error(error);error=true})
-            // also save to items-history ...
-            firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
+            let insideBlock = false;
+            text = text.split('\n').map(line => {
+                let str = line;
+                if (str.match(/^```/)) { insideBlock = !insideBlock; }
+                // preserve line breaks by inserting <br> outside of code blocks
+                if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n" 
+                // wrap #tags inside clickable <mark></mark>
+                if (!insideBlock) {
+                    str = str.replace(/(?:^|\s)(#[\/\w]+)/g, `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`);
+                }
+                return str
+            }).join('\n');
+            return marked(text);
         }
-    }
-    function onClick() { onEditing(index, editing = true) }
+        
+        import Editor from './Editor.svelte'
+        export let editing = false
+        export let focused = false
+        export let saving = false
+        export let deleted = false
+        // NOTE: required props should not have default values
+        export let index: number
+        export let id: string
+        export let time: number
+        export let timeString: string
+        export let timeOutOfOrder: boolean
+        export let updateTime: number
+        export let createTime: number
+        let debugString = `${time}, ${updateTime}, ${createTime}`
+        export let text: string
+        export let savedText: string
+        export let height = 0;
+        const placeholder = " "
+        let error = false
+        export let onEditing = (index:number, editing:boolean)=>{}
+        export let onFocused = (index:number, focused:boolean)=>{}
+        export let onDeleted = (index:number)=>{}
+        export let onSavedAsync = (id:string)=>{}
+        export let onHeightAsync = (id:string, height:number, prevheight:number)=>{}
+        export let onPrev = ()=>{}
+        export let onNext = ()=>{}
+        
+        import { firestore } from '../../firebase.js'
+        function onEditorDone() {
+            time = Date.now() // update modified time before invoking onEditing for sorting        
+            onEditing(index, editing = false) // can be deletion or update
+            // NOTE: text is already trimmed for onDone
+            if (text.length == 0) { // delete
+                saving = true
+                deleted = true /* reflect immediately, since failure is not too serious */
+                console.log("deleting item",id)
+                onDeleted(index)
+                // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
+                const savedid = id // capture for async callback
+                firestore().collection("items").doc(id).delete().then(()=>{onSavedAsync(savedid)})
+                .catch((error)=>{console.error(error);error=true})
+            } else if (text != savedText) { // update
+                saving = true
+                const item = {time:time, text:text};
+                console.log("updating item",item)
+                const savedid = id // capture for async callback
+                // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
+                firestore().collection("items").doc(id).update(item).then(()=>{onSavedAsync(savedid)})
+                .catch((error)=>{console.error(error);error=true})
+                // also save to items-history ...
+                firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
+            }
+        }
+        function onClick() { onEditing(index, editing = true) }
+        
+    </script>
     
-</script>
-
-<div class="super-container">
-    {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
-    <div class="debug">{debugString}</div>
-    <div class="container" class:editing class:focused class:timeOutOfOrder>
-        <div class="index">{index}</div>
-        {#if editing}
-        <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}></Editor>
-        {:else}
-        <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
-        {/if}
+    <div class="super-container">
+        {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
+        <div class="debug">{debugString}</div>
+        <div class="container" class:editing class:focused class:timeOutOfOrder>
+            <div class="index">{index}</div>
+            {#if editing}
+            <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}></Editor>
+            {:else}
+            <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
+            {/if}
+        </div>
     </div>
-</div>
