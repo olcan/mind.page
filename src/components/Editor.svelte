@@ -51,11 +51,10 @@
     :global(mark) {
         color: transparent;
         /* background: rgba(30,90,255,.25); */
-        background: #333;
+        background: #444;
         border-radius: 4px;
-        padding: 1px 1px;
-        border: 1px solid #444;
-        margin: -2px -2px;
+        padding: 0 2px;
+        margin: 0 -2px;
         cursor: pointer;
     }
 	/* adapt to smaller windows/devices */

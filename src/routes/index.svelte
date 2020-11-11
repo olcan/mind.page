@@ -139,16 +139,23 @@
 	function onEditorChange(origText:string) {
 		const text = origText.toLowerCase().trim()
 		const terms = [... new Set(text.split(/\s+/))]
+		let listing = []
 		items.forEach((item)=>{
 			const lctext = item.text.toLowerCase()
 			item.prefixMatch = lctext.startsWith(terms[0])
 			item.prefixMatchExtended = ""
-			if (item.prefixMatch) item.prefixMatchExtended = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
+			if (item.prefixMatch) 
+				item.prefixMatchExtended = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
+			// use first exact-match item as listing
+			if (item.prefixMatchExtended == terms[0] && listing.length == 0)
+				listing = lctext.match(/(:?^|\s)(#[\/\w]+)/g).map((t)=>t.trim()).reverse()
 			item.matches = matches(lctext, terms)
 		})
 		items = stableSort(items, (a, b) => {
-			return (b.prefixMatch - a.prefixMatch) || // exact prefix match on first term is top priority (even over editing)
-			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) || // alphanumeric ordering on extension is second-highest priority
+			// top priority is explicit listing in an exact-match item
+			return (listing.indexOf(b.prefixMatchExtended) - listing.indexOf(a.prefixMatchExtended)) || 
+			(b.prefixMatch - a.prefixMatch) || // exact prefix match on first term
+			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) || // alphanumeric ordering on extension
 			(b.editing - a.editing) || // NaN (~0) if either undefined
 			(b.matches - a.matches) ||
 			(b.time - a.time)

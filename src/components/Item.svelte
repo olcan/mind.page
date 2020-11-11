@@ -83,8 +83,8 @@
     .item :global(mark) { 
         color: black; 
         background: #999;
-        padding: 1px 2px;
-        margin: -1px -2px;
+        padding: 0px 2px;
+        margin: 0px -2px;
         border: 0;
     }
     .item :global(:first-child) { margin-top: 0; }
