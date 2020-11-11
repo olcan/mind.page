@@ -216,8 +216,6 @@
         
         import { firestore } from '../../firebase.js'
         function onEditorDone() {
-            time = Date.now() // update modified time before invoking onEditing for sorting        
-            onEditing(index, editing = false) // can be deletion or update
             // NOTE: text is already trimmed for onDone
             if (text.length == 0) { // delete
                 saving = true
@@ -230,6 +228,8 @@
                 .catch((error)=>{console.error(error);error=true})
             } else if (text != savedText) { // update
                 saving = true
+                // NOTE: we do not update time for #log items
+                if (!text.match(/(?:^|\s)#log(?:\s|$)/)) time = Date.now()
                 const item = {time:time, text:text};
                 console.log("updating item",item)
                 const savedid = id // capture for async callback
@@ -239,6 +239,8 @@
                 // also save to items-history ...
                 firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
             }
+            // NOTE: we invoke onEditing last, after having updated time (if changed)
+            onEditing(index, editing = false) // can be deletion or update
         }
         function onClick() { onEditing(index, editing = true) }
         
@@ -248,7 +250,7 @@
         {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
         <div class="debug">{debugString}</div>
         <div class="container" class:editing class:focused class:timeOutOfOrder>
-            <div class="index">{index}</div>
+            <div class="index">{index+1}</div>
             {#if editing}
             <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}></Editor>
             {:else}
