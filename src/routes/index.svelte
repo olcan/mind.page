@@ -156,7 +156,7 @@
 		updateItemIndices()
 	}
 	function onTagClick(tag:string) {
-		editorText = editorText.trim() + " " + tag + " "
+		editorText = (editorText.trim() + " " + tag).trim() + " "
 		onEditorChange(editorText)
 		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
 		textArea(-1).focus()
