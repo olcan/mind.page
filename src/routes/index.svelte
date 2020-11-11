@@ -101,12 +101,17 @@
 			if (item.focused) focusedItem = index;
 			// if (document.activeElement == textArea(index)) focusedItem = index;
 			
-			let timeString = itemTimeString((Date.now() - item.time)/1000)
-			item.timeOutOfOrder = (item.time > prevTime) // for special styling
-			item.timeString = (timeString == prevTimeString && !item.timeOutOfOrder) ? "" : timeString
-			// item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
-			prevTimeString = timeString
-			prevTime = item.time
+			if (item.pinned) { // ignore time for pinned items
+				item.timeString = ""
+				item.timeOutOfOrder = false
+			} else {
+				let timeString = itemTimeString((Date.now() - item.time)/1000)
+				item.timeOutOfOrder = (item.time > prevTime) // for special styling
+				item.timeString = (timeString == prevTimeString && !item.timeOutOfOrder) ? "" : timeString
+				// item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
+				prevTimeString = timeString
+				prevTime = item.time
+			}
 			
 			// NOTE: although we have heights, the ideal algorithm is unclear so we use simple count-based splitting for now
 			// NOTE: one option is to use screen size and split by total height, but it is not obvious we want to fill the screen
@@ -429,7 +434,7 @@
 	{#if item.page}<div class="page-separator"/>{/if}
 	<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
 	<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onSavedAsync={onItemSaved} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:saving={item.saving} bind:savedText={item.savedText} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onSavedAsync={onItemSaved} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:saving={item.saving} bind:savedText={item.savedText} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} itemCount={items.length} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
 	{/each}
 </div>
 
