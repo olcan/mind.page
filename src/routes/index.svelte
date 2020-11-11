@@ -142,22 +142,31 @@
 		let listing = []
 		items.forEach((item)=>{
 			const lctext = item.text.toLowerCase()
+			item.pinned = lctext.match(/(?:^|\s)#pin(?:\s|$)/) ? true : false
 			item.prefixMatch = lctext.startsWith(terms[0])
 			item.prefixMatchExtended = ""
-			if (item.prefixMatch) 
+			if (item.prefixMatch)
 				item.prefixMatchExtended = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
 			// use first exact-match item as listing
 			if (item.prefixMatchExtended == terms[0] && listing.length == 0)
 				listing = lctext.match(/(:?^|\s)(#[\/\w]+)/g).map((t)=>t.trim()).reverse()
 			item.matches = matches(lctext, terms)
 		})
+		// NOTE: undefined values produce NaN, which is treated as 0
 		items = stableSort(items, (a, b) => {
-			// top priority is explicit listing in an exact-match item
-			return (listing.indexOf(b.prefixMatchExtended) - listing.indexOf(a.prefixMatchExtended)) || 
-			(b.prefixMatch - a.prefixMatch) || // exact prefix match on first term
-			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) || // alphanumeric ordering on extension
-			(b.editing - a.editing) || // NaN (~0) if either undefined
+			// pinned (contains #pin)
+			return (b.pinned - a.pinned) ||
+			// position in item with exact match on first term
+			(listing.indexOf(b.prefixMatchExtended) - listing.indexOf(a.prefixMatchExtended)) ||
+			// prefix match on first term
+			(b.prefixMatch - a.prefixMatch) ||
+			// alphanumeric ordering on prefix-matching term			
+			(a.prefixMatchExtended.localeCompare(b.prefixMatchExtended)) ||
+			// editing mode
+			(b.editing - a.editing) ||
+			// # of matching words
 			(b.matches - a.matches) ||
+			// time (most recent first)
 			(b.time - a.time)
 		})
 		updateItemIndices()
