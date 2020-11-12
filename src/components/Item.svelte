@@ -61,7 +61,6 @@
     }
     .saving { opacity: 0.5; }
     .error { color:red; }
-    .deleted { display: none; }
     
     /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
     .item :global(h1,h2,h3,h4,h5,h6,p,ul,blockquote,pre) { margin: 0 }
@@ -201,7 +200,6 @@
     export let editing = false
     export let focused = false
     export let saving = false
-    export let deleted = false
     // NOTE: required props should not have default values
     export let index: number
     export let id: string
@@ -213,48 +211,17 @@
     export let createTime: number
     let debugString = `${time}, ${updateTime}, ${createTime}`
     export let text: string
-    export let savedText: string
     export let height = 0;
     const placeholder = " "
     let error = false
     export let onEditing = (index:number, editing:boolean)=>{}
     export let onFocused = (index:number, focused:boolean)=>{}
-    export let onDeleted = (index:number)=>{}
-    export let onSavedAsync = (id:string)=>{}
     export let onHeightAsync = (id:string, height:number, prevheight:number)=>{}
     export let onPrev = ()=>{}
     export let onNext = ()=>{}
     
     import { firestore } from '../../firebase.js'
-    function onEditorDone() {
-        // NOTE: text is already trimmed for onDone
-        if (text.length == 0) { // delete
-            saving = true
-            deleted = true /* reflect immediately, since failure is not too serious */
-            // console.log("deleting item",id)
-            onEditing(index, editing = false) // no longer editing
-            onDeleted(index) // deleted, must be called after onEditing(_,false)
-            // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
-            const savedid = id // capture for async callback
-            firestore().collection("items").doc(id).delete().then(()=>{onSavedAsync(savedid)})
-            .catch((error)=>{console.error(error);error=true})
-            return
-        }        
-        if (text != savedText) { // update
-            saving = true
-            // NOTE: we do not update time for #log items
-            if (!text.match(/(?:^|\s)#log(?:\s|$)/)) time = Date.now()
-            const item = {time:time, text:text};
-            // console.log("updating item",item)
-            const savedid = id // capture for async callback
-            // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
-            firestore().collection("items").doc(id).update(item).then(()=>{onSavedAsync(savedid)})
-            .catch((error)=>{console.error(error);error=true})
-            // also save to items-history ...
-            firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
-        }
-        onEditing(index, editing = false) // no longer editing, may have new time (for sorting)
-    }
+    function onDone() { onEditing(index, editing = false) }
     function onClick() { onEditing(index, editing = true) }
     
 </script>
@@ -265,9 +232,9 @@
     <div class="container" class:editing class:focused class:timeOutOfOrder>
         <div class="index">{@html index>0 ? (index+1) : itemCount + "<br>" + (index+1)}</div>
         {#if editing}
-        <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onEditorDone}></Editor>
+        <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onDone}></Editor>
         {:else}
-        <div class="item" bind:this={itemdiv} class:saving class:error class:deleted on:click={onClick}>{@html toHTML(text||placeholder)}</div>
+        <div class="item" bind:this={itemdiv} class:saving class:error on:click={onClick}>{@html toHTML(text||placeholder)}</div>
         {/if}
     </div>
 </div>

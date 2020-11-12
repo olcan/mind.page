@@ -2,6 +2,7 @@
 	#loading {
 		display: flex;
 		min-height: 100vh;
+		min-height: -webkit-fill-available; /*consider bottom bar on iOS Safari*/
 		justify-content: center;
 		align-items: center;
 		font-size: 2em;
@@ -24,17 +25,17 @@
 	}
 	#editor {
 		/* max-width: 600px; */
+		margin-right: 4px;
 		width: 100%;
 	}
 	.spacer { flex-grow: 1; }
 	#user {
 		/* display: flexbox; */
 		flex: 0 0 48px;
-		max-height: 48px;
-		margin-left: 4px;
+		width: 48px;
+		height: 48px;
 		margin-right: 4px;
 		border-radius: 24px;
-		background-size: cover !important;
 		background: gray;
 		cursor: pointer;
 	}
@@ -67,6 +68,7 @@
 	// NOTE: Preload function can be called on either client or server
 	// See https://sapper.svelte.dev/docs#Preloading
 	export async function preload(page, session) {
+		console.log("preloading, client?", isClient)
 		// NOTE: for development server, admin credentials require `gcloud auth application-default login`
 		const user:any = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error)
 		if (user && allowedUsers.includes(user.uid)) {
@@ -86,6 +88,8 @@
 	export let items = []
 	export let error = null
 	let user = null
+	let loggedIn = false
+	let deletedItems = []
 	let editingItems = []
 	let focusedItem = -1
 	let focused = false
@@ -150,10 +154,12 @@
 	function matches(str, terms) {
 		return terms.map((t)=>str.indexOf(t)>=0).reduce((a,b)=>a+b, 0)
 	}
-
+	
 	function onEditorChange(origText:string) {
-		const text = origText.toLowerCase().trim()
-		const terms = [... new Set(text.split(/\s+/))].filter((t)=>t.length>0)
+		let text = origText.toLowerCase().trim()
+		let terms = [... new Set(text.split(/\s+/))].filter((t)=>t.length>0)
+		// disable search if text starts with '/'
+		if (text.startsWith('/')) terms = []
 		let listing = []
 		items.forEach((item)=>{
 			const lctext = item.text.toLowerCase()
@@ -164,10 +170,10 @@
 			item.prefixMatch = lctext.startsWith(terms[0])
 			item.prefixMatchTerm = ""
 			if (item.prefixMatch)
-				item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
+			item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
 			// use first exact-match item as listing
 			if (item.prefixMatchTerm == terms[0] && listing.length == 0)
-				listing = (lctext.match(/(:?^|\s)(#[\/\w]+)/g)||[]).map((t)=>t.trim()).reverse()
+			listing = (lctext.match(/(:?^|\s)(#[\/\w]+)/g)||[]).map((t)=>t.trim()).reverse()
 			item.matches = matches(lctext, terms)
 		})
 		// NOTE: undefined values produce NaN, which is treated as 0
@@ -210,11 +216,12 @@
 		// NOTE: text is already trimmed for onDone
 		if (e.code == "Backspace") return // ignore backspace
 		let editing = true // created item can be editing or not
+		let time = Date.now() // default time is current, can be past if undeleting
 		switch (text) {
 			case '/signout': { signOut(); return }
 			case '/count': { text = `${editingItems.length} items are selected`; break }
 			case '/times': { 
-				if (editingItems.length == 0) { text="no item selected"; break }
+				if (editingItems.length == 0) { alert("/times: no item selected"); return }
 				let item = items[editingItems[0]];
 				text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
 				break
@@ -226,13 +233,21 @@
 				location.href = "twitter://post?message=" + encodeURIComponent(item.text)
 				return
 			}
+			case '/undelete': {
+				if (deletedItems.length == 0) { alert("/undelete: nothing to undelete (in this session)"); return }
+				time = deletedItems[0].time
+				text = deletedItems[0].text
+				deletedItems.shift()
+				editing = false
+				break
+			}
 			default: {
 				if (text.startsWith("/")) { text = `unknown command ${text}`; break }
 				editing = text.length == 0 // if text is empty, continue editing
 			}
 		}
 		let tmpid = Date.now().toString()
-		let itemToSave = {time:Date.now(), text:text}
+		let itemToSave = {time:time, text:text}
 		let item = {...itemToSave, id:tmpid, saving:true, editing:editing};
 		items = [item, ...items]
 		editorText = ""
@@ -269,21 +284,13 @@
 		// console.log("focusing on ",near,"from",index)
 	}
 	
-	function onItemDeleted(index:number) {
-		items.splice(index, 1)
-		updateItemIndices()
-		items = items // trigger dom update
-		setTimeout(()=>focusOnNearestEditingItem(index-1),0)
-		//textArea(-1).focus() // focus on editor to prevent accidental deletion of saved items
-	}
-
 	function onItemSaved(id:string) {
 		const index = indexFromId.get(id)
 		if (index == undefined) return // item was deleted
 		items[index].savedText = items[index].text
 		items[index].saving = false
 	}
-
+	
 	function onItemHeight(id:string, height:number) {
 		const index = indexFromId.get(id)
 		if (index == undefined) return // item was deleted
@@ -297,14 +304,16 @@
 		firebase().auth().onAuthStateChanged(authUser => {
 			if (authUser) { // user logged in
 				user = authUser;
+				loggedIn = true
 				console.log("signed in", user.email)
+				localStorage.setItem('user', JSON.stringify(user))
 				
 				// Store user's ID token as a 1-hour __session cookie to send to server for preload
 				// NOTE: __session is the only cookie allowed by firebase for efficient caching
 				//       (see https://stackoverflow.com/a/44935288)
 				user.getIdToken(false/*force refresh*/).then((token)=>{
 					document.cookie = '__session=' + token + ';max-age=86400';
-					console.log("updated cookie", error || ", no error")
+					console.log("updated cookie", error || "no error")
 					// reload with new cookie if we are on error page
 					if (error) location.reload()
 				}).catch(console.error)
@@ -319,7 +328,7 @@
 				firebase().auth().signInWithRedirect(provider)
 				firebase().auth().getRedirectResult().then((result) => {
 					user = result.user
-					console.log("signed in after redirect", error || ", no error")
+					console.log("signed in after redirect", error || "no error")
 					// reload if we are on an error page
 					// NOTE: this can lead to infinite loop if done without some delay
 					// if (error) location.reload()
@@ -330,9 +339,9 @@
 	}
 	
 	function onItemEditing(index:number, editing:boolean) {
+		let item = items[index]
 		if (editing) { // started editing
 			editingItems.push(index)
-			let item = items[index] // since index may change
 			onEditorChange(editorText)
 			setTimeout(()=>{ // allow textarea to be created
 				// NOTE: this focus does not work on iOS, even though focusOnNearestEditingItem (below) works, possibly because the keyboard is already visible in that case. In any case, the overall behavior on iOS is reasonable since user gets better context after reodering and can manually focus.
@@ -344,11 +353,28 @@
 			editingItems.splice(editingItems.indexOf(index), 1)
 			if (focusedItem == index) {
 				focusedItem = -1
-				// textArea(-1).focus()
-				if (items[index].text.length > 0) { // otherwise handled in onItemDeleted()
-					onEditorChange(editorText) // update sorting of items
+
+				if (item.text.length == 0) { // delete
+					items.splice(index, 1)
+					updateItemIndices()
+					items = items // trigger dom update
+					setTimeout(()=>focusOnNearestEditingItem(index-1),0)
+					deletedItems.unshift({time:item.time, text:item.savedText}) // for /undelete
+					firestore().collection("items").doc(item.id).delete().catch(console.error)
+
+				} else { // update
+					if (item.text != item.savedText) { // save new text
+						item.saving = true
+						if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now()
+						const itemToSave = {time:item.time, text:item.text};
+						firestore().collection("items").doc(item.id).update(itemToSave)
+						.then(()=>{onItemSaved(item.id)}).catch(console.error)
+						// also save to items-history ...
+						firestore().collection("items-history").add({item:item.id, ...itemToSave}).catch(console.error)
+					}
+					onEditorChange(editorText) // update sorting of items (at least editing state has changed)
 					focusOnNearestEditingItem(index)
-				}
+				}				
 			}
 		}
 		// console.log(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`)
@@ -403,87 +429,95 @@
 			window.top.scrollTo(0,0)
 		}
 	}
-
+	
 	function resizeEditor() {
 		// console.log("resizing editor ...")
 		// let editor = document.getElementById("editor");
 		// let firstItem = document.getElementsByClassName("item")[0];
 		// if (editor && firstItem && firstItem.clientWidth > 0) {
-		// 	let maxWidth = firstItem.clientWidth + 'px'
-		// 	if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
-		// }
-	}
-
-	// NOTE: editor maxWidth must be managed if it is placed outside .items
-	// NOTE: periodic resize is the only simple and reliable way to handle iOS font size changes
-	// import { onMount, onDestroy, afterUpdate } from 'svelte';
-	// afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
-	// let resizeIntervalID;
-	// onMount(()=>{resizeIntervalID = setInterval(resizeEditor, 1000)})
-	// onDestroy(()=>{clearInterval(resizeIntervalID)})
-
-	// global helper functions for javascript:... shortcuts
-	if (isClient) { // functions for client use
-		window["_replace"] = function(text:string) {
-			onEditorChange(editorText = text)
+			// 	let maxWidth = firstItem.clientWidth + 'px'
+			// 	if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
+			// }
 		}
-		window["_replace_edit"] = function(text:string) { 
-			onEditorChange(editorText = (text + " ").trimStart())
-			textArea(-1).focus()
+		
+		// NOTE: editor maxWidth must be managed if it is placed outside .items
+		// NOTE: periodic resize is the only simple and reliable way to handle iOS font size changes
+		// import { onMount, onDestroy, afterUpdate } from 'svelte';
+		// afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
+		// let resizeIntervalID;
+		// onMount(()=>{resizeIntervalID = setInterval(resizeEditor, 1000)})
+		// onDestroy(()=>{clearInterval(resizeIntervalID)})
+		
+		// global helper functions for javascript:... shortcuts
+		if (isClient) { // functions for client use
+			window["_replace"] = function(text:string) {
+				onEditorChange(editorText = text)
+			}
+			window["_replace_edit"] = function(text:string) { 
+				onEditorChange(editorText = (text + " ").trimStart())
+				textArea(-1).focus()
+			}
+			window["_append"] = function(text:string) {			
+				onEditorChange(editorText = (editorText.trim() + " " + text).trimStart())
+			}
+			window["_append_edit"] = function(text:string) {
+				onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
+				textArea(-1).focus()
+			}
+			window["_enter"] = function(text:string) {
+				onEditorDone(text, null)
+			}
+			window["_text"] = function() { return editorText.trim() }
+			window["_encoded_text"] = function() { return encodeURIComponent(editorText.trim()) }
+			window["_google"] = function() { 
+				window.open('https://google.com/search?q='+encodeURIComponent(editorText.trim()))
+			}
+			window["_tweet"] = function() {
+				if (editorText.trim() == "") { onEditorDone("/tweet", null) } 
+				else { location.href = "twitter://post?message=" + encodeURIComponent(editorText.trim()) }
+			}
 		}
-		window["_append"] = function(text:string) {			
-			onEditorChange(editorText = (editorText.trim() + " " + text).trimStart())
+		if (isClient) {
+			// NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403, (2) autofocus fails on editor (textarea-editor). Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
+			if (!user && localStorage.getItem('user')) {
+				user = JSON.parse(localStorage.getItem('user'))
+				console.log("restored user from local storage")
+			}
+			console.log("first script run, items:", items.length)
 		}
-		window["_append_edit"] = function(text:string) {
-			onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
-			textArea(-1).focus()
-		}
-		window["_enter"] = function(text:string) {
-			onEditorDone(text, null)
-		}
-		window["_text"] = function() { return editorText.trim() }
-		window["_encoded_text"] = function() { return encodeURIComponent(editorText.trim()) }
-		window["_google"] = function() { 
-			window.open('https://google.com/search?q='+encodeURIComponent(editorText.trim()))
-		}
-		window["_tweet"] = function() {
-			if (editorText.trim() == "") { onEditorDone("/tweet", null) } 
-			else { location.href = "twitter://post?message=" + encodeURIComponent(editorText.trim()) }
-		}
-	}
-
-</script>
-
-{#if user && allowedUsers.includes(user.uid) && !error}
-<!-- all good! user logged in, has permissions, and no error from server -->
-
-<div class="items">
-	<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
-		<div id="editor">
-			<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+	</script>
+	
+	{#if user && allowedUsers.includes(user.uid) && !error}
+	<!-- all good! user logged in, has permissions, and no error from server -->
+	
+	<div class="items">
+		<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
+			<div id="editor">
+				<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
+			</div>
+			<div class="spacer"/>
+			{#if loggedIn}<img id="user" src="{user.photoURL}" alt="{user.email}" on:click={signOut}>{/if}
 		</div>
-		<div class="spacer"/>
-		<div id="user" style="background-image: url({user.photoURL})" on:click={signOut}/>
+		{#if loggedIn}<script>document.getElementById("textarea-editor").focus()</script>{/if}
+		
+		{#each items as item}
+		{#if item.page}<div class="page-separator"/>{/if}
+		<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
+		<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
+		<Item onEditing={onItemEditing} onFocused={onItemFocused} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:saving={item.saving} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} itemCount={items.length} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
+		{/each}
 	</div>
 	
-	{#each items as item}
-	{#if item.page}<div class="page-separator"/>{/if}
-	<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
-	<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
-	<Item onEditing={onItemEditing} onFocused={onItemFocused} onDeleted={onItemDeleted} onSavedAsync={onItemSaved} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:deleted={item.deleted} bind:saving={item.saving} bind:savedText={item.savedText} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} itemCount={items.length} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
-	{/each}
-</div>
-
-{:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
-User {user.email} not allowed.
-
-{:else if error} <!-- user logged in, has permissions, but server returned error -->
-<div id='loading'/>
-{:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
-<div id='loading'/>
-{:else} <!-- should not happen -->
-?
-
-{/if}
-
-<svelte:window on:keypress={disableSaveShortcut} on:resize={resizeEditor}/>
+	{:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
+	User {user.email} not allowed.
+	
+	{:else if error} <!-- user logged in, has permissions, but server returned error -->
+	<div id='loading'/>
+	{:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
+	<script>console.log('loading ...')</script>
+	<div id='loading'/>
+	{:else} <!-- should not happen -->
+	?
+	{/if}
+	
+	<svelte:window on:keypress={disableSaveShortcut} on:resize={resizeEditor}/>
