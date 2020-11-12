@@ -226,7 +226,7 @@
     
 </script>
 
-<div class="super-container">
+<div class="super-container" bind:this={itemdiv}>
     {#if timeString} <div class="time" class:timeOutOfOrder>{timeString}</div> {/if}
     <div class="debug">{debugString}</div>
     <div class="container" class:editing class:focused class:timeOutOfOrder>
@@ -234,7 +234,7 @@
         {#if editing}
         <Editor id={id} bind:text={text} bind:focused={focused} onPrev={onPrev} onNext={onNext} onFocused={(focused)=>onFocused(index,focused)} onDone={onDone}></Editor>
         {:else}
-        <div class="item" bind:this={itemdiv} class:saving class:error on:click={onClick}>{@html toHTML(text||placeholder)}</div>
+        <div class="item" class:saving class:error on:click={onClick}>{@html toHTML(text||placeholder)}</div>
         {/if}
     </div>
 </div>

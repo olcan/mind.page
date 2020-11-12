@@ -113,7 +113,7 @@
 		// NOTE: once editor is available, we can calculate # columns and maxPageHeight
 		if (document.getElementById('editor')) {
 			let columnCount = Math.round(window.innerWidth / document.getElementById('editor').clientWidth)
-			maxPageHeight = columnCount * window.innerHeight
+			maxPageHeight = columnCount * window.visualViewport.height
 		}
 		items.forEach((item, index)=>{
 			item.index = index
@@ -134,7 +134,7 @@
 				prevTime = item.time
 			}
 			if (maxPageHeight > 0) { // page based on item heights
-				pageHeight += item.height
+				pageHeight += item.height + 8 // include margins
 				item.page = pageHeight > maxPageHeight
 				if (item.page) pageHeight = item.height
 			} else { // page at every 10th item
