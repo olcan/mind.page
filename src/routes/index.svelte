@@ -198,6 +198,7 @@
 	let editorText = ""
 	function onEditorDone(text:string, e:KeyboardEvent) {
 		// NOTE: text is already trimmed for onDone
+		if (e.code == "Backspace") return // ignore backspace
 		let editing = true // created item can be editing or not
 		switch (text) {
 			case '/signout': { signOut(); return }
@@ -326,7 +327,7 @@
 			setTimeout(()=>{ // allow textarea to be created
 				// NOTE: this focus does not work on iOS, even though focusOnNearestEditingItem (below) works, possibly because the keyboard is already visible in that case. In any case, the overall behavior on iOS is reasonable since user gets better context after reodering and can manually focus.
 				textArea(item.index).focus()
-				if (item.index > index) window.top.scrollTo(0,0) // scroll to top if item was moved up (TODO: test this)
+				if (item.index < index) window.top.scrollTo(0,0) // scroll to top if item was moved up
 			},0) // trigger resort
 			
 		} else { // stopped editing

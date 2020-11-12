@@ -87,9 +87,6 @@
         textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
     }
     
-    let arrowUpDownLine = 0
-    let arrowUpDownLines = 0
-    let deleteOnBackspaceUp = false
     function onKeyDown(e: KeyboardEvent) {
         // console.log("onKeyDown",e)
         if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
@@ -110,27 +107,15 @@
             }
         }
         
-        // delete item with backspace (safer if done on KeyUp)
+        // delete item with backspace
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
-            // deleteOnBackspaceUp = true
-            onDone(text = textarea.value.trim(), e)
+            onDone(text = "", e)
             e.preventDefault()
             return
         }
-
         // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
         if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            text = textarea.value = ""
-            setTimeout(()=>onDone(text, e), 0) // dispatching avoids some problems
-            return
-        }
-    }
-    
-    function onKeyUp(e: KeyboardEvent) {
-        if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
-        if (deleteOnBackspaceUp && e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
-            onDone(text = textarea.value.trim(), e)
+            onDone(text = "", e)
             e.preventDefault()
             return
         }
@@ -161,7 +146,7 @@
 <div bind:this={editor} id="editor">
     <!-- <div class="backdrop"><div id="partial" bind:this={partial}></div></div> -->
     <div class="backdrop" class:focused bind:this={backdrop}><div id="highlights" bind:this={highlights}>{placeholder}</div></div>
-    <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keydown={onKeyDown} on:keyup={onKeyUp} on:keypress={onKeyPress} on:focus={()=>onFocused(focused=true)} on:blur={()=>onFocused(focused=false)} autocapitalize=off>{text}</textarea>
+    <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keydown={onKeyDown} on:keypress={onKeyPress} on:focus={()=>onFocused(focused=true)} on:blur={()=>onFocused(focused=false)} autocapitalize=off>{text}</textarea>
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->
