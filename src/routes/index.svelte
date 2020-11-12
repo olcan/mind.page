@@ -108,6 +108,13 @@
 		let prevTime = Infinity
 		let prevTimeString = ""
 		indexFromId = new Map()
+		let pageHeight = 0;
+		let maxPageHeight = 0;
+		// NOTE: once editor is available, we can calculate # columns and maxPageHeight
+		if (document.getElementById('editor')) {
+			let columnCount = Math.round(window.innerWidth / document.getElementById('editor').clientWidth)
+			maxPageHeight = columnCount * window.innerHeight
+		}
 		items.forEach((item, index)=>{
 			item.index = index
 			indexFromId.set(item.id, index)
@@ -126,13 +133,15 @@
 				prevTimeString = timeString
 				prevTime = item.time
 			}
-			
-			// NOTE: although we have heights, the ideal algorithm is unclear so we use simple count-based splitting for now
-			// NOTE: one option is to use screen size and split by total height, but it is not obvious we want to fill the screen
-			// console.log(item.height)			
-			item.page = (index > 0 && index % 10 == 0)
+			if (maxPageHeight > 0) { // page based on item heights
+				pageHeight += item.height
+				item.page = pageHeight > maxPageHeight
+				if (item.page) pageHeight = item.height
+			} else { // page at every 10th item
+				item.page = (index > 0 && index % 10 == 0)
+			}
 		})
-		
+			
 		if (focusedItem >= 0) { // maintain focused item
 			const textarea = textArea(focusedItem)
 			if (textarea) setTimeout(()=>textarea.focus(),0) // allow dom update before refocus
@@ -466,10 +475,13 @@
 		console.log("first script run, items:", items.length)
 	}
 
-	// NOTE: onMount does not work for editor focus. afterUpdate works but may be too aggressive ...
-	// import { afterUpdate } from 'svelte';
-    // afterUpdate(()=>{ if (focusedItem < 0) document.getElementById("textarea-editor").focus() })
+	import { onMount } from 'svelte';
+	// NOTE: invoking onEditorChange on a timeout allows item heights to be available for paging
+	onMount(()=>{setTimeout(()=>onEditorChange(""),0)})	
+	// NOTE: onMount does not work for editor focus. afterUpdate works but is too aggresive/frequent
+	// afterUpdate(()=>{ if (focusedItem < 0) document.getElementById("textarea-editor").focus() })
 	
+	function onWindowResize() { onEditorChange("") }
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
@@ -505,4 +517,4 @@ User {user.email} not allowed.
 ?
 {/if}
 
-<svelte:window on:keypress={disableSaveShortcut}/>
+<svelte:window on:keypress={disableSaveShortcut} on:resize={onWindowResize}/>
