@@ -388,10 +388,12 @@
 		setTimeout(()=>textArea(index+inc).focus(),0)
 	}
 	
-	function disableSaveShortcut(e:KeyboardEvent) {
-		// disable save shortcuts, focus on editor instead
+	function disableEditorShortcuts(e:KeyboardEvent) {
+		// disable save/forward/back shortcuts on window, focus on editor instead
 		if (focusedItem >= 0) return // already focused on an item
-		if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
+		if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || 
+		(e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
+		((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey))) {
 			e.preventDefault()
 			textArea(-1).focus()
 			window.top.scrollTo(0,0)
@@ -525,4 +527,4 @@ User {user.email} not allowed.
 ?
 {/if}
 
-<svelte:window on:keypress={disableSaveShortcut} on:resize={onWindowResize}/>
+<svelte:window on:keypress={disableEditorShortcuts} on:resize={onWindowResize}/>
