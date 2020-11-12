@@ -487,7 +487,7 @@
 	let lastWindowWidth = 0;
 	function onWindowResize() {
 		// NOTE: we only need layout on width changes, and height changes are too common on iOS due to dynamic toolbars
-		if (window.innerWidth != lastWindowWidth) onEditorChange("") 
+		if (window.innerWidth != lastWindowWidth) onEditorChange(editorText) 
 		lastWindowWidth = window.innerWidth
 	}
 </script>
