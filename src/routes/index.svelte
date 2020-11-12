@@ -1,4 +1,14 @@
 <style>
+	#loading {
+		display: flex;
+		min-height: 100vh;
+		justify-content: center;
+		align-items: center;
+		font-size: 2em;
+		font-family: Helvetica;
+		background: #111 url(/loading.gif) no-repeat center;
+		background-size: 30%;
+	}
 	#header {
 		display: flex;
 		width: 100%;
@@ -468,11 +478,9 @@
 User {user.email} not allowed.
 
 {:else if error} <!-- user logged in, has permissions, but server returned error -->
-Signing in <i>again</i> ...
-
+<div id='loading'/>
 {:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
-Signing in ...
-
+<div id='loading'/>
 {:else} <!-- should not happen -->
 ?
 
