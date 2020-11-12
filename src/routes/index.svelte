@@ -198,8 +198,6 @@
 	let editorText = ""
 	function onEditorDone(text:string, e:KeyboardEvent) {
 		// NOTE: text is already trimmed for onDone
-		// if empty, then we trigger chain saving (e.g. Cmd+S) except backspace
-		if (text.length == 0) { if (e.code != "Backspace") focusOnNearestEditingItem(-1); return }
 		let editing = true // created item can be editing or not
 		switch (text) {
 			case '/signout': { signOut(); return }
@@ -219,7 +217,7 @@
 			}
 			default: {
 				if (text.startsWith("/")) { text = `unknown command ${text}`; break }
-				editing = false
+				editing = text.length == 0 // if text is empty, continue editing
 			}
 		}
 		let tmpid = Date.now().toString()
@@ -228,10 +226,15 @@
 		items = [item, ...items]
 		editorText = ""
 		onEditorChange(editorText)
-		textArea(-1).focus()
+		if (editing) setTimeout(()=>textArea(indexFromId.get(tmpid)).focus(),0)
+		else textArea(-1).focus()
 		
 		firestore().collection("items").add(itemToSave).then((doc)=>{
 			let index = indexFromId.get(tmpid) // since index can change
+			if (index == undefined) { // item was deleted before it could be saved
+				doc.delete().catch(console.error)
+				return
+			}
 			items[index].saving = false // assigning to item object in array triggers dom update for item
 			items[index].savedText = text
 			items[index].id = doc.id

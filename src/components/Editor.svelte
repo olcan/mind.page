@@ -2,7 +2,6 @@
     #editor {
         position: relative;
         height: 48px;
-        min-height: 1.2em;
         width: 100%;
         cursor: text;
         break-inside: avoid-column;

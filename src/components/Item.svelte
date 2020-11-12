@@ -48,6 +48,7 @@
     .item {
         color: #ddd;
         width: 100%;
+        min-height: 48px;
         background: transparent;
         padding: 10px;
         box-sizing: border-box;
