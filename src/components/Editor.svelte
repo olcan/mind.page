@@ -88,8 +88,9 @@
         
         // indent selection
         if ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
+            e.preventDefault()            
+            // if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
+            textarea.selectionStart = textarea.value.substring(0,textarea.selectionStart).replace(/[^\n]*$/,"").length
             const oldStart = textarea.selectionStart
             const oldEnd = textarea.selectionEnd
             let oldLength = textarea.value.length
