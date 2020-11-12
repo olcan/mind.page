@@ -54,11 +54,6 @@
 		border-top: 1px dashed #444;
 		margin: 20px 0;
 	}
-	/* adapt to smaller windows/devices */
-	@media only screen and (max-width: 600px) {
-		.items { column-count: 1 }
-		.page-separator { display: none }
-	}    
 </style>
 
 <script context="module" lang="ts">
@@ -116,6 +111,8 @@
 			// NOTE: window.visualViewport.height is more accurate on iOS, but causes shifting on scroll
 			//       (is also complicated by overlays such as for keyboard at the bottom on the iPad)
 			maxPageHeight = columnCount * window.innerHeight * 0.85
+			// disable any paging on single-column layout
+			if (columnCount == 1) maxPageHeight = Infinity
 		}
 		items.forEach((item, index)=>{
 			item.index = index
@@ -137,8 +134,9 @@
 			}
 			if (maxPageHeight > 0) { // page based on item heights
 				pageHeight += item.height + 8 // include margins
-				item.page = pageHeight > maxPageHeight
-				if (item.page) pageHeight = item.height
+				// NOTE: if paging at this item cuts page height by more than half, then we page on next item
+				item.page = pageHeight > maxPageHeight && (pageHeight - item.height) >= maxPageHeight/2
+				if (item.page) pageHeight = item.height + 8
 			} else { // page at every 10th item
 				item.page = (index > 0 && index % 10 == 0)
 			}
