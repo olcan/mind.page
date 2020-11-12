@@ -480,8 +480,16 @@
 	onMount(()=>{setTimeout(()=>onEditorChange(""),0)})	
 	// NOTE: onMount does not work for editor focus. afterUpdate works but is too aggresive/frequent
 	// afterUpdate(()=>{ if (focusedItem < 0) document.getElementById("textarea-editor").focus() })
-	
-	function onWindowResize() { onEditorChange("") }
+
+	// Trigger layout on window width changes
+	// NOTE: we also need this on font resizing, but that is much harder to detect
+	//       (only robust known method is a periodic check, but that is not worth it for now)
+	let lastWindowWidth = 0;
+	function onWindowResize() {
+		// NOTE: we only need layout on width changes, and height changes are too common on iOS due to dynamic toolbars
+		if (window.innerWidth != lastWindowWidth) onEditorChange("") 
+		lastWindowWidth = window.innerWidth
+	}
 </script>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
