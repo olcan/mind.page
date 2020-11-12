@@ -113,7 +113,9 @@
 		// NOTE: once editor is available, we can calculate # columns and maxPageHeight
 		if (document.getElementById('editor')) {
 			let columnCount = Math.round(window.innerWidth / document.getElementById('editor').clientWidth)
-			maxPageHeight = columnCount * window.visualViewport.height
+			// NOTE: window.visualViewport.height is more accurate on iOS, but causes shifting on scroll
+			//       (is also complicated by overlays such as for keyboard at the bottom on the iPad)
+			maxPageHeight = columnCount * window.innerHeight * 0.85
 		}
 		items.forEach((item, index)=>{
 			item.index = index
