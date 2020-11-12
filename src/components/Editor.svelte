@@ -83,8 +83,27 @@
     }
     
     function onKeyDown(e: KeyboardEvent) {
-        // console.log("onKeyDown",e)
-        if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
+        // console.log(e)
+        // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
+        
+        // indent selection
+        if ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
+            const oldStart = textarea.selectionStart
+            const oldEnd = textarea.selectionEnd
+            let oldLength = textarea.value.length
+            textarea.value = textarea.value.substring(0,textarea.selectionStart) + (e.code == "BracketLeft" ?
+            textarea.value.substring(textarea.selectionStart,textarea.selectionEnd).replace(/(^|\n)    /g,"$1") :
+            textarea.value.substring(textarea.selectionStart,textarea.selectionEnd).replace(/(^|\n)/g, "$1    ")
+            ) + textarea.value.substring(textarea.selectionEnd);
+            textarea.selectionStart = oldStart            
+            textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength)
+            onInput()
+            return
+        }
+        
+        if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection below here
         
         // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
         if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
@@ -115,13 +134,20 @@
             e.preventDefault()
             return
         }
-
+        
         // insert spaces on Tab
         if (e.code == "Tab") {
             e.preventDefault();
-            var pos = textarea.selectionStart;
-            textarea.value = textarea.value.substring(0,pos) + "    " + textarea.value.substring(textarea.selectionEnd);
-            textarea.selectionEnd = pos + 4;
+            if (!e.shiftKey) { // forward tab
+                var pos = textarea.selectionStart;
+                textarea.value = textarea.value.substring(0,pos) + "    " + textarea.value.substring(textarea.selectionEnd);
+                textarea.selectionStart = textarea.selectionEnd = pos + 4;
+                
+            } else if (textarea.selectionStart >= 4 && textarea.value.substring(textarea.selectionStart-4, textarea.selectionStart) == '    ') { // backward tab
+                const pos = textarea.selectionStart
+                textarea.value = textarea.value.substring(0, pos-4) + textarea.value.substring(pos)
+                textarea.selectionStart = textarea.selectionEnd = pos - 4
+            }
             onInput()
         }
     }
