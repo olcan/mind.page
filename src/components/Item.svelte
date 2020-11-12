@@ -127,7 +127,7 @@
     
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
-        return `<a target="_blank" href=${href} title=${title} onclick="event.stopPropagation()">${text}</a>`;
+        return `<a target="_blank" href="${href}" title="${title||text}" onclick="event.stopPropagation()">${text}</a>`;
     }
     // marked.use({ renderer });
     marked.setOptions({
@@ -231,12 +231,15 @@
             saving = true
             deleted = true /* reflect immediately, since failure is not too serious */
             // console.log("deleting item",id)
-            onDeleted(index)
+            onEditing(index, editing = false) // no longer editing
+            onDeleted(index) // deleted, must be called after onEditing(_,false)
             // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
             const savedid = id // capture for async callback
             firestore().collection("items").doc(id).delete().then(()=>{onSavedAsync(savedid)})
             .catch((error)=>{console.error(error);error=true})
-        } else if (text != savedText) { // update
+            return
+        }        
+        if (text != savedText) { // update
             saving = true
             // NOTE: we do not update time for #log items
             if (!text.match(/(?:^|\s)#log(?:\s|$)/)) time = Date.now()
@@ -249,8 +252,7 @@
             // also save to items-history ...
             firestore().collection("items-history").add({item:id, ...item}).catch(console.error)
         }
-        // NOTE: we invoke onEditing last, after having updated time (if changed)
-        onEditing(index, editing = false) // can be deletion or update
+        onEditing(index, editing = false) // no longer editing, may have new time (for sorting)
     }
     function onClick() { onEditing(index, editing = true) }
     

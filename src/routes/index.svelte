@@ -157,7 +157,7 @@
 				item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0]
 			// use first exact-match item as listing
 			if (item.prefixMatchTerm == terms[0] && listing.length == 0)
-				listing = lctext.match(/(:?^|\s)(#[\/\w]+)/g).map((t)=>t.trim()).reverse()
+				listing = (lctext.match(/(:?^|\s)(#[\/\w]+)/g)||[]).map((t)=>t.trim()).reverse()
 			item.matches = matches(lctext, terms)
 		})
 		// NOTE: undefined values produce NaN, which is treated as 0
@@ -186,7 +186,7 @@
 		onEditorChange(editorText)
 		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
 		textArea(-1).focus()
-		// window.top.scrollTo(0,0)
+		window.top.scrollTo(0,0)
 	}
 	
 	function signOut() {
@@ -247,8 +247,11 @@
 		// console.log("focusOnNearestEditingItem, editingItems",editingItems)
 		let near = Math.min.apply(null, editingItems.filter((i)=>i>index))
 		if (near == Infinity) near = Math.max.apply(null, [-1, ...editingItems])
-		textArea(near).focus()
 		focusedItem = near
+		textArea(near).focus()
+		// NOTE: a second dispatched focus() call can sometimes be necessary 
+		//       (e.g. if you unpin/save a pinned item and refocus on some item below)
+		setTimeout(()=>textArea(near).focus(), 0)
 		// console.log("focusing on ",near,"from",index)
 	}
 	
@@ -352,29 +355,39 @@
 		return document.getElementById("textarea-" + (index<0 ? "editor" : items[index].id)) as HTMLTextAreaElement
 	}
 	
-	function onPrevItem() {
-		if (focusedItem >= 0) {
-			const index = focusedItem
-			const textarea = textArea(index)
-			if (index == 0) textArea(-1).focus()
-			else {
-				if(!items[index-1].editing) editItem(index-1)
-				setTimeout(()=>textArea(index-1).focus(),0)
+	function onPrevItem(inc=-1) {
+		if (focusedItem + inc < -1) return
+		const index = focusedItem
+		const textarea = textArea(index)
+		if (index+inc == -1) textArea(-1).focus()
+		else {
+			if(!items[index+inc].editing) {
+				if (items[index+inc].pinned) { onPrevItem(inc-1); return } // skip if pinned
+				editItem(index+inc)
 			}
+			setTimeout(()=>textArea(index+inc).focus(),0)
 		}
 	}
 	
-	function onNextItem() {
-		if (focusedItem < items.length-1) {
-			const index = focusedItem
-			const textarea = textArea(index)
-			if(!items[index+1].editing) editItem(index+1)
-			setTimeout(()=>textArea(index+1).focus(),0)
+	function onNextItem(inc=1) {
+		if (focusedItem + inc >= items.length) return
+		const index = focusedItem
+		const textarea = textArea(index)
+		if(!items[index+inc].editing) {
+			if (items[index+inc].pinned) { onNextItem(inc+1); return } // skip if pinned
+			editItem(index+inc)
 		}
+		setTimeout(()=>textArea(index+inc).focus(),0)
 	}
 	
 	function disableSaveShortcut(e:KeyboardEvent) {
-		if (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) e.preventDefault()
+		// disable save shortcuts, focus on editor instead
+		if (focusedItem >= 0) return // already focused on an item
+		if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
+			e.preventDefault()
+			textArea(-1).focus()
+			window.top.scrollTo(0,0)
+		}
 	}
 
 	function resizeEditor() {

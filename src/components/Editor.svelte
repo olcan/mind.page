@@ -57,10 +57,10 @@
         margin: 0 -2px;
         cursor: pointer;
     }
-	/* adapt to smaller windows/devices */
-	@media only screen and (max-width: 600px) {
+    /* adapt to smaller windows/devices */
+    @media only screen and (max-width: 600px) {
         .backdrop, textarea { font-size: 1.15em; line-height: 1.4em; }
-	}    
+    }    
 </style>
 
 <script lang="ts">
@@ -94,7 +94,7 @@
     function onKeyDown(e: KeyboardEvent) {
         // console.log("onKeyDown",e)
         if (textarea.selectionStart != textarea.selectionEnd) return // we do not handle selection
-
+        
         // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
         if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
             if ((e.code == "ArrowUp" || e.code == "ArrowLeft") && textarea.selectionStart == 0) {
@@ -110,51 +110,20 @@
                 return
             }
         }
-
-        // NOTE: This works on the mac but causes skipping of cursor movements on iOS.
-        //
-        // Record line number and total lines as soon as up/down keys are down
-        // For codes, see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
-        // if ((e.code == "ArrowDown" || e.code == "ArrowUp")) {
-        //     partial.innerText = " "
-        //     const lineHeight = partial.clientHeight            
-        //     partial.innerText = textarea.value.substring(0,textarea.selectionStart);
-        //     // NOTE: to get accurate line number, we need to simulate "soft breaks" by including next word ...
-        //     // NOTE: there is still an interesting edge case where Cmd-Right can go farther (w/o wrapping) than just right key
-        //     // if (!partial.innerText.substring(partial.innerText.length-1).match(/\s/))
-        //     partial.innerText += textarea.value.substring(textarea.selectionStart).replace(/[^\w].*/s,"")
-        //     if (partial.innerText.substring(partial.innerText.length-1) == '\n') partial.innerText += " "// +1 line
-        //     // console.log(partial.clientHeight,lineHeight,highlights.clientHeight)
-        //     arrowUpDownLine = Math.max(1, partial.clientHeight / lineHeight)
-        //     arrowUpDownLines = Math.max(1, highlights.clientHeight / lineHeight)
-        //     // NOTE: we dispatch any action to allow default handler chain to respond (i.e. move cursor), especially on iOS
-        //     // setTimeout(()=>onArrowUpDown(e.code, arrowUpDownLine, arrowUpDownLines))    
-        //     // kill arrow up/down on first/last line (handled on key up below)
-        //     if ((e.code == "ArrowUp" && arrowUpDownLine == 1) || (e.code == "ArrowDown" && arrowUpDownLine == arrowUpDownLines)) {
-        //         onArrowUpDown(e.code, arrowUpDownLine, arrowUpDownLines)
-        //         e.stopPropagation()
-        //         e.preventDefault()
-        //     }
-        //     return
-        // }
-
-        // // fix (Safari only?) deletion of extra space from input
-        // if (e.code == "Backspace" && textarea.selectionStart > 0) {
-        //     console.log("here")
-        //     const pos = textarea.selectionStart
-        //     textarea.value = textarea.value.substring(0, pos-1) + textarea.value.substring(pos)
-        //     textarea.selectionStart = textarea.selectionEnd = pos - 1
-        //     onInput() // since we prevent default handler
-        //     e.stopPropagation()
-        //     e.preventDefault()
-        //     return
-        // }
-
+        
         // delete item with backspace (safer if done on KeyUp)
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
             // deleteOnBackspaceUp = true
             onDone(text = textarea.value.trim(), e)
             e.preventDefault()
+            return
+        }
+
+        // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
+        if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            text = textarea.value = ""
+            setTimeout(()=>onDone(text, e), 0) // dispatching avoids some problems
             return
         }
     }
@@ -169,9 +138,9 @@
     }
     
     function onKeyPress(e: KeyboardEvent) {
-        // console.log("onKeyPress",e)
         // add/save item with Cmd/Ctrl/Shift+Enter or Cmd/Ctrl+S
-        if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
+        if ((e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) || 
+        (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
             e.preventDefault()
             onDone(text = textarea.value.trim(), e)
             return
