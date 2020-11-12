@@ -297,47 +297,6 @@
 		items[index].height = height
 	}
 	
-	// Sign in user as needed ...
-	if (isClient) {
-		if (error) console.log(error) // log server-side error
-		// NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
-		firebase().auth().onAuthStateChanged(authUser => {
-			if (authUser) { // user logged in
-				user = authUser;
-				loggedIn = true
-				console.log("signed in", user.email)
-				localStorage.setItem('user', JSON.stringify(user))
-				
-				// Store user's ID token as a 1-hour __session cookie to send to server for preload
-				// NOTE: __session is the only cookie allowed by firebase for efficient caching
-				//       (see https://stackoverflow.com/a/44935288)
-				user.getIdToken(false/*force refresh*/).then((token)=>{
-					document.cookie = '__session=' + token + ';max-age=86400';
-					console.log("updated cookie", error || "no error")
-					// reload with new cookie if we are on error page
-					if (error) location.reload()
-				}).catch(console.error)
-				
-			} else {
-				// return // test signed out state
-				let provider = new window.firebase.auth.GoogleAuthProvider()
-				firebase().auth().useDeviceLanguage()
-				// firebase().auth().setPersistence("none")
-				// firebase().auth().setPersistence("session")
-				firebase().auth().setPersistence("local")
-				firebase().auth().signInWithRedirect(provider)
-				firebase().auth().getRedirectResult().then((result) => {
-					user = result.user
-					console.log("signed in after redirect", error || "no error")
-					// reload if we are on an error page
-					// NOTE: this can lead to infinite loop if done without some delay
-					// if (error) location.reload()
-					// setTimeout(()=>{if (error) location.reload()}, 1000)					
-				}).catch(console.error)
-			}
-		})
-	}
-	
 	function onItemEditing(index:number, editing:boolean) {
 		let item = items[index]
 		if (editing) { // started editing
@@ -353,7 +312,7 @@
 			editingItems.splice(editingItems.indexOf(index), 1)
 			if (focusedItem == index) {
 				focusedItem = -1
-
+				
 				if (item.text.length == 0) { // delete
 					items.splice(index, 1)
 					updateItemIndices()
@@ -361,7 +320,7 @@
 					setTimeout(()=>focusOnNearestEditingItem(index-1),0)
 					deletedItems.unshift({time:item.time, text:item.savedText}) // for /undelete
 					firestore().collection("items").doc(item.id).delete().catch(console.error)
-
+					
 				} else { // update
 					if (item.text != item.savedText) { // save new text
 						item.saving = true
@@ -430,94 +389,120 @@
 		}
 	}
 	
-	function resizeEditor() {
-		// console.log("resizing editor ...")
-		// let editor = document.getElementById("editor");
-		// let firstItem = document.getElementsByClassName("item")[0];
-		// if (editor && firstItem && firstItem.clientWidth > 0) {
-			// 	let maxWidth = firstItem.clientWidth + 'px'
-			// 	if (editor.style.maxWidth != maxWidth) editor.style.maxWidth = maxWidth
-			// }
-		}
+	if (isClient) {		
+		// Sign in user as needed ...
+		if (error) console.log(error) // log server-side error
+		// NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
+		firebase().auth().onAuthStateChanged(authUser => {
+			if (authUser) { // user logged in
+				user = authUser;
+				loggedIn = true
+				console.log("signed in", user.email)
+				localStorage.setItem('user', JSON.stringify(user))
+				
+				// Store user's ID token as a 1-hour __session cookie to send to server for preload
+				// NOTE: __session is the only cookie allowed by firebase for efficient caching
+				//       (see https://stackoverflow.com/a/44935288)
+				user.getIdToken(false/*force refresh*/).then((token)=>{
+					document.cookie = '__session=' + token + ';max-age=86400';
+					console.log("updated cookie", error || "no error")
+					// reload with new cookie if we are on error page
+					if (error) location.reload()
+				}).catch(console.error)
+				
+			} else {
+				// return // test signed out state
+				let provider = new window.firebase.auth.GoogleAuthProvider()
+				firebase().auth().useDeviceLanguage()
+				// firebase().auth().setPersistence("none")
+				// firebase().auth().setPersistence("session")
+				firebase().auth().setPersistence("local")
+				firebase().auth().signInWithRedirect(provider)
+				firebase().auth().getRedirectResult().then((result) => {
+					user = result.user
+					console.log("signed in after redirect", error || "no error")
+					// reload if we are on an error page
+					// NOTE: this can lead to infinite loop if done without some delay
+					// if (error) location.reload()
+					// setTimeout(()=>{if (error) location.reload()}, 1000)					
+				}).catch(console.error)
+			}
+		})
 		
-		// NOTE: editor maxWidth must be managed if it is placed outside .items
-		// NOTE: periodic resize is the only simple and reliable way to handle iOS font size changes
-		// import { onMount, onDestroy, afterUpdate } from 'svelte';
-		// afterUpdate(resizeEditor) // NOTE: onMount is insufficient since items are updated
-		// let resizeIntervalID;
-		// onMount(()=>{resizeIntervalID = setInterval(resizeEditor, 1000)})
-		// onDestroy(()=>{clearInterval(resizeIntervalID)})
-		
-		// global helper functions for javascript:... shortcuts
-		if (isClient) { // functions for client use
-			window["_replace"] = function(text:string) {
-				onEditorChange(editorText = text)
-			}
-			window["_replace_edit"] = function(text:string) { 
-				onEditorChange(editorText = (text + " ").trimStart())
-				textArea(-1).focus()
-			}
-			window["_append"] = function(text:string) {			
-				onEditorChange(editorText = (editorText.trim() + " " + text).trimStart())
-			}
-			window["_append_edit"] = function(text:string) {
-				onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
-				textArea(-1).focus()
-			}
-			window["_enter"] = function(text:string) {
-				onEditorDone(text, null)
-			}
-			window["_text"] = function() { return editorText.trim() }
-			window["_encoded_text"] = function() { return encodeURIComponent(editorText.trim()) }
-			window["_google"] = function() { 
-				window.open('https://google.com/search?q='+encodeURIComponent(editorText.trim()))
-			}
-			window["_tweet"] = function() {
-				if (editorText.trim() == "") { onEditorDone("/tweet", null) } 
-				else { location.href = "twitter://post?message=" + encodeURIComponent(editorText.trim()) }
-			}
+		// Set up global helper functions for javascript:... shortcuts
+		window["_replace"] = function(text:string) {
+			onEditorChange(editorText = text)
 		}
-		if (isClient) {
-			// NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403, (2) autofocus fails on editor (textarea-editor). Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
-			if (!user && localStorage.getItem('user')) {
-				user = JSON.parse(localStorage.getItem('user'))
-				console.log("restored user from local storage")
-			}
-			console.log("first script run, items:", items.length)
+		window["_replace_edit"] = function(text:string) { 
+			onEditorChange(editorText = (text + " ").trimStart())
+			textArea(-1).focus()
 		}
-	</script>
+		window["_append"] = function(text:string) {			
+			onEditorChange(editorText = (editorText.trim() + " " + text).trimStart())
+		}
+		window["_append_edit"] = function(text:string) {
+			onEditorChange(editorText = (editorText.trim() + " " + text).trim() + " ")
+			textArea(-1).focus()
+		}
+		window["_enter"] = function(text:string) {
+			onEditorDone(text, null)
+		}
+		window["_text"] = function() { return editorText.trim() }
+		window["_encoded_text"] = function() { return encodeURIComponent(editorText.trim()) }
+		window["_google"] = function() { 
+			window.open('https://google.com/search?q='+encodeURIComponent(editorText.trim()))
+		}
+		window["_tweet"] = function() {
+			if (editorText.trim() == "") { onEditorDone("/tweet", null) } 
+			else { location.href = "twitter://post?message=" + encodeURIComponent(editorText.trim()) }
+		}
+
+		// Restore user from localStorage for faster init
+		// NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
+		if (!user && localStorage.getItem('user')) {
+			user = JSON.parse(localStorage.getItem('user'))
+			console.log("restored user from local storage")
+		}
+		console.log("first script run, items:", items.length)
+	}
+
+	// NOTE: onMount does not work for editor focus. afterUpdate works but may be too aggressive ...
+	// import { afterUpdate } from 'svelte';
+    // afterUpdate(()=>{ if (focusedItem < 0) document.getElementById("textarea-editor").focus() })
 	
-	{#if user && allowedUsers.includes(user.uid) && !error}
-	<!-- all good! user logged in, has permissions, and no error from server -->
-	
-	<div class="items">
-		<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
-			<div id="editor">
-				<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem} autofocus={true}/>
-			</div>
-			<div class="spacer"/>
-			{#if loggedIn}<img id="user" src="{user.photoURL}" alt="{user.email}" on:click={signOut}>{/if}
+</script>
+
+{#if user && allowedUsers.includes(user.uid) && !error}
+<!-- all good! user logged in, has permissions, and no error from server -->
+
+<div class="items">
+	<div id="header" class:focused on:click={()=>textArea(-1).focus()}>
+		<div id="editor">
+			<Editor bind:text={editorText} bind:focused={focused} onChange={onEditorChange} onDone={onEditorDone} onPrev={onPrevItem} onNext={onNextItem}/>
 		</div>
-		{#if loggedIn}<script>document.getElementById("textarea-editor").focus()</script>{/if}
-		
-		{#each items as item}
-		{#if item.page}<div class="page-separator"/>{/if}
-		<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
-		<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
-		<Item onEditing={onItemEditing} onFocused={onItemFocused} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:saving={item.saving} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} itemCount={items.length} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
-		{/each}
+		<div class="spacer"/>
+		{#if loggedIn}<img id="user" src="{user.photoURL}" alt="{user.email}" on:click={signOut}>{/if}
 	</div>
+	{#if loggedIn}<script>document.getElementById("textarea-editor").focus()</script>{/if}
 	
-	{:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
-	User {user.email} not allowed.
-	
-	{:else if error} <!-- user logged in, has permissions, but server returned error -->
-	<div id='loading'/>
-	{:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
-	<script>console.log('loading ...')</script>
-	<div id='loading'/>
-	{:else} <!-- should not happen -->
-	?
-	{/if}
-	
-	<svelte:window on:keypress={disableSaveShortcut} on:resize={resizeEditor}/>
+	{#each items as item}
+	{#if item.page}<div class="page-separator"/>{/if}
+	<!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
+	<!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
+	<Item onEditing={onItemEditing} onFocused={onItemFocused} onHeightAsync={onItemHeight} onTagClick={onTagClick} onPrev={onPrevItem} onNext={onNextItem} bind:text={item.text} bind:editing={item.editing} bind:focused={item.focused} bind:saving={item.saving} bind:height={item.height} bind:time={item.time} id={item.id} index={item.index} itemCount={items.length} timeString={item.timeString} timeOutOfOrder={item.timeOutOfOrder} updateTime={item.updateTime} createTime={item.createTime}/>
+	{/each}
+</div>
+
+{:else if user && !allowedUsers.includes(user.uid)} <!-- user logged in but not allowed -->
+User {user.email} not allowed.
+
+{:else if error} <!-- user logged in, has permissions, but server returned error -->
+<div id='loading'/>
+{:else if !user && !error} <!-- user not logged in and no errors from server yet (login in progress) -->
+<script>console.log('loading ...')</script>
+<div id='loading'/>
+{:else} <!-- should not happen -->
+?
+{/if}
+
+<svelte:window on:keypress={disableSaveShortcut}/>

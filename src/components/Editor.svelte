@@ -29,9 +29,6 @@
     .backdrop.focused {
         background: #222;        
     }
-    /* #partial {
-        visibility: false
-    } */
     textarea {
         position: absolute;
         background: transparent;
@@ -71,12 +68,10 @@
     export let onDone = (text:string, e:KeyboardEvent)=>{}
     export let onPrev = ()=>{}
     export let onNext = ()=>{}
-    export let autofocus = false
     
     const placeholder = " "
     let editor: HTMLDivElement
     let backdrop: HTMLDivElement
-    // let partial: HTMLDivElement
     let highlights: HTMLDivElement    
     let textarea: HTMLTextAreaElement
     let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
@@ -107,17 +102,27 @@
             }
         }
         
-        // delete item with backspace
+        // delete empty item with backspace
         if (e.code == "Backspace" && textarea.value.trim()=="" && textarea.selectionStart == 0) {
             onDone(text = "", e)
             e.preventDefault()
             return
         }
+        // delete non-empty item with Shift/Cmd/Ctrl+Backspace
         // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
         if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
             onDone(text = "", e)
             e.preventDefault()
             return
+        }
+
+        // insert spaces on Tab
+        if (e.code == "Tab") {
+            e.preventDefault();
+            var pos = textarea.selectionStart;
+            textarea.value = textarea.value.substring(0,pos) + "    " + textarea.value.substring(textarea.selectionEnd);
+            textarea.selectionEnd = pos + 4;
+            onInput()
         }
     }
     
@@ -132,19 +137,23 @@
     }
     
     function onInput() {
+        // force replace tabs with spaces
+        if (textarea.value.indexOf('\t')>=0) {
+            // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
+            if (textarea.value.match(/^[-*]\s/)) textarea.value = textarea.value.replace(/(\t+)/g, '$1 - ')
+            textarea.value = textarea.value.replace(/\t/g, '    ')
+        }
         text = textarea.value // no trimming until onDone
         updateTextDivs()
         onChange(textarea.value)
     }
     
-    import { onMount, afterUpdate } from 'svelte';
-    onMount(()=>{if(autofocus) textarea.focus()})
+    import { afterUpdate } from 'svelte';
     afterUpdate(updateTextDivs);
     
 </script>
 
 <div bind:this={editor} id="editor">
-    <!-- <div class="backdrop"><div id="partial" bind:this={partial}></div></div> -->
     <div class="backdrop" class:focused bind:this={backdrop}><div id="highlights" bind:this={highlights}>{placeholder}</div></div>
     <textarea id={"textarea-"+id} bind:this={textarea} placeholder={placeholder} on:input={onInput} on:keydown={onKeyDown} on:keypress={onKeyPress} on:focus={()=>onFocused(focused=true)} on:blur={()=>onFocused(focused=false)} autocapitalize=off>{text}</textarea>
 </div>
