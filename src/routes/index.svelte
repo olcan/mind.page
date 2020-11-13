@@ -11,7 +11,7 @@
 	// NOTE: Preload function can be called on either client or server
 	// See https://sapper.svelte.dev/docs#Preloading
 	export async function preload(page, session) {
-		console.log("preloading, client?", isClient);
+		// console.log("preloading, client?", isClient);
 		// NOTE: for development server, admin credentials require `gcloud auth application-default login`
 		const user: any = await firebaseAdmin()
 			.auth()
@@ -199,11 +199,18 @@
 		});
 		updateItemIndices();
 	}
+
+	function regexEscape(str) {
+		return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+	}
+
 	function onTagClick(tag: string) {
-		editorText = (editorText.trim() + " " + tag).trim() + " ";
+		// const tagregex = new RegExp(`(?:^|\\s)${regexEscape(tag)}(?:\\s|$)`);
+		// if (editorText.match(tagregex)) return; // tag already exists
+		// editorText = (editorText.trim() + " " + tag).trim() + " ";
+		editorText = tag;
 		onEditorChange(editorText);
-		// NOTE: refocusing on editor can be annoying on mobile due to keyboard
-		textArea(-1).focus();
+		// textArea(-1).focus();
 		window.top.scrollTo(0, 0);
 	}
 
