@@ -1,259 +1,248 @@
 <script lang="ts">
-    export let id = "editor";
-    export let text = "";
-    export let focused = false;
-    export let onFocused = (focused: boolean) => {};
-    export let onChange = (text) => {};
-    export let onDone = (text: string, e: KeyboardEvent) => {};
-    export let onPrev = () => {};
-    export let onNext = () => {};
+  export let id = "editor";
+  export let text = "";
+  export let focused = false;
+  export let onFocused = (focused: boolean) => {};
+  export let onChange = (text) => {};
+  export let onDone = (text: string, e: KeyboardEvent) => {};
+  export let onPrev = () => {};
+  export let onNext = () => {};
 
-    const placeholder = " ";
-    let editor: HTMLDivElement;
-    let backdrop: HTMLDivElement;
-    let highlights: HTMLDivElement;
-    let textarea: HTMLTextAreaElement;
-    let escapeHTML = (t) =>
-        t
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    let applyHighlights = (t) =>
-        t
-            .replace(/\n$/g, "\n\n")
-            .replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
+  const placeholder = " ";
+  let editor: HTMLDivElement;
+  let backdrop: HTMLDivElement;
+  let highlights: HTMLDivElement;
+  let textarea: HTMLTextAreaElement;
+  let escapeHTML = (t) =>
+    t
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  let applyHighlights = (t) =>
+    t.replace(/\n$/g, "\n\n").replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
 
-    function updateTextDivs() {
-        highlights.innerHTML = applyHighlights(
-            escapeHTML(textarea.value || placeholder)
-        );
-        textarea.style.height = editor.style.height =
-            backdrop.scrollHeight + "px";
+  function updateTextDivs() {
+    highlights.innerHTML = applyHighlights(
+      escapeHTML(textarea.value || placeholder)
+    );
+    textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
+  }
+
+  function onKeyDown(e: KeyboardEvent) {
+    // console.log(e)
+    // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
+
+    // indent selection
+    if (
+      (e.code == "BracketLeft" || e.code == "BracketRight") &&
+      (e.metaKey || e.ctrlKey)
+    ) {
+      e.preventDefault();
+      // if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
+      textarea.selectionStart = textarea.value
+        .substring(0, textarea.selectionStart)
+        .replace(/[^\n]*$/, "").length;
+      const oldStart = textarea.selectionStart;
+      const oldEnd = textarea.selectionEnd;
+      let oldLength = textarea.value.length;
+      textarea.value =
+        textarea.value.substring(0, textarea.selectionStart) +
+        (e.code == "BracketLeft"
+          ? textarea.value
+              .substring(textarea.selectionStart, textarea.selectionEnd)
+              .replace(/(^|\n)    /g, "$1")
+          : textarea.value
+              .substring(textarea.selectionStart, textarea.selectionEnd)
+              .replace(/(^|\n)/g, "$1    ")) +
+        textarea.value.substring(textarea.selectionEnd);
+      textarea.selectionStart = oldStart;
+      textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
+      onInput();
+      return;
     }
 
-    function onKeyDown(e: KeyboardEvent) {
-        // console.log(e)
-        // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
+    if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
 
-        // indent selection
-        if (
-            (e.code == "BracketLeft" || e.code == "BracketRight") &&
-            (e.metaKey || e.ctrlKey)
-        ) {
-            e.preventDefault();
-            // if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
-            textarea.selectionStart = textarea.value
-                .substring(0, textarea.selectionStart)
-                .replace(/[^\n]*$/, "").length;
-            const oldStart = textarea.selectionStart;
-            const oldEnd = textarea.selectionEnd;
-            let oldLength = textarea.value.length;
-            textarea.value =
-                textarea.value.substring(0, textarea.selectionStart) +
-                (e.code == "BracketLeft"
-                    ? textarea.value
-                          .substring(
-                              textarea.selectionStart,
-                              textarea.selectionEnd
-                          )
-                          .replace(/(^|\n)    /g, "$1")
-                    : textarea.value
-                          .substring(
-                              textarea.selectionStart,
-                              textarea.selectionEnd
-                          )
-                          .replace(/(^|\n)/g, "$1    ")) +
-                textarea.value.substring(textarea.selectionEnd);
-            textarea.selectionStart = oldStart;
-            textarea.selectionEnd =
-                oldEnd + (textarea.value.length - oldLength);
-            onInput();
-            return;
-        }
-
-        if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
-
-        // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
-        if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-            if (
-                (e.code == "ArrowUp" || e.code == "ArrowLeft") &&
-                textarea.selectionStart == 0
-            ) {
-                e.stopPropagation();
-                e.preventDefault();
-                onPrev();
-                return;
-            }
-            if (
-                (e.code == "ArrowDown" || e.code == "ArrowRight") &&
-                textarea.selectionStart == textarea.value.length
-            ) {
-                e.stopPropagation();
-                e.preventDefault();
-                onNext();
-                return;
-            }
-        }
-
-        // delete empty item with backspace
-        if (
-            e.code == "Backspace" &&
-            textarea.value.trim() == "" &&
-            textarea.selectionStart == 0
-        ) {
-            onDone((text = ""), e);
-            e.preventDefault();
-            return;
-        }
-        // delete non-empty item with Shift/Cmd/Ctrl+Backspace
-        // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
-        if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-            onDone((text = ""), e);
-            e.preventDefault();
-            return;
-        }
-
-        // insert spaces on Tab
-        if (e.code == "Tab") {
-            e.preventDefault();
-            if (!e.shiftKey) {
-                // forward tab
-                var pos = textarea.selectionStart;
-                textarea.value =
-                    textarea.value.substring(0, pos) +
-                    "    " +
-                    textarea.value.substring(textarea.selectionEnd);
-                textarea.selectionStart = textarea.selectionEnd = pos + 4;
-            } else if (
-                textarea.selectionStart >= 4 &&
-                textarea.value.substring(
-                    textarea.selectionStart - 4,
-                    textarea.selectionStart
-                ) == "    "
-            ) {
-                // backward tab
-                const pos = textarea.selectionStart;
-                textarea.value =
-                    textarea.value.substring(0, pos - 4) +
-                    textarea.value.substring(pos);
-                textarea.selectionStart = textarea.selectionEnd = pos - 4;
-            }
-            onInput();
-        }
+    // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
+    if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
+      if (
+        (e.code == "ArrowUp" || e.code == "ArrowLeft") &&
+        textarea.selectionStart == 0
+      ) {
+        e.stopPropagation();
+        e.preventDefault();
+        onPrev();
+        return;
+      }
+      if (
+        (e.code == "ArrowDown" || e.code == "ArrowRight") &&
+        textarea.selectionStart == textarea.value.length
+      ) {
+        e.stopPropagation();
+        e.preventDefault();
+        onNext();
+        return;
+      }
     }
 
-    function onKeyPress(e: KeyboardEvent) {
-        // add/save item with Cmd/Ctrl/Shift+Enter or Cmd/Ctrl+S
-        if (
-            (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
-            (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
-        ) {
-            e.preventDefault();
-            onDone((text = textarea.value.trim()), e);
-            return;
-        }
+    // delete empty item with backspace
+    if (
+      e.code == "Backspace" &&
+      textarea.value.trim() == "" &&
+      textarea.selectionStart == 0
+    ) {
+      onDone((text = ""), e);
+      e.preventDefault();
+      return;
+    }
+    // delete non-empty item with Shift/Cmd/Ctrl+Backspace
+    // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
+    if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+      onDone((text = ""), e);
+      e.preventDefault();
+      return;
     }
 
-    function onInput() {
-        // force replace tabs with spaces
-        if (textarea.value.indexOf("\t") >= 0) {
-            // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-            if (textarea.value.match(/^[-*]\s/))
-                textarea.value = textarea.value.replace(/(\t+)/g, "$1 - ");
-            textarea.value = textarea.value.replace(/\t/g, "    ");
-        }
-        text = textarea.value; // no trimming until onDone
-        updateTextDivs();
-        onChange(textarea.value);
+    // insert spaces on Tab
+    if (e.code == "Tab") {
+      e.preventDefault();
+      if (!e.shiftKey) {
+        // forward tab
+        var pos = textarea.selectionStart;
+        textarea.value =
+          textarea.value.substring(0, pos) +
+          "    " +
+          textarea.value.substring(textarea.selectionEnd);
+        textarea.selectionStart = textarea.selectionEnd = pos + 4;
+      } else if (
+        textarea.selectionStart >= 4 &&
+        textarea.value.substring(
+          textarea.selectionStart - 4,
+          textarea.selectionStart
+        ) == "    "
+      ) {
+        // backward tab
+        const pos = textarea.selectionStart;
+        textarea.value =
+          textarea.value.substring(0, pos - 4) + textarea.value.substring(pos);
+        textarea.selectionStart = textarea.selectionEnd = pos - 4;
+      }
+      onInput();
     }
+  }
 
-    import { afterUpdate } from "svelte";
-    afterUpdate(updateTextDivs);
+  function onKeyPress(e: KeyboardEvent) {
+    // add/save item with Cmd/Ctrl/Shift+Enter or Cmd/Ctrl+S
+    if (
+      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
+    ) {
+      e.preventDefault();
+      onDone((text = textarea.value.trim()), e);
+      return;
+    }
+  }
+
+  function onInput() {
+    // force replace tabs with spaces
+    if (textarea.value.indexOf("\t") >= 0) {
+      // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
+      if (textarea.value.match(/^[-*]\s/))
+        textarea.value = textarea.value.replace(/(\t+)/g, "$1 - ");
+      textarea.value = textarea.value.replace(/\t/g, "    ");
+    }
+    text = textarea.value; // no trimming until onDone
+    updateTextDivs();
+    onChange(textarea.value);
+  }
+
+  import { afterUpdate } from "svelte";
+  afterUpdate(updateTextDivs);
 </script>
 
 <style>
-    #editor {
-        position: relative;
-        height: 48px;
-        width: 100%;
-        cursor: text;
-        /* splitting the editor does not work on iOS */
-        break-inside: avoid-column;
-    }
+  #editor {
+    position: relative;
+    height: 48px;
+    width: 100%;
+    cursor: text;
+    /* splitting the editor does not work on iOS */
+    break-inside: avoid-column;
+  }
+  .backdrop,
+  textarea {
+    font-family: Helvetica;
+    font-size: 1.25em;
+    line-height: 1.4em;
+  }
+  .backdrop {
+    color: transparent;
+    position: absolute;
+    overflow: auto;
+    width: 100%;
+    background: #1b1b1b;
+    border-radius: 0 4px 4px 0;
+    min-height: 48px;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    box-sizing: border-box; /* essential for proper sizing of textarea */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .backdrop.focused {
+    background: #222;
+  }
+  textarea {
+    position: absolute;
+    background: transparent;
+    color: #ddd;
+    min-height: 48px;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    box-sizing: border-box; /* essential for proper sizing of textarea */
+    outline: none;
+    border: 0;
+    border-radius: 0;
+    display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
+    resize: none;
+  }
+  :global(mark) {
+    color: transparent;
+    /* background: rgba(30,90,255,.25); */
+    background: #444;
+    border-radius: 4px;
+    padding: 0 2px;
+    margin: 0 -2px;
+    cursor: pointer;
+  }
+  /* adapt to smaller windows/devices */
+  @media only screen and (max-width: 600px) {
     .backdrop,
     textarea {
-        font-family: Helvetica;
-        font-size: 1.25em;
-        line-height: 1.4em;
+      font-size: 1.15em;
+      line-height: 1.4em;
     }
-    .backdrop {
-        color: transparent;
-        position: absolute;
-        overflow: auto;
-        width: 100%;
-        background: #1b1b1b;
-        border-radius: 0 4px 4px 0;
-        min-height: 48px;
-        width: 100%;
-        margin: 0;
-        padding: 10px;
-        box-sizing: border-box; /* essential for proper sizing of textarea */
-        white-space: pre-wrap;
-        word-wrap: break-word;
-    }
-    .backdrop.focused {
-        background: #222;
-    }
-    textarea {
-        position: absolute;
-        background: transparent;
-        color: #ddd;
-        min-height: 48px;
-        width: 100%;
-        margin: 0;
-        padding: 10px;
-        box-sizing: border-box; /* essential for proper sizing of textarea */
-        outline: none;
-        border: 0;
-        border-radius: 0;
-        display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
-        resize: none;
-    }
-    :global(mark) {
-        color: transparent;
-        /* background: rgba(30,90,255,.25); */
-        background: #444;
-        border-radius: 4px;
-        padding: 0 2px;
-        margin: 0 -2px;
-        cursor: pointer;
-    }
-    /* adapt to smaller windows/devices */
-    @media only screen and (max-width: 600px) {
-        .backdrop,
-        textarea {
-            font-size: 1.15em;
-            line-height: 1.4em;
-        }
-    }
+  }
 </style>
 
 <div bind:this={editor} id="editor">
-    <div class="backdrop" class:focused bind:this={backdrop}>
-        <div id="highlights" bind:this={highlights}>{placeholder}</div>
-    </div>
-    <textarea
-        id={'textarea-' + id}
-        bind:this={textarea}
-        {placeholder}
-        on:input={onInput}
-        on:keydown={onKeyDown}
-        on:keypress={onKeyPress}
-        on:focus={() => onFocused((focused = true))}
-        on:blur={() => onFocused((focused = false))}
-        autocapitalize="off">{text}</textarea>
+  <div class="backdrop" class:focused bind:this={backdrop}>
+    <div id="highlights" bind:this={highlights}>{placeholder}</div>
+  </div>
+  <textarea
+    id={'textarea-' + id}
+    bind:this={textarea}
+    {placeholder}
+    on:input={onInput}
+    on:keydown={onKeyDown}
+    on:keypress={onKeyPress}
+    on:focus={() => onFocused((focused = true))}
+    on:blur={() => onFocused((focused = false))}
+    autocapitalize="off">{text}</textarea>
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->
