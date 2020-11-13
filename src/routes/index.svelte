@@ -140,7 +140,7 @@
 			.map(({ item }) => item);
 	}
 
-	function matches(str, terms) {
+	function matchCount(str, terms) {
 		return terms.map((t) => str.indexOf(t) >= 0).reduce((a, b) => a + b, 0);
 	}
 
@@ -173,7 +173,7 @@
 					.map((t) => t.trim())
 					.reverse();
 			}
-			item.matches = matches(lctext, terms);
+			item.matchCount = matchCount(lctext, terms);
 		});
 		// NOTE: undefined values produce NaN, which is treated as 0
 		items = stableSort(items, (a, b) => {
@@ -192,7 +192,7 @@
 				// editing mode
 				b.editing - a.editing ||
 				// # of matching words
-				b.matches - a.matches ||
+				b.matchCount - a.matchCount ||
 				// time (most recent first)
 				b.time - a.time
 			);
