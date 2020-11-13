@@ -147,9 +147,15 @@
 
   function onEditorChange(origText: string) {
     let text = origText.toLowerCase().trim();
-    let terms = [...new Set(text.split(/\s+/))].filter((t) => t.length > 0);
+    let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
     // disable search if text starts with '/'
     if (text.startsWith("/")) terms = [];
+    let termsSecondary = [];
+    terms.forEach((term) => {
+      if (term[0] == "#" && term.indexOf("/") >= 0)
+        termsSecondary.push(term.substring(0, term.indexOf("/")));
+    });
+
     let listing = [];
     items.forEach((item) => {
       const lctext = item.text.toLowerCase();
@@ -171,7 +177,19 @@
           .map((t) => t.trim())
           .reverse();
       }
-      item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
+      item.matchingTerms = [];
+      if (item.pinned) {
+        // match only tags for pinned items
+        item.matchingTerms = terms.filter(
+          (t) => t[0] == "#" && lctext.indexOf(t) >= 0
+        );
+      } else {
+        item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
+      }
+      item.matchingTermsSecondary = [];
+      item.matchingTermsSecondary = termsSecondary.filter(
+        (t) => lctext.indexOf(t) >= 0
+      );
     });
     // NOTE: undefined values produce NaN, which is treated as 0
     items = stableSort(items, (a, b) => {
@@ -191,6 +209,8 @@
         b.editing - a.editing ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
+        // # of matching secondary words
+        b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
         // time (most recent first)
         b.time - a.time
       );
@@ -198,14 +218,7 @@
     updateItemIndices();
   }
 
-  function regexEscape(str) {
-    return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-  }
-
   function onTagClick(tag: string) {
-    // const tagregex = new RegExp(`(?:^|\\s)${regexEscape(tag)}(?:\\s|$)`);
-    // if (editorText.match(tagregex)) return; // tag already exists
-    // editorText = (editorText.trim() + " " + tag).trim() + " ";
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     onEditorChange(editorText);
     window.top.scrollTo(0, 0);
@@ -727,7 +740,8 @@
         id={item.id}
         index={item.index}
         itemCount={items.length}
-        matchingTerms={JSON.stringify(item.matchingTerms)}
+        matchingTerms={item.matchingTerms.join(',')}
+        matchingTermsSecondary={item.matchingTermsSecondary.join(',')}
         timeString={item.timeString}
         timeOutOfOrder={item.timeOutOfOrder}
         updateTime={item.updateTime}

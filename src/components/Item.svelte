@@ -35,52 +35,6 @@
     },
   });
 
-  let itemdiv: HTMLDivElement;
-  import { afterUpdate } from "svelte";
-  afterUpdate(() => {
-    if (!itemdiv) return;
-    // remove <code></code> wrapper block
-    Array.from(document.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
-        code.outerHTML = code.innerHTML;
-    });
-    Array.from(document.getElementsByTagName("pre")).forEach((pre) => {
-      if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
-        pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
-    });
-    const prevheight = height;
-    const heightid = id; // capture for async callback
-    const typesetdiv = itemdiv; // capture for async callback
-    // NOTE: we have to capture any item state used in callback since the component state can be modified/reused during callback
-    window["MathJax"]
-      .typesetPromise([itemdiv])
-      .then(() => {
-        typesetdiv
-          .querySelectorAll(".MathJax")
-          .forEach((elem) => elem.setAttribute("tabindex", "-1"));
-        onHeightAsync(heightid, typesetdiv.clientHeight, prevheight);
-      })
-      .catch(console.error);
-  });
-
-  export let onTagClick = (tag: string) => {};
-  window["handleTagClick"] = (tag: string) => {
-    onTagClick(tag);
-  };
-
-  const textReplace = (str, subStr, newSubStr) => {
-    let mdBlock = false;
-    return str
-      .split("\n")
-      .map((str) => {
-        if (str.match(/^```/)) {
-          mdBlock = !mdBlock;
-        }
-        return mdBlock || str.match(/^```|^    /) ? str : str + "<br>\n";
-      })
-      .join("\n");
-  };
-
   import Editor from "./Editor.svelte";
   export let editing = false;
   export let focused = false;
@@ -90,12 +44,15 @@
   export let id: string;
   export let itemCount: number;
   export let matchingTerms: any;
+  export let matchingTermsSecondary: any;
   export let time: number;
   export let timeString: string;
   export let timeOutOfOrder: boolean;
   export let updateTime: number;
   export let createTime: number;
-  let debugString = `${time}, ${updateTime}, ${createTime}`;
+  let debugString;
+  $: debugString = `${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
+
   export let text: string;
   export let height = 0;
   const placeholder = " ";
@@ -119,21 +76,41 @@
     onEditing(index, (editing = true));
   }
 
-  function toHTML(text: string, matchingTerms: any) {
-    // TODO: why do we get an infinite render loop if matchingTerms is passed as an array?
-    // console.log(matchingTerms)
-    const terms = new Set(JSON.parse(matchingTerms));
+  export let onTagClick = (tag: string) => {};
+  window["handleTagClick"] = (tag: string) => {
+    onTagClick(tag);
+  };
+
+  function regexEscape(str) {
+    return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+  }
+
+  function toHTML(
+    text: string,
+    matchingTerms: any,
+    matchingTermsSecondary: any
+  ) {
+    // NOTE: passing matchingTerms as an Array leads to an infinite render loop
+    // console.log(matchingTerms);
+    const terms = new Set<string>(matchingTerms.split(",").filter((t) => t));
+    const termsSecondary = new Set<string>(
+      matchingTermsSecondary.split(",").filter((t) => t)
+    );
+
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
     text = text
       .split("\n")
       .map((line) => {
         let str = line;
-        if (str.match(/^```/)) {
-          insideBlock = !insideBlock;
-        }
+        // disable MathJax syntax that contains matching terms
+        terms.forEach((term: string) => {
+          const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "s");
+          str = str.replace(regex, "&#36;$1" + term + "$2&#36;");
+        });
+        if (str.match(/^```/)) insideBlock = !insideBlock;
         // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideBlock && !str.match(/^```|^    /)) str += "<br>";
+        if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n";
         if (!insideBlock) {
           // hide #pin and #pin/* (not useful visually or for clicking)
           str = str.replace(/(?:^|\s)#pin(?:\s|$)/, "");
@@ -145,16 +122,122 @@
             /(^|\s)(#[\/\w]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
-                terms.has(tag) ? 'class="selected"' : ""
+                terms.has(tag)
+                  ? 'class="selected"'
+                  : termsSecondary.has(tag)
+                  ? 'class="secondary-selected"'
+                  : ""
               } onclick="handleTagClick('${tag}');event.stopPropagation()">${tag}</mark>`
           );
         }
         return str;
       })
       .join("\n")
-      .replace(/\\<br>\n/g, "");
+      .replace(/\\<br>\n\n/g, "");
     return marked(text);
   }
+
+  // we use afterUpdate hook to make changes to the DOM after rendering
+  let containerdiv: HTMLDivElement;
+  let itemdiv: HTMLDivElement;
+  import { afterUpdate } from "svelte";
+  afterUpdate(() => {
+    if (!itemdiv) return; // itemdiv is null if editing
+    // NOTE: this function must be idempotent as it can be called multiple times for a subset of items
+    // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
+
+    if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
+      itemdiv.setAttribute("_highlightTerms", matchingTerms);
+      // if (!itemdiv.getAttribute("_origHTML"))
+      //   itemdiv.setAttribute("_origHTML", itemdiv.innerHTML);
+      // itemdiv.innerHTML = itemdiv.getAttribute("_origHTML");
+      Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
+        span.outerHTML = span.innerHTML;
+      });
+      const terms = matchingTerms.split(",").filter((t) => t);
+      let treeWalker = document.createTreeWalker(
+        itemdiv,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: function (node) {
+            switch (node.nodeName.toLowerCase()) {
+              case "mark":
+                return (node as HTMLElement).className == "selected"
+                  ? NodeFilter.FILTER_REJECT
+                  : NodeFilter.FILTER_ACCEPT;
+              case "svg":
+              case "math":
+                return NodeFilter.FILTER_REJECT;
+              default:
+                return NodeFilter.FILTER_ACCEPT;
+            }
+          },
+        }
+      );
+      while (treeWalker.nextNode()) {
+        let node = treeWalker.currentNode;
+        if (node.nodeType != Node.TEXT_NODE) continue;
+        let parent = node.parentNode;
+        let text = node.nodeValue;
+        let m;
+        terms.forEach((term) => {
+          let regex = new RegExp(`^(.*?)(${regexEscape(term)})`, "s");
+          while ((m = text.match(regex))) {
+            text = text.slice(m[0].length);
+            parent.insertBefore(document.createTextNode(m[1]), node);
+            var word = parent.insertBefore(
+              document.createElement("span"),
+              node
+            );
+            word.appendChild(document.createTextNode(m[2]));
+            word.className = "highlight";
+            if (node.parentElement.tagName == "MARK") {
+              // adjust left/right margin/padding for in-tag matches
+              if (m[2][0] == "#") {
+                // prefix match
+                word.style.paddingLeft = "2px";
+                word.style.marginLeft = "-2px";
+              }
+              if (text.length == 0) {
+                // suffix match
+                word.style.paddingRight = "2px";
+                word.style.marginRight = "-2px";
+              }
+            }
+          }
+        });
+        node.nodeValue = text;
+      }
+    }
+
+    // remove <code></code> wrapper block
+    Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
+        code.outerHTML = code.innerHTML;
+    });
+
+    // replace <pre></pre> wrapper with <blockquote></blockquote>
+    Array.from(itemdiv.getElementsByTagName("pre")).forEach((pre) => {
+      if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
+        pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
+    });
+
+    // capture state for async callback
+    // (component state can be modified/reused during callbac)
+    const typesetdiv = itemdiv;
+    const heightdiv = containerdiv;
+    const prevheight = height;
+    const itemid = id;
+    window["MathJax"]
+      .typesetPromise([typesetdiv])
+      .then(() => {
+        typesetdiv
+          .querySelectorAll(".MathJax")
+          .forEach((elem) => elem.setAttribute("tabindex", "-1"));
+        onHeightAsync(itemid, heightdiv.clientHeight, prevheight);
+      })
+      .catch(console.error);
+  });
 </script>
 
 <style>
@@ -261,10 +344,25 @@
     margin: 0;
   }
   .item :global(mark.selected) {
-    /* background: white; */
-    /* background: rgb(120, 180, 255); */
     background: lightgreen;
   }
+  .item :global(mark.secondary-selected) {
+    background: white;
+    /* background: #333; */
+    /* color: lightgreen; */
+    /* border: 2px solid lightgreen; */
+    /* margin: -2px; */
+  }
+  .item :global(span.highlight) {
+    color: black;
+    background: yellow;
+    border-radius: 4px;
+  }
+  /* .item :global(mark span.highlight) {
+    color: black;
+    background: transparent;
+    text-decoration: underline;
+  } */
   .item :global(.vertical-bar) {
     color: #444;
   }
@@ -301,7 +399,7 @@
   }
 </style>
 
-<div class="super-container" bind:this={itemdiv}>
+<div class="super-container" bind:this={containerdiv}>
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -320,8 +418,13 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
-      <div class="item" class:saving class:error on:click={onClick}>
-        {@html toHTML(text || placeholder, matchingTerms)}
+      <div
+        class="item"
+        bind:this={itemdiv}
+        class:saving
+        class:error
+        on:click={onClick}>
+        {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
   </div>
