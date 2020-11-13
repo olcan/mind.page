@@ -206,7 +206,7 @@
     // const tagregex = new RegExp(`(?:^|\\s)${regexEscape(tag)}(?:\\s|$)`);
     // if (editorText.match(tagregex)) return; // tag already exists
     // editorText = (editorText.trim() + " " + tag).trim() + " ";
-    editorText = editorText.trim() == tag ? "" : tag;
+    editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     onEditorChange(editorText);
     window.top.scrollTo(0, 0);
   }
