@@ -1,6 +1,9 @@
 export const firebaseConfig = {
   apiKey: "AIzaSyArfytkqMVwd_5TdIaKSun0iSxzjEbaRkU",
-  authDomain: "olcanswiki.firebaseapp.com",
+  // authDomain: "olcanswiki.firebaseapp.com",
+  // NOTE: (sub-)domain must be added under OAuth settings on Google Cloud console:
+  // https://console.developers.google.com/apis/credentials?folder=&organizationId=&project=olcanswiki
+  authDomain: "olcan.com",
   databaseURL: "https://olcanswiki.firebaseio.com",
   projectId: "olcanswiki",
   storageBucket: "olcanswiki.appspot.com",

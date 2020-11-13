@@ -555,7 +555,6 @@
 			return editorText.trim();
 		};
 		window["_append_clipboard"] = function () {
-			// NOTE: this does not work in Safari on the Mac. Need to test on iOS.
 			navigator.clipboard.readText().then(window["_append"]).catch(alert);
 		};
 		window["_encoded_text"] = function () {
