@@ -29,4 +29,4 @@ if (!("FIREBASE_CONFIG" in process.env)) { // firebase handles the listening
 	});
 }
 
-export {sapperServer} // for use as handler in index.js
+export { sapperServer } // for use as handler in index.js
