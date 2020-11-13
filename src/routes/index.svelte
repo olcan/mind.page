@@ -569,7 +569,9 @@
 					try {
 						let url = new URL(urlstr);
 						window["_append_edit"](
-							`${prefix} [${title}](${urlstr}) ${suffix}`.trim()
+							`${prefix}[${
+								title || url.host
+							}](${urlstr})${suffix}`
 						);
 						if (enter) window["_enter"]();
 					} catch (_) {

@@ -263,11 +263,22 @@
     .item :global(mark) {
         color: black;
         background: #999;
+        vertical-align: middle;
         /* remove negative margins used to align with textarea text */
         margin: 0;
     }
     .item :global(.vertical-bar) {
         color: #444;
+    }
+    .item :global(hr) {
+        border: none;
+        height: 1px;
+        background-color: #222;
+    }
+    .item :global(div) {
+        background-color: #222;
+        border-radius: 4px;
+        padding: 4px 6px;
     }
     .item :global(:first-child) {
         margin-top: 0;
