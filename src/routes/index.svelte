@@ -227,9 +227,9 @@
 	}
 
 	let editorText = "";
-	function onEditorDone(text: string, e: KeyboardEvent) {
+	function onEditorDone(text: string, e: KeyboardEvent = null) {
 		// NOTE: text is already trimmed for onDone
-		if (e.code == "Backspace") return; // ignore backspace
+		if (e && e.code == "Backspace") return; // ignore backspace
 		let editing = true; // created item can be editing or not
 		let time = Date.now(); // default time is current, can be past if undeleting
 		switch (text) {
@@ -549,10 +549,14 @@
 			textArea(-1).focus();
 		};
 		window["_enter"] = function (text: string) {
-			onEditorDone(text, null);
+			onEditorDone(text);
 		};
 		window["_text"] = function () {
 			return editorText.trim();
+		};
+		window["_append_clipboard"] = function () {
+			// NOTE: this does not work in Safari on the Mac. Need to test on iOS.
+			navigator.clipboard.readText().then(window["_append"]).catch(alert);
 		};
 		window["_encoded_text"] = function () {
 			return encodeURIComponent(editorText.trim());

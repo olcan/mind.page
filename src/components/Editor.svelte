@@ -179,7 +179,8 @@
         height: 48px;
         width: 100%;
         cursor: text;
-        /* break-inside: avoid-column; */
+        /* splitting the editor does not work on iOS */
+        break-inside: avoid-column;
     }
     .backdrop,
     textarea {
