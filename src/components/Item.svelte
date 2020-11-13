@@ -159,6 +159,7 @@
         onEditing(index, (editing = false));
     }
     function onClick() {
+        if (window.getSelection().type == "Range") return; // ignore click if text is selected
         onEditing(index, (editing = true));
     }
 </script>

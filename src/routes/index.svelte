@@ -549,13 +549,34 @@
 			textArea(-1).focus();
 		};
 		window["_enter"] = function (text: string) {
-			onEditorDone(text);
+			onEditorDone(text || editorText);
 		};
 		window["_text"] = function () {
 			return editorText.trim();
 		};
 		window["_append_clipboard"] = function () {
 			navigator.clipboard.readText().then(window["_append"]).catch(alert);
+		};
+		window["_append_clipboard_link"] = function (
+			prefix: string,
+			title: string,
+			suffix: string,
+			enter: boolean = false
+		) {
+			navigator.clipboard
+				.readText()
+				.then((urlstr) => {
+					try {
+						let url = new URL(urlstr);
+						window["_append_edit"](
+							`${prefix} [${title}](${urlstr}) ${suffix}`.trim()
+						);
+						if (enter) window["_enter"]();
+					} catch (_) {
+						alert("clipboard content is not a URL");
+					}
+				})
+				.catch(alert);
 		};
 		window["_encoded_text"] = function () {
 			return encodeURIComponent(editorText.trim());
