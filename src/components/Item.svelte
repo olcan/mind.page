@@ -115,8 +115,8 @@
                     );
                     // wrap #tags inside clickable <mark></mark>
                     str = str.replace(
-                        /(?:^|\s)(#[\/\w]+)/g,
-                        `<mark onclick="handleTagClick('$1');event.stopPropagation()">$1</mark>`
+                        /(^|\s)(#[\/\w]+)/g,
+                        `$1<mark onclick="handleTagClick('$2');event.stopPropagation()">$2</mark>`
                     );
                 }
                 return str;
@@ -263,19 +263,17 @@
     .item :global(mark) {
         color: black;
         background: #999;
-        /* fix negative margins used to align with textarea text */
-        margin: 0 2px;
+        /* remove negative margins used to align with textarea text */
+        margin: 0;
     }
     .item :global(.vertical-bar) {
         color: #444;
     }
     .item :global(:first-child) {
         margin-top: 0;
-        margin-left: 0;
     }
     .item :global(:last-child) {
         margin-bottom: 0;
-        margin-right: 0;
     }
     :global(.MathJax) {
         margin-bottom: 0 !important;
