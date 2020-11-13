@@ -103,7 +103,7 @@
                     insideBlock = !insideBlock;
                 }
                 // preserve line breaks by inserting <br> outside of code blocks
-                if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n";
+                if (!insideBlock && !str.match(/^```|^    /)) str += "<br>";
                 if (!insideBlock) {
                     // hide #pin and #pin/* (not useful visually or for clicking)
                     str = str.replace(/(?:^|\s)#pin(?:\s|$)/, "");
@@ -121,7 +121,8 @@
                 }
                 return str;
             })
-            .join("\n");
+            .join("\n")
+            .replace(/\\<br>\n/g, "");
         return marked(text);
     }
 
@@ -261,18 +262,19 @@
     .item :global(mark) {
         color: black;
         background: #999;
-        padding: 0px 2px;
-        margin: 0px -2px;
-        border: 0;
+        /* fix negative margins used to align with textarea text */
+        margin: 0 2px;
     }
     .item :global(.vertical-bar) {
         color: #444;
     }
     .item :global(:first-child) {
         margin-top: 0;
+        margin-left: 0;
     }
     .item :global(:last-child) {
         margin-bottom: 0;
+        margin-right: 0;
     }
     :global(.MathJax) {
         margin-bottom: 0 !important;
