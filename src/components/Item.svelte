@@ -134,7 +134,8 @@
         return str;
       })
       .join("\n")
-      .replace(/\\<br>\n\n/g, "");
+      .replace(/\\<br>\n\n/g, "")
+      .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>");
     return marked(text);
   }
 
@@ -354,6 +355,9 @@
   }
   .item :global(a) {
     color: #79e;
+    background: #222;
+    padding: 2px 4px;
+    border-radius: 4px;
     text-decoration: none;
   }
   .item :global(mark) {
@@ -388,9 +392,11 @@
     color: #444;
   }
   .item :global(hr) {
-    border: none;
-    height: 1px;
-    background-color: #222;
+    background: transparent;
+    border: 0;
+    border-top: 1px dashed #222;
+    height: 1px; /* disappears if both height and border are 0 */
+    margin: 10px 0;
   }
   .item :global(div) {
     background-color: #222;
