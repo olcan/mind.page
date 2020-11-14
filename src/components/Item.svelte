@@ -43,6 +43,7 @@
   export let index: number;
   export let id: string;
   export let itemCount: number;
+  export let matchingItemCount: number;
   export let matchingTerms: any;
   export let matchingTermsSecondary: any;
   export let time: number;
@@ -192,7 +193,8 @@
             word.appendChild(document.createTextNode(m[2]));
             word.className = "highlight";
             if (node.parentElement.tagName == "MARK") {
-              node.parentElement.style.background = "white";
+              // NOTE: this becomes stale when the match goes away
+              // node.parentElement.style.background = "white";
               // adjust left/right margin/padding for in-tag matches
               if (m[2][0] == "#") {
                 // prefix match
@@ -259,11 +261,22 @@
   }
   .index {
     float: right;
-    color: #333;
+    color: #666;
     /* padding-right: 4px; */
     font-family: Helvetica;
     text-align: right;
+    opacity: 0.5;
   }
+  .index.matching {
+    color: lightgreen;
+  }
+  .index .itemCount {
+    color: #ddd;
+  }
+  .index .matchingItemCount {
+    color: lightgreen;
+  }
+
   .time {
     color: #444;
     display: inline-block;
@@ -363,7 +376,7 @@
   .item :global(mark span.highlight) {
     color: black;
     background: lightgreen;
-    padding: 1px 4px;
+    padding: 1px 0;
   }
   .item :global(.vertical-bar) {
     color: #444;
@@ -407,8 +420,14 @@
   {/if}
   <div class="debug">{debugString}</div>
   <div class="container" class:editing class:focused class:timeOutOfOrder>
-    <div class="index">
-      {@html index > 0 ? index + 1 : itemCount + '<br>' + (index + 1)}
+    <div class="index" class:matching={matchingTerms.length > 0}>
+      {#if index == 0}
+        <span class="itemCount">{itemCount}</span><br />
+        {#if matchingItemCount > 0}
+          <span class="matchingItemCount">{matchingItemCount}</span><br />
+        {/if}
+      {/if}
+      {index + 1}
     </div>
     {#if editing}
       <Editor

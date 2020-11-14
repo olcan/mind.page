@@ -159,6 +159,8 @@
         termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
+    // let matchingTermCounts = new Map<string, number>();
+    let matchingItemCount = 0;
     let listing = [];
     items.forEach((item) => {
       const lctext = item.text.toLowerCase();
@@ -189,11 +191,27 @@
       } else {
         item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
       }
+      if (item.matchingTerms.length > 0) {
+        matchingItemCount++;
+        // item.matchingTerms.forEach((term) =>
+        //   matchingTermCounts.set(term, (matchingTermCounts.get(term) || 0) + 1)
+        // );
+      }
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter(
         (t) => lctext.indexOf(t) >= 0
       );
     });
+
+    // Store matching item/term counts in items
+    items.forEach((item) => {
+      item.matchingItemCount = matchingItemCount;
+      // item.matchingTermCounts = [];
+      // item.matchingTerms.forEach((term) =>
+      //   item.matchingTermCounts.push(matchingTermCounts.get(term))
+      // );
+    });
+
     // NOTE: undefined values produce NaN, which is treated as 0
     items = stableSort(items, (a, b) => {
       // pinned (contains #pin)
@@ -743,6 +761,7 @@
         id={item.id}
         index={item.index}
         itemCount={items.length}
+        matchingItemCount={item.matchingItemCount}
         matchingTerms={item.matchingTerms.join(',')}
         matchingTermsSecondary={item.matchingTermsSecondary.join(',')}
         timeString={item.timeString}
