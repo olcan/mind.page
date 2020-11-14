@@ -521,18 +521,21 @@
           console.log("signed in", user.email);
           localStorage.setItem("user", JSON.stringify(user));
 
-          // Store user's ID token as a 1-hour __session cookie to send to server for preload
-          // NOTE: __session is the only cookie allowed by firebase for efficient caching
-          //       (see https://stackoverflow.com/a/44935288)
-          user
-            .getIdToken(false /*force refresh*/)
-            .then((token) => {
-              document.cookie = "__session=" + token + ";max-age=86400";
-              console.log("updated cookie", error || "no error");
-              // reload with new cookie if we are on error page
-              if (error) location.reload();
-            })
-            .catch(console.error);
+          // proceeed to set up server-side session cookie only if user is allowed
+          if (allowedUsers.includes(user.uid)) {
+            // Store user's ID token as a 1-hour __session cookie to send to server for preload
+            // NOTE: __session is the only cookie allowed by firebase for efficient caching
+            //       (see https://stackoverflow.com/a/44935288)
+            user
+              .getIdToken(false /*force refresh*/)
+              .then((token) => {
+                document.cookie = "__session=" + token + ";max-age=86400";
+                console.log("updated cookie", error || "no error");
+                // reload with new cookie if we are on error page
+                if (error) location.reload();
+              })
+              .catch(console.error);
+          }
         } else {
           // return // test signed out state
           let provider = new window.firebase.auth.GoogleAuthProvider();
@@ -773,9 +776,8 @@
   </div>
 {:else if user && !allowedUsers.includes(user.uid)}
   <!-- user logged in but not allowed -->
-  User
-  {user.email}
-  not allowed.
+  Hello
+  {user.email}!
 {:else if error}
   <!-- user logged in, has permissions, but server returned error -->
   <div id="loading" />
