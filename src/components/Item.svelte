@@ -392,11 +392,11 @@
     height: 1px;
     background-color: #222;
   }
-  .item :global(div) {
+  /* .item :global(div) {
     background-color: #222;
     border-radius: 4px;
     padding: 4px 6px;
-  }
+  } */
   .item :global(:first-child) {
     margin-top: 0;
   }
