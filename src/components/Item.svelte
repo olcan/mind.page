@@ -105,7 +105,7 @@
         let str = line;
         // disable MathJax syntax that contains matching terms
         terms.forEach((term: string) => {
-          const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "s");
+          const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "si");
           str = str.replace(regex, "&#36;$1" + term + "$2&#36;");
         });
         if (str.match(/^```/)) insideBlock = !insideBlock;
@@ -181,7 +181,7 @@
         let text = node.nodeValue;
         let m;
         terms.forEach((term) => {
-          let regex = new RegExp(`^(.*?)(${regexEscape(term)})`, "s");
+          let regex = new RegExp(`^(.*?)(${regexEscape(term)})`, "si");
           while ((m = text.match(regex))) {
             text = text.slice(m[0].length);
             parent.insertBefore(document.createTextNode(m[1]), node);
@@ -192,16 +192,17 @@
             word.appendChild(document.createTextNode(m[2]));
             word.className = "highlight";
             if (node.parentElement.tagName == "MARK") {
+              node.parentElement.style.background = "white";
               // adjust left/right margin/padding for in-tag matches
               if (m[2][0] == "#") {
                 // prefix match
-                word.style.paddingLeft = "2px";
-                word.style.marginLeft = "-2px";
+                word.style.paddingLeft = "4px";
+                word.style.marginLeft = "-4px";
               }
               if (text.length == 0) {
                 // suffix match
-                word.style.paddingRight = "2px";
-                word.style.marginRight = "-2px";
+                word.style.paddingRight = "4px";
+                word.style.marginRight = "-4px";
               }
             }
           }
@@ -339,8 +340,9 @@
   .item :global(mark) {
     color: black;
     background: #999;
-    vertical-align: middle;
+    /* vertical-align: middle; */
     /* remove negative margins used to align with textarea text */
+    padding: 1px 4px;
     margin: 0;
   }
   .item :global(mark.selected) {
@@ -355,14 +357,14 @@
   }
   .item :global(span.highlight) {
     color: black;
-    background: yellow;
+    background: lightgreen;
     border-radius: 4px;
   }
-  /* .item :global(mark span.highlight) {
+  .item :global(mark span.highlight) {
     color: black;
-    background: transparent;
-    text-decoration: underline;
-  } */
+    background: lightgreen;
+    padding: 1px 4px;
+  }
   .item :global(.vertical-bar) {
     color: #444;
   }

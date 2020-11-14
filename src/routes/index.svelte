@@ -152,8 +152,11 @@
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
-      if (term[0] == "#" && term.indexOf("/") >= 0)
-        termsSecondary.push(term.substring(0, term.indexOf("/")));
+      if (term[0] != "#") return;
+      let pos;
+      let tag = term;
+      while ((pos = tag.lastIndexOf("/")) >= 0)
+        termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
     let listing = [];
@@ -638,7 +641,7 @@
     font-size: 2em;
     font-family: Helvetica;
     background: #111 url(/loading.gif) no-repeat center;
-    background-size: 30%;
+    background-size: 200px;
   }
   #header {
     display: flex;
