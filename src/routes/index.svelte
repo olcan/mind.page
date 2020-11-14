@@ -616,16 +616,17 @@
       return encodeURIComponent(editorText.trim());
     };
     window["_google"] = function () {
-      window.open(
-        "https://google.com/search?q=" + encodeURIComponent(editorText.trim())
-      );
+      let query = editorText.trim();
+      onEditorChange((editorText = ""));
+      window.open("https://google.com/search?q=" + encodeURIComponent(query));
     };
     window["_tweet"] = function () {
-      if (editorText.trim() == "") {
+      let tweet = editorText.trim();
+      onEditorChange((editorText = ""));
+      if (tweet == "") {
         onEditorDone("/tweet", null);
       } else {
-        location.href =
-          "twitter://post?message=" + encodeURIComponent(editorText.trim());
+        location.href = "twitter://post?message=" + encodeURIComponent(tweet);
       }
     };
 
