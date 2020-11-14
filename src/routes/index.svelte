@@ -73,16 +73,17 @@
     indexFromId = new Map();
     let pageHeight = 0;
     let maxPageHeight = 0;
-    // NOTE: once editor is available, we can calculate # columns and maxPageHeight
-    if (document.getElementById("editor")) {
+    // NOTE: once header is available, we can calculate # columns and maxPageHeight
+    if (document.getElementById("header")) {
       let columnCount = Math.round(
-        window.innerWidth / document.getElementById("editor").clientWidth
+        window.innerWidth / document.getElementById("header").clientWidth
       );
-      // NOTE: window.visualViewport.height is more accurate on iOS, but causes shifting on scroll
-      //       (is also complicated by overlays such as for keyboard at the bottom on the iPad)
-      maxPageHeight = columnCount * window.innerHeight * 0.85;
+      // NOTE: window.visualViewport.height (vs window.innerHeight) includes decorations on iOS
+      //       (but can cause shifting if this function is triggered by height (vs just width) changes)
+      maxPageHeight = columnCount * window.visualViewport.height;
       // disable any paging on single-column layout
       if (columnCount == 1) maxPageHeight = Infinity;
+      pageHeight = document.getElementById("header").clientHeight + 8; // first page includes header
     }
     items.forEach((item, index) => {
       item.index = index;
