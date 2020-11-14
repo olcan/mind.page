@@ -261,7 +261,11 @@
   let editorText = "";
   function onEditorDone(text: string, e: KeyboardEvent = null) {
     // NOTE: text is already trimmed for onDone
-    if (e && e.code == "Backspace") return; // ignore backspace
+    if (e && e.code == "Backspace") {
+      // just clear and return
+      onEditorChange((editorText = ""));
+      return;
+    }
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
     switch (text) {
