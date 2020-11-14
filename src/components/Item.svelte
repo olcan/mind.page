@@ -195,16 +195,22 @@
             if (node.parentElement.tagName == "MARK") {
               // NOTE: this becomes stale when the match goes away
               // node.parentElement.style.background = "white";
-              // adjust left/right margin/padding for in-tag matches
+              // adjust left/right margin/padding and border radius for in-tag matches
+              word.style.borderRadius = "0";
               if (m[2][0] == "#") {
-                // prefix match
+                // prefix match (rounded on left)
                 word.style.paddingLeft = "4px";
                 word.style.marginLeft = "-4px";
+                word.style.borderTopLeftRadius;
+                word.style.borderTopLeftRadius = "4px";
+                word.style.borderBottomLeftRadius = "4px";
               }
               if (text.length == 0) {
-                // suffix match
+                // suffix match (rounded on right)
                 word.style.paddingRight = "4px";
                 word.style.marginRight = "-4px";
+                word.style.borderTopRightRadius = "4px";
+                word.style.borderBottomRightRadius = "4px";
               }
             }
           }
