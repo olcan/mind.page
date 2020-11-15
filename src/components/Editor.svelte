@@ -8,6 +8,24 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
+  import "highlight.js/styles/monokai-sublime.css";
+  import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
+  import plaintext from "highlight.js/lib/languages/plaintext.js";
+  hljs.registerLanguage("plaintext", plaintext);
+  import javascript from "highlight.js/lib/languages/javascript.js";
+  hljs.registerLanguage("javascript", javascript);
+  import typescript from "highlight.js/lib/languages/typescript.js";
+  hljs.registerLanguage("typescript", typescript);
+  import css from "highlight.js/lib/languages/css.js";
+  hljs.registerLanguage("css", css);
+  import json from "highlight.js/lib/languages/json.js";
+  hljs.registerLanguage("json", json);
+  import xml from "highlight.js/lib/languages/xml.js";
+  hljs.registerLanguage("xml", xml); // including html
+  hljs.configure({
+    tabReplace: "    ",
+  });
+
   const placeholder = " ";
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
@@ -20,13 +38,18 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
-  let applyHighlights = (t) =>
+  let highlightTags = (t) =>
     t.replace(/\n$/g, "\n\n").replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
 
   function updateTextDivs() {
-    highlights.innerHTML = applyHighlights(
-      escapeHTML(textarea.value || placeholder)
-    );
+    const text = textarea.value || placeholder;
+    if (textarea.value.match(/^#js\s/)) {
+      highlights.innerHTML =
+        "<mark class=language>#js</mark>" +
+        hljs.highlight("js", text.replace(/^#js(\s)/, "$1") + "\n").value;
+    } else {
+      highlights.innerHTML = highlightTags(escapeHTML(text));
+    }
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
 
@@ -47,16 +70,18 @@
       const oldStart = textarea.selectionStart;
       const oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
-      textarea.value =
-        textarea.value.substring(0, textarea.selectionStart) +
-        (e.code == "BracketLeft"
+      // NOTE: execCommand maintains undo/redo history.
+      document.execCommand(
+        "insertText",
+        false,
+        e.code == "BracketLeft"
           ? textarea.value
               .substring(textarea.selectionStart, textarea.selectionEnd)
               .replace(/(^|\n)    /g, "$1")
           : textarea.value
               .substring(textarea.selectionStart, textarea.selectionEnd)
-              .replace(/(^|\n)/g, "$1    ")) +
-        textarea.value.substring(textarea.selectionEnd);
+              .replace(/(^|\n)/g, "$1    ")
+      );
       textarea.selectionStart = oldStart;
       textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
       onInput();
@@ -64,6 +89,18 @@
     }
 
     if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
+
+    // NOTE: We handle this in onKeyUp to fix a caret delay issue
+    // // create line on Enter, maintain indentation
+    // if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+    //   let currentLine = textarea.value
+    //     .slice(0, textarea.selectionStart)
+    //     .split("\n")
+    //     .pop();
+    //   let newlineIndent = "\n" + currentLine.match(/^\s*/)[0];
+    //   document.execCommand("insertText", false, newlineIndent);
+    //   e.preventDefault();
+    // }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
@@ -110,12 +147,7 @@
       e.preventDefault();
       if (!e.shiftKey) {
         // forward tab
-        var pos = textarea.selectionStart;
-        textarea.value =
-          textarea.value.substring(0, pos) +
-          "    " +
-          textarea.value.substring(textarea.selectionEnd);
-        textarea.selectionStart = textarea.selectionEnd = pos + 4;
+        document.execCommand("insertText", false, "    ");
       } else if (
         textarea.selectionStart >= 4 &&
         textarea.value.substring(
@@ -123,13 +155,21 @@
           textarea.selectionStart
         ) == "    "
       ) {
-        // backward tab
-        const pos = textarea.selectionStart;
-        textarea.value =
-          textarea.value.substring(0, pos - 4) + textarea.value.substring(pos);
-        textarea.selectionStart = textarea.selectionEnd = pos - 4;
+        textarea.selectionStart = textarea.selectionStart - 4;
+        document.execCommand("delete", false);
       }
       onInput();
+    }
+  }
+
+  function onKeyUp(e: KeyboardEvent) {
+    // maintain indentation of previous line on enter (without modifiers)
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+      let spaces = textarea.value
+        .substring(0, textarea.selectionStart)
+        .match(/(?:^|\n)(\s*).*?\n$/);
+      if (spaces && spaces[1].length > 0)
+        document.execCommand("insertText", false, spaces[1]);
     }
   }
 
@@ -178,7 +218,8 @@
     line-height: 1.4em;
   }
   .backdrop {
-    color: transparent;
+    /* color: transparent; */
+    color: #ddd;
     position: absolute;
     overflow: auto;
     width: 100%;
@@ -198,7 +239,9 @@
   textarea {
     position: absolute;
     background: transparent;
-    color: #ddd;
+    /* color: #ddd; */
+    caret-color: #ddd;
+    color: transparent;
     min-height: 48px;
     width: 100%;
     margin: 0;
@@ -211,13 +254,15 @@
     resize: none;
   }
   :global(mark) {
-    color: transparent;
-    /* background: rgba(30,90,255,.25); */
-    background: #444;
+    /* color: transparent; */
+    background: #999;
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;
     cursor: pointer;
+  }
+  :global(mark.language) {
+    background: #7bf;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
@@ -234,11 +279,13 @@
     <div id="highlights" bind:this={highlights}>{placeholder}</div>
   </div>
   <textarea
+    spellcheck={false}
     id={'textarea-' + id}
     bind:this={textarea}
     {placeholder}
     on:input={onInput}
     on:keydown={onKeyDown}
+    on:keyup={onKeyUp}
     on:keypress={onKeyPress}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}

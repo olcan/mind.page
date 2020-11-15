@@ -149,8 +149,8 @@
   function onEditorChange(origText: string) {
     let text = origText.toLowerCase().trim();
     let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    // disable search if text starts with '/'
-    if (text.startsWith("/")) terms = [];
+    // disable search if text (origText before trimming) starts with '/' or #js
+    if (origText.startsWith("/") || origText.match(/^#js\s/)) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
       if (term[0] != "#") return;

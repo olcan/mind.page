@@ -99,6 +99,15 @@
       matchingTermsSecondary.split(",").filter((t) => t)
     );
 
+    // hide starting #pin and #pin/* (not useful visually or for clicking)
+    text = text.replace(/^#pin(?:\s|$)/, "");
+    text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
+
+    // if starting with #js, trim and wrap inside js block
+    if (text.match(/^#js\s/)) {
+      text = "```js\n" + text.replace(/^#js\s/, "").trim() + "\n```";
+    }
+
     // NOTE: modifications should only happen outside of code blocks
     let insideMultilineBlock = false;
     text = text
@@ -114,9 +123,6 @@
         // preserve line breaks by inserting <br> outside of code blocks
         if (!insideMultilineBlock && !str.match(/^```/)) str += "<br>\n";
         if (!insideMultilineBlock && !str.match(/^</)) {
-          // hide #pin and #pin/* (not useful visually or for clicking)
-          str = str.replace(/(?:^|\s)#pin(?:\s|$)/, "");
-          str = str.replace(/(?:^|\s)#pin\/[\/\w]*(?:\s|$)/, "");
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
