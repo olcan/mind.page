@@ -31,6 +31,7 @@
       // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
       //if (language=="") return hljs.highlightAuto(code).value;
       const validLanguage = hljs.getLanguage(language) ? language : "plaintext";
+      // console.log("highlighting", validLanguage, code);
       return hljs.highlight(validLanguage, code).value;
     },
   });
@@ -99,7 +100,7 @@
     );
 
     // NOTE: modifications should only happen outside of code blocks
-    let insideBlock = false;
+    let insideMultilineBlock = false;
     text = text
       .split("\n")
       .map((line) => {
@@ -109,10 +110,10 @@
           const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "si");
           str = str.replace(regex, "&#36;$1" + term + "$2&#36;");
         });
-        if (str.match(/^```/)) insideBlock = !insideBlock;
+        if (str.match(/^```/)) insideMultilineBlock = !insideMultilineBlock;
         // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideBlock && !str.match(/^```|^    /)) str += "<br>\n";
-        if (!insideBlock) {
+        if (!insideMultilineBlock && !str.match(/^```/)) str += "<br>\n";
+        if (!insideMultilineBlock && !str.match(/^</)) {
           // hide #pin and #pin/* (not useful visually or for clicking)
           str = str.replace(/(?:^|\s)#pin(?:\s|$)/, "");
           str = str.replace(/(?:^|\s)#pin\/[\/\w]*(?:\s|$)/, "");
@@ -232,6 +233,14 @@
         pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
     });
 
+    // Example of Replit iframe: <iframe id="replit" width="100%" height="500px" style="border:1px solid #444" src="https://repl.it/@olcan/UtilizedKeyMuse?lite=1&outputonly=1"></iframe>
+    // // replace <iframe> with <div>
+    // Array.from(itemdiv.getElementsByTagName("iframe")).forEach((iframe) => {
+    //   // const height = iframe.height
+    //   const height = "200px";
+    //   iframe.outerHTML = `<div style="height:${height}"></div>`;
+    // });
+
     // capture state for async callback
     // (component state can be modified/reused during callbac)
     const typesetdiv = itemdiv;
@@ -257,6 +266,7 @@
     margin-right: 8px;
   }
   .container {
+    position: relative;
     /* border: 1px solid transparent; */
     border-left: 2px solid #444;
     /* overflow: hidden; */
@@ -267,7 +277,10 @@
     border-left: 2px solid #aaa;
   }
   .index {
-    float: right;
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
     color: #666;
     /* padding-right: 4px; */
     font-family: Helvetica;

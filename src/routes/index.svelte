@@ -79,7 +79,7 @@
         window.innerWidth / document.getElementById("header").clientWidth
       );
       // NOTE: window.visualViewport.height (vs window.innerHeight) includes decorations on iOS
-      //       (but can cause shifting if this function is triggered by height (vs just width) changes)
+      //       (but can cause undesirable shifting if this function is triggered too often or at bad times)
       maxPageHeight = columnCount * window.visualViewport.height;
       // disable any paging on single-column layout
       if (columnCount == 1) maxPageHeight = Infinity;
@@ -177,7 +177,7 @@
         item.prefixMatchTerm =
           terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
-      // use first exact-match item as listing
+      // use first exact-match item as "listing" item
       if (item.prefixMatchTerm == terms[0] && listing.length == 0) {
         listing = (lctext.match(/(:?^|\s)(#[\/\w]+)/g) || [])
           .map((t) => t.trim())
@@ -391,11 +391,12 @@
       // started editing
       editingItems.push(index);
       onEditorChange(editorText);
+      // NOTE: setTimeout is required for editor to be added to the Dom
+      textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
+      // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
       setTimeout(() => {
-        // allow textarea to be created
-        // NOTE: this focus does not work on iOS, even though focusOnNearestEditingItem (below) works, possibly because the keyboard is already visible in that case. In any case, the overall behavior on iOS is reasonable since user gets better context after reodering and can manually focus.
         textArea(item.index).focus();
-        if (item.index < index) window.top.scrollTo(0, 0); // scroll to top if item was moved up
+        // if (item.index < index) window.top.scrollTo(0, 0); // scroll to top if item was moved up
       }, 0); // trigger resort
     } else {
       // stopped editing
@@ -630,6 +631,38 @@
       }
     };
 
+    // Window resize/scroll handlers ...
+    // NOTE: These seem to respond to font resizing also, so no need for polling below
+    let lastScrollTime = 0;
+    let lastViewportWidth = 0;
+    let minViewportHeight = Infinity; // only respond if it gets smaller
+    window.visualViewport.addEventListener("scroll", (e) => {
+      lastScrollTime = Date.now();
+    });
+    let resizePending = false;
+    function tryResize() {
+      if (Date.now() - lastScrollTime > 250) {
+        if (
+          window.visualViewport.width != lastViewportWidth ||
+          window.visualViewport.height < minViewportHeight
+        ) {
+          onEditorChange(editorText);
+          lastViewportWidth = window.visualViewport.width;
+          minViewportHeight = Math.min(
+            minViewportHeight,
+            window.visualViewport.height
+          );
+        }
+      } else if (!resizePending) {
+        resizePending = true;
+        setTimeout(() => {
+          resizePending = false;
+          tryResize();
+        }, 250);
+      }
+    }
+    window.visualViewport.addEventListener("resize", tryResize);
+
     // Restore user from localStorage for faster init
     // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
     if (!user && localStorage.getItem("user")) {
@@ -639,23 +672,14 @@
     console.log("first script run, items:", items.length);
   }
 
-  import { onMount } from "svelte";
-  // NOTE: invoking onEditorChange on a timeout allows item heights to be available for paging
+  import { onMount, onDestroy } from "svelte";
+  let pollingInterval = 0;
   onMount(() => {
+    // NOTE: invoking onEditorChange on a timeout allows item heights to be available for paging
     setTimeout(() => onEditorChange(""), 0);
+    // pollingInterval = setInterval(()=>{}, 250)
   });
-  // NOTE: onMount does not work for editor focus. afterUpdate works but is too aggresive/frequent
-  // afterUpdate(()=>{ if (focusedItem < 0) document.getElementById("textarea-editor").focus() })
-
-  // Trigger layout on window width changes
-  // NOTE: we also need this on font resizing, but that is much harder to detect
-  //       (only robust known method is a periodic check, but that is not worth it for now)
-  let lastWindowWidth = 0;
-  function onWindowResize() {
-    // NOTE: we only need layout on width changes, and height changes are too common on iOS due to dynamic toolbars
-    if (window.innerWidth != lastWindowWidth) onEditorChange(editorText);
-    lastWindowWidth = window.innerWidth;
-  }
+  onDestroy(() => clearInterval(pollingInterval));
 </script>
 
 <style>
@@ -797,6 +821,4 @@
   ?
 {/if}
 
-<svelte:window
-  on:keypress={disableEditorShortcuts}
-  on:resize={onWindowResize} />
+<svelte:window on:keypress={disableEditorShortcuts} />
