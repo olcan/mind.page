@@ -420,6 +420,34 @@
             .delete()
             .catch(console.error);
         } else {
+          // extract all JS code
+          // NOTE: this logic is consistent with onInput() in Editor.svelte
+          let insideJS = false;
+          const jscode = item.text
+            .split("\n")
+            .map((line) => {
+              if (!insideJS && line.match(/^```js/)) insideJS = true;
+              else if (insideJS && line.match(/^```/)) insideJS = false;
+              if (line.match(/^```/)) return "";
+              return insideJS ? line : "";
+            })
+            .filter((t) => t)
+            .join("\n")
+            .trim();
+
+          if (jscode.length > 0) {
+            let jsout = "";
+            try {
+              jsout = eval(jscode);
+              item.text =
+                item.text.replace(/\n#js\/output\n.*$/s, "") +
+                "\n#js/output\n" +
+                jsout;
+            } catch (e) {
+              alert(e.message);
+            }
+          }
+
           // update
           if (item.text != item.savedText) {
             // save new text
