@@ -470,15 +470,17 @@
               .catch(console.error);
           }
           onEditorChange(editorText); // update sorting of items (at least editing state has changed)
-          if (editingItems.length > 0) {
-            // focus on nearest editing item
-            focusOnNearestEditingItem(index);
-          } else {
-            // focus on editor if item is moved back down, otherwise stay put
-            setTimeout(() => {
-              if (item.index > index) textArea(-1).focus();
-            }, 0); // trigger resort
-          }
+          focusOnNearestEditingItem(index);
+          // NOTE: we decided to always focus on something, editor if needed; if the jump up is a problem, then the item of focus should be pinned at/near the top, which is the correct solution
+          // if (editingItems.length > 0) {
+          //   // focus on nearest editing item
+          //   focusOnNearestEditingItem(index);
+          // } else {
+          //   // focus on editor if item is moved back down, otherwise stay put
+          //   setTimeout(() => {
+          //     if (item.index > index) textArea(-1).focus();
+          //   }, 0); // trigger resort
+          // }
         }
       }
     }
