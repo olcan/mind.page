@@ -778,6 +778,10 @@
     border-top: 1px dashed #444;
     margin: 20px 0;
   }
+  /* override italic comment style of sunburst */
+  :global(.hljs-comment) {
+    font-style: normal;
+  }
 </style>
 
 {#if user && allowedUsers.includes(user.uid) && !error}
