@@ -8,7 +8,7 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
-  import "highlight.js/styles/monokai-sublime.css";
+  import "highlight.js/styles/sunburst.css";
   import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
   import plaintext from "highlight.js/lib/languages/plaintext.js";
   hljs.registerLanguage("plaintext", plaintext);

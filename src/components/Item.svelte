@@ -3,7 +3,7 @@
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
 
-  import "highlight.js/styles/monokai-sublime.css";
+  import "highlight.js/styles/sunburst.css";
   import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
   import plaintext from "highlight.js/lib/languages/plaintext.js";
   hljs.registerLanguage("plaintext", plaintext);
