@@ -39,17 +39,23 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
   let highlightTags = (t) =>
-    t.replace(/\n$/g, "\n\n").replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
+    t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
 
   function updateTextDivs() {
-    const text = textarea.value || placeholder;
-    if (textarea.value.match(/^#js\s/)) {
-      highlights.innerHTML =
-        "<mark class=language>#js</mark>" +
-        hljs.highlight("js", text.replace(/^#js(\s)/, "$1") + "\n").value;
-    } else {
-      highlights.innerHTML = highlightTags(escapeHTML(text));
-    }
+    const text = (textarea.value || placeholder) + "\n";
+    let insideJS = false;
+    const html = text
+      .split("\n")
+      .map((line) => {
+        if (!insideJS && line.match(/^```js/)) insideJS = true;
+        else if (insideJS && line.match(/^```/)) insideJS = false;
+        if (line.match(/^```/)) return line; // return multiline block delimiter lines as is
+        return insideJS
+          ? hljs.highlight("js", line).value
+          : highlightTags(escapeHTML(line));
+      })
+      .join("\n");
+    highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
 
@@ -106,6 +112,7 @@
     if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
 
     // create line on Enter, maintain indentation
+    // NOTE: there can be slight delay on caret update, but seems to be a Mac-only problem
     if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
       let spaces = textarea.value
         .substring(0, textarea.selectionStart)

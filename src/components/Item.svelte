@@ -103,11 +103,6 @@
     text = text.replace(/^#pin(?:\s|$)/, "");
     text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
 
-    // if starting with #js, trim and wrap inside js block
-    if (text.match(/^#js\s/)) {
-      text = "```js\n" + text.replace(/^#js\s/, "").trim() + "\n```";
-    }
-
     // NOTE: modifications should only happen outside of code blocks
     let insideMultilineBlock = false;
     text = text
@@ -119,10 +114,16 @@
           const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "si");
           str = str.replace(regex, "&#36;$1" + term + "$2&#36;");
         });
-        if (str.match(/^```/)) insideMultilineBlock = !insideMultilineBlock;
+        if (!insideMultilineBlock && str.match(/^```/s))
+          // allow extra chars (consistent w/ marked)
+          insideMultilineBlock = true;
+        else if (insideMultilineBlock && str.match(/^```\s*$/s))
+          // do not allow extra chars (consistent w/ marked)
+          insideMultilineBlock = false;
+
         // preserve line breaks by inserting <br> outside of code blocks
         if (!insideMultilineBlock && !str.match(/^```/)) str += "<br>\n";
-        if (!insideMultilineBlock && !str.match(/^</)) {
+        if (!insideMultilineBlock && !str.match(/^```/) && !str.match(/^</)) {
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
