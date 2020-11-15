@@ -63,13 +63,21 @@
       (e.metaKey || e.ctrlKey)
     ) {
       e.preventDefault();
-      // if (textarea.selectionStart == textarea.selectionEnd) textarea.select()
-      textarea.selectionStart = textarea.value
-        .substring(0, textarea.selectionStart)
-        .replace(/[^\n]*$/, "").length;
       const oldStart = textarea.selectionStart;
       const oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
+      // move selection to line start
+      let lineStart = textarea.value
+        .substring(0, textarea.selectionStart)
+        .replace(/[^\n]*$/, "").length;
+      if (
+        textarea.selectionStart == textarea.selectionEnd &&
+        e.code == "BracketRight"
+      ) {
+        textarea.selectionStart = textarea.selectionEnd = lineStart;
+      } else {
+        textarea.selectionStart = lineStart;
+      }
       // NOTE: execCommand maintains undo/redo history.
       document.execCommand(
         "insertText",
@@ -82,25 +90,29 @@
               .substring(textarea.selectionStart, textarea.selectionEnd)
               .replace(/(^|\n)/g, "$1    ")
       );
-      textarea.selectionStart = oldStart;
-      textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
+      if (oldStart < oldEnd) {
+        // restore expanded selection
+        textarea.selectionStart = Math.min(lineStart, oldStart);
+        textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
+      } else {
+        // move forward
+        textarea.selectionStart = textarea.selectionEnd =
+          oldEnd + (textarea.value.length - oldLength);
+      }
       onInput();
       return;
     }
 
     if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
 
-    // NOTE: We handle this in onKeyUp to fix a caret delay issue
-    // // create line on Enter, maintain indentation
-    // if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-    //   let currentLine = textarea.value
-    //     .slice(0, textarea.selectionStart)
-    //     .split("\n")
-    //     .pop();
-    //   let newlineIndent = "\n" + currentLine.match(/^\s*/)[0];
-    //   document.execCommand("insertText", false, newlineIndent);
-    //   e.preventDefault();
-    // }
+    // create line on Enter, maintain indentation
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+      let spaces = textarea.value
+        .substring(0, textarea.selectionStart)
+        .match(/(?:^|\n)( *).*?$/);
+      document.execCommand("insertText", false, "\n" + spaces[1] || "");
+      e.preventDefault();
+    }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
@@ -122,6 +134,21 @@
         onNext();
         return;
       }
+    }
+
+    // remove spaced tabs with backspace
+    if (
+      e.code == "Backspace" &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey) &&
+      textarea.selectionStart >= 4 &&
+      textarea.value.substring(
+        textarea.selectionStart - 4,
+        textarea.selectionStart
+      ) == "    "
+    ) {
+      textarea.selectionStart = textarea.selectionStart - 4;
+      document.execCommand("delete", false);
+      e.preventDefault();
     }
 
     // delete empty item with backspace
@@ -163,14 +190,14 @@
   }
 
   function onKeyUp(e: KeyboardEvent) {
-    // maintain indentation of previous line on enter (without modifiers)
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      let spaces = textarea.value
-        .substring(0, textarea.selectionStart)
-        .match(/(?:^|\n)(\s*).*?\n$/);
-      if (spaces && spaces[1].length > 0)
-        document.execCommand("insertText", false, spaces[1]);
-    }
+    // // maintain indentation of previous line on enter (without modifiers)
+    // if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+    //   let spaces = textarea.value
+    //     .substring(0, textarea.selectionStart)
+    //     .match(/(?:^|\n)( *).*?\n$/);
+    //   if (spaces && spaces[1].length > 0)
+    //     document.execCommand("insertText", false, spaces[1]);
+    // }
   }
 
   function onKeyPress(e: KeyboardEvent) {
