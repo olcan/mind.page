@@ -470,7 +470,15 @@
               .catch(console.error);
           }
           onEditorChange(editorText); // update sorting of items (at least editing state has changed)
-          focusOnNearestEditingItem(index);
+          if (editingItems.length > 0) {
+            // focus on nearest editing item
+            focusOnNearestEditingItem(index);
+          } else {
+            // focus on editor if item is moved back down, otherwise stay put
+            setTimeout(() => {
+              if (item.index > index) textArea(-1).focus();
+            }, 0); // trigger resort
+          }
         }
       }
     }
