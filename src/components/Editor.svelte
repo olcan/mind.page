@@ -247,7 +247,7 @@
   }
   .backdrop,
   textarea {
-    font-family: Helvetica;
+    font-family: monospace;
     font-size: 1.25em;
     line-height: 1.4em;
   }

@@ -131,11 +131,12 @@
     }
   }
 
-  // initialize indices and savedText (as original text returned by server)
+  // initialize indices and savedText/Time
   if (isClient) {
     onEditorChange(""); // initial sort, index assignment, etc
     items.forEach((item) => {
       item.savedText = item.text;
+      item.savedTime = item.time;
     });
   }
 
@@ -213,6 +214,13 @@
       // );
     });
 
+    // Update times for editing items to maintain their ordering when one is saved
+    let now = Date.now();
+    items.forEach((item) => {
+      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/))
+        item.time = now;
+    });
+
     // NOTE: undefined values produce NaN, which is treated as 0
     items = stableSort(items, (a, b) => {
       // pinned (contains #pin)
@@ -227,8 +235,8 @@
         b.prefixMatch - a.prefixMatch ||
         // alphanumeric ordering on prefix-matching term
         a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
-        // editing mode
-        b.editing - a.editing ||
+        // // editing mode
+        // b.editing - a.editing ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
         // # of matching secondary words
@@ -342,6 +350,7 @@
         }
         items[index].saving = false; // assigning to item object in array triggers dom update for item
         items[index].savedText = text;
+        items[index].savedTime = time;
         items[index].id = doc.id;
         indexFromId.set(doc.id, index);
         indexFromId.delete(tmpid);
@@ -376,6 +385,7 @@
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
     items[index].savedText = items[index].text;
+    items[index].savedTime = items[index].time;
     items[index].saving = false;
   }
 
@@ -387,6 +397,9 @@
 
   function onItemEditing(index: number, editing: boolean) {
     let item = items[index];
+    // for non-log items, update time whenever the item is "touched"
+    if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
+
     if (editing) {
       // started editing
       editingItems.push(index);
@@ -411,7 +424,7 @@
           items = items; // trigger dom update
           setTimeout(() => focusOnNearestEditingItem(index - 1), 0);
           deletedItems.unshift({
-            time: item.time,
+            time: item.savedTime,
             text: item.savedText,
           }); // for /undelete
           firestore()
@@ -449,11 +462,9 @@
           }
 
           // update
-          if (item.text != item.savedText) {
+          if (item.time != item.savedTime || item.text != item.savedText) {
             // save new text
             item.saving = true;
-            if (!item.text.match(/(?:^|\s)#log(?:\s|$)/))
-              item.time = Date.now();
             const itemToSave = { time: item.time, text: item.text };
             firestore()
               .collection("items")
@@ -469,18 +480,8 @@
               .add({ item: item.id, ...itemToSave })
               .catch(console.error);
           }
-          onEditorChange(editorText); // update sorting of items (at least editing state has changed)
+          onEditorChange(editorText); // update sorting of items (at least time or text has changed)
           focusOnNearestEditingItem(index);
-          // NOTE: we decided to always focus on something, editor if needed; if the jump up is a problem, then the item of focus should be pinned at/near the top, which is the correct solution
-          // if (editingItems.length > 0) {
-          //   // focus on nearest editing item
-          //   focusOnNearestEditingItem(index);
-          // } else {
-          //   // focus on editor if item is moved back down, otherwise stay put
-          //   setTimeout(() => {
-          //     if (item.index > index) textArea(-1).focus();
-          //   }, 0); // trigger resort
-          // }
         }
       }
     }
@@ -819,7 +820,6 @@
         <div class="page-separator" />
       {/if}
       <!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
-      <!-- TODO: reconsider for saving, savedText, and height; problem may be initialization, test for saving first -->
       <Item
         onEditing={onItemEditing}
         onFocused={onItemFocused}
