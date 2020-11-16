@@ -904,7 +904,7 @@
     flex-grow: 1;
   }
   #user {
-    height: 42px; /* must match height of single-line editor */
+    height: 42px; /* must match height of single-line editor (also see @media query below) */
     margin-right: 4px;
     border-radius: 50%;
     background: gray;
@@ -927,6 +927,12 @@
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
+  }
+  /* adapt to smaller windows/devices */
+  @media only screen and (max-width: 600px) {
+    #user {
+      height: 40px; /* must match height of single-line editor (on narrow window) */
+    }
   }
 </style>
 

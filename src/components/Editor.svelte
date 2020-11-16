@@ -268,8 +268,8 @@
   .backdrop,
   textarea {
     font-family: monospace;
-    font-size: 1.25em;
-    line-height: 1.4em;
+    font-size: 14px;
+    line-height: 22px;
   }
   .backdrop {
     /* color: transparent; */
@@ -331,8 +331,8 @@
   @media only screen and (max-width: 600px) {
     .backdrop,
     textarea {
-      font-size: 1.15em;
-      line-height: 1.4em;
+      font-size: 12px;
+      line-height: 20px;
     }
   }
 </style>

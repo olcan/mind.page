@@ -354,8 +354,8 @@
     /* white-space: pre-wrap; */
     word-wrap: break-word;
     font-family: Helvetica;
-    font-size: 1.25em;
-    line-height: 1.4em;
+    font-size: 17px;
+    line-height: 25px;
     /* cursor: pointer; */
   }
   .saving {
@@ -380,11 +380,15 @@
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
+    font-size: 14px;
+    line-height: 22px;
   }
   .item :global(pre) {
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
+    font-size: 14px;
+    line-height: 22px;
   }
   .item :global(br:last-child) {
     display: none;
@@ -392,7 +396,7 @@
   .item :global(a) {
     color: #79e;
     background: #222;
-    padding: 2px 4px;
+    padding: 1px 4px;
     border-radius: 4px;
     text-decoration: none;
   }
@@ -456,8 +460,19 @@
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     .item {
-      font-size: 1.15em;
-      line-height: 1.4em;
+      font-size: 16px;
+      line-height: 23px;
+    }
+    .time {
+      font-size: 14px;
+    }
+    .item :global(blockquote) {
+      font-size: 12px;
+      line-height: 20px;
+    }
+    .item :global(pre) {
+      font-size: 12px;
+      line-height: 20px;
     }
   }
 </style>
