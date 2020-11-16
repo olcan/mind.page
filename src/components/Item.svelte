@@ -103,6 +103,21 @@
     text = text.replace(/^#pin(?:\s|$)/, "");
     text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
 
+    // replace naked URLs with markdown links named after host name
+    text = text.replace(/(^|\s)(http[^\s)]*?)($|\s)/g, (m, pfx, url, sfx) => {
+      if (url[url.length - 1] == ".") {
+        // move ending period to the suffix
+        url = url.substring(0, url.length - 1);
+        sfx = "." + sfx;
+      }
+      try {
+        let obj = new URL(url);
+        return `${pfx}[${obj.host}](${url})${sfx}`;
+      } catch (_) {
+        return pfx + url + sfx;
+      }
+    });
+
     // NOTE: modifications should only happen outside of code blocks
     let insideMultilineBlock = false;
     text = text

@@ -159,10 +159,9 @@
     return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
   }
 
-  function onEditorChange(origText: string) {
-    let text = origText.toLowerCase().trim();
+  function onEditorChange(text: string) {
+    text = text.toLowerCase().trim();
     let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    // disable search if text (or origText before trimming) matches certain conditions
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
@@ -441,9 +440,8 @@
     }
   }
 
-  function appendJSOutput(origText: string) {
-    if (!origText.match(/```js/)) return origText; // no js code in text
-    let text = origText;
+  function appendJSOutput(text: string) {
+    if (!text.match(/```js/)) return text; // no js code in text
     // execute JS code, including any tag-referenced items (using latest tags/label)
     const lctext = text.toLowerCase();
     const tags = itemTags(lctext);

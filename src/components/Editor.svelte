@@ -47,7 +47,7 @@
     const html = text
       .split("\n")
       .map((line) => {
-        if (!insideJS && line.match(/^```js/)) insideJS = true;
+        if (!insideJS && line.match(/^```(js|webppl)/)) insideJS = true;
         else if (insideJS && line.match(/^```/)) insideJS = false;
         if (line.match(/^```/)) return line; // return multiline block delimiter lines as is
         return insideJS
