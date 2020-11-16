@@ -155,6 +155,10 @@
       .map(({ item }) => item);
   }
 
+  function itemTags(lctext): Array<string> {
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
+  }
+
   function onEditorChange(origText: string) {
     let text = origText.toLowerCase().trim();
     let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
@@ -174,10 +178,7 @@
     let listing = [];
     items.forEach((item) => {
       const lctext = item.text.toLowerCase();
-      item.tags = Array.from(
-        lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g),
-        (m) => m[1]
-      );
+      item.tags = itemTags(lctext);
       // first tag is taken as "label" if it is the first text in the item
       item.label = lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
 
@@ -334,10 +335,13 @@
         break;
       }
       default: {
-        if (text.startsWith("/")) {
-          text = `unknown command ${text}`;
-          break;
+        if (text.match(/\/js(\s|$)/)) {
+          text = "```js\n" + text.replace(/\/js\s*/, "").trim() + "\n```";
+        } else if (text.startsWith("/")) {
+          alert(`unknown command ${text}`);
+          return;
         }
+        text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
       }
     }
@@ -407,6 +411,63 @@
     items[index].height = height;
   }
 
+  function extractJSCode(text: string) {
+    // NOTE: this logic is consistent with onInput() in Editor.svelte
+    let insideJS = false;
+    return text
+      .split("\n")
+      .map((line) => {
+        if (!insideJS && line.match(/^```js/)) insideJS = true;
+        else if (insideJS && line.match(/^```/)) insideJS = false;
+        if (line.match(/^```/)) return "";
+        return insideJS ? line : "";
+      })
+      .filter((t) => t)
+      .join("\n")
+      .trim();
+  }
+
+  function evalJSCode(text: string, label: string = ""): string {
+    const jscode = extractJSCode(text);
+    if (jscode.length == 0) return "";
+
+    try {
+      return eval("(function(){" + jscode + "})()");
+    } catch (e) {
+      let msg = e.toString();
+      if (label) msg = label + ": " + msg;
+      alert(msg);
+      return undefined;
+    }
+  }
+
+  function appendJSOutput(origText: string) {
+    if (!origText.match(/```js/)) return origText; // no js code in text
+    let text = origText;
+    // execute JS code, including any tag-referenced items (using latest tags/label)
+    const lctext = text.toLowerCase();
+    const tags = itemTags(lctext);
+    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+    let jsout = [];
+    tags.forEach((tag) => {
+      if (tag == label) return;
+      const indices = indicesFromLabel.get(tag) || [];
+      indices.forEach((index) => {
+        jsout.push(evalJSCode(items[index].text, items[index].label) || "");
+      });
+    });
+    jsout.push(evalJSCode(text, label) || "");
+
+    let outputBlock =
+      "\n```(output)\n" + (jsout.join("\n").trim() || "(no output)") + "\n```";
+    if (text.match(/\n```\(output\)\n.*?\n```/s)) {
+      text = text.replace(/\n```\(output\)\n.*?\n```/gs, outputBlock);
+    } else {
+      text += outputBlock;
+    }
+    return text;
+  }
+
   function onItemEditing(index: number, editing: boolean) {
     let item = items[index];
     // for non-log items, update time whenever the item is "touched"
@@ -444,36 +505,7 @@
             .delete()
             .catch(console.error);
         } else {
-          // TODO: refactor this and implement imports by label
-
-          // extract all JS code
-          // NOTE: this logic is consistent with onInput() in Editor.svelte
-          let insideJS = false;
-          const jscode = item.text
-            .split("\n")
-            .map((line) => {
-              if (!insideJS && line.match(/^```js/)) insideJS = true;
-              else if (insideJS && line.match(/^```/)) insideJS = false;
-              if (line.match(/^```/)) return "";
-              return insideJS ? line : "";
-            })
-            .filter((t) => t)
-            .join("\n")
-            .trim();
-
-          if (jscode.length > 0) {
-            let jsout = "";
-            try {
-              jsout = eval(jscode);
-              item.text =
-                item.text.replace(/\n#js\/output\n.*$/s, "") +
-                "\n#js/output\n" +
-                jsout;
-            } catch (e) {
-              if (item.label) alert(item.label + ": " + e.message);
-              else alert(e.message);
-            }
-          }
+          item.text = appendJSOutput(item.text);
 
           // update
           if (item.time != item.savedTime || item.text != item.savedText) {
@@ -494,6 +526,7 @@
               .add({ item: item.id, ...itemToSave })
               .catch(console.error);
           }
+
           onEditorChange(editorText); // update sorting of items (at least time or text has changed)
         }
 
@@ -692,6 +725,13 @@
       } else {
         location.href = "twitter://post?message=" + encodeURIComponent(tweet);
       }
+    };
+    window["_eval"] = function (tag: string) {
+      const indices = indicesFromLabel.get(tag) || [];
+      const jsout = indices.map((index) =>
+        evalJSCode(items[index].text, items[index].label)
+      );
+      return jsout.length == 1 ? jsout[0] : jsout;
     };
 
     // Window resize/scroll handlers ...
