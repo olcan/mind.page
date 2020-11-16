@@ -819,12 +819,9 @@
     flex-grow: 1;
   }
   #user {
-    /* display: flexbox; */
-    flex: 0 0 48px;
-    width: 48px;
-    height: 48px;
+    height: 42px; /* must match height of single-line editor */
     margin-right: 4px;
-    border-radius: 24px;
+    border-radius: 50%;
     background: gray;
     cursor: pointer;
   }

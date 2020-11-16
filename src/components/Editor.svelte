@@ -241,7 +241,7 @@
 <style>
   #editor {
     position: relative;
-    height: 48px;
+    /* height: 42px; */
     width: 100%;
     cursor: text;
     /* splitting the editor does not work on iOS */
@@ -261,7 +261,7 @@
     width: 100%;
     background: #1b1b1b;
     border-radius: 0 4px 4px 0;
-    min-height: 48px;
+    /* min-height: 42px; */
     width: 100%;
     margin: 0;
     padding: 10px;
@@ -278,7 +278,7 @@
     /* color: #ddd; */
     caret-color: #ddd;
     color: transparent;
-    min-height: 48px;
+    /* min-height: 42px; */
     width: 100%;
     margin: 0;
     padding: 10px;
