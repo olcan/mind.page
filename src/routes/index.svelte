@@ -335,7 +335,10 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text = "```js\n" + text.replace(/\/js\s*/, "").trim() + "\n```";
+          text =
+            "```js_input\n" +
+            text.replace(/\/js_input\s*/, "").trim() +
+            "\n```";
         } else if (text.startsWith("/")) {
           alert(`unknown command ${text}`);
           return;
@@ -416,7 +419,7 @@
     return text
       .split("\n")
       .map((line) => {
-        if (!insideJS && line.match(/^```js/)) insideJS = true;
+        if (!insideJS && line.match(/^```js_input(\s|$)/)) insideJS = true;
         else if (insideJS && line.match(/^```/)) insideJS = false;
         if (line.match(/^```/)) return "";
         return insideJS ? line : "";
@@ -441,7 +444,7 @@
   }
 
   function appendJSOutput(text: string) {
-    if (!text.match(/```js/)) return text; // no js code in text
+    if (!text.match(/```js_input\s/)) return text; // no js code in text
     // execute JS code, including any tag-referenced items (using latest tags/label)
     const lctext = text.toLowerCase();
     const tags = itemTags(lctext);
@@ -457,9 +460,9 @@
     jsout.push(evalJSCode(text, label) || "");
 
     let outputBlock =
-      "\n```(output)\n" + (jsout.join("\n").trim() || "(no output)") + "\n```";
-    if (text.match(/\n```\(output\)\n.*?\n```/s)) {
-      text = text.replace(/\n```\(output\)\n.*?\n```/gs, outputBlock);
+      "\n```js_output\n" + (jsout.join("\n").trim() || "(no output)") + "\n```";
+    if (text.match(/\n```js_output\n.*?\n```/s)) {
+      text = text.replace(/\n```js_output\n.*?\n```/gs, outputBlock);
     } else {
       text += outputBlock;
     }

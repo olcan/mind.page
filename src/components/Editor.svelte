@@ -42,19 +42,36 @@
     t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
 
   function updateTextDivs() {
-    const text = (textarea.value || placeholder) + "\n";
-    let insideJS = false;
-    const html = text
-      .split("\n")
-      .map((line) => {
-        if (!insideJS && line.match(/^```(js|webppl)/)) insideJS = true;
-        else if (insideJS && line.match(/^```/)) insideJS = false;
-        if (line.match(/^```/)) return line; // return multiline block delimiter lines as is
-        return insideJS
-          ? hljs.highlight("js", line).value
-          : highlightTags(escapeHTML(line));
-      })
-      .join("\n");
+    const text = textarea.value || placeholder;
+    let insideCodeBlock = false;
+    let language = "";
+    let code = "";
+    let html = "";
+    text.split("\n").map((line) => {
+      if (!insideCodeBlock && line.match(/^```(\w+)$/)) {
+        insideCodeBlock = true;
+        language = line.match(/^```(\w+)$/).pop();
+        if (language == "js_input") language = "js";
+        language = hljs.getLanguage(language) ? language : "plaintext";
+        code = "";
+        html += '<span class="block-delimiter">';
+        html += line + "\n";
+        html += "</span>";
+      } else if (insideCodeBlock && line.match(/^```/)) {
+        html += '<div class="block">';
+        html += hljs.highlight(language, code).value;
+        html += "</div>";
+        insideCodeBlock = false;
+        html += '<span class="block-delimiter">';
+        html += line + "\n";
+        html += "</span>";
+      } else if (insideCodeBlock) {
+        code += line + "\n";
+      } else {
+        html += highlightTags(escapeHTML(line)) + "\n";
+      }
+    });
+    if (insideCodeBlock) html += code; // append unclosed block (without highlighting)
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
@@ -299,6 +316,15 @@
   }
   :global(mark.language) {
     background: #7bf;
+  }
+  :global(.block) {
+    background: #171717;
+    border-radius: 4px;
+    padding: 1px;
+    margin: -1px;
+  }
+  :global(.block-delimiter) {
+    color: #666;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {

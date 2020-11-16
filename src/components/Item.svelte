@@ -30,9 +30,10 @@
     highlight: function (code, language) {
       // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
       //if (language=="") return hljs.highlightAuto(code).value;
-      const validLanguage = hljs.getLanguage(language) ? language : "plaintext";
+      if (language == "js_input") language = "js";
+      language = hljs.getLanguage(language) ? language : "plaintext";
       // console.log("highlighting", validLanguage, code);
-      return hljs.highlight(validLanguage, code).value;
+      return hljs.highlight(language, code).value;
     },
   });
 
