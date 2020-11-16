@@ -52,6 +52,7 @@
         insideCodeBlock = true;
         language = line.match(/^```(\w+)$/).pop();
         if (language == "js_input") language = "js";
+        if (language == "webppl") language = "js";
         language = hljs.getLanguage(language) ? language : "plaintext";
         code = "";
         html += '<span class="block-delimiter">';

@@ -287,13 +287,13 @@
     /* break-inside: avoid; */
     margin: 4px 0;
     margin-right: 8px;
+    max-width: 800px;
   }
   .container {
     position: relative;
     /* border: 1px solid transparent; */
     border-left: 2px solid #444;
     /* overflow: hidden; */
-    /* max-width: 600px; */
   }
   .container.focused {
     /* border: 1px solid #666; */

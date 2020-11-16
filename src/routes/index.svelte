@@ -335,10 +335,7 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text =
-            "```js_input\n" +
-            text.replace(/\/js_input\s*/, "").trim() +
-            "\n```";
+          text = "```js_input\n" + text.replace(/\/js\s*/, "").trim() + "\n```";
         } else if (text.startsWith("/")) {
           alert(`unknown command ${text}`);
           return;
@@ -400,11 +397,16 @@
   }
 
   function onItemSaved(id: string) {
+    // console.log("saved item", id);
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
     items[index].savedText = items[index].text;
     items[index].savedTime = items[index].time;
     items[index].saving = false;
+    if (items[index].saveClosure) {
+      items[index].saveClosure(index);
+      items[index].saveClosure = null;
+    }
   }
 
   function onItemHeight(id: string, height: number) {
@@ -413,29 +415,39 @@
     items[index].height = height;
   }
 
-  function extractJSCode(text: string) {
+  function extractBlock(text: string, type: string) {
     // NOTE: this logic is consistent with onInput() in Editor.svelte
-    let insideJS = false;
+    let insideBlock = false;
+    let regex = RegExp("^```" + type + "(\\s|$)");
     return text
       .split("\n")
       .map((line) => {
-        if (!insideJS && line.match(/^```js_input(\s|$)/)) insideJS = true;
-        else if (insideJS && line.match(/^```/)) insideJS = false;
+        if (!insideBlock && line.match(regex)) insideBlock = true;
+        else if (insideBlock && line.match(/^```/)) insideBlock = false;
         if (line.match(/^```/)) return "";
-        return insideJS ? line : "";
+        return insideBlock ? line : "";
       })
       .filter((t) => t)
       .join("\n")
       .trim();
   }
 
-  function evalJSCode(text: string, label: string = ""): string {
-    const jscode = extractJSCode(text);
-    if (jscode.length == 0) return "";
+  let evalIndex = -1;
+  function evalJSInput(
+    text: string,
+    label: string = "",
+    index: number = -1
+  ): string {
+    const jsin = extractBlock(text, "js_input");
+    if (jsin.length == 0) return "";
 
     try {
-      return eval("(function(){" + jscode + "})()");
+      evalIndex = index;
+      let out = eval("(function(){" + jsin + "})()");
+      evalIndex = -1;
+      return out;
     } catch (e) {
+      evalIndex = -1;
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
       alert(msg);
@@ -443,7 +455,18 @@
     }
   }
 
-  function appendJSOutput(text: string) {
+  function appendBlock(text: string, type: string, block: string) {
+    block = "\n```" + type + "\n" + block + "\n```";
+    const regex = "\\n```" + type + "\\n.*?\\n```";
+    if (text.match(RegExp(regex, "s"))) {
+      text = text.replace(RegExp(regex, "gs"), block);
+    } else {
+      text += block;
+    }
+    return text;
+  }
+
+  function appendJSOutput(text: string, index: number = -1) {
     if (!text.match(/```js_input\s/)) return text; // no js code in text
     // execute JS code, including any tag-referenced items (using latest tags/label)
     const lctext = text.toLowerCase();
@@ -454,19 +477,38 @@
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        jsout.push(evalJSCode(items[index].text, items[index].label) || "");
+        jsout.push(
+          evalJSInput(items[index].text, items[index].label) || "",
+          index
+        );
       });
     });
-    jsout.push(evalJSCode(text, label) || "");
+    jsout.push(evalJSInput(text, label, index) || "");
+    return appendBlock(
+      text,
+      "js_output",
+      jsout.join("\n").trim() || "(no output)"
+    );
+  }
 
-    let outputBlock =
-      "\n```js_output\n" + (jsout.join("\n").trim() || "(no output)") + "\n```";
-    if (text.match(/\n```js_output\n.*?\n```/s)) {
-      text = text.replace(/\n```js_output\n.*?\n```/gs, outputBlock);
-    } else {
-      text += outputBlock;
-    }
-    return text;
+  function saveItem(index: number) {
+    let item = items[index];
+    // save new text
+    item.saving = true;
+    const itemToSave = { time: item.time, text: item.text };
+    firestore()
+      .collection("items")
+      .doc(item.id)
+      .update(itemToSave)
+      .then(() => {
+        onItemSaved(item.id);
+      })
+      .catch(console.error);
+    // also save to items-history ...
+    firestore()
+      .collection("items-history")
+      .add({ item: item.id, ...itemToSave })
+      .catch(console.error);
   }
 
   function onItemEditing(index: number, editing: boolean) {
@@ -506,28 +548,9 @@
             .delete()
             .catch(console.error);
         } else {
-          item.text = appendJSOutput(item.text);
-
-          // update
-          if (item.time != item.savedTime || item.text != item.savedText) {
-            // save new text
-            item.saving = true;
-            const itemToSave = { time: item.time, text: item.text };
-            firestore()
-              .collection("items")
-              .doc(item.id)
-              .update(itemToSave)
-              .then(() => {
-                onItemSaved(item.id);
-              })
-              .catch(console.error);
-            // also save to items-history ...
-            firestore()
-              .collection("items-history")
-              .add({ item: item.id, ...itemToSave })
-              .catch(console.error);
-          }
-
+          item.text = appendJSOutput(item.text, index); // NOTE: this may trigger an async _write
+          if (item.time != item.savedTime || item.text != item.savedText)
+            saveItem(index);
           onEditorChange(editorText); // update sorting of items (at least time or text has changed)
         }
 
@@ -730,9 +753,68 @@
     window["_eval"] = function (tag: string) {
       const indices = indicesFromLabel.get(tag) || [];
       const jsout = indices.map((index) =>
-        evalJSCode(items[index].text, items[index].label)
+        evalJSInput(items[index].text, items[index].label)
       );
       return jsout.length == 1 ? jsout[0] : jsout;
+    };
+
+    function indicesForItem(item: string) {
+      if (item == "" && evalIndex >= 0) {
+        return [evalIndex];
+      } else if (indexFromId.has(item)) {
+        return [indexFromId.get(item)];
+      } else {
+        return indicesFromLabel.get(item) || [];
+      }
+    }
+
+    window["_id"] = function (item: string = "") {
+      let ids = [];
+      let indices = indicesForItem(item);
+      indices.map((index) => {
+        ids.push(items[index].id);
+      });
+      return ids.length == 1 ? ids[0] : ids;
+    };
+
+    window["_read"] = function (type: string = "", item: string = "") {
+      let content = [];
+      let indices = indicesForItem(item);
+      indices.map((index) => {
+        if (type == "") content.push(items[index].text);
+        else content.push(extractBlock(items[index].text, type));
+      });
+      return content.length == 1 ? content[0] : content;
+    };
+
+    window["_write"] = function (
+      item: string,
+      text: string,
+      type: string = "_write"
+    ) {
+      // NOTE: write is always async in case triggered by eval during onItemEditing
+      setTimeout(() => {
+        let indices = indicesForItem(item);
+        indices.map((index) => {
+          if (items[index].editing) {
+            console.log("can not _write to item while editing");
+            return;
+          }
+          let writeClosure = (index) => {
+            if (type == "") items[index].text = text;
+            else items[index].text = appendBlock(items[index].text, type, text);
+            items[index].time = Date.now();
+            onEditorChange(editorText);
+            saveItem(index);
+          };
+          if (items[index].saving) {
+            items[index].saveClosure = writeClosure;
+            console.log("_write is postponed until saving is complete");
+          } else {
+            writeClosure(index); // write immediately
+          }
+        });
+      }, 0);
     };
 
     // Window resize/scroll handlers ...
@@ -806,6 +888,8 @@
     border-left: 2px solid #444;
     margin-bottom: 8px; /* matches right margin of items for column spacing */
     background: #1b1b1b; /* matches unfocused editor */
+    /* max-width same as .super-container in Item.svelte */
+    max-width: 800px;
   }
   #header.focused {
     background: #1b1b1b;
@@ -828,11 +912,10 @@
   }
   .items {
     column-count: auto;
-    column-width: 480px;
+    column-width: 600px; /* minimum width; max-width is on #editor and .super-container */
     column-gap: 0;
     column-fill: auto;
     /* margin-top: 4px; */
-    /* column-width: 600px; */
   }
   .page-separator {
     column-span: all;
