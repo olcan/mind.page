@@ -69,6 +69,7 @@
       (e.metaKey || e.ctrlKey)
     ) {
       e.preventDefault();
+      e.stopPropagation(); // do not propagate to window
       const oldStart = textarea.selectionStart;
       const oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
@@ -214,6 +215,7 @@
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
     ) {
       e.preventDefault();
+      e.stopPropagation(); // do not propagate to window
       onDone((text = textarea.value.trim()), e);
       return;
     }

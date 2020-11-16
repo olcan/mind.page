@@ -65,12 +65,14 @@
   }
 
   let indexFromId;
+  let indicesFromLabel;
   function updateItemIndices() {
     editingItems = [];
     focusedItem = -1;
     let prevTime = Infinity;
     let prevTimeString = "";
     indexFromId = new Map();
+    indicesFromLabel = new Map();
     let pageHeight = 0;
     let maxPageHeight = 0;
     // NOTE: once header is available, we can calculate # columns and maxPageHeight
@@ -88,6 +90,12 @@
     items.forEach((item, index) => {
       item.index = index;
       indexFromId.set(item.id, index);
+      if (item.label) {
+        indicesFromLabel.set(item.label, [
+          ...(indicesFromLabel.get(item.label) || []),
+          index,
+        ]);
+      }
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
       // if (document.activeElement == textArea(index)) focusedItem = index;
@@ -127,7 +135,7 @@
       if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
     } else {
       // refocus on editor if it was unfocused within last .25 seconds
-      if (Date.now() - editorBlurTime < 250) textArea(-1).focus();
+      // if (Date.now() - editorBlurTime < 250) textArea(-1).focus();
     }
   }
 
@@ -166,12 +174,18 @@
     let listing = [];
     items.forEach((item) => {
       const lctext = item.text.toLowerCase();
-      item.pinned = lctext.match(/(?:^|\s)#pin(?:\/|\s|$)/) ? true : false;
-      // NOTE: alphanumeric ordering must always be preceded with a prefix match condition
+      item.tags = Array.from(
+        lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g),
+        (m) => m[1]
+      );
+      // first tag is taken as "label" if it is the first text in the item
+      item.label = lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
+
+      // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-      item.pinTerm = (lctext.match(/(?:^|\s)#pin\/[\/\w]*(?:\s|$)/) || [
-        "",
-      ])[0].trim();
+      const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
+      item.pinned = pintags.length > 0;
+      item.pinTerm = pintags[0] || "";
       item.prefixMatch = lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
@@ -179,11 +193,9 @@
           terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
       // use first exact-match item as "listing" item
-      if (item.prefixMatchTerm == terms[0] && listing.length == 0) {
-        listing = (lctext.match(/(:?^|\s)(#[\/\w]+)/g) || [])
-          .map((t) => t.trim())
-          .reverse();
-      }
+      if (item.prefixMatchTerm == terms[0] && listing.length == 0)
+        listing = item.tags.reverse(); // so that last is best and default (-1) is worst
+
       item.matchingTerms = [];
       if (item.pinned) {
         // match only tags for pinned items
@@ -422,7 +434,6 @@
           items.splice(index, 1);
           updateItemIndices();
           items = items; // trigger dom update
-          setTimeout(() => focusOnNearestEditingItem(index - 1), 0);
           deletedItems.unshift({
             time: item.savedTime,
             text: item.savedText,
@@ -433,6 +444,8 @@
             .delete()
             .catch(console.error);
         } else {
+          // TODO: refactor this and implement imports by label
+
           // extract all JS code
           // NOTE: this logic is consistent with onInput() in Editor.svelte
           let insideJS = false;
@@ -457,7 +470,8 @@
                 "\n#js/output\n" +
                 jsout;
             } catch (e) {
-              alert(e.message);
+              if (item.label) alert(item.label + ": " + e.message);
+              else alert(e.message);
             }
           }
 
@@ -481,7 +495,17 @@
               .catch(console.error);
           }
           onEditorChange(editorText); // update sorting of items (at least time or text has changed)
+        }
+
+        // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
+        //       that is not worth the benefit without an attached keyboard (which is harder to detect)
+        if (
+          editingItems.length > 0 ||
+          !navigator.platform.startsWith("iPhone")
+        ) {
           focusOnNearestEditingItem(index);
+        } else {
+          (document.activeElement as HTMLElement).blur();
         }
       }
     }
@@ -811,7 +835,10 @@
     </div>
     {#if loggedIn}
       <script>
-        document.getElementById("textarea-editor").focus();
+        // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
+        //       autofocus except in certain unexpected situations (like coming back to app)
+        if (!navigator.platform.startsWith("iPhone"))
+          document.getElementById("textarea-editor").focus();
       </script>
     {/if}
 
