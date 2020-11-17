@@ -104,7 +104,7 @@
     text = text.replace(/^#pin(?:\s|$)/, "");
     text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
 
-    // replace naked URLs with markdown links named after host name
+    // replace naked URLs with markdown links (or images) named after host name
     text = text.replace(/(^|\s)(https?:\/\/[^\s)]*)/g, (m, pfx, url) => {
       let sfx = "";
       if (url[url.length - 1].match(/[\.,;:]/)) {
@@ -112,8 +112,14 @@
         sfx = url[url.length - 1] + sfx;
         url = url.substring(0, url.length - 1);
       }
+      // convert dropbox urls to direct download
+      url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
+      url = url.replace("?dl=0", "");
       try {
         let obj = new URL(url);
+        if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
+          return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`;
+        }
         return `${pfx}[${obj.host}](${url})${sfx}`;
       } catch (_) {
         return pfx + url + sfx;
@@ -500,6 +506,10 @@
     border-top: 1px dashed #222;
     height: 1px; /* disappears if both height and border are 0 */
     margin: 10px 0;
+  }
+  .item :global(img) {
+    width: 200px; /* default width, change using style="width:_" attribute */
+    max-width: 100%;
   }
   .item :global(:first-child) {
     margin-top: 0 !important;
