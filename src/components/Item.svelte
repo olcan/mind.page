@@ -343,7 +343,7 @@
     /* break-inside: avoid; */
     margin: 4px 0;
     margin-right: 8px;
-    max-width: 800px;
+    max-width: 700px;
   }
   .container {
     position: relative;

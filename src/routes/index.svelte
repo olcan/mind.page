@@ -900,14 +900,13 @@
     margin-bottom: 8px; /* matches right margin of items for column spacing */
     background: #1b1b1b; /* matches unfocused editor */
     /* max-width same as .super-container in Item.svelte */
-    max-width: 800px;
+    max-width: 700px;
   }
   #header.focused {
     background: #1b1b1b;
     border-left: 2px solid #aaa;
   }
   #editor {
-    /* max-width: 600px; */
     margin-right: 4px;
     width: 100%;
   }
@@ -923,7 +922,7 @@
   }
   .items {
     column-count: auto;
-    column-width: 600px; /* minimum width; max-width is on #editor and .super-container */
+    column-width: 500px; /* minimum width; max-width is on #header and .super-container (in Item.svelte) */
     column-gap: 0;
     column-fill: auto;
     /* margin-top: 4px; */
