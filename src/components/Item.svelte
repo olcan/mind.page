@@ -162,9 +162,9 @@
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(
-        /\n```_write\w*?\n\s*(<.*?>)\s*\n```/gs,
+        /\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
         "$1<br>"
-      ) /*unwrap html _writes*/;
+      ) /*unwrap _html_ blocks*/;
     return marked(text);
   }
 
@@ -174,8 +174,33 @@
   import { afterUpdate } from "svelte";
   afterUpdate(() => {
     if (!itemdiv) return; // itemdiv is null if editing
-    // NOTE: this function must be idempotent as it can be called multiple times for a subset of items
+    // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
+    // NOTE: always invoked twice for new items due to id change after first save
+    // NOTE: invoked on every sort, e.g. during search-as-you-type
+    //       (following logic prevents this, proving divs are reused)
+    if (itemdiv.hasAttribute("_updated")) return;
+    itemdiv.setAttribute("_updated", Date.now().toString());
+
+    // cache cacheable divs under window[_cached_divs][_cache_key]
+    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
+    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
+      if (div.hasAttribute("_cached")) return;
+      const key = div.getAttribute("_cache_key");
+      div.setAttribute("_cached", Date.now().toString());
+      console.log("caching div", key);
+      window["_cached_divs"][key] = div; //.cloneNode(true);
+    });
+
+    // restore any cached divs
+    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
+      if (div.hasAttribute("_cached")) return;
+      const key = div.getAttribute("_cache_key");
+      if (window["_cached_divs"].hasOwnProperty(key)) {
+        console.log("reusing cached div", key);
+        div.replaceWith(window["_cached_divs"][key]);
+      }
+    });
 
     // highlight search terms that matched in item text
     if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
@@ -263,7 +288,7 @@
     });
 
     // capture state for async callback
-    // (component state can be modified/reused during callbac)
+    // (component state can be modified/reused during callback)
     const typesetdiv = itemdiv;
     const heightdiv = containerdiv;
     const prevheight = height;
@@ -278,27 +303,13 @@
       })
       .catch(console.error);
 
-    // reuse any cached divs
-    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
-    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
-      if (
-        !div.hasAttribute("_cached") &&
-        window["_cached_divs"].hasOwnProperty(div.getAttribute("_cache_key"))
-      ) {
-        console.log("reusing cached div", div.getAttribute("_cache_key"));
-        const cached_div =
-          window["_cached_divs"][div.getAttribute("_cache_key")];
-        div.replaceWith(cached_div);
-      }
-    });
-
     // trigger execution of script tags by adding/removing them to <head>
     const scripts = itemdiv.getElementsByTagName("script");
     // wait for all scripts to be done, then cache any cacheable divs
     // (or cache immediately if no scripts to run)
     let pendingScripts = scripts.length;
     if (pendingScripts > 0) {
-      console.log(`processing ${pendingScripts} scripts in item ${index} ...`);
+      console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
       Array.from(scripts).forEach((script) => {
         if (script.parentElement.hasAttribute("_cached")) {
           pendingScripts--;
@@ -314,29 +325,14 @@
         clone.onload = function () {
           document.head.removeChild(clone);
           pendingScripts--;
-          if (pendingScripts == 0) {
-            Array.from(itemdiv.querySelectorAll(".cacheable")).forEach(
-              (div) => {
-                if (div.hasAttribute("_cached")) return;
-                div.setAttribute("_cached", "true");
-                console.log("caching div", div.getAttribute("_cache_key"));
-                window["_cached_divs"][div.getAttribute("_cache_key")] = div; //.cloneNode(true);
-              }
-            );
-          }
+          if (pendingScripts == 0)
+            console.log(`all scripts done in item ${index}`);
         };
         if (script.hasAttribute("src")) {
           clone.src = script.src;
         } else {
           clone.innerText = `(function(){${script.innerText}; document.getElementById('${clone.id}').onload()})()`;
         }
-      });
-    } else {
-      Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
-        if (div.hasAttribute("_cached")) return;
-        div.setAttribute("_cached", "true");
-        console.log("caching div", div.getAttribute("_cache_key"));
-        window["_cached_divs"][div.getAttribute("_cache_key")] = div; //.cloneNode(true);
       });
     }
   });

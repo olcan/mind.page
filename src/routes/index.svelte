@@ -340,7 +340,6 @@
           return;
         }
         text = appendJSOutput(text);
-        text = appendLinkPreviews(text);
         editing = text.length == 0; // if text is empty, continue editing
       }
     }
@@ -494,44 +493,6 @@
     );
   }
 
-  function appendLinkPreviews(text: string, index: number = -1): string {
-    if (index < 0) return text; // TODO
-    if (items[index].pinned) return text; // skip previews for pinned items (can always pin with previews)
-    let urls = [
-      ...new Set(
-        Array.from(
-          (text as any).matchAll(/(?:^|\s|\()(https?:\/\/[^\s)]*)/g),
-          (m) => m[1]
-        )
-      ),
-    ];
-    let id = items[index].id;
-    urls.forEach((url, url_index) => {
-      if (!url.startsWith("https://twitter.com")) return; // for testing
-
-      const cache_key = Math.random().toString(36).substring(7);
-      // const embed = `<div class="link-preview cacheable" _url="${url}" _cache_key="${key}"></div>`;
-      // text = appendBlock(text, `_write_link_preview_${url_index}_tmp`, embed);
-      const api_key = "a84c544da471386ca02979";
-      const encoded_url = encodeURIComponent(url);
-      fetch(
-        `https://cdn.iframe.ly/api/oembed?url=${encoded_url}&api_key=${api_key}&_theme=dark` //&omit_script=1`
-      )
-        .then((resp) => resp.text())
-        .then((body) => {
-          let html = JSON.parse(body).html;
-          if (!html) return; // no preview available
-          window["_write"](
-            id,
-            `<!-- ${url} -->\n<div class="link-preview cacheable" _cache_key="${cache_key}">${html}</div>`,
-            `_write_link_preview_${url_index}_tmp`
-          );
-        })
-        .catch(console.error);
-    });
-    return text;
-  }
-
   function saveItem(index: number) {
     let item = items[index];
     // save new text
@@ -589,16 +550,14 @@
             .delete()
             .catch(console.error);
         } else {
-          // Empty out any _tmp blocks as they should be re-generated
+          // empty out any *_output|*_write blocks as they should be re-generated
           item.text = item.text.replace(
-            /\n```(\w*?_tmp)\n.*?\n```/gs,
-            // "\n```$1\n\n```"
-            ""
+            /\n```(\w*?_output|_write)\n.*?\n```/gs,
+            "\n```$1\n\n```"
           );
           // console.log(item.text);
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
-          item.text = appendLinkPreviews(item.text, index);
           if (item.time != item.savedTime || item.text != item.savedText)
             saveItem(index);
           onEditorChange(editorText); // update sorting of items (at least time or text has changed)
@@ -840,7 +799,7 @@
     window["_write"] = function (
       item: string,
       text: string,
-      type: string = "_write_tmp"
+      type: string = "_write"
     ) {
       // NOTE: write is always async in case triggered by eval during onItemEditing
       setTimeout(() => {
