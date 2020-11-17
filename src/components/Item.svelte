@@ -107,10 +107,10 @@
     // replace naked URLs with markdown links named after host name
     text = text.replace(/(^|\s)(https?:\/\/[^\s)]*)/g, (m, pfx, url) => {
       let sfx = "";
-      if (url[url.length - 1] == ".") {
-        // move ending period to the suffix
+      if (url[url.length - 1].match(/[\.,;:]/)) {
+        // move certain last characters out of the url
+        sfx = url[url.length - 1] + sfx;
         url = url.substring(0, url.length - 1);
-        sfx = "." + sfx;
       }
       try {
         let obj = new URL(url);
