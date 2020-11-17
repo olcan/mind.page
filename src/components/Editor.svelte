@@ -267,7 +267,6 @@
 <style>
   #editor {
     position: relative;
-    /* height: 42px; */
     width: 100%;
     cursor: text;
     /* splitting the editor does not work on iOS */
@@ -276,8 +275,8 @@
   .backdrop,
   textarea {
     font-family: monospace;
-    font-size: 14px;
-    line-height: 22px;
+    font-size: 15px;
+    line-height: 25px;
   }
   .backdrop {
     /* color: transparent; */
@@ -287,7 +286,6 @@
     width: 100%;
     background: #1b1b1b;
     border-radius: 0 4px 4px 0;
-    /* min-height: 42px; */
     width: 100%;
     margin: 0;
     padding: 10px;
@@ -304,7 +302,6 @@
     /* color: #ddd; */
     caret-color: #ddd;
     color: transparent;
-    /* min-height: 42px; */
     width: 100%;
     margin: 0;
     padding: 10px;
@@ -339,8 +336,8 @@
   @media only screen and (max-width: 600px) {
     .backdrop,
     textarea {
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 13px;
+      line-height: 22px;
     }
   }
 </style>

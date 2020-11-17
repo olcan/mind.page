@@ -343,7 +343,7 @@
     /* break-inside: avoid; */
     margin: 4px 0;
     margin-right: 8px;
-    max-width: 700px;
+    max-width: 750px;
   }
   .container {
     position: relative;
@@ -410,8 +410,8 @@
     /* white-space: pre-wrap; */
     word-wrap: break-word;
     font-family: Avenir Next, Helvetica;
-    font-size: 17px;
-    line-height: 25px;
+    font-size: 18px;
+    line-height: 28px;
     /* cursor: pointer; */
   }
   .saving {
@@ -432,23 +432,16 @@
     padding-left: 21px;
     /* border-left: 1px solid #333; */
   }
-  .item :global(blockquote) {
+  .item :global(blockquote, pre) {
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
-    font-size: 14px;
-    line-height: 22px;
-  }
-  .item :global(pre) {
-    padding-left: 15px;
-    margin-bottom: 10px;
-    border-left: 1px solid #333;
-    font-size: 14px;
-    line-height: 22px;
+    font-size: 15px;
+    line-height: 24px;
   }
   .item :global(code) {
-    font-size: 14px;
-    line-height: 22px;
+    font-size: 15px;
+    line-height: 24px;
     white-space: pre; /* preserve whitespace, break on \n only */
   }
   .item :global(br:last-child) {
@@ -517,22 +510,14 @@
   @media only screen and (max-width: 600px) {
     .item {
       font-size: 16px;
-      line-height: 23px;
+      line-height: 25px;
     }
     .time {
       font-size: 14px;
     }
-    .item :global(blockquote) {
+    .item :global(blockquote, pre, code) {
       font-size: 12px;
-      line-height: 20px;
-    }
-    .item :global(pre) {
-      font-size: 12px;
-      line-height: 20px;
-    }
-    .item :global(code) {
-      font-size: 12px;
-      line-height: 20px;
+      line-height: 22px;
     }
   }
 </style>

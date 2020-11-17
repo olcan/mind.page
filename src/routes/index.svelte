@@ -886,8 +886,6 @@
     min-height: -webkit-fill-available; /*consider bottom bar on iOS Safari*/
     justify-content: center;
     align-items: center;
-    font-size: 2em;
-    font-family: Avenir Next, Helvetica;
     background: #111 url(/loading.gif) no-repeat center;
     background-size: 200px;
   }
@@ -900,7 +898,7 @@
     margin-bottom: 8px; /* matches right margin of items for column spacing */
     background: #1b1b1b; /* matches unfocused editor */
     /* max-width same as .super-container in Item.svelte */
-    max-width: 700px;
+    max-width: 750px;
   }
   #header.focused {
     background: #1b1b1b;
@@ -914,7 +912,7 @@
     flex-grow: 1;
   }
   #user {
-    height: 42px; /* must match height of single-line editor (also see @media query below) */
+    height: 45px; /* must match height of single-line editor (also see @media query below) */
     margin-right: 4px;
     border-radius: 50%;
     background: gray;
@@ -941,7 +939,7 @@
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     #user {
-      height: 40px; /* must match height of single-line editor (on narrow window) */
+      height: 42px; /* must match height of single-line editor (on narrow window) */
     }
   }
 </style>
