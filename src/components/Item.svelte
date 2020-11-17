@@ -210,6 +210,14 @@
       }
     });
 
+    // convert dropbox image src urls to direct download
+    Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
+      if (!img.hasAttribute("src")) return;
+      img.src = img.src
+        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
+        .replace("?dl=0", "");
+    });
+
     // highlight search terms that matched in item text
     if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
       itemdiv.setAttribute("_highlightTerms", matchingTerms);
