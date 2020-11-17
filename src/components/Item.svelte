@@ -139,7 +139,9 @@
           insideMultilineBlock = false;
 
         // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideMultilineBlock && !str.match(/^```/)) str += "<br>\n";
+        if (!insideMultilineBlock && !str.match(/^```|^    /))
+          // |^\> (breaking blockquotes for now)
+          str += "<br>\n";
         if (!insideMultilineBlock && !str.match(/^```/) && !str.match(/^</)) {
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
@@ -432,16 +434,23 @@
     padding-left: 21px;
     /* border-left: 1px solid #333; */
   }
-  .item :global(blockquote, pre) {
+  /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
+  .item :global(blockquote) {
+    padding-left: 15px;
+    margin-bottom: 10px;
+    border-left: 1px solid #333;
+  }
+  /* NOTE: these font sizes should match those in Editor */
+  .item :global(pre) {
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
     font-size: 15px;
-    line-height: 24px;
+    line-height: 25px;
   }
   .item :global(code) {
     font-size: 15px;
-    line-height: 24px;
+    line-height: 25px;
     white-space: pre; /* preserve whitespace, break on \n only */
   }
   .item :global(br:last-child) {
@@ -515,9 +524,10 @@
     .time {
       font-size: 14px;
     }
-    .item :global(blockquote, pre, code) {
-      font-size: 12px;
-      line-height: 22px;
+    /* NOTE: these font sizes should match those in Editor */
+    .item :global(pre, code) {
+      font-size: 13px !important; /* !important seems necessary if you use commas in selector */
+      line-height: 22px !important;
     }
   }
 </style>
