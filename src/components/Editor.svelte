@@ -190,9 +190,17 @@
     // delete non-empty item with Shift/Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      onDone((text = ""), e);
-      e.preventDefault();
-      return;
+      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start of the item
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        !navigator.platform.startsWith("iPhone") ||
+        textarea.selectionStart == 0
+      ) {
+        onDone((text = ""), e);
+        e.preventDefault();
+        return;
+      }
     }
 
     // insert spaces on Tab

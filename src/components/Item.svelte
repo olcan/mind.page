@@ -105,7 +105,8 @@
     text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
 
     // replace naked URLs with markdown links named after host name
-    text = text.replace(/(^|\s)(http[^\s)]*?)($|\s)/g, (m, pfx, url, sfx) => {
+    text = text.replace(/(^|\s)(https?:\/\/[^\s)]*)/g, (m, pfx, url) => {
+      let sfx = "";
       if (url[url.length - 1] == ".") {
         // move ending period to the suffix
         url = url.substring(0, url.length - 1);
@@ -159,7 +160,11 @@
       })
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
-      .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>");
+      .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
+      .replace(
+        /\n```_write\w*?\n\s*(<.*?>)\s*\n```/gs,
+        "$1<br>"
+      ) /*unwrap html _writes*/;
     return marked(text);
   }
 
@@ -172,6 +177,7 @@
     // NOTE: this function must be idempotent as it can be called multiple times for a subset of items
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
 
+    // highlight search terms that matched in item text
     if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
       itemdiv.setAttribute("_highlightTerms", matchingTerms);
       // if (!itemdiv.getAttribute("_origHTML"))
@@ -256,14 +262,6 @@
         pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
     });
 
-    // Example of Replit iframe: <iframe id="replit" width="100%" height="500px" style="border:1px solid #444" src="https://repl.it/@olcan/UtilizedKeyMuse?lite=1&outputonly=1"></iframe>
-    // // replace <iframe> with <div>
-    // Array.from(itemdiv.getElementsByTagName("iframe")).forEach((iframe) => {
-    //   // const height = iframe.height
-    //   const height = "200px";
-    //   iframe.outerHTML = `<div style="height:${height}"></div>`;
-    // });
-
     // capture state for async callback
     // (component state can be modified/reused during callbac)
     const typesetdiv = itemdiv;
@@ -279,6 +277,68 @@
         onHeightAsync(itemid, heightdiv.clientHeight, prevheight);
       })
       .catch(console.error);
+
+    // reuse any cached divs
+    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
+    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
+      if (
+        !div.hasAttribute("_cached") &&
+        window["_cached_divs"].hasOwnProperty(div.getAttribute("_cache_key"))
+      ) {
+        console.log("reusing cached div", div.getAttribute("_cache_key"));
+        const cached_div =
+          window["_cached_divs"][div.getAttribute("_cache_key")];
+        div.replaceWith(cached_div);
+      }
+    });
+
+    // trigger execution of script tags by adding/removing them to <head>
+    const scripts = itemdiv.getElementsByTagName("script");
+    // wait for all scripts to be done, then cache any cacheable divs
+    // (or cache immediately if no scripts to run)
+    let pendingScripts = scripts.length;
+    if (pendingScripts > 0) {
+      console.log(`processing ${pendingScripts} scripts in item ${index} ...`);
+      Array.from(scripts).forEach((script) => {
+        if (script.parentElement.hasAttribute("_cached")) {
+          pendingScripts--;
+          console.log("skipping script in cached div");
+          return; // skip scripts in restored divs
+        }
+        script.remove();
+        let clone = document.createElement("script");
+        clone.type = script.type || "text/javascript";
+        clone.id = Math.random().toString();
+        // console.log("executing script", script);
+        document.head.appendChild(clone);
+        clone.onload = function () {
+          document.head.removeChild(clone);
+          pendingScripts--;
+          if (pendingScripts == 0) {
+            Array.from(itemdiv.querySelectorAll(".cacheable")).forEach(
+              (div) => {
+                if (div.hasAttribute("_cached")) return;
+                div.setAttribute("_cached", "true");
+                console.log("caching div", div.getAttribute("_cache_key"));
+                window["_cached_divs"][div.getAttribute("_cache_key")] = div; //.cloneNode(true);
+              }
+            );
+          }
+        };
+        if (script.hasAttribute("src")) {
+          clone.src = script.src;
+        } else {
+          clone.innerText = `(function(){${script.innerText}; document.getElementById('${clone.id}').onload()})()`;
+        }
+      });
+    } else {
+      Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
+        if (div.hasAttribute("_cached")) return;
+        div.setAttribute("_cached", "true");
+        console.log("caching div", div.getAttribute("_cache_key"));
+        window["_cached_divs"][div.getAttribute("_cache_key")] = div; //.cloneNode(true);
+      });
+    }
   });
 </script>
 
@@ -306,7 +366,7 @@
     z-index: 1;
     color: #666;
     /* padding-right: 4px; */
-    font-family: Helvetica;
+    font-family: Avenir Next, Helvetica;
     text-align: right;
     opacity: 0.5;
   }
@@ -327,7 +387,7 @@
     padding-right: 5px;
     margin-bottom: 4px; /* should match vertical margin of .super-container */
     /* margin-bottom: 4px; */
-    font-family: Helvetica;
+    font-family: Avenir Next, Helvetica;
     font-size: 15px;
   }
   .time.timeOutOfOrder {
@@ -342,7 +402,7 @@
     /* display: inline-block; */
     display: none;
     color: #444;
-    font-family: Helvetica;
+    font-family: Avenir Next, Helvetica;
   }
   .item {
     color: #ddd;
@@ -353,7 +413,7 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-family: Helvetica;
+    font-family: Avenir Next, Helvetica;
     font-size: 17px;
     line-height: 25px;
     /* cursor: pointer; */
@@ -389,6 +449,11 @@
     border-left: 1px solid #333;
     font-size: 14px;
     line-height: 22px;
+  }
+  .item :global(code) {
+    font-size: 14px;
+    line-height: 22px;
+    white-space: pre; /* preserve whitespace, break on \n only */
   }
   .item :global(br:last-child) {
     display: none;
@@ -438,16 +503,11 @@
     height: 1px; /* disappears if both height and border are 0 */
     margin: 10px 0;
   }
-  .item :global(div) {
-    background-color: #222;
-    border-radius: 4px;
-    padding: 4px 6px;
-  }
   .item :global(:first-child) {
-    margin-top: 0;
+    margin-top: 0 !important;
   }
   .item :global(:last-child) {
-    margin-bottom: 0;
+    margin-bottom: 0 !important;
   }
   :global(.MathJax) {
     margin-bottom: 0 !important;
@@ -471,6 +531,10 @@
       line-height: 20px;
     }
     .item :global(pre) {
+      font-size: 12px;
+      line-height: 20px;
+    }
+    .item :global(code) {
       font-size: 12px;
       line-height: 20px;
     }
