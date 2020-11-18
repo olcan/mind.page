@@ -20,9 +20,7 @@
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
-    return `<a target="_blank" href="${href}" title="${
-      title || text
-    }" onclick="event.stopPropagation()">${text}</a>`;
+    return `<a target="_blank" href="${href}" title="${title || text}" onclick="event.stopPropagation()">${text}</a>`;
   };
   // marked.use({ renderer });
   marked.setOptions({
@@ -53,8 +51,6 @@
   export let timeOutOfOrder: boolean;
   export let updateTime: number;
   export let createTime: number;
-  let debugString;
-  $: debugString = `${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   export let text: string;
   export let height = 0;
@@ -62,13 +58,13 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onHeightAsync = (
-    id: string,
-    height: number,
-    prevheight: number
-  ) => {};
+  export let onResized = (id: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
+
+  let debugString;
+  // NOTE: the debugString also helps get rid of the "unused property" warning
+  $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   import { firestore } from "../../firebase.js";
   function onDone() {
@@ -88,24 +84,18 @@
     return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
   }
 
-  function toHTML(
-    text: string,
-    matchingTerms: any,
-    matchingTermsSecondary: any
-  ) {
+  function toHTML(text: string, matchingTerms: any, matchingTermsSecondary: any) {
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(",").filter((t) => t));
-    const termsSecondary = new Set<string>(
-      matchingTermsSecondary.split(",").filter((t) => t)
-    );
+    const termsSecondary = new Set<string>(matchingTermsSecondary.split(",").filter((t) => t));
 
     // hide starting #pin and #pin/* (not useful visually or for clicking)
     text = text.replace(/^#pin(?:\s|$)/, "");
     text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
 
     // replace naked URLs with markdown links (or images) named after host name
-    text = text.replace(/(^|\s)(https?:\/\/[^\s)]*)/g, (m, pfx, url) => {
+    text = text.replace(/(^|\s|>)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
       let sfx = "";
       if (url[url.length - 1].match(/[\.,;:]/)) {
         // move certain last characters out of the url
@@ -156,11 +146,7 @@
             /(^|\s)(#[\/\w]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
-                terms.has(tag)
-                  ? 'class="selected"'
-                  : termsSecondary.has(tag)
-                  ? 'class="secondary-selected"'
-                  : ""
+                terms.has(tag) ? 'class="selected"' : termsSecondary.has(tag) ? 'class="secondary-selected"' : ""
               } onclick="handleTagClick('${tag}');event.stopPropagation()">${tag}</mark>`
           );
         }
@@ -169,15 +155,11 @@
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
-      .replace(
-        /\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
-        "$1<br>"
-      ) /*unwrap _html_ blocks*/;
+      .replace(/\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs, "$1<br>") /*unwrap _html_ blocks*/;
     return marked(text);
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering
-  let containerdiv: HTMLDivElement;
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
   afterUpdate(() => {
@@ -187,11 +169,7 @@
     // NOTE: always invoked twice for new items due to id change after first save
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     //       (following logic prevents this, proving divs are reused)
-    if (
-      itemdiv.hasAttribute("_updated") &&
-      matchingTerms == itemdiv.getAttribute("_highlightTerms")
-    )
-      return;
+    if (itemdiv.hasAttribute("_updated") && matchingTerms == itemdiv.getAttribute("_highlightTerms")) return;
     itemdiv.setAttribute("_updated", Date.now().toString());
 
     // cache cacheable divs under window[_cached_divs][_cache_key]
@@ -214,14 +192,6 @@
       }
     });
 
-    // convert dropbox image src urls to direct download
-    Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
-      if (!img.hasAttribute("src")) return;
-      img.src = img.src
-        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
-        .replace("?dl=0", "");
-    });
-
     // highlight search terms that matched in item text
     if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
       itemdiv.setAttribute("_highlightTerms", matchingTerms);
@@ -232,25 +202,21 @@
         span.outerHTML = span.innerHTML;
       });
       const terms = matchingTerms.split(",").filter((t) => t);
-      let treeWalker = document.createTreeWalker(
-        itemdiv,
-        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: function (node) {
-            switch (node.nodeName.toLowerCase()) {
-              case "mark":
-                return (node as HTMLElement).className == "selected"
-                  ? NodeFilter.FILTER_REJECT
-                  : NodeFilter.FILTER_ACCEPT;
-              case "svg":
-              case "math":
-                return NodeFilter.FILTER_REJECT;
-              default:
-                return NodeFilter.FILTER_ACCEPT;
-            }
-          },
-        }
-      );
+      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: function (node) {
+          switch (node.nodeName.toLowerCase()) {
+            case "mark":
+              return (node as HTMLElement).className == "selected"
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+            case "svg":
+            case "math":
+              return NodeFilter.FILTER_REJECT;
+            default:
+              return NodeFilter.FILTER_ACCEPT;
+          }
+        },
+      });
       while (treeWalker.nextNode()) {
         let node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
@@ -262,10 +228,7 @@
           while ((m = text.match(regex))) {
             text = text.slice(m[0].length);
             parent.insertBefore(document.createTextNode(m[1]), node);
-            var word = parent.insertBefore(
-              document.createElement("span"),
-              node
-            );
+            var word = parent.insertBefore(document.createElement("span"), node);
             word.appendChild(document.createTextNode(m[2]));
             word.className = "highlight";
             if (node.parentElement.tagName == "MARK") {
@@ -297,8 +260,7 @@
 
     // remove <code></code> wrapper block
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
-        code.outerHTML = code.innerHTML;
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
     });
 
     // replace <pre></pre> wrapper with <blockquote></blockquote>
@@ -307,26 +269,33 @@
         pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
     });
 
-    // capture state for async callback
+    // capture state (id) for async callbacks below
     // (component state can be modified/reused during callback)
-    const typesetdiv = itemdiv;
-    const heightdiv = containerdiv;
-    const prevheight = height;
     const itemid = id;
     window["MathJax"]
-      .typesetPromise([typesetdiv])
+      .typesetPromise([itemdiv])
       .then(() => {
-        typesetdiv
+        document
+          .getElementById(itemid)
           .querySelectorAll(".MathJax")
           .forEach((elem) => elem.setAttribute("tabindex", "-1"));
-        onHeightAsync(itemid, heightdiv.clientHeight, prevheight);
+        onResized(itemid);
       })
       .catch(console.error);
 
+    // set up img onload callbacks for height updates
+    // convert dropbox image src urls to direct download
+    Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
+      if (!img.hasAttribute("src")) return;
+      img.src = img.src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      img.onload = function () {
+        onResized(itemid);
+      };
+    });
+
     // trigger execution of script tags by adding/removing them to <head>
     const scripts = itemdiv.getElementsByTagName("script");
-    // wait for all scripts to be done, then cache any cacheable divs
-    // (or cache immediately if no scripts to run)
+    // wait for all scripts to be done, then update height in case it changes
     let pendingScripts = scripts.length;
     if (pendingScripts > 0) {
       console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
@@ -345,8 +314,10 @@
         clone.onload = function () {
           document.head.removeChild(clone);
           pendingScripts--;
-          if (pendingScripts == 0)
+          if (pendingScripts == 0) {
             console.log(`all scripts done in item ${index}`);
+            onResized(itemid);
+          }
         };
         if (script.hasAttribute("src")) {
           clone.src = script.src;
@@ -360,7 +331,7 @@
 
 <style>
   .super-container {
-    /* break-inside: avoid; */
+    break-inside: avoid;
     margin: 4px 0;
     margin-right: 8px;
     max-width: 750px;
@@ -492,7 +463,6 @@
   .item :global(mark) {
     color: black;
     background: #999;
-    /* vertical-align: middle; */
     /* remove negative margins used to align with textarea text */
     padding: 1px 4px;
     margin: 0;
@@ -502,10 +472,6 @@
   }
   .item :global(mark.secondary-selected) {
     background: white;
-    /* background: #333; */
-    /* color: lightgreen; */
-    /* border: 2px solid lightgreen; */
-    /* margin: -2px; */
   }
   .item :global(span.highlight) {
     color: black;
@@ -562,7 +528,7 @@
   }
 </style>
 
-<div class="super-container" bind:this={containerdiv}>
+<div class="super-container">
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -571,9 +537,7 @@
     <div class="index" class:matching={matchingTerms.length > 0}>
       {#if index == 0}
         <span class="itemCount">{itemCount}</span><br />
-        {#if matchingItemCount > 0}
-          <span class="matchingItemCount">{matchingItemCount}</span><br />
-        {/if}
+        {#if matchingItemCount > 0}<span class="matchingItemCount">{matchingItemCount}</span><br />{/if}
       {/if}
       {index + 1}
     </div>
@@ -587,12 +551,7 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
-      <div
-        class="item"
-        bind:this={itemdiv}
-        class:saving
-        class:error
-        on:click={onClick}>
+      <div class="item" {id} bind:this={itemdiv} class:saving class:error on:click={onClick}>
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
