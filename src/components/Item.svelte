@@ -20,7 +20,9 @@
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
-    return `<a target="_blank" href="${href}" title="${title || text}" onclick="event.stopPropagation()">${text}</a>`;
+    return `<a target="_blank" href="${href}" title="${
+      title || text
+    }" onclick="event.stopPropagation()">${text}</a>`;
   };
   // marked.use({ renderer });
   marked.setOptions({
@@ -58,7 +60,7 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onResized = (id: string) => {};
+  export let onResized = (id: string, height: number) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -84,11 +86,24 @@
     return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
   }
 
-  function toHTML(text: string, matchingTerms: any, matchingTermsSecondary: any) {
+  function hashCode(s) {
+    return s.split("").reduce(function (a, b) {
+      a = (a << 5) - a + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+  }
+
+  function toHTML(
+    text: string,
+    matchingTerms: any,
+    matchingTermsSecondary: any
+  ) {
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(",").filter((t) => t));
-    const termsSecondary = new Set<string>(matchingTermsSecondary.split(",").filter((t) => t));
+    const termsSecondary = new Set<string>(
+      matchingTermsSecondary.split(",").filter((t) => t)
+    );
 
     // hide starting #pin and #pin/* (not useful visually or for clicking)
     text = text.replace(/^#pin(?:\s|$)/, "");
@@ -116,29 +131,32 @@
       }
     });
 
+    let mathTermRegex = new RegExp(
+      `\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`,
+      "i"
+    );
+
     // NOTE: modifications should only happen outside of code blocks
-    let insideMultilineBlock = false;
+    let insideBlock = false;
     text = text
       .split("\n")
       .map((line) => {
         let str = line;
-        // disable MathJax syntax that contains matching terms
-        terms.forEach((term: string) => {
-          const regex = RegExp(`\\$(.*)${regexEscape(term)}(.*)\\$`, "si");
-          str = str.replace(regex, "&#36;$1" + term + "$2&#36;");
-        });
-        if (!insideMultilineBlock && str.match(/^```/s))
+        if (!insideBlock && str.match(/^```/s))
           // allow extra chars (consistent w/ marked)
-          insideMultilineBlock = true;
-        else if (insideMultilineBlock && str.match(/^```\s*$/s))
+          insideBlock = true;
+        else if (insideBlock && str.match(/^```\s*$/s))
           // do not allow extra chars (consistent w/ marked)
-          insideMultilineBlock = false;
+          insideBlock = false;
 
         // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideMultilineBlock && !str.match(/^```|^    /))
+        if (!insideBlock && !str.match(/^```|^    /))
           // |^\> (breaking blockquotes for now)
           str += "<br>\n";
-        if (!insideMultilineBlock && !str.match(/^```/) && !str.match(/^</)) {
+        if (!insideBlock && !str.match(/^```/) && !str.match(/^</)) {
+          // wrap math inside span.math (unless text matches search terms)
+          if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
+            str = str.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
@@ -146,7 +164,11 @@
             /(^|\s)(#[\/\w]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
-                terms.has(tag) ? 'class="selected"' : termsSecondary.has(tag) ? 'class="secondary-selected"' : ""
+                terms.has(tag)
+                  ? 'class="selected"'
+                  : termsSecondary.has(tag)
+                  ? 'class="secondary-selected"'
+                  : ""
               } onclick="handleTagClick('${tag}');event.stopPropagation()">${tag}</mark>`
           );
         }
@@ -155,7 +177,10 @@
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
-      .replace(/\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs, "$1<br>") /*unwrap _html_ blocks*/;
+      .replace(
+        /\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
+        "$1<br>"
+      ) /*unwrap _html_ blocks*/;
     return marked(text);
   }
 
@@ -169,8 +194,15 @@
     // NOTE: always invoked twice for new items due to id change after first save
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     //       (following logic prevents this, proving divs are reused)
-    if (itemdiv.hasAttribute("_updated") && matchingTerms == itemdiv.getAttribute("_highlightTerms")) return;
-    itemdiv.setAttribute("_updated", Date.now().toString());
+    const textHash = hashCode(text);
+    if (
+      textHash == itemdiv.hasAttribute("_textHash") &&
+      matchingTerms == itemdiv.getAttribute("_highlightTerms")
+    ) {
+      return;
+    }
+    itemdiv.setAttribute("_textHash", textHash);
+    itemdiv.setAttribute("_highlightTerms", matchingTerms);
 
     // cache cacheable divs under window[_cached_divs][_cache_key]
     if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
@@ -192,75 +224,77 @@
       }
     });
 
-    // highlight search terms that matched in item text
-    if (matchingTerms != itemdiv.getAttribute("_highlightTerms")) {
-      itemdiv.setAttribute("_highlightTerms", matchingTerms);
-      // if (!itemdiv.getAttribute("_origHTML"))
-      //   itemdiv.setAttribute("_origHTML", itemdiv.innerHTML);
-      // itemdiv.innerHTML = itemdiv.getAttribute("_origHTML");
-      Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
-        span.outerHTML = span.innerHTML;
-      });
-      const terms = matchingTerms.split(",").filter((t) => t);
-      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-        acceptNode: function (node) {
-          switch (node.nodeName.toLowerCase()) {
-            case "mark":
-              return (node as HTMLElement).className == "selected"
-                ? NodeFilter.FILTER_REJECT
-                : NodeFilter.FILTER_ACCEPT;
-            case "svg":
-            case "math":
-              return NodeFilter.FILTER_REJECT;
-            default:
-              return NodeFilter.FILTER_ACCEPT;
-          }
-        },
-      });
+    // highlight matching terms in item text
+    Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
+      span.outerHTML = span.innerHTML;
+    });
+    const terms = matchingTerms.split(",").filter((t) => t);
+    if (terms.length > 0) {
+      let treeWalker = document.createTreeWalker(
+        itemdiv,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: function (node) {
+            switch (node.nodeName.toLowerCase()) {
+              case "mark":
+                return (node as HTMLElement).className == "selected"
+                  ? NodeFilter.FILTER_REJECT
+                  : NodeFilter.FILTER_ACCEPT;
+              case "svg":
+              case "math":
+                return NodeFilter.FILTER_REJECT;
+              default:
+                return NodeFilter.FILTER_ACCEPT;
+            }
+          },
+        }
+      );
       while (treeWalker.nextNode()) {
         let node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
         let parent = node.parentNode;
         let text = node.nodeValue;
         let m;
-        terms.forEach((term) => {
-          let regex = new RegExp(`^(.*?)(${regexEscape(term)})`, "si");
-          while ((m = text.match(regex))) {
-            text = text.slice(m[0].length);
-            parent.insertBefore(document.createTextNode(m[1]), node);
-            var word = parent.insertBefore(document.createElement("span"), node);
-            word.appendChild(document.createTextNode(m[2]));
-            word.className = "highlight";
-            if (node.parentElement.tagName == "MARK") {
-              // NOTE: this becomes stale when the match goes away
-              // node.parentElement.style.background = "white";
-              // adjust left/right margin/padding and border radius for in-tag matches
-              word.style.borderRadius = "0";
-              if (m[2][0] == "#") {
-                // prefix match (rounded on left)
-                word.style.paddingLeft = "4px";
-                word.style.marginLeft = "-4px";
-                word.style.borderTopLeftRadius;
-                word.style.borderTopLeftRadius = "4px";
-                word.style.borderBottomLeftRadius = "4px";
-              }
-              if (text.length == 0) {
-                // suffix match (rounded on right)
-                word.style.paddingRight = "4px";
-                word.style.marginRight = "-4px";
-                word.style.borderTopRightRadius = "4px";
-                word.style.borderBottomRightRadius = "4px";
-              }
+        let regex = new RegExp(
+          `^(.*?)(${terms.map(regexEscape).join("|")})`,
+          "si"
+        );
+        while ((m = text.match(regex))) {
+          text = text.slice(m[0].length);
+          parent.insertBefore(document.createTextNode(m[1]), node);
+          var word = parent.insertBefore(document.createElement("span"), node);
+          word.appendChild(document.createTextNode(m[2]));
+          word.className = "highlight";
+          if (node.parentElement.tagName == "MARK") {
+            // NOTE: this becomes stale when the match goes away
+            // node.parentElement.style.background = "white";
+            // adjust left/right margin/padding and border radius for in-tag matches
+            word.style.borderRadius = "0";
+            if (m[2][0] == "#") {
+              // prefix match (rounded on left)
+              word.style.paddingLeft = "4px";
+              word.style.marginLeft = "-4px";
+              word.style.borderTopLeftRadius;
+              word.style.borderTopLeftRadius = "4px";
+              word.style.borderBottomLeftRadius = "4px";
+            }
+            if (text.length == 0) {
+              // suffix match (rounded on right)
+              word.style.paddingRight = "4px";
+              word.style.marginRight = "-4px";
+              word.style.borderTopRightRadius = "4px";
+              word.style.borderBottomRightRadius = "4px";
             }
           }
-        });
+        }
         node.nodeValue = text;
       }
     }
 
     // remove <code></code> wrapper block
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
+        code.outerHTML = code.innerHTML;
     });
 
     // replace <pre></pre> wrapper with <blockquote></blockquote>
@@ -272,14 +306,16 @@
     // capture state (id) for async callbacks below
     // (component state can be modified/reused during callback)
     const itemid = id;
+    const typesetdiv = itemdiv;
+    // trigger typesetting of any math elements
+
     window["MathJax"]
-      .typesetPromise([itemdiv])
+      .typesetPromise(itemdiv.getElementsByClassName("math"))
       .then(() => {
-        document
-          .getElementById(itemid)
+        typesetdiv
           .querySelectorAll(".MathJax")
           .forEach((elem) => elem.setAttribute("tabindex", "-1"));
-        onResized(itemid);
+        onResized(itemid, typesetdiv.offsetHeight);
       })
       .catch(console.error);
 
@@ -287,9 +323,11 @@
     // convert dropbox image src urls to direct download
     Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
       if (!img.hasAttribute("src")) return;
-      img.src = img.src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      img.src = img.src
+        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
+        .replace("?dl=0", "");
       img.onload = function () {
-        onResized(itemid);
+        onResized(itemid, typesetdiv.offsetHeight);
       };
     });
 
@@ -316,7 +354,7 @@
           pendingScripts--;
           if (pendingScripts == 0) {
             console.log(`all scripts done in item ${index}`);
-            onResized(itemid);
+            onResized(itemid, typesetdiv.offsetHeight);
           }
         };
         if (script.hasAttribute("src")) {
@@ -486,6 +524,11 @@
   .item :global(.vertical-bar) {
     color: #444;
   }
+  .item :global(.math) {
+    background: #222;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
   .item :global(hr) {
     background: transparent;
     border: 0;
@@ -537,7 +580,9 @@
     <div class="index" class:matching={matchingTerms.length > 0}>
       {#if index == 0}
         <span class="itemCount">{itemCount}</span><br />
-        {#if matchingItemCount > 0}<span class="matchingItemCount">{matchingItemCount}</span><br />{/if}
+        {#if matchingItemCount > 0}
+          <span class="matchingItemCount">{matchingItemCount}</span><br />
+        {/if}
       {/if}
       {index + 1}
     </div>
@@ -551,7 +596,13 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
-      <div class="item" {id} bind:this={itemdiv} class:saving class:error on:click={onClick}>
+      <div
+        class="item"
+        {id}
+        bind:this={itemdiv}
+        class:saving
+        class:error
+        on:click={onClick}>
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}

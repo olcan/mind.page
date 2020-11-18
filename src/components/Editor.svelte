@@ -41,7 +41,9 @@
   let highlightTags = (t) =>
     t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
   let highlightCode = (t) =>
-    t.replace(/(`.*?`)/gs, '<span class="code">$1</span>');
+    t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
+  let highlightMath = (t) =>
+    t.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
@@ -71,7 +73,8 @@
       } else if (insideCodeBlock) {
         code += line + "\n";
       } else {
-        html += highlightCode(highlightTags(escapeHTML(line))) + "\n";
+        html +=
+          highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
     if (insideCodeBlock) html += code; // append unclosed block (without highlighting)
@@ -334,7 +337,7 @@
   :global(.block-delimiter) {
     color: #666;
   }
-  :global(.code) {
+  :global(.code, .math) {
     background: #171717;
     padding: 2px 4px;
     margin: -2px -4px;
