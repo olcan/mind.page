@@ -111,9 +111,17 @@
       matchingTermsSecondary.split(" ").filter((t) => t)
     );
 
-    // hide starting #pin and #pin/* (not useful visually or for clicking)
-    text = text.replace(/^#pin(?:\s|$)/, "");
-    text = text.replace(/^#pin\/[\/\w]*(?:\s|$)/, "");
+    // parse header tags
+    const headerTags = new Set(
+      Array.from(
+        (text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#\w+)\s+/g),
+        (m) => m[1]
+      )
+    );
+    const isMenu = headerTags.has("#menu") || headerTags.has("#_menu");
+
+    // remove hidden tags and trim
+    text = text.replace(/(?:^|\s)(#_[\/\w]+)/g, "").trim();
 
     // replace naked URLs with markdown links (or images) named after host name
     text = text.replace(/(^|\s|>)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
@@ -156,10 +164,12 @@
           insideBlock = false;
 
         // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideBlock && !str.match(/^```|^    /))
+        if (!insideBlock && !str.match(/^```|^    |^</))
           // |^\> (breaking blockquotes for now)
           str += "<br>\n";
-        if (!insideBlock && !str.match(/^```/) && !str.match(/^</)) {
+        // NOTE: for html tags, we don't want <br> but we still need an extra \n for markdown parser
+        if (!insideBlock && str.match(/^</)) str += "\n";
+        if (!insideBlock && !str.match(/^```|^</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
             str = str.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
@@ -184,10 +194,13 @@
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(
-        /\n```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
+        /(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
         "$1<br>"
       ) /*unwrap _html_ blocks*/;
-    return marked(text);
+
+    text = marked(text);
+    if (isMenu) text = '<div class="menu">' + text + "</div>";
+    return text;
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
@@ -516,6 +529,12 @@
     padding: 1px 4px;
     margin: 0;
   }
+  .item :global(.menu a) {
+    padding: 8px;
+  }
+  .item :global(.menu mark) {
+    padding: 8px;
+  }
   .item :global(mark.selected) {
     background: lightgreen;
   }
@@ -567,6 +586,12 @@
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
+    .item :global(.menu a) {
+      padding: 8px 4px;
+    }
+    .item :global(.menu mark) {
+      padding: 8px 4px;
+    }
     .item {
       font-size: 16px;
       line-height: 25px;

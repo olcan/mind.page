@@ -199,7 +199,7 @@
 
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-      const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
+      const pintags = item.tags.filter((t) => t.match(/^#_?pin(?:\/|$)/));
       item.pinned = pintags.length > 0;
       item.pinTerm = pintags[0] || "";
       item.prefixMatch = lctext.startsWith(terms[0]);

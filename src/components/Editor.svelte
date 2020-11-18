@@ -77,7 +77,9 @@
           highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
-    if (insideCodeBlock) html += code; // append unclosed block (without highlighting)
+    // append unclosed block as regular markdown
+    if (insideCodeBlock)
+      html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
