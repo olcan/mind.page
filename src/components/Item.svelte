@@ -290,8 +290,8 @@
             const tagStyle = window.getComputedStyle(node.parentElement);
             word.style.borderRadius = "0";
             // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
-            word.style.paddingTop = tagStyle.paddingTop;
-            word.style.paddingBottom = tagStyle.paddingBottom;
+            // word.style.paddingTop = tagStyle.paddingTop;
+            // word.style.paddingBottom = tagStyle.paddingBottom;
             if (m[2][0] == "#") {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
@@ -535,12 +535,20 @@
     padding: 1px 4px;
     margin: 0;
   }
-  .item :global(.menu a) {
-    padding: 8px;
+  /* .menu styling: paragraphs become flex boxes */
+  .item :global(.menu p) {
+    display: flex;
+    width: 95%; /* leave some extra space for editing and item count/index indicators */
   }
-  .item :global(.menu mark) {
-    padding: 8px;
+  .item :global(.menu a, .menu mark) {
+    padding: 8px !important;
   }
+  .item :global(.menu p a, .menu p mark) {
+    flex: 1 1 auto;
+    text-align: center;
+    margin: 2px !important;
+  }
+
   .item :global(mark.selected) {
     background: lightgreen;
   }
@@ -576,9 +584,9 @@
     width: 200px; /* default width, change using style="width:_" attribute */
     max-width: 100%;
   }
-  .item :global(:first-child) {
+  /* .item :global(:first-child) {
     margin-top: 0 !important;
-  }
+  } */
   .item :global(:last-child) {
     margin-bottom: 0 !important;
   }
@@ -592,11 +600,8 @@
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
-    .item :global(.menu a) {
-      padding: 8px 4px;
-    }
-    .item :global(.menu mark) {
-      padding: 8px 4px;
+    .item :global(.menu a, .menu mark) {
+      padding: 8px 4px !important;
     }
     .item {
       font-size: 16px;
@@ -607,7 +612,7 @@
     }
     /* NOTE: these font sizes should match those in Editor */
     .item :global(pre, code) {
-      font-size: 13px !important; /* !important seems necessary if you use commas in selector */
+      font-size: 13px !important; /* !important is sometimes necessary if you use commas in selector */
       line-height: 22px !important;
     }
   }

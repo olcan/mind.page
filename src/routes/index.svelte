@@ -148,7 +148,7 @@
       if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
     } else {
       // refocus on editor if it was unfocused within last .25 seconds
-      // if (Date.now() - editorBlurTime < 250) textArea(-1).focus();
+      if (Date.now() - editorBlurTime < 250) textArea(-1).focus();
     }
   }
 
