@@ -187,7 +187,11 @@
     // NOTE: always invoked twice for new items due to id change after first save
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     //       (following logic prevents this, proving divs are reused)
-    if (itemdiv.hasAttribute("_updated")) return;
+    if (
+      itemdiv.hasAttribute("_updated") &&
+      matchingTerms == itemdiv.getAttribute("_highlightTerms")
+    )
+      return;
     itemdiv.setAttribute("_updated", Date.now().toString());
 
     // cache cacheable divs under window[_cached_divs][_cache_key]
