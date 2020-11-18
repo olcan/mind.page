@@ -466,6 +466,14 @@
     font-size: 15px;
     line-height: 25px;
     white-space: pre; /* preserve whitespace, break on \n only */
+    background: #222;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .item :global(pre code) {
+    background: none;
+    padding: 0;
+    border-radius: 0;
   }
   .item :global(br:last-child) {
     display: none;
