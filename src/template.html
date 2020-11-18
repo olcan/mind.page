@@ -19,8 +19,6 @@
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-firestore.js"></script>
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
-
     <script>
       MathJax = {
         tex: {
@@ -30,9 +28,13 @@
           ],
         },
         svg: { fontCache: "global" },
+        // http://docs.mathjax.org/en/latest/options/menu.html        
+        // http://docs.mathjax.org/en/latest/output/mathml.html
+        // NOTE: these options take effect in context menu but inTabOrder fails to set tabindex=-1
+        options: { menuOptions: { settings: { inTabOrder: false, assistiveMml: false } } }
       };
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@latest/es5/tex-svg.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/mathjs@latest/lib/browser/math.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
     <!-- <script async src="https://cdn.jsdelivr.net/npm/webppl@latest/src/main.min.js"></script> -->

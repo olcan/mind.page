@@ -190,43 +190,42 @@
     return marked(text);
   }
 
-  // we use afterUpdate hook to make changes to the DOM after rendering
+  // we use afterUpdate hook to make changes to the DOM after rendering/updates
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
+
   afterUpdate(() => {
     if (!itemdiv) return; // itemdiv is null if editing
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
     // NOTE: always invoked twice for new items due to id change after first save
     // NOTE: invoked on every sort, e.g. during search-as-you-type
-    //       (following logic prevents this, proving divs are reused)
+    // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
+    //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
     const textHash = hashCode(text).toString();
+    if (!itemdiv.firstElementChild)
+      itemdiv.appendChild(document.createElement("span"));
     if (
-      textHash == itemdiv.getAttribute("_textHash") &&
-      matchingTerms == itemdiv.getAttribute("_highlightTerms")
+      textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
+      matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       return;
     }
-    itemdiv.setAttribute("_textHash", textHash);
-    itemdiv.setAttribute("_highlightTerms", matchingTerms);
+    itemdiv.firstElementChild.setAttribute("_textHash", textHash);
+    itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
 
     // cache cacheable divs under window[_cached_divs][_cache_key]
     if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
     Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
       if (div.hasAttribute("_cached")) return;
       const key = div.getAttribute("_cache_key");
-      div.setAttribute("_cached", Date.now().toString());
-      console.log("caching div", key);
-      window["_cached_divs"][key] = div; //.cloneNode(true);
-    });
-
-    // restore any cached divs
-    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
-      if (div.hasAttribute("_cached")) return;
-      const key = div.getAttribute("_cache_key");
       if (window["_cached_divs"].hasOwnProperty(key)) {
         console.log("reusing cached div", key);
         div.replaceWith(window["_cached_divs"][key]);
+      } else {
+        div.setAttribute("_cached", Date.now().toString());
+        console.log("caching div", key);
+        window["_cached_divs"][key] = div; //.cloneNode(true);
       }
     });
 
@@ -313,17 +312,23 @@
     // (component state can be modified/reused during callback)
     const itemid = id;
     const typesetdiv = itemdiv;
-    // trigger typesetting of any math elements
 
-    window["MathJax"]
-      .typesetPromise(itemdiv.getElementsByClassName("math"))
-      .then(() => {
-        typesetdiv
-          .querySelectorAll(".MathJax")
-          .forEach((elem) => elem.setAttribute("tabindex", "-1"));
-        onResized(itemid, typesetdiv.offsetHeight);
-      })
-      .catch(console.error);
+    // trigger typesetting of any math elements
+    Array.from(itemdiv.getElementsByClassName("math")).forEach((math) => {
+      if (math.hasAttribute("_rendered")) return;
+      console.log("rendering math", math.innerHTML);
+      math.setAttribute("_rendered", Date.now().toString());
+      window["MathJax"]
+        .typesetPromise([math])
+        .then(() => {
+          // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
+          typesetdiv
+            .querySelectorAll(".MathJax")
+            .forEach((elem) => elem.setAttribute("tabindex", "-1"));
+          onResized(itemid, typesetdiv.offsetHeight);
+        })
+        .catch(console.error);
+    });
 
     // set up img onload callbacks for height updates
     // convert dropbox image src urls to direct download
