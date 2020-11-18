@@ -175,7 +175,9 @@
   function onEditorChange(text: string) {
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [...new Set(text.split(/\s+/))].filter((t) => t);
+    let terms = [
+      ...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/))),
+    ].filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
@@ -1044,8 +1046,8 @@
             index={item.index}
             itemCount={items.length}
             matchingItemCount={item.matchingItemCount}
-            matchingTerms={item.matchingTerms.join(',')}
-            matchingTermsSecondary={item.matchingTermsSecondary.join(',')}
+            matchingTerms={item.matchingTerms.join(' ')}
+            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
             timeString={item.timeString}
             timeOutOfOrder={item.timeOutOfOrder}
             updateTime={item.updateTime}

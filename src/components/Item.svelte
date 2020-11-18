@@ -86,11 +86,17 @@
     return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
   }
 
-  function hashCode(s) {
-    return s.split("").reduce(function (a, b) {
-      a = (a << 5) - a + b.charCodeAt(0);
-      return a & a;
-    }, 0);
+  /* from https://github.com/darkskyapp/string-hash/blob/master/index.js */
+  function hashCode(str): number {
+    var hash = 5381,
+      i = str.length;
+    while (i) {
+      hash = (hash * 33) ^ str.charCodeAt(--i);
+    }
+    /* JavaScript does bitwise operations (like XOR, above) on 32-bit signed
+     * integers. Since we want the results to be always positive, convert the
+     * signed int to an unsigned by doing an unsigned bitshift. */
+    return hash >>> 0;
   }
 
   function toHTML(
@@ -100,9 +106,9 @@
   ) {
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
-    const terms = new Set<string>(matchingTerms.split(",").filter((t) => t));
+    const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
     const termsSecondary = new Set<string>(
-      matchingTermsSecondary.split(",").filter((t) => t)
+      matchingTermsSecondary.split(" ").filter((t) => t)
     );
 
     // hide starting #pin and #pin/* (not useful visually or for clicking)
@@ -194,9 +200,9 @@
     // NOTE: always invoked twice for new items due to id change after first save
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     //       (following logic prevents this, proving divs are reused)
-    const textHash = hashCode(text);
+    const textHash = hashCode(text).toString();
     if (
-      textHash == itemdiv.hasAttribute("_textHash") &&
+      textHash == itemdiv.getAttribute("_textHash") &&
       matchingTerms == itemdiv.getAttribute("_highlightTerms")
     ) {
       return;
@@ -228,7 +234,7 @@
     Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
       span.outerHTML = span.innerHTML;
     });
-    const terms = matchingTerms.split(",").filter((t) => t);
+    const terms = matchingTerms.split(" ").filter((t) => t);
     if (terms.length > 0) {
       let treeWalker = document.createTreeWalker(
         itemdiv,
