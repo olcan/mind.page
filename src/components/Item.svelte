@@ -286,22 +286,28 @@
           if (node.parentElement.tagName == "MARK") {
             // NOTE: this becomes stale when the match goes away
             // node.parentElement.style.background = "white";
-            // adjust left/right margin/padding and border radius for in-tag matches
+            // adjust margin/padding and border radius for in-tag (in-mark) matches
+            const tagStyle = window.getComputedStyle(node.parentElement);
             word.style.borderRadius = "0";
+            // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
+            word.style.paddingTop = tagStyle.paddingTop;
+            word.style.paddingBottom = tagStyle.paddingBottom;
             if (m[2][0] == "#") {
               // prefix match (rounded on left)
-              word.style.paddingLeft = "4px";
-              word.style.marginLeft = "-4px";
+              word.style.paddingLeft = tagStyle.paddingLeft;
+              word.style.marginLeft = "-" + tagStyle.paddingLeft;
               word.style.borderTopLeftRadius;
-              word.style.borderTopLeftRadius = "4px";
-              word.style.borderBottomLeftRadius = "4px";
+              word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
+              word.style.borderBottomLeftRadius =
+                tagStyle.borderBottomLeftRadius;
             }
             if (text.length == 0) {
               // suffix match (rounded on right)
-              word.style.paddingRight = "4px";
-              word.style.marginRight = "-4px";
-              word.style.borderTopRightRadius = "4px";
-              word.style.borderBottomRightRadius = "4px";
+              word.style.paddingRight = tagStyle.paddingRight;
+              word.style.marginRight = "-" + tagStyle.paddingRight;
+              word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
+              word.style.borderBottomRightRadius =
+                tagStyle.borderBottomLeftRadius;
             }
           }
         }

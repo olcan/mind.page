@@ -215,8 +215,9 @@
       item.matchingTerms = [];
       if (item.pinned) {
         // match only tags for pinned items
+        // item.matchingTerms = terms.filter((t) => item.tags.indexOf(t) >= 0);
         item.matchingTerms = terms.filter(
-          (t) => t[0] == "#" && lctext.indexOf(t) >= 0
+          (t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
         );
       } else {
         item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
