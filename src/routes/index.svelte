@@ -448,10 +448,10 @@
     if (items[index].height != height) {
       // height change, trigger layout in 250ms
       if (!layoutPending) {
-        console.log(
-          `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-          items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        );
+        // console.log(
+        //   `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        // );
         layoutPending = true;
         setTimeout(() => {
           onEditorChange(editorText);
@@ -459,10 +459,10 @@
         }, 250);
       } else if (items[index].height != 0) {
         // also log non-trivial height change
-        console.log(
-          `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-          items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        );
+        // console.log(
+        //   `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        // );
       }
       items[index].height = height;
     }
@@ -871,7 +871,7 @@
           };
           if (items[index].saving) {
             items[index].saveClosure = saveClosure;
-            console.log("_write is postponed until saving is complete");
+            // console.log("_write is postponed until saving is complete");
           } else {
             saveClosure(index); // write and save immediately
           }
