@@ -330,7 +330,8 @@
     // capture state (id) for async callbacks below
     // (component state can be modified/reused during callback)
     const itemid = id;
-    const typesetdiv = itemdiv;
+    let typesetdiv = itemdiv;
+    setTimeout(() => onResized(itemid, typesetdiv.offsetHeight), 0);
 
     // trigger typesetting of any math elements
     Array.from(itemdiv.getElementsByClassName("math")).forEach((math) => {

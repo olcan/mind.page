@@ -73,26 +73,28 @@
     let prevTimeString = "";
     indexFromId = new Map();
     indicesFromLabel = new Map();
-    let pageHeight = 0;
-    let maxPageHeight = 0;
-    let pageCount = 0;
+    let sectionHeight = 0;
+    let maxSectionHeight = 0;
+    let columnCount = 1;
+    let sectionIndex = 0;
+    let pageIndex = 0;
     let timeString = "";
     pages = [0];
     // NOTE: once header is available, we can calculate # columns and maxPageHeight
     if (document.getElementById("header")) {
-      let columnCount = Math.round(
+      columnCount = Math.round(
         window.innerWidth / document.getElementById("header").clientWidth
       );
       // NOTE: window.visualViewport.height (vs window.innerHeight) includes decorations on iOS
       //       (but can cause undesirable shifting if this function is triggered too often or at bad times)
-      maxPageHeight = columnCount * window.visualViewport.height;
+      maxSectionHeight = window.visualViewport.height;
       // disable any paging on single-column layout
-      if (columnCount == 1) maxPageHeight = Infinity;
-      pageHeight = document.getElementById("header").offsetHeight + 8; // first page includes header
+      if (columnCount == 1) maxSectionHeight = Infinity;
+      sectionHeight = document.getElementById("header").offsetHeight + 8; // first page includes header
     }
     items.forEach((item, index) => {
       item.index = index;
-      item.page = pageCount;
+      item.page = pageIndex;
       indexFromId.set(item.id, index);
       if (item.label) {
         indicesFromLabel.set(item.label, [
@@ -119,25 +121,28 @@
         prevTimeString = timeString;
         prevTime = item.time;
       }
-
-      if (maxPageHeight > 0) {
+      item.sectionStart = false;
+      if (maxSectionHeight > 0) {
         // page based on item heights
-        pageHeight += item.height + 8 + (item.timeString ? 19 : 0); // include margins and timeString
+        sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
         // NOTE: if paging at this item cuts page height by more than half, then we page on next item
-        item.pageStart =
-          pageHeight > maxPageHeight &&
-          pageHeight - item.height >= maxPageHeight / 2;
-        if (item.pageStart) {
-          pageHeight = item.height + 8 + (item.timeString ? 19 : 0);
-        }
+        item.sectionStart =
+          sectionHeight > maxSectionHeight &&
+          sectionHeight - item.height >= maxSectionHeight / 2;
+        if (item.sectionStart)
+          sectionHeight = item.height + 8 + (item.timeString ? 24 : 0);
       } else {
-        // page at every 10th item
-        item.pageStart = index > 0 && index % 10 == 0;
+        item.sectionStart = index > 0 && index % 5 == 0; // 5 items per section
+      }
+      item.pageStart = false;
+      if (item.sectionStart) {
+        sectionIndex++;
+        item.pageStart = columnCount > 1 && sectionIndex % columnCount == 0;
       }
       if (item.pageStart) {
+        pageIndex++;
         item.page++;
         item.timeString = timeString; // always include time string for new page
-        pageCount++;
         pages.push(item.page);
       }
     });
@@ -433,24 +438,31 @@
   function onItemResized(id: string, height: number) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
+    if (height == 0) {
+      console.warn(
+        `zero height reported (last known height ${items[index].height}) for item ${id} at index ${index}`,
+        items[index].text.substring(0, Math.min(items[index].text.length, 80))
+      );
+      return;
+    }
     if (items[index].height != height) {
       // height change, trigger layout in 250ms
       if (!layoutPending) {
-        // console.log(
-        //   `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
+        console.log(
+          `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+          items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        );
         layoutPending = true;
         setTimeout(() => {
           onEditorChange(editorText);
           layoutPending = false;
         }, 250);
       } else if (items[index].height != 0) {
-        // // also log non-trivial height change
-        // console.log(
-        //   `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
+        // also log non-trivial height change
+        console.log(
+          `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+          items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        );
       }
       items[index].height = height;
     }
