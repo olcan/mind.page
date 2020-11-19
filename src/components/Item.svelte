@@ -28,7 +28,7 @@
     highlight: function (code, language) {
       // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
       //if (language=="") return hljs.highlightAuto(code).value;
-      if (language == "js_input") language = "js";
+      if (language == "js_input" || language == "webppl") language = "js";
       language = hljs.getLanguage(language) ? language : "plaintext";
       // console.log("highlighting", validLanguage, code);
       return hljs.highlight(language, code).value;
@@ -72,6 +72,7 @@
   }
   function onClick() {
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
+    if (editing) return; // already editing
     onEditing(index, (editing = true));
   }
 
