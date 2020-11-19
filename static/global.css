@@ -17,7 +17,7 @@ path.domain { stroke: gray !important; }
 .c3-legend-item text { stroke: gray !important; }
 .c3-tooltip { background-color: #111 !important; }
 .c3-tooltip th, td { background-color: #222 !important; }
-.c3 { background: #222; border-radius: 4px; }
+.c3 { background: #171717; border-radius: 4px; padding: 4px; }
 .c3 text { 
 	fill: gray;
 	stroke: none !important;
