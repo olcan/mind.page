@@ -205,6 +205,10 @@
       }
     }
 
+    // apply hidden divs
+    text = text.replace(/<!--\s*hidden\s*-->/g, '<div style="display:none">');
+    text = text.replace(/<!--\s*\/hidden\s*-->/g, "</div>");
+
     text = marked(text);
     if (isMenu) text = '<div class="menu">' + text + "</div>";
     return text;

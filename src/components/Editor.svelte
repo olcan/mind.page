@@ -80,6 +80,14 @@
     // append unclosed block as regular markdown
     if (insideCodeBlock)
       html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
+
+    // wrap hidden sections
+    console.log(html);
+    html = html.replace(
+      /(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      '<div class="hidden">$1</div>'
+    );
+
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
@@ -344,6 +352,12 @@
     padding: 2px 4px;
     margin: -2px -4px;
     border-radius: 4px;
+  }
+  :global(.hidden) {
+    opacity: 0.5;
+    border-top: 1px dashed gray;
+    border-bottom: 1px dashed gray;
+    margin: -1px 0;
   }
 
   /* adapt to smaller windows/devices */
