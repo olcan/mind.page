@@ -47,30 +47,31 @@
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
-    let insideCodeBlock = false;
+    let insideBlock = false;
     let language = "";
     let code = "";
     let html = "";
     text.split("\n").map((line) => {
-      if (!insideCodeBlock && line.match(/^```(\w+)$/)) {
-        insideCodeBlock = true;
+      if (!insideBlock && line.match(/^```(\w+)$/)) {
+        insideBlock = true;
         language = line.match(/^```(\w+)$/).pop();
         if (language == "js_input") language = "js";
         if (language == "webppl") language = "js";
+        if (language == "_html") language = "html";
         language = hljs.getLanguage(language) ? language : "plaintext";
         code = "";
         html += '<span class="block-delimiter">';
         html += line + "\n";
         html += "</span>";
-      } else if (insideCodeBlock && line.match(/^```/)) {
+      } else if (insideBlock && line.match(/^```/)) {
         html += '<div class="block">';
         html += hljs.highlight(language, code).value;
         html += "</div>";
-        insideCodeBlock = false;
+        insideBlock = false;
         html += '<span class="block-delimiter">';
         html += line + "\n";
         html += "</span>";
-      } else if (insideCodeBlock) {
+      } else if (insideBlock) {
         code += line + "\n";
       } else {
         html +=
@@ -78,11 +79,10 @@
       }
     });
     // append unclosed block as regular markdown
-    if (insideCodeBlock)
+    if (insideBlock)
       html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
 
     // wrap hidden sections
-    console.log(html);
     html = html.replace(
       /(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
       '<div class="hidden">$1</div>'
@@ -98,8 +98,9 @@
 
     // indent selection
     if (
-      (e.code == "BracketLeft" || e.code == "BracketRight") &&
-      (e.metaKey || e.ctrlKey)
+      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
+        (e.metaKey || e.ctrlKey)) ||
+      (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart)
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window

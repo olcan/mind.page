@@ -9,3 +9,17 @@ body {
 	/* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
 	touch-action: manipulation;
 }
+
+/* global c3 styles (local ones can go into each item) */
+/* modifications to https://github.com/c3js/c3/blob/master/c3.css */
+path.domain { stroke: gray !important; }
+.tick line, text { stroke: gray !important; }
+.c3-legend-item text { stroke: gray !important; }
+.c3-tooltip { background-color: #111 !important; }
+.c3-tooltip th, td { background-color: #222 !important; }
+.c3 { background: #222; border-radius: 4px; }
+.c3 text { 
+	fill: gray;
+	stroke: none !important;
+	font-size: 15px;
+}

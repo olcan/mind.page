@@ -29,6 +29,7 @@
       // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
       //if (language=="") return hljs.highlightAuto(code).value;
       if (language == "js_input" || language == "webppl") language = "js";
+      if (language == "_html") language = "html";
       language = hljs.getLanguage(language) ? language : "plaintext";
       // console.log("highlighting", validLanguage, code);
       return hljs.highlight(language, code).value;
@@ -166,8 +167,8 @@
         if (!insideBlock && !str.match(/^```|^    |^</))
           // |^\> (breaking blockquotes for now)
           str += "<br>\n";
-        // NOTE: for html tags, we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^</)) str += "\n";
+        // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
+        if (!insideBlock && str.match(/^```|^</)) str += "\n";
         if (!insideBlock && !str.match(/^```|^</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
@@ -194,7 +195,7 @@
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(
         /(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
-        "$1<br>"
+        "$1"
       ) /*unwrap _html_ blocks*/;
 
     if (isMenu) {
@@ -403,7 +404,7 @@
         if (script.hasAttribute("src")) {
           clone.src = script.src;
         } else {
-          clone.innerText = `(function(){${script.innerText}; document.getElementById('${clone.id}').onload()})()`;
+          clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
         }
       });
     }

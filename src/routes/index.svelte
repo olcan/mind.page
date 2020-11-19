@@ -537,11 +537,9 @@
       });
     });
     jsout.push(evalJSInput(text, label, index) || "");
-    return appendBlock(
-      text,
-      "js_output",
-      jsout.join("\n").trim() || "(no output)"
-    );
+    let jsoutString = jsout.join("\n").trim();
+    if (!jsoutString) return text; // no output
+    return appendBlock(text, "js_output", jsoutString);
   }
 
   function saveItem(index: number) {
@@ -821,6 +819,12 @@
     function indicesForItem(item: string) {
       if (item == "" && evalIndex >= 0) {
         return [evalIndex];
+      } else if (
+        item == "" &&
+        window["_script_item_id"] &&
+        indexFromId.has(window["_script_item_id"])
+      ) {
+        return [indexFromId.get(window["_script_item_id"])];
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
       } else {
