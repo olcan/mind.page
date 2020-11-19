@@ -594,7 +594,6 @@
     margin: 10px 0;
   }
   .item :global(img) {
-    width: 200px; /* default width, change using style="width:_" attribute */
     max-width: 100%;
   }
   /* NOTE: this caused first <mark> under .menu > p to lose its upper margin and lose alignment */
