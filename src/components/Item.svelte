@@ -337,6 +337,7 @@
     // (component state can be modified/reused during callback)
     const itemid = id;
     let typesetdiv = itemdiv;
+    // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => onResized(itemid, typesetdiv.offsetHeight), 0);
 
     // trigger typesetting of any math elements
@@ -407,8 +408,8 @@
 <style>
   .super-container {
     break-inside: avoid;
-    margin: 4px 0;
-    margin-right: 8px;
+    padding: 4px 0;
+    padding-right: 8px;
     max-width: 750px;
   }
   .container {
@@ -447,8 +448,7 @@
     display: inline-block;
     padding-left: 5px;
     padding-right: 5px;
-    margin-bottom: 4px; /* should match vertical margin of .super-container */
-    /* margin-bottom: 4px; */
+    margin-bottom: 4px;
     font-family: Avenir Next, Helvetica;
     font-size: 15px;
   }
@@ -631,7 +631,7 @@
   }
 </style>
 
-<div class="super-container">
+<div class="super-container" on:click={onClick}>
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -656,13 +656,7 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
-      <div
-        class="item"
-        {id}
-        bind:this={itemdiv}
-        class:saving
-        class:error
-        on:click={onClick}>
+      <div class="item" {id} bind:this={itemdiv} class:saving class:error>
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}

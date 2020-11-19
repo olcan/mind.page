@@ -90,7 +90,7 @@
       maxSectionHeight = window.visualViewport.height;
       // disable any paging on single-column layout
       if (columnCount == 1) maxSectionHeight = Infinity;
-      sectionHeight = document.getElementById("header").offsetHeight + 8; // first page includes header
+      sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
     }
     items.forEach((item, index) => {
       item.index = index;
@@ -123,7 +123,7 @@
       }
       item.sectionStart = false;
       if (maxSectionHeight > 0) {
-        // page based on item heights
+        // page based on item heights (plus super-container padding/margin and timeString height)
         sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
         // NOTE: if paging at this item cuts page height by more than half, then we page on next item
         item.sectionStart =
@@ -941,17 +941,18 @@
     background-size: 200px;
   }
   #header {
-    display: flex;
     width: 100%;
-    /* margin-right:8px; */
-    padding: 4px 0;
-    border-left: 2px solid #444;
-    margin-bottom: 8px; /* matches right margin of items for column spacing */
-    background: #1b1b1b; /* matches unfocused editor */
     /* max-width same as .super-container in Item.svelte */
     max-width: 750px;
+    padding-bottom: 8px;
   }
-  #header.focused {
+  #header-container {
+    display: flex;
+    padding: 4px 0;
+    border-left: 2px solid #444;
+    background: #1b1b1b; /* matches unfocused editor */
+  }
+  #header-container.focused {
     background: #1b1b1b;
     border-left: 2px solid #aaa;
   }
@@ -1001,26 +1002,29 @@
   {#each pages as page}
     <div class="items">
       {#if page == 0}
-        <div id="header" class:focused on:click={() => textArea(-1).focus()}>
-          <div id="editor">
-            <Editor
-              bind:text={editorText}
-              bind:focused
-              onFocused={onEditorFocused}
-              onChange={onEditorChange}
-              onDone={onEditorDone}
-              onPrev={onPrevItem}
-              onNext={onNextItem} />
+        <div id="header" on:click={() => textArea(-1).focus()}>
+          <div id="header-container" class:focused>
+            <div id="editor">
+              <Editor
+                bind:text={editorText}
+                bind:focused
+                onFocused={onEditorFocused}
+                onChange={onEditorChange}
+                onDone={onEditorDone}
+                onPrev={onPrevItem}
+                onNext={onNextItem} />
+            </div>
+            <div class="spacer" />
+            {#if loggedIn}
+              <img
+                id="user"
+                src={user.photoURL}
+                alt={user.email}
+                on:click={signOut} />
+            {/if}
           </div>
-          <div class="spacer" />
-          {#if loggedIn}
-            <img
-              id="user"
-              src={user.photoURL}
-              alt={user.email}
-              on:click={signOut} />
-          {/if}
         </div>
+        <!-- auto-focus on the editor unless on iPhone -->
         {#if loggedIn}
           <script>
             // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
