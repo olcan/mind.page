@@ -20,9 +20,7 @@
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
-    return `<a target="_blank" href="${href}" title="${
-      title || text
-    }" onclick="event.stopPropagation()">${text}</a>`;
+    return `<a target="_blank" href="${href}" onclick="event.stopPropagation()">${text}</a>`;
   };
   // marked.use({ renderer });
   marked.setOptions({
@@ -197,6 +195,14 @@
         /(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
         "$1<br>"
       ) /*unwrap _html_ blocks*/;
+
+    if (isMenu) {
+      // parse icon replacement urls
+      let replacements = (text as any).matchAll(/<!-- (\w+?) (.+?) -->/g);
+      for (let pair of replacements) {
+        text = text.replace(pair[1], pair[2]);
+      }
+    }
 
     text = marked(text);
     if (isMenu) text = '<div class="menu">' + text + "</div>";
@@ -548,6 +554,12 @@
     flex: 1 1 auto;
     text-align: center;
     margin: 2px !important;
+  }
+  .item :global(.menu img) {
+    width: 24px;
+    height: 24px;
+    min-width: 24px; /* necessary on smaller device */
+    vertical-align: middle;
   }
 
   .item :global(mark.selected) {
