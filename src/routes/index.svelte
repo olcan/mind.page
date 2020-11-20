@@ -83,7 +83,7 @@
     let timeString = "";
     pages = [0];
     pageHeights = []; // needs a final append for last page
-    // NOTE: once header is available, we can calculate # columns and maxSectionHeight
+    // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
     if (document.getElementById("header")) {
       // NOTE: we use outerWidth as it is not subject to zooming/scaling
       columnCount = Math.round(
@@ -91,7 +91,11 @@
       );
       // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
       maxSectionHeight = outerHeight;
+      console.log(columnCount, maxSectionHeight);
       sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
+    } else {
+      console.log("header not yet available for columnCount");
+      columnCount = Math.floor(outerWidth / 500); // guess based on column-width (~min-width)
     }
     items.forEach((item, index) => {
       item.index = index;
@@ -1002,7 +1006,7 @@
   .items {
     column-count: auto;
     column-fill: balance;
-    column-width: 500px; /* minimum width; max-width is on #header and .super-container (in Item.svelte) */
+    column-width: 500px; /* acts like min-width; max-width is on #header and .super-container (in Item.svelte) */
     column-gap: 0;
     /* margin-top: 4px; */
   }

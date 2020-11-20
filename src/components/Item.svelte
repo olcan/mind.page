@@ -650,8 +650,8 @@
           <span class="matchingItemCount">{matchingItemCount}</span><br />
         {/if}
       {/if}
-      {index + 1}<br />
-      {height}
+      {index + 1}
+      <!-- <br /> {height} -->
     </div>
     {#if editing}
       <Editor
