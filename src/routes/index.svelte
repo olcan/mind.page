@@ -67,6 +67,7 @@
   let indicesFromLabel;
   let pages = [];
   let pageHeights = [];
+  let maxSectionHeight = 0;
   function updateItemIndices() {
     editingItems = [];
     focusedItem = -1;
@@ -75,7 +76,6 @@
     indexFromId = new Map();
     indicesFromLabel = new Map();
     let sectionHeight = 0;
-    let maxSectionHeight = 0;
     let columnCount = 1;
     let sectionIndex = 0;
     let pageIndex = 0;
@@ -85,14 +85,12 @@
     pageHeights = []; // needs a final append for last page
     // NOTE: once header is available, we can calculate # columns and maxSectionHeight
     if (document.getElementById("header")) {
+      // NOTE: we use outerWidth as it is not subject to zooming/scaling
       columnCount = Math.round(
-        window.innerWidth / document.getElementById("header").clientWidth
+        outerWidth / document.getElementById("header").offsetWidth
       );
-      // NOTE: window.visualViewport.height (vs window.innerHeight) includes decorations on iOS
-      //       (but can cause undesirable shifting if this function is triggered too often or at bad times)
-      maxSectionHeight = window.visualViewport.height;
-      // disable any paging on single-column layout
-      if (columnCount == 1) maxSectionHeight = Infinity;
+      // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
+      maxSectionHeight = outerHeight;
       sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
     }
     items.forEach((item, index) => {
@@ -132,6 +130,7 @@
         sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
         // NOTE: if paging at this item cuts page height by more than half, then we page on next item
         item.sectionStart =
+          columnCount > 1 &&
           sectionHeight > maxSectionHeight &&
           sectionHeightPreItem >= maxSectionHeight / 2;
         if (item.sectionStart) {
@@ -913,27 +912,23 @@
       }, 0);
     };
 
-    // Window resize/scroll handlers ...
+    // Visual viewport resize/scroll handlers ...
     // NOTE: These seem to respond to font resizing also, so no need for polling below
     let lastScrollTime = 0;
-    let lastViewportWidth = 0;
-    let minViewportHeight = Infinity; // only respond if it gets smaller
-    window.visualViewport.addEventListener("scroll", (e) => {
+    let lastOuterWidth = 0;
+    let lastOuterHeight = 0;
+    visualViewport.addEventListener("scroll", (e) => {
       lastScrollTime = Date.now();
     });
     let resizePending = false;
     function tryResize() {
+      // NOTE: no need to ignore while zooming as long as we use outer width/height
+      // if (visualViewport.scale > 1) return; // ignore while zooming
       if (Date.now() - lastScrollTime > 250) {
-        if (
-          window.visualViewport.width != lastViewportWidth ||
-          window.visualViewport.height < minViewportHeight
-        ) {
+        if (outerWidth != lastOuterWidth || outerHeight != lastOuterHeight) {
           onEditorChange(editorText);
-          lastViewportWidth = window.visualViewport.width;
-          minViewportHeight = Math.min(
-            minViewportHeight,
-            window.visualViewport.height
-          );
+          lastOuterWidth = outerWidth;
+          lastOuterHeight = outerHeight;
         }
       } else if (!resizePending) {
         resizePending = true;
@@ -943,7 +938,7 @@
         }, 250);
       }
     }
-    window.visualViewport.addEventListener("resize", tryResize);
+    visualViewport.addEventListener("resize", tryResize);
 
     // Restore user from localStorage for faster init
     // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
