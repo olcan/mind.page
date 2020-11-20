@@ -380,7 +380,7 @@
     // wait for all scripts to be done, then update height in case it changes
     let pendingScripts = scripts.length;
     if (pendingScripts > 0) {
-      console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
+      // console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
       Array.from(scripts).forEach((script) => {
         if (script.parentElement.hasAttribute("_cached")) {
           pendingScripts--;
@@ -397,7 +397,7 @@
           document.head.removeChild(clone);
           pendingScripts--;
           if (pendingScripts == 0) {
-            console.log(`all scripts done in item ${index}`);
+            // console.log(`all scripts done in item ${index}`);
             if (itemdiv) onResized(id, itemdiv.offsetHeight);
           }
         };

@@ -373,10 +373,13 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text = "```js_input\n" + text.replace(/\/js\s*/, "").trim() + "\n```";
-        } else if (text.startsWith("/")) {
-          alert(`unknown command ${text}`);
+          text =
+            "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
+        } else if (text.match(/\/\w+/)) {
+          alert(`unknown command ${text.match(/\/\w+/)[0]}`);
           return;
+        } else if (text.match(/\/\s+/s)) {
+          text = text.replace(/\/\s+/s, "");
         }
         text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
@@ -396,8 +399,9 @@
       .add(itemToSave)
       .then((doc) => {
         let index = indexFromId.get(tmpid); // since index can change
-        let selectionStart = textArea(index).selectionStart;
-        let selectionEnd = textArea(index).selectionEnd;
+        let textarea = textArea(index);
+        let selectionStart = textarea ? textarea.selectionStart : 0;
+        let selectionEnd = textarea ? textarea.selectionEnd : 0;
         if (index == undefined) {
           // item was deleted before it could be saved
           doc.delete().catch(console.error);
@@ -414,9 +418,11 @@
           setTimeout(() => {
             let index = indexFromId.get(doc.id);
             if (index == undefined) return;
-            textArea(index).selectionStart = selectionStart;
-            textArea(index).selectionEnd = selectionEnd;
-            textArea(index).focus();
+            let textarea = textArea(index);
+            if (!textarea) return;
+            textarea.selectionStart = selectionStart;
+            textarea.selectionEnd = selectionEnd;
+            textarea.focus();
           }, 0);
         // also save to items-history ...
         firestore()
