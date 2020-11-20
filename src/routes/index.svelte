@@ -562,6 +562,22 @@
       .catch(console.error);
   }
 
+  // https://stackoverflow.com/a/9039885
+  function iOS() {
+    return (
+      [
+        "iPad Simulator",
+        "iPhone Simulator",
+        "iPod Simulator",
+        "iPad",
+        "iPhone",
+        "iPod",
+      ].includes(navigator.platform) ||
+      // iPad on iOS 13 detection
+      (navigator.userAgent.includes("Mac") && "ontouchend" in document)
+    );
+  }
+
   function onItemEditing(index: number, editing: boolean) {
     let item = items[index];
     // for non-log items, update time whenever the item is "touched"
@@ -572,8 +588,10 @@
       editingItems.push(index);
       onEditorChange(editorText);
       // NOTE: setTimeout is required for editor to be added to the Dom
-      textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
-      // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
+      if (iOS()) {
+        textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
+        // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
+      }
       setTimeout(() => {
         textArea(item.index).focus();
         // if (item.index < index) window.top.scrollTo(0, 0); // scroll to top if item was moved up
@@ -599,9 +617,9 @@
             .delete()
             .catch(console.error);
         } else {
-          // empty out any *_output|*_write blocks as they should be re-generated
+          // empty out any *_output blocks as they should be re-generated
           item.text = item.text.replace(
-            /\n```(\w*?_output|_write)\n.*?\n```/gs,
+            /\n```(\w*?_output)\n.*?\n```/gs,
             "\n```$1\n\n```"
           );
           // console.log(item.text);
@@ -854,7 +872,7 @@
     window["_write"] = function (
       item: string,
       text: string,
-      type: string = "_write"
+      type: string = "_output"
     ) {
       // NOTE: write is always async in case triggered by eval during onItemEditing
       setTimeout(() => {

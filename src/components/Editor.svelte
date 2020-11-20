@@ -61,16 +61,16 @@
         language = hljs.getLanguage(language) ? language : "plaintext";
         code = "";
         html += '<span class="block-delimiter">';
-        html += line + "\n";
-        html += "</span>";
+        html += escapeHTML(line);
+        html += "</span>\n";
       } else if (insideBlock && line.match(/^```/)) {
         html += '<div class="block">';
         html += hljs.highlight(language, code).value;
         html += "</div>";
         insideBlock = false;
         html += '<span class="block-delimiter">';
-        html += line + "\n";
-        html += "</span>";
+        html += escapeHTML(line);
+        html += "</span>\n";
       } else if (insideBlock) {
         code += line + "\n";
       } else {
@@ -84,8 +84,8 @@
 
     // wrap hidden sections
     html = html.replace(
-      /(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
-      '<div class="hidden">$1</div>'
+      /\n(\s*?&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      '\n<div class="hidden">$1</div>'
     );
 
     highlights.innerHTML = html;
@@ -105,7 +105,7 @@
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       const oldStart = textarea.selectionStart;
-      const oldEnd = textarea.selectionEnd;
+      let oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
       // move selection to line start
       let lineStart = textarea.value
@@ -119,11 +119,15 @@
       } else {
         textarea.selectionStart = lineStart;
       }
+      textarea.selectionEnd = Math.max(
+        textarea.selectionStart,
+        textarea.value.substring(0, textarea.selectionEnd).trimEnd().length
+      );
       // NOTE: execCommand maintains undo/redo history.
       document.execCommand(
         "insertText",
         false,
-        e.code == "BracketLeft"
+        e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
           ? textarea.value
               .substring(textarea.selectionStart, textarea.selectionEnd)
               .replace(/(^|\n)    /g, "$1")
@@ -135,6 +139,10 @@
         // restore expanded selection
         textarea.selectionStart = Math.min(lineStart, oldStart);
         textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
+        // textarea.selectionEnd = Math.min(
+        //   oldEnd + (textarea.value.length - oldLength),
+        //   oldEnd - 1 + (textarea.value.substring(oldEnd) + "\n").indexOf("\n")
+        // );
       } else {
         // move forward
         textarea.selectionStart = textarea.selectionEnd =
