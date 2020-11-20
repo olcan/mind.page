@@ -1009,6 +1009,7 @@
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
+    color: #666;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
