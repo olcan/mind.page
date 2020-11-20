@@ -271,6 +271,7 @@
                   : NodeFilter.FILTER_ACCEPT;
               case "svg":
               case "math":
+              case "script":
                 return NodeFilter.FILTER_REJECT;
               default:
                 return NodeFilter.FILTER_ACCEPT;
@@ -338,12 +339,10 @@
         pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
     });
 
-    // capture state (id) for async callbacks below
-    // (component state can be modified/reused during callback)
-    const itemid = id;
-    let typesetdiv = itemdiv;
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
-    setTimeout(() => onResized(itemid, typesetdiv.offsetHeight), 0);
+    setTimeout(() => {
+      if (itemdiv) onResized(id, itemdiv.offsetHeight);
+    }, 0);
 
     // trigger typesetting of any math elements
     Array.from(itemdiv.getElementsByClassName("math")).forEach((math) => {
@@ -353,11 +352,13 @@
       window["MathJax"]
         .typesetPromise([math])
         .then(() => {
-          // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-          typesetdiv
-            .querySelectorAll(".MathJax")
-            .forEach((elem) => elem.setAttribute("tabindex", "-1"));
-          onResized(itemid, typesetdiv.offsetHeight);
+          if (itemdiv) {
+            // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
+            itemdiv
+              .querySelectorAll(".MathJax")
+              .forEach((elem) => elem.setAttribute("tabindex", "-1"));
+            onResized(id, itemdiv.offsetHeight);
+          }
         })
         .catch(console.error);
     });
@@ -369,8 +370,8 @@
       img.src = img.src
         .replace("www.dropbox.com", "dl.dropboxusercontent.com")
         .replace("?dl=0", "");
-      img.onload = function () {
-        onResized(itemid, typesetdiv.offsetHeight);
+      img.onload = () => {
+        if (itemdiv) onResized(id, itemdiv.offsetHeight);
       };
     });
 
@@ -397,7 +398,7 @@
           pendingScripts--;
           if (pendingScripts == 0) {
             console.log(`all scripts done in item ${index}`);
-            onResized(itemid, typesetdiv.offsetHeight);
+            if (itemdiv) onResized(id, itemdiv.offsetHeight);
           }
         };
         if (script.hasAttribute("src")) {
@@ -649,7 +650,8 @@
           <span class="matchingItemCount">{matchingItemCount}</span><br />
         {/if}
       {/if}
-      {index + 1}
+      {index + 1}<br />
+      {height}
     </div>
     {#if editing}
       <Editor

@@ -66,6 +66,7 @@
   let indexFromId;
   let indicesFromLabel;
   let pages = [];
+  let pageHeights = [];
   function updateItemIndices() {
     editingItems = [];
     focusedItem = -1;
@@ -78,9 +79,11 @@
     let columnCount = 1;
     let sectionIndex = 0;
     let pageIndex = 0;
+    let pageHeight = 0;
     let timeString = "";
     pages = [0];
-    // NOTE: once header is available, we can calculate # columns and maxPageHeight
+    pageHeights = []; // needs a final append for last page
+    // NOTE: once header is available, we can calculate # columns and maxSectionHeight
     if (document.getElementById("header")) {
       columnCount = Math.round(
         window.innerWidth / document.getElementById("header").clientWidth
@@ -124,13 +127,19 @@
       item.sectionStart = false;
       if (maxSectionHeight > 0) {
         // page based on item heights (plus super-container padding/margin and timeString height)
+        let sectionHeightPreItem = sectionHeight;
+        pageHeight = Math.max(pageHeight, sectionHeightPreItem);
         sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
         // NOTE: if paging at this item cuts page height by more than half, then we page on next item
         item.sectionStart =
           sectionHeight > maxSectionHeight &&
-          sectionHeight - item.height >= maxSectionHeight / 2;
-        if (item.sectionStart)
+          sectionHeightPreItem >= maxSectionHeight / 2;
+        if (item.sectionStart) {
           sectionHeight = item.height + 8 + (item.timeString ? 24 : 0);
+          // console.log(
+          //   `cutting off section ${sectionIndex} at index ${index}, height ${sectionHeightPreItem} (max ${maxSectionHeight}), new section at height ${sectionHeight}`
+          // );
+        }
       } else {
         item.sectionStart = index > 0 && index % 5 == 0; // 5 items per section
       }
@@ -140,12 +149,16 @@
         item.pageStart = columnCount > 1 && sectionIndex % columnCount == 0;
       }
       if (item.pageStart) {
+        pageHeights.push(pageHeight);
+        pageHeight = sectionHeight;
         pageIndex++;
         item.page++;
         item.timeString = timeString; // always include time string for new page
         pages.push(item.page);
       }
     });
+    pageHeights.push(pageHeight); // last page height
+    // console.log(pageHeights);
 
     if (focusedItem >= 0) {
       // maintain focus on item
@@ -440,18 +453,17 @@
     if (index == undefined) return; // item was deleted
     if (height == 0 && items[index].height > 0) {
       console.warn(
-        `ignoring zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
+        `zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
         items[index].text.substring(0, Math.min(items[index].text.length, 80))
       );
-      return;
     }
     if (items[index].height != height) {
       // height change, trigger layout in 250ms
       if (!layoutPending) {
-        // console.log(
-        //   `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
+        console.log(
+          `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+          items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        );
         layoutPending = true;
         setTimeout(() => {
           onEditorChange(editorText);
@@ -994,9 +1006,9 @@
   }
   .items {
     column-count: auto;
+    column-fill: balance;
     column-width: 500px; /* minimum width; max-width is on #header and .super-container (in Item.svelte) */
     column-gap: 0;
-    column-fill: auto;
     /* margin-top: 4px; */
   }
   .page-separator {
