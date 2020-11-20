@@ -91,10 +91,10 @@
       );
       // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
       maxSectionHeight = outerHeight;
-      console.log(columnCount, maxSectionHeight);
+      // console.log(columnCount, maxSectionHeight);
       sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
     } else {
-      console.log("header not yet available for columnCount");
+      // console.log("header not yet available for columnCount");
       columnCount = Math.floor(outerWidth / 500); // guess based on column-width (~min-width)
     }
     items.forEach((item, index) => {
@@ -396,6 +396,8 @@
       .add(itemToSave)
       .then((doc) => {
         let index = indexFromId.get(tmpid); // since index can change
+        let selectionStart = textArea(index).selectionStart;
+        let selectionEnd = textArea(index).selectionEnd;
         if (index == undefined) {
           // item was deleted before it could be saved
           doc.delete().catch(console.error);
@@ -408,8 +410,14 @@
         indexFromId.set(doc.id, index);
         indexFromId.delete(tmpid);
         if (focusedItem == index)
-          // maintain focus through id change ...
-          setTimeout(() => textArea(indexFromId.get(doc.id)).focus(), 0);
+          // maintain focus (and caret placement) through id/element change
+          setTimeout(() => {
+            let index = indexFromId.get(doc.id);
+            if (index == undefined) return;
+            textArea(index).selectionStart = selectionStart;
+            textArea(index).selectionEnd = selectionEnd;
+            textArea(index).focus();
+          }, 0);
         // also save to items-history ...
         firestore()
           .collection("items-history")
