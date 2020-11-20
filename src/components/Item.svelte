@@ -193,9 +193,8 @@
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
-      .replace(
-        /(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs,
-        "$1"
+      .replace(/(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs, (m, _html) =>
+        _html.replace(/_{id}/g, id)
       ) /*unwrap _html_ blocks*/;
 
     if (isMenu) {
@@ -609,10 +608,10 @@
   .item :global(:last-child) {
     margin-bottom: 0 !important;
   }
-  :global(.MathJax) {
+  .item :global(.MathJax) {
     margin-bottom: 0 !important;
   }
-  :global(blockquote .MathJax) {
+  .item :global(blockquote .MathJax) {
     display: block;
     padding-top: 5px;
     padding-bottom: 5px;

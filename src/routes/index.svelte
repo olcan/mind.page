@@ -438,9 +438,9 @@
   function onItemResized(id: string, height: number) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
-    if (height == 0) {
+    if (height == 0 && items[index].height > 0) {
       console.warn(
-        `zero height reported (last known height ${items[index].height}) for item ${id} at index ${index}`,
+        `ignoring zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
         items[index].text.substring(0, Math.min(items[index].text.length, 80))
       );
       return;
