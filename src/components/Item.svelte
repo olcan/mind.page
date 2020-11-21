@@ -100,7 +100,10 @@
     return hash >>> 0;
   }
 
+  let textHash: string; // text hash computed at render time (in toHTML)
   function toHTML(text: string, matchingTerms: any, matchingTermsSecondary: any) {
+    textHash = hashCode(text).toString();
+
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
@@ -179,7 +182,7 @@
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(/(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs, (m, _html) =>
-        _html.replace(/_{id}/g, id)
+        _html.replace(/_{id}/g, id).replace(/_{hash}/g, textHash)
       ) /*unwrap _html_ blocks*/;
 
     if (isMenu) {
@@ -203,6 +206,24 @@
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
 
+  function cacheElems() {
+    // cache (restore) elements with attribute _cache_key to (from) window[_cached_divs][_cache_key]
+    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
+    Array.from(itemdiv.querySelectorAll("[_cache_key]")).forEach((elem) => {
+      if (elem.hasAttribute("_cached")) return; // already cached/restored
+      const key = elem.getAttribute("_cache_key");
+      if (window["_cached_divs"].hasOwnProperty(key)) {
+        // console.log("reusing cached div", key);
+        elem.replaceWith(window["_cached_divs"][key]);
+      } else {
+        if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
+        elem.setAttribute("_cached", Date.now().toString());
+        // console.log("caching div", key);
+        window["_cached_divs"][key] = elem; //.cloneNode(true);
+      }
+    });
+  }
+
   afterUpdate(() => {
     if (!itemdiv) return; // itemdiv is null if editing
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
@@ -211,7 +232,6 @@
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
-    const textHash = hashCode(text).toString();
     if (!itemdiv.firstElementChild) itemdiv.appendChild(document.createElement("span"));
     if (
       textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
@@ -221,26 +241,12 @@
     }
     itemdiv.firstElementChild.setAttribute("_textHash", textHash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
-
-    // cache cacheable divs under window[_cached_divs][_cache_key]
-    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
-    Array.from(itemdiv.querySelectorAll(".cacheable")).forEach((div) => {
-      if (div.hasAttribute("_cached")) return;
-      const key = div.getAttribute("_cache_key");
-      if (window["_cached_divs"].hasOwnProperty(key)) {
-        console.log("reusing cached div", key);
-        div.replaceWith(window["_cached_divs"][key]);
-      } else {
-        div.setAttribute("_cached", Date.now().toString());
-        console.log("caching div", key);
-        window["_cached_divs"][key] = div; //.cloneNode(true);
-      }
-    });
+    cacheElems(); // cache elems with _cache_key (but without <script> in them)
 
     // highlight matching terms in item text
     // NOTE: highlighting only first page is experimental
     //       (and does not apply to highlighting done in toHTML, e.g. mark.selected and mark.secondary-selected)
-    if (page == 0) {
+    if (true || page == 0) {
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
         span.outerHTML = span.innerHTML;
       });
@@ -350,43 +356,43 @@
     });
 
     // trigger execution of script tags by adding/removing them to <head>
-    // NOTE: this is slow, so we do it asyc and only on first page
-    if (page == 0) {
-      setTimeout(() => {
-        const scripts = itemdiv.getElementsByTagName("script");
-        // wait for all scripts to be done, then update height in case it changes
-        let pendingScripts = scripts.length;
-        if (pendingScripts > 0) {
-          // console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
-          Array.from(scripts).forEach((script) => {
-            if (script.parentElement.hasAttribute("_cached")) {
-              pendingScripts--;
-              console.log("skipping script in cached div");
-              return; // skip scripts in restored divs
-            }
-            script.remove();
-            let clone = document.createElement("script");
-            clone.type = script.type || "text/javascript";
-            clone.id = Math.random().toString();
-            // console.log("executing script", script);
-            document.head.appendChild(clone);
-            clone.onload = function () {
-              document.head.removeChild(clone);
-              pendingScripts--;
-              if (pendingScripts == 0) {
-                // console.log(`all scripts done in item ${index}`);
-                if (itemdiv) onResized(id, itemdiv.offsetHeight);
+    // NOTE: this is slow, so we do it asyc ...
+    setTimeout(() => {
+      if (!itemdiv) return;
+      const scripts = itemdiv.getElementsByTagName("script");
+      // wait for all scripts to be done, then update height in case it changes
+      let pendingScripts = scripts.length;
+      if (pendingScripts > 0) {
+        console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
+        Array.from(scripts).forEach((script) => {
+          if (!script.parentElement.hasAttribute("_cache_key")) {
+            console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
+          }
+          script.remove(); // remove script once executed
+          let clone = document.createElement("script");
+          clone.type = script.type || "text/javascript";
+          clone.id = Math.random().toString();
+          // console.log("executing script", script);
+          document.head.appendChild(clone);
+          setTimeout(() => document.head.removeChild(clone), 0);
+          clone.onload = function () {
+            pendingScripts--;
+            if (pendingScripts == 0) {
+              console.log(`all scripts done in item ${index + 1}`);
+              if (itemdiv) {
+                onResized(id, itemdiv.offsetHeight);
+                cacheElems(); // cache elems with _cache_key that had scripts in them
               }
-            };
-            if (script.hasAttribute("src")) {
-              clone.src = script.src;
-            } else {
-              clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
             }
-          });
-        }
-      }, 0);
-    }
+          };
+          if (script.hasAttribute("src")) {
+            clone.src = script.src;
+          } else {
+            clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
+          }
+        });
+      }
+    }, 0);
   });
 </script>
 

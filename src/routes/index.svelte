@@ -770,12 +770,12 @@
       return encodeURIComponent(editorText.trim());
     };
     window["_google"] = function () {
-      let query = editorText.trim();
+      let query = editorText.replace(/^\/\s+/s, "").trim();
       onEditorChange((editorText = ""));
       window.open("https://google.com/search?q=" + encodeURIComponent(query));
     };
     window["_tweet"] = function () {
-      let tweet = editorText.trim();
+      let tweet = editorText.replace(/^\/\s+/s, "").trim();
       onEditorChange((editorText = ""));
       if (tweet == "") {
         onEditorDone("/tweet", null);
