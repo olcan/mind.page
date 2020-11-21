@@ -99,24 +99,15 @@
     return hash >>> 0;
   }
 
-  function toHTML(
-    text: string,
-    matchingTerms: any,
-    matchingTermsSecondary: any
-  ) {
+  function toHTML(text: string, matchingTerms: any, matchingTermsSecondary: any) {
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
-    const termsSecondary = new Set<string>(
-      matchingTermsSecondary.split(" ").filter((t) => t)
-    );
+    const termsSecondary = new Set<string>(matchingTermsSecondary.split(" ").filter((t) => t));
 
     // parse header tags
     const headerTags = new Set(
-      Array.from(
-        (text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#\w+)\s+/g),
-        (m) => m[1]
-      )
+      Array.from((text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#\w+)\s+/g), (m) => m[1])
     );
     const isMenu = headerTags.has("#menu") || headerTags.has("#_menu");
 
@@ -145,10 +136,7 @@
       }
     });
 
-    let mathTermRegex = new RegExp(
-      `\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`,
-      "i"
-    );
+    let mathTermRegex = new RegExp(`\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`, "i");
 
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
@@ -180,11 +168,7 @@
             /(^|\s)(#[\/\w]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
-                terms.has(tag)
-                  ? 'class="selected"'
-                  : termsSecondary.has(tag)
-                  ? 'class="secondary-selected"'
-                  : ""
+                terms.has(tag) ? 'class="selected"' : termsSecondary.has(tag) ? 'class="secondary-selected"' : ""
               } onclick="handleTagClick('${tag}');event.stopPropagation()">${tag}</mark>`
           );
         }
@@ -227,8 +211,7 @@
     // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
     const textHash = hashCode(text).toString();
-    if (!itemdiv.firstElementChild)
-      itemdiv.appendChild(document.createElement("span"));
+    if (!itemdiv.firstElementChild) itemdiv.appendChild(document.createElement("span"));
     if (
       textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
@@ -259,36 +242,29 @@
     });
     const terms = matchingTerms.split(" ").filter((t) => t);
     if (terms.length > 0) {
-      let treeWalker = document.createTreeWalker(
-        itemdiv,
-        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: function (node) {
-            switch (node.nodeName.toLowerCase()) {
-              case "mark":
-                return (node as HTMLElement).className == "selected"
-                  ? NodeFilter.FILTER_REJECT
-                  : NodeFilter.FILTER_ACCEPT;
-              case "svg":
-              case "math":
-              case "script":
-                return NodeFilter.FILTER_REJECT;
-              default:
-                return NodeFilter.FILTER_ACCEPT;
-            }
-          },
-        }
-      );
+      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: function (node) {
+          switch (node.nodeName.toLowerCase()) {
+            case "mark":
+              return (node as HTMLElement).className == "selected"
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+            case "svg":
+            case "math":
+            case "script":
+              return NodeFilter.FILTER_REJECT;
+            default:
+              return NodeFilter.FILTER_ACCEPT;
+          }
+        },
+      });
       while (treeWalker.nextNode()) {
         let node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
         let parent = node.parentNode;
         let text = node.nodeValue;
         let m;
-        let regex = new RegExp(
-          `^(.*?)(${terms.map(regexEscape).join("|")})`,
-          "si"
-        );
+        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
           parent.insertBefore(document.createTextNode(m[1]), node);
@@ -310,16 +286,14 @@
               word.style.marginLeft = "-" + tagStyle.paddingLeft;
               word.style.borderTopLeftRadius;
               word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomLeftRadius =
-                tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
             }
             if (text.length == 0) {
               // suffix match (rounded on right)
               word.style.paddingRight = tagStyle.paddingRight;
               word.style.marginRight = "-" + tagStyle.paddingRight;
               word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomRightRadius =
-                tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
             }
           }
         }
@@ -329,8 +303,7 @@
 
     // remove <code></code> wrapper block
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
-        code.outerHTML = code.innerHTML;
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
     });
 
     // replace <pre></pre> wrapper with <blockquote></blockquote>
@@ -354,9 +327,7 @@
         .then(() => {
           if (itemdiv) {
             // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-            itemdiv
-              .querySelectorAll(".MathJax")
-              .forEach((elem) => elem.setAttribute("tabindex", "-1"));
+            itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
             onResized(id, itemdiv.offsetHeight);
           }
         })
@@ -367,9 +338,7 @@
     // convert dropbox image src urls to direct download
     Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
       if (!img.hasAttribute("src")) return;
-      img.src = img.src
-        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
-        .replace("?dl=0", "");
+      img.src = img.src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
       img.onload = () => {
         if (itemdiv) onResized(id, itemdiv.offsetHeight);
       };
@@ -646,9 +615,7 @@
     <div class="index" class:matching={matchingTerms.length > 0}>
       {#if index == 0}
         <span class="itemCount">{itemCount}</span><br />
-        {#if matchingItemCount > 0}
-          <span class="matchingItemCount">{matchingItemCount}</span><br />
-        {/if}
+        {#if matchingItemCount > 0}<span class="matchingItemCount">{matchingItemCount}</span><br />{/if}
       {/if}
       {index + 1}
       <!-- <br /> {height} -->

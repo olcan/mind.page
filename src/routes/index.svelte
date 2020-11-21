@@ -1,11 +1,5 @@
 <script context="module" lang="ts">
-  import {
-    isClient,
-    firebase,
-    firestore,
-    firebaseConfig,
-    firebaseAdmin,
-  } from "../../firebase.js";
+  import { isClient, firebase, firestore, firebaseConfig, firebaseAdmin } from "../../firebase.js";
   const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"]; // user.uid for olcans@gmail.com
 
   // NOTE: Preload function can be called on either client or server
@@ -13,16 +7,9 @@
   export async function preload(page, session) {
     // console.log("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-    const user: any = await firebaseAdmin()
-      .auth()
-      .verifyIdToken(session.cookie)
-      .catch(console.error);
+    const user: any = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
     if (user && allowedUsers.includes(user.uid)) {
-      let items = await firebaseAdmin()
-        .firestore()
-        .collection("items")
-        .orderBy("time", "desc")
-        .get();
+      let items = await firebaseAdmin().firestore().collection("items").orderBy("time", "desc").get();
       // return {}
       return {
         items: items.docs.map((doc) =>
@@ -86,9 +73,7 @@
     // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
     if (document.getElementById("header")) {
       // NOTE: we use outerWidth as it is not subject to zooming/scaling
-      columnCount = Math.round(
-        outerWidth / document.getElementById("header").offsetWidth
-      );
+      columnCount = Math.round(outerWidth / document.getElementById("header").offsetWidth);
       // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
       maxSectionHeight = outerHeight;
       // console.log(columnCount, maxSectionHeight);
@@ -102,10 +87,7 @@
       item.page = pageIndex;
       indexFromId.set(item.id, index);
       if (item.label) {
-        indicesFromLabel.set(item.label, [
-          ...(indicesFromLabel.get(item.label) || []),
-          index,
-        ]);
+        indicesFromLabel.set(item.label, [...(indicesFromLabel.get(item.label) || []), index]);
       }
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
@@ -118,10 +100,7 @@
       } else {
         timeString = itemTimeString((Date.now() - item.time) / 1000);
         item.timeOutOfOrder = item.time > prevTime; // for special styling
-        item.timeString =
-          timeString == prevTimeString && !item.timeOutOfOrder
-            ? ""
-            : timeString;
+        item.timeString = timeString == prevTimeString && !item.timeOutOfOrder ? "" : timeString;
         // item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
         prevTimeString = timeString;
         prevTime = item.time;
@@ -134,9 +113,7 @@
         sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
         // NOTE: if paging at this item cuts page height by more than half, then we page on next item
         item.sectionStart =
-          columnCount > 1 &&
-          sectionHeight > maxSectionHeight &&
-          sectionHeightPreItem >= maxSectionHeight / 2;
+          columnCount > 1 && sectionHeight > maxSectionHeight && sectionHeightPreItem >= maxSectionHeight / 2;
         if (item.sectionStart) {
           sectionHeight = item.height + 8 + (item.timeString ? 24 : 0);
           // console.log(
@@ -196,17 +173,14 @@
   function onEditorChange(text: string) {
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [
-      ...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/))),
-    ].filter((t) => t);
+    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/)))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
       if (term[0] != "#") return;
       let pos;
       let tag = term;
-      while ((pos = tag.lastIndexOf("/")) >= 0)
-        termsSecondary.push((tag = tag.slice(0, pos)));
+      while ((pos = tag.lastIndexOf("/")) >= 0) termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
     // let matchingTermCounts = new Map<string, number>();
@@ -226,20 +200,16 @@
       item.prefixMatch = lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
-        item.prefixMatchTerm =
-          terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
+        item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
       // use first exact-match item as "listing" item
-      if (item.prefixMatchTerm == terms[0] && listing.length == 0)
-        listing = item.tags.reverse(); // so that last is best and default (-1) is worst
+      if (item.prefixMatchTerm == terms[0] && listing.length == 0) listing = item.tags.reverse(); // so that last is best and default (-1) is worst
 
       item.matchingTerms = [];
       if (item.pinned) {
         // match only tags for pinned items
         // item.matchingTerms = terms.filter((t) => item.tags.indexOf(t) >= 0);
-        item.matchingTerms = terms.filter(
-          (t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
-        );
+        item.matchingTerms = terms.filter((t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0);
       } else {
         item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
       }
@@ -250,9 +220,7 @@
         // );
       }
       item.matchingTermsSecondary = [];
-      item.matchingTermsSecondary = termsSecondary.filter(
-        (t) => lctext.indexOf(t) >= 0
-      );
+      item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
     });
 
     // Store matching item/term counts in items
@@ -267,8 +235,7 @@
     // Update times for editing items to maintain their ordering when one is saved
     let now = Date.now();
     items.forEach((item) => {
-      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/))
-        item.time = now;
+      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = now;
     });
 
     // NOTE: undefined values produce NaN, which is treated as 0
@@ -279,8 +246,7 @@
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
         // position in item with exact match on first term
-        listing.indexOf(b.prefixMatchTerm) -
-          listing.indexOf(a.prefixMatchTerm) ||
+        listing.indexOf(b.prefixMatchTerm) - listing.indexOf(a.prefixMatchTerm) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // alphanumeric ordering on prefix-matching term
@@ -341,9 +307,7 @@
           return;
         }
         let item = items[editingItems[0]];
-        text = `${new Date(item.time)}\n${new Date(
-          item.updateTime
-        )}\n${new Date(item.createTime)}`;
+        text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
       }
       case "/tweet": {
@@ -356,8 +320,7 @@
           return;
         }
         let item = items[editingItems[0]];
-        location.href =
-          "twitter://post?message=" + encodeURIComponent(item.text);
+        location.href = "twitter://post?message=" + encodeURIComponent(item.text);
         return;
       }
       case "/undelete": {
@@ -373,8 +336,7 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text =
-            "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
+          text = "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
         } else if (text.match(/^\/\w+/)) {
           alert(`unknown command ${text.match(/^\/\w+/)[0]}`);
           return;
@@ -515,11 +477,7 @@
   }
 
   let evalIndex = -1;
-  function evalJSInput(
-    text: string,
-    label: string = "",
-    index: number = -1
-  ): string {
+  function evalJSInput(text: string, label: string = "", index: number = -1): string {
     const jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
 
@@ -559,10 +517,7 @@
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        jsout.push(
-          evalJSInput(items[index].text, items[index].label) || "",
-          index
-        );
+        jsout.push(evalJSInput(items[index].text, items[index].label) || "", index);
       });
     });
     jsout.push(evalJSInput(text, label, index) || "");
@@ -594,14 +549,7 @@
   // https://stackoverflow.com/a/9039885
   function iOS() {
     return (
-      [
-        "iPad Simulator",
-        "iPhone Simulator",
-        "iPod Simulator",
-        "iPad",
-        "iPhone",
-        "iPod",
-      ].includes(navigator.platform) ||
+      ["iPad Simulator", "iPhone Simulator", "iPod Simulator", "iPad", "iPhone", "iPod"].includes(navigator.platform) ||
       // iPad on iOS 13 detection
       (navigator.userAgent.includes("Mac") && "ontouchend" in document)
     );
@@ -640,31 +588,20 @@
             time: item.savedTime,
             text: item.savedText,
           }); // for /undelete
-          firestore()
-            .collection("items")
-            .doc(item.id)
-            .delete()
-            .catch(console.error);
+          firestore().collection("items").doc(item.id).delete().catch(console.error);
         } else {
           // empty out any *_output blocks as they should be re-generated
-          item.text = item.text.replace(
-            /\n```(\w*?_output)\n.*?\n```/gs,
-            "\n```$1\n\n```"
-          );
+          item.text = item.text.replace(/\n```(\w*?_output)\n.*?\n```/gs, "\n```$1\n\n```");
           // console.log(item.text);
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
-          if (item.time != item.savedTime || item.text != item.savedText)
-            saveItem(index);
+          if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
           onEditorChange(editorText); // update sorting of items (at least time or text has changed)
         }
 
         // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
         //       that is not worth the benefit without an attached keyboard (which is harder to detect)
-        if (
-          editingItems.length > 0 ||
-          !navigator.platform.startsWith("iPhone")
-        ) {
+        if (editingItems.length > 0 || !navigator.platform.startsWith("iPhone")) {
           focusOnNearestEditingItem(index);
         } else {
           (document.activeElement as HTMLElement).blur();
@@ -686,9 +623,7 @@
   }
 
   function textArea(index: number): HTMLTextAreaElement {
-    return document.getElementById(
-      "textarea-" + (index < 0 ? "editor" : items[index].id)
-    ) as HTMLTextAreaElement;
+    return document.getElementById("textarea-" + (index < 0 ? "editor" : items[index].id)) as HTMLTextAreaElement;
   }
 
   function onPrevItem(inc = -1) {
@@ -728,8 +663,7 @@
     if (
       (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
-        (e.metaKey || e.ctrlKey))
+      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey))
     ) {
       e.preventDefault();
       textArea(-1).focus();
@@ -798,14 +732,10 @@
       textArea(-1).focus();
     };
     window["_append"] = function (text: string) {
-      onEditorChange(
-        (editorText = (editorText.trim() + " " + text).trimStart())
-      );
+      onEditorChange((editorText = (editorText.trim() + " " + text).trimStart()));
     };
     window["_append_edit"] = function (text: string) {
-      onEditorChange(
-        (editorText = (editorText.trim() + " " + text).trim() + " ")
-      );
+      onEditorChange((editorText = (editorText.trim() + " " + text).trim() + " "));
       textArea(-1).focus();
     };
     window["_enter"] = function (text: string) {
@@ -828,9 +758,7 @@
         .then((urlstr) => {
           try {
             let url = new URL(urlstr);
-            window["_append_edit"](
-              `${prefix}[${title || url.host}](${urlstr})${suffix}`
-            );
+            window["_append_edit"](`${prefix}[${title || url.host}](${urlstr})${suffix}`);
             if (enter) window["_enter"]();
           } catch (_) {
             alert("clipboard content is not a URL");
@@ -857,20 +785,14 @@
     };
     window["_eval"] = function (tag: string) {
       const indices = indicesFromLabel.get(tag) || [];
-      const jsout = indices.map((index) =>
-        evalJSInput(items[index].text, items[index].label)
-      );
+      const jsout = indices.map((index) => evalJSInput(items[index].text, items[index].label));
       return jsout.length == 1 ? jsout[0] : jsout;
     };
 
     function indicesForItem(item: string) {
       if (item == "" && evalIndex >= 0) {
         return [evalIndex];
-      } else if (
-        item == "" &&
-        window["_script_item_id"] &&
-        indexFromId.has(window["_script_item_id"])
-      ) {
+      } else if (item == "" && window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
         return [indexFromId.get(window["_script_item_id"])];
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
@@ -898,11 +820,7 @@
       return content.length == 1 ? content[0] : content;
     };
 
-    window["_write"] = function (
-      item: string,
-      text: string,
-      type: string = "_output"
-    ) {
+    window["_write"] = function (item: string, text: string, type: string = "_output") {
       // NOTE: write is always async in case triggered by eval during onItemEditing
       setTimeout(() => {
         let indices = indicesForItem(item);
@@ -1063,13 +981,7 @@
                 onNext={onNextItem} />
             </div>
             <div class="spacer" />
-            {#if loggedIn}
-              <img
-                id="user"
-                src={user.photoURL}
-                alt={user.email}
-                on:click={signOut} />
-            {/if}
+            {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
           </div>
         </div>
         <!-- auto-focus on the editor unless on iPhone -->
@@ -1077,8 +989,7 @@
           <script>
             // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
             //       autofocus except in certain unexpected situations (like coming back to app)
-            if (!navigator.platform.startsWith("iPhone"))
-              document.getElementById("textarea-editor").focus();
+            if (!navigator.platform.startsWith("iPhone")) document.getElementById("textarea-editor").focus();
           </script>
         {/if}
       {/if}
