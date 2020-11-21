@@ -66,7 +66,7 @@
 
   let debugString;
   // NOTE: the debugString also helps get rid of the "unused property" warning
-  $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
+  $: debugString = `${page} ${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   import { firestore } from "../../firebase.js";
   function onDone() {
@@ -199,6 +199,21 @@
 
     text = marked(text);
     if (isMenu) text = '<div class="menu">' + text + "</div>";
+
+    // process images to transform src and add _cache_key attribute
+    text = text.replace(/<img .*?src="(.+?)".*?>/gi, function (m, src) {
+      if (m.match(/_cache_key/i)) {
+        console.warn("img with self-assigned _cache_key");
+        return m;
+      }
+      // convert dropbox image src urls to direct download
+      src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      m = m.replace(/ src=[^> ]*/, "");
+      m = m.replace(/ _cache_key=[^> ]*/, "");
+      // console.log("img src", src, m);
+      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${src}">`;
+    });
+
     return text;
   }
 
@@ -213,12 +228,12 @@
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
       if (window["_cached_divs"].hasOwnProperty(key)) {
-        // console.log("reusing cached div", key);
+        // console.log("reusing cached element", key, elem.tagName);
         elem.replaceWith(window["_cached_divs"][key]);
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
-        // console.log("caching div", key);
+        // console.log("caching element", key, elem.tagName);
         window["_cached_divs"][key] = elem; //.cloneNode(true);
       }
     });
@@ -241,76 +256,77 @@
     }
     itemdiv.firstElementChild.setAttribute("_textHash", textHash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
-    cacheElems(); // cache elems with _cache_key (but without <script> in them)
+
+    // cache any elements with _cache_key (invoked again later for elements with scripts)
+    cacheElems();
 
     // highlight matching terms in item text
-    // NOTE: highlighting only first page is experimental
-    //       (and does not apply to highlighting done in toHTML, e.g. mark.selected and mark.secondary-selected)
-    if (true || page == 0) {
+    // NOTE: this can be slow so we do it async
+    setTimeout(() => {
+      if (!itemdiv) return;
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
         span.outerHTML = span.innerHTML;
       });
       const terms = matchingTerms.split(" ").filter((t) => t);
-      if (terms.length > 0) {
-        let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-          acceptNode: function (node) {
-            switch (node.nodeName.toLowerCase()) {
-              case "mark":
-                return (node as HTMLElement).className == "selected"
-                  ? NodeFilter.FILTER_REJECT
-                  : NodeFilter.FILTER_ACCEPT;
-              case "svg":
-              case "math":
-              case "script":
-                return NodeFilter.FILTER_REJECT;
-              default:
-                return NodeFilter.FILTER_ACCEPT;
+      if (terms.length == 0) return;
+      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: function (node) {
+          switch (node.nodeName.toLowerCase()) {
+            case "mark":
+              return (node as HTMLElement).className == "selected"
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+            case "svg":
+            case "math":
+            case "script":
+              return NodeFilter.FILTER_REJECT;
+            default:
+              return NodeFilter.FILTER_ACCEPT;
+          }
+        },
+      });
+      while (treeWalker.nextNode()) {
+        let node = treeWalker.currentNode;
+        if (node.nodeType != Node.TEXT_NODE) continue;
+        let parent = node.parentNode;
+        let text = node.nodeValue;
+        let m;
+        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
+        while ((m = text.match(regex))) {
+          text = text.slice(m[0].length);
+          parent.insertBefore(document.createTextNode(m[1]), node);
+          var word = parent.insertBefore(document.createElement("span"), node);
+          word.appendChild(document.createTextNode(m[2]));
+          word.className = "highlight";
+          if (node.parentElement.tagName == "MARK") {
+            // NOTE: this becomes stale when the match goes away
+            // node.parentElement.style.background = "white";
+            // adjust margin/padding and border radius for in-tag (in-mark) matches
+            const tagStyle = window.getComputedStyle(node.parentElement);
+            word.style.borderRadius = "0";
+            // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
+            // word.style.paddingTop = tagStyle.paddingTop;
+            // word.style.paddingBottom = tagStyle.paddingBottom;
+            if (m[2][0] == "#") {
+              // prefix match (rounded on left)
+              word.style.paddingLeft = tagStyle.paddingLeft;
+              word.style.marginLeft = "-" + tagStyle.paddingLeft;
+              word.style.borderTopLeftRadius;
+              word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
+              word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
             }
-          },
-        });
-        while (treeWalker.nextNode()) {
-          let node = treeWalker.currentNode;
-          if (node.nodeType != Node.TEXT_NODE) continue;
-          let parent = node.parentNode;
-          let text = node.nodeValue;
-          let m;
-          let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
-          while ((m = text.match(regex))) {
-            text = text.slice(m[0].length);
-            parent.insertBefore(document.createTextNode(m[1]), node);
-            var word = parent.insertBefore(document.createElement("span"), node);
-            word.appendChild(document.createTextNode(m[2]));
-            word.className = "highlight";
-            if (node.parentElement.tagName == "MARK") {
-              // NOTE: this becomes stale when the match goes away
-              // node.parentElement.style.background = "white";
-              // adjust margin/padding and border radius for in-tag (in-mark) matches
-              const tagStyle = window.getComputedStyle(node.parentElement);
-              word.style.borderRadius = "0";
-              // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
-              // word.style.paddingTop = tagStyle.paddingTop;
-              // word.style.paddingBottom = tagStyle.paddingBottom;
-              if (m[2][0] == "#") {
-                // prefix match (rounded on left)
-                word.style.paddingLeft = tagStyle.paddingLeft;
-                word.style.marginLeft = "-" + tagStyle.paddingLeft;
-                word.style.borderTopLeftRadius;
-                word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-                word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
-              }
-              if (text.length == 0) {
-                // suffix match (rounded on right)
-                word.style.paddingRight = tagStyle.paddingRight;
-                word.style.marginRight = "-" + tagStyle.paddingRight;
-                word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
-                word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
-              }
+            if (text.length == 0) {
+              // suffix match (rounded on right)
+              word.style.paddingRight = tagStyle.paddingRight;
+              word.style.marginRight = "-" + tagStyle.paddingRight;
+              word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
+              word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
             }
           }
-          node.nodeValue = text;
         }
+        node.nodeValue = text;
       }
-    }
+    });
 
     // remove <code></code> wrapper block
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
@@ -345,18 +361,29 @@
         .catch(console.error);
     });
 
-    // set up img onload callbacks for height updates
-    // convert dropbox image src urls to direct download
+    // set up img tags to enable caching and invoke onResized onload
     Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
-      if (!img.hasAttribute("src")) return;
-      img.src = img.src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      if (img.hasAttribute("_loaded")) return; // already loaded (and presumably restored from cache)
+      if (!img.hasAttribute("src")) {
+        console.warn("img missing src");
+        return;
+      }
+      if (!img.hasAttribute("_cache_key")) {
+        console.warn("img missing _cache_key (should be automatically added)");
+        return;
+      }
+      if (img.getAttribute("_cache_key") != img.src) {
+        console.warn("img _cache_key does not match src");
+        return;
+      }
       img.onload = () => {
         if (itemdiv) onResized(id, itemdiv.offsetHeight);
+        img.setAttribute("_loaded", Date.now().toString());
       };
     });
 
     // trigger execution of script tags by adding/removing them to <head>
-    // NOTE: this is slow, so we do it asyc ...
+    // NOTE: this is slow, so we do it asyc, and we warn if the parent element is not cached
     setTimeout(() => {
       if (!itemdiv) return;
       const scripts = itemdiv.getElementsByTagName("script");
