@@ -238,6 +238,8 @@
     });
 
     // highlight matching terms in item text
+    // NOTE: highlighting only first page is experimental
+    //       (and does not apply to highlighting done in toHTML, e.g. mark.selected and mark.secondary-selected)
     if (page == 0) {
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
         span.outerHTML = span.innerHTML;
