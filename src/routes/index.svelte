@@ -375,11 +375,11 @@
         if (text.match(/\/js(\s|$)/)) {
           text =
             "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
-        } else if (text.match(/\/\w+/)) {
-          alert(`unknown command ${text.match(/\/\w+/)[0]}`);
+        } else if (text.match(/^\/\w+/)) {
+          alert(`unknown command ${text.match(/^\/\w+/)[0]}`);
           return;
-        } else if (text.match(/\/\s+/s)) {
-          text = text.replace(/\/\s+/s, "");
+        } else if (text.match(/^\/\s+/s)) {
+          text = text.replace(/^\/\s+/s, "");
         }
         text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
