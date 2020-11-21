@@ -43,6 +43,7 @@
   // NOTE: required props should not have default values
   export let index: number;
   export let id: string;
+  export let page: number;
   export let itemCount: number;
   export let matchingItemCount: number;
   export let matchingTerms: any;
@@ -237,67 +238,69 @@
     });
 
     // highlight matching terms in item text
-    Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
-      span.outerHTML = span.innerHTML;
-    });
-    const terms = matchingTerms.split(" ").filter((t) => t);
-    if (terms.length > 0) {
-      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-        acceptNode: function (node) {
-          switch (node.nodeName.toLowerCase()) {
-            case "mark":
-              return (node as HTMLElement).className == "selected"
-                ? NodeFilter.FILTER_REJECT
-                : NodeFilter.FILTER_ACCEPT;
-            case "svg":
-            case "math":
-            case "script":
-              return NodeFilter.FILTER_REJECT;
-            default:
-              return NodeFilter.FILTER_ACCEPT;
-          }
-        },
+    if (page == 0) {
+      Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
+        span.outerHTML = span.innerHTML;
       });
-      while (treeWalker.nextNode()) {
-        let node = treeWalker.currentNode;
-        if (node.nodeType != Node.TEXT_NODE) continue;
-        let parent = node.parentNode;
-        let text = node.nodeValue;
-        let m;
-        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
-        while ((m = text.match(regex))) {
-          text = text.slice(m[0].length);
-          parent.insertBefore(document.createTextNode(m[1]), node);
-          var word = parent.insertBefore(document.createElement("span"), node);
-          word.appendChild(document.createTextNode(m[2]));
-          word.className = "highlight";
-          if (node.parentElement.tagName == "MARK") {
-            // NOTE: this becomes stale when the match goes away
-            // node.parentElement.style.background = "white";
-            // adjust margin/padding and border radius for in-tag (in-mark) matches
-            const tagStyle = window.getComputedStyle(node.parentElement);
-            word.style.borderRadius = "0";
-            // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
-            // word.style.paddingTop = tagStyle.paddingTop;
-            // word.style.paddingBottom = tagStyle.paddingBottom;
-            if (m[2][0] == "#") {
-              // prefix match (rounded on left)
-              word.style.paddingLeft = tagStyle.paddingLeft;
-              word.style.marginLeft = "-" + tagStyle.paddingLeft;
-              word.style.borderTopLeftRadius;
-              word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
+      const terms = matchingTerms.split(" ").filter((t) => t);
+      if (terms.length > 0) {
+        let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+          acceptNode: function (node) {
+            switch (node.nodeName.toLowerCase()) {
+              case "mark":
+                return (node as HTMLElement).className == "selected"
+                  ? NodeFilter.FILTER_REJECT
+                  : NodeFilter.FILTER_ACCEPT;
+              case "svg":
+              case "math":
+              case "script":
+                return NodeFilter.FILTER_REJECT;
+              default:
+                return NodeFilter.FILTER_ACCEPT;
             }
-            if (text.length == 0) {
-              // suffix match (rounded on right)
-              word.style.paddingRight = tagStyle.paddingRight;
-              word.style.marginRight = "-" + tagStyle.paddingRight;
-              word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
+          },
+        });
+        while (treeWalker.nextNode()) {
+          let node = treeWalker.currentNode;
+          if (node.nodeType != Node.TEXT_NODE) continue;
+          let parent = node.parentNode;
+          let text = node.nodeValue;
+          let m;
+          let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
+          while ((m = text.match(regex))) {
+            text = text.slice(m[0].length);
+            parent.insertBefore(document.createTextNode(m[1]), node);
+            var word = parent.insertBefore(document.createElement("span"), node);
+            word.appendChild(document.createTextNode(m[2]));
+            word.className = "highlight";
+            if (node.parentElement.tagName == "MARK") {
+              // NOTE: this becomes stale when the match goes away
+              // node.parentElement.style.background = "white";
+              // adjust margin/padding and border radius for in-tag (in-mark) matches
+              const tagStyle = window.getComputedStyle(node.parentElement);
+              word.style.borderRadius = "0";
+              // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
+              // word.style.paddingTop = tagStyle.paddingTop;
+              // word.style.paddingBottom = tagStyle.paddingBottom;
+              if (m[2][0] == "#") {
+                // prefix match (rounded on left)
+                word.style.paddingLeft = tagStyle.paddingLeft;
+                word.style.marginLeft = "-" + tagStyle.paddingLeft;
+                word.style.borderTopLeftRadius;
+                word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
+                word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
+              }
+              if (text.length == 0) {
+                // suffix match (rounded on right)
+                word.style.paddingRight = tagStyle.paddingRight;
+                word.style.marginRight = "-" + tagStyle.paddingRight;
+                word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
+                word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
+              }
             }
           }
+          node.nodeValue = text;
         }
-        node.nodeValue = text;
       }
     }
 
@@ -345,37 +348,42 @@
     });
 
     // trigger execution of script tags by adding/removing them to <head>
-    const scripts = itemdiv.getElementsByTagName("script");
-    // wait for all scripts to be done, then update height in case it changes
-    let pendingScripts = scripts.length;
-    if (pendingScripts > 0) {
-      // console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
-      Array.from(scripts).forEach((script) => {
-        if (script.parentElement.hasAttribute("_cached")) {
-          pendingScripts--;
-          console.log("skipping script in cached div");
-          return; // skip scripts in restored divs
+    // NOTE: this is slow, so we do it asyc and only on first page
+    if (page == 0) {
+      setTimeout(() => {
+        const scripts = itemdiv.getElementsByTagName("script");
+        // wait for all scripts to be done, then update height in case it changes
+        let pendingScripts = scripts.length;
+        if (pendingScripts > 0) {
+          // console.log(`executing ${pendingScripts} scripts in item ${index} ...`);
+          Array.from(scripts).forEach((script) => {
+            if (script.parentElement.hasAttribute("_cached")) {
+              pendingScripts--;
+              console.log("skipping script in cached div");
+              return; // skip scripts in restored divs
+            }
+            script.remove();
+            let clone = document.createElement("script");
+            clone.type = script.type || "text/javascript";
+            clone.id = Math.random().toString();
+            // console.log("executing script", script);
+            document.head.appendChild(clone);
+            clone.onload = function () {
+              document.head.removeChild(clone);
+              pendingScripts--;
+              if (pendingScripts == 0) {
+                // console.log(`all scripts done in item ${index}`);
+                if (itemdiv) onResized(id, itemdiv.offsetHeight);
+              }
+            };
+            if (script.hasAttribute("src")) {
+              clone.src = script.src;
+            } else {
+              clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
+            }
+          });
         }
-        script.remove();
-        let clone = document.createElement("script");
-        clone.type = script.type || "text/javascript";
-        clone.id = Math.random().toString();
-        // console.log("executing script", script);
-        document.head.appendChild(clone);
-        clone.onload = function () {
-          document.head.removeChild(clone);
-          pendingScripts--;
-          if (pendingScripts == 0) {
-            // console.log(`all scripts done in item ${index}`);
-            if (itemdiv) onResized(id, itemdiv.offsetHeight);
-          }
-        };
-        if (script.hasAttribute("src")) {
-          clone.src = script.src;
-        } else {
-          clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
-        }
-      });
+      }, 0);
     }
   });
 </script>

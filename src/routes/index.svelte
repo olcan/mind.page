@@ -1020,6 +1020,7 @@
             bind:time={item.time}
             id={item.id}
             index={item.index}
+            page={item.page}
             itemCount={items.length}
             matchingItemCount={item.matchingItemCount}
             matchingTerms={item.matchingTerms.join(' ')}
