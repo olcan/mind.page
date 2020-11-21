@@ -262,8 +262,10 @@
 
     // highlight matching terms in item text
     // NOTE: this can be slow so we do it async
+    const matchingTermsAtDispatch = matchingTerms;
     setTimeout(() => {
       if (!itemdiv) return;
+      if (matchingTerms != matchingTermsAtDispatch) return;
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
         span.outerHTML = span.innerHTML;
       });
