@@ -163,23 +163,23 @@
     return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
   }
 
-  let lastEditorChangeTime = 0;
+  const editorDebounceTime = 500;
+  let lastEditorChangeTime = Infinity;
   let editorChangePending = false;
   function onEditorChange(text: string) {
-    // if editor has focus, debounce for 250ms from last call/return
-    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < 250) {
-      console.log("debounce");
+    // if editor has focus and it is too soon since last change, debounce
+    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
+      lastEditorChangeTime = Date.now(); // reset timer at each postponed change
       if (!editorChangePending) {
         editorChangePending = true;
         setTimeout(() => {
           editorChangePending = false;
           onEditorChange(editorText);
-        }, 250);
+        }, editorDebounceTime);
       }
-      lastEditorChangeTime = Date.now(); // reset timer at each call
       return;
     }
-    lastEditorChangeTime = Date.now();
+    lastEditorChangeTime = Infinity; // force minimum wait from next change
 
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
@@ -272,7 +272,6 @@
       );
     });
     updateItemIndices();
-    lastEditorChangeTime = Date.now(); // also consider running time of this function
   }
 
   function onTagClick(tag: string) {
