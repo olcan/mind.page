@@ -70,12 +70,14 @@
     let timeString = "";
     pages = [0];
     pageHeights = []; // needs a final append for last page
+    const itemsCanBreak = true; // if true, sections == pages (should match break-inside setting for .super-container)
+
     // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
     if (document.getElementById("header")) {
       // NOTE: we use outerWidth as it is not subject to zooming/scaling
       columnCount = Math.round(outerWidth / document.getElementById("header").offsetWidth);
       // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
-      maxSectionHeight = outerHeight;
+      maxSectionHeight = outerHeight * (itemsCanBreak ? columnCount : 1);
       // console.log(columnCount, maxSectionHeight);
       sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
     } else {
@@ -126,10 +128,10 @@
       item.pageStart = false;
       if (item.sectionStart) {
         sectionIndex++;
-        item.pageStart = columnCount > 1 && sectionIndex % columnCount == 0;
+        item.pageStart = columnCount > 1 && (itemsCanBreak || sectionIndex % columnCount == 0);
       }
       if (item.pageStart) {
-        pageHeights.push(pageHeight);
+        pageHeights.push(pageHeight * (itemsCanBreak ? 1.0 / columnCount : 1));
         pageHeight = sectionHeight;
         pageIndex++;
         item.page++;
@@ -427,17 +429,30 @@
   }
 
   let layoutPending = false;
-  function onItemResized(id: string, height: number) {
+  function onItemResized(itemdiv) {
+    const id = itemdiv.id;
     const index = indexFromId.get(id);
-    if (index == undefined) return; // item was deleted
+    if (index == undefined) return;
+    // const height = parseInt(window.getComputedStyle(itemdiv).height);
+    // const height = Math.min(itemdiv.clientHeight, itemdiv.offsetHeight);
+    // const height = itemdiv.getBoundingClientRect().height;
+    const height = itemdiv.offsetHeight;
     if (height == 0 && items[index].height > 0) {
       console.warn(
         `zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
         items[index].text.substring(0, Math.min(items[index].text.length, 80))
       );
     }
-    if (items[index].height != height) {
-      // height change, trigger layout in 250ms
+    items[index].height = height;
+    // NOTE: reported height can apparently fluctuate when items can be broken across columns (i.e. break-inside != avoid, so we only consider layout (paging) changes when item heights change significantly, e.g. from zero to non-zero, by +100px or by -50%+. When the layout is updated, the latest known heights are used for all items, but layout (i.e. paging) can be stale in the meantime, with some pages being slightly smaller/larger than they should be until next layout.
+    if (
+      height == 0 ||
+      items[index].height == 0 ||
+      height >= items[index].height + 100 ||
+      height <= 0.5 * items[index].height
+      // height != items[index].height
+    ) {
+      // significant height change, trigger layout in 250ms
       if (!layoutPending) {
         console.log(
           `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
@@ -448,14 +463,7 @@
           onEditorChange(editorText);
           layoutPending = false;
         }, 250);
-      } else if (items[index].height != 0) {
-        // also log non-trivial height change
-        // console.log(
-        //   `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
       }
-      items[index].height = height;
     }
   }
 
@@ -888,7 +896,7 @@
   import { onMount, onDestroy } from "svelte";
   let pollingInterval = 0;
   onMount(() => {
-    // NOTE: invoking onEditorChange on a timeout allows item heights to be available for paging
+    // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial paging
     setTimeout(() => onEditorChange(""), 0);
     // pollingInterval = setInterval(()=>{}, 250)
   });

@@ -60,7 +60,7 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onResized = (id: string, height: number) => {};
+  export let onResized = (itemdiv) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -343,7 +343,7 @@
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
-      if (itemdiv) onResized(id, itemdiv.offsetHeight);
+      if (itemdiv) onResized(itemdiv);
     }, 0);
 
     // trigger typesetting of any math elements
@@ -357,7 +357,7 @@
           if (itemdiv) {
             // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
             itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
-            onResized(id, itemdiv.offsetHeight);
+            onResized(itemdiv);
           }
         })
         .catch(console.error);
@@ -379,7 +379,7 @@
         return;
       }
       img.onload = () => {
-        if (itemdiv) onResized(id, itemdiv.offsetHeight);
+        if (itemdiv) onResized(itemdiv);
         img.setAttribute("_loaded", Date.now().toString());
       };
     });
@@ -409,7 +409,7 @@
             if (pendingScripts == 0) {
               console.log(`all scripts done in item ${index + 1}`);
               if (itemdiv) {
-                onResized(id, itemdiv.offsetHeight);
+                onResized(itemdiv);
                 cacheElems(); // cache elems with _cache_key that had scripts in them
               }
             }
@@ -427,7 +427,7 @@
 
 <style>
   .super-container {
-    break-inside: avoid;
+    /* break-inside: avoid; */
     padding: 4px 0;
     padding-right: 8px;
     max-width: 750px;
