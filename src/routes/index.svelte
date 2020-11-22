@@ -152,15 +152,6 @@
     }
   }
 
-  // initialize indices and savedText/Time
-  if (isClient) {
-    onEditorChange(""); // initial sort, index assignment, etc
-    items.forEach((item) => {
-      item.savedText = item.text;
-      item.savedTime = item.time;
-    });
-  }
-
   function stableSort(array, compare) {
     return array
       .map((item, index) => ({ item, index }))
@@ -172,7 +163,24 @@
     return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
   }
 
+  let lastEditorChangeTime = 0;
+  let editorChangePending = false;
   function onEditorChange(text: string) {
+    // if editor has focus, debounce for 250ms from last call/return
+    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < 250) {
+      console.log("debounce");
+      if (!editorChangePending) {
+        editorChangePending = true;
+        setTimeout(() => {
+          editorChangePending = false;
+          onEditorChange(editorText);
+        }, 250);
+      }
+      lastEditorChangeTime = Date.now(); // reset timer at each call
+      return;
+    }
+    lastEditorChangeTime = Date.now();
+
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
     let terms = [...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/)))].filter((t) => t);
@@ -264,6 +272,7 @@
       );
     });
     updateItemIndices();
+    lastEditorChangeTime = Date.now(); // also consider running time of this function
   }
 
   function onTagClick(tag: string) {
@@ -680,6 +689,13 @@
   }
 
   if (isClient) {
+    // initialize indices and savedText/Time
+    onEditorChange(""); // initial sort, index assignment, etc
+    items.forEach((item) => {
+      item.savedText = item.text;
+      item.savedTime = item.time;
+    });
+
     // Sign in user as needed ...
     if (error) console.log(error); // log server-side error
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
