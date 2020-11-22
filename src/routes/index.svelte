@@ -167,7 +167,7 @@
   let lastEditorChangeTime = Infinity;
   let editorChangePending = false;
   function onEditorChange(text: string) {
-    // if editor has focus and it is too soon since last change, debounce
+    // if editor has focus and it is too soon since last change/return, debounce
     if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
       lastEditorChangeTime = Date.now(); // reset timer at each postponed change
       if (!editorChangePending) {
@@ -179,7 +179,7 @@
       }
       return;
     }
-    lastEditorChangeTime = Infinity; // force minimum wait from next change
+    lastEditorChangeTime = Infinity; // force minimum wait for next change
 
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
@@ -272,6 +272,7 @@
       );
     });
     updateItemIndices();
+    lastEditorChangeTime = Infinity; // force minimum wait for next change
   }
 
   function onTagClick(tag: string) {
