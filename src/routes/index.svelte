@@ -52,10 +52,11 @@
 
   let indexFromId;
   let indicesFromLabel;
+  let headerdiv;
   let pages = [];
   let pageHeights = [];
   let maxSectionHeight = 0;
-  function updateItemIndices() {
+  function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
     let prevTime = Infinity;
@@ -73,13 +74,13 @@
     const itemsCanBreak = true; // if true, sections == pages (should match break-inside setting for .super-container)
 
     // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
-    if (document.getElementById("header")) {
+    if (headerdiv) {
       // NOTE: we use outerWidth as it is not subject to zooming/scaling
-      columnCount = Math.round(outerWidth / document.getElementById("header").offsetWidth);
+      columnCount = Math.round(outerWidth / headerdiv.offsetWidth);
       // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
       maxSectionHeight = outerHeight * (itemsCanBreak ? columnCount : 1);
       // console.log(columnCount, maxSectionHeight);
-      sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
+      sectionHeight = headerdiv.offsetHeight; // first page includes header
     } else {
       // console.log("header not yet available for columnCount");
       columnCount = Math.floor(outerWidth / 500); // guess based on column-width (~min-width)
@@ -164,8 +165,10 @@
     return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
   }
 
+  // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
+  //       Invoke updateItemLayout directly if only item sizes have changed.
   const editorDebounceTime = 500;
-  let lastEditorChangeTime = Infinity;
+  let lastEditorChangeTime = 0;
   let editorChangePending = false;
   function onEditorChange(text: string) {
     // if editor has focus and it is too soon since last change/return, debounce
@@ -272,7 +275,7 @@
         b.time - a.time
       );
     });
-    updateItemIndices();
+    updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
   }
 
@@ -299,6 +302,7 @@
     // NOTE: text is already trimmed for onDone
     if (e && e.code == "Backspace") {
       // just clear and return
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange((editorText = ""));
       return;
     }
@@ -365,9 +369,8 @@
     items = [item, ...items];
     // NOTE: we append JS output here so that we can specify item index and plug in _{id}
     itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
-    editorText = "";
-    textArea(-1).blur(); // disable debounce
-    onEditorChange(editorText);
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
+    onEditorChange((editorText = ""));
     textArea(-1).focus(); // refocus (necessary on iOS for shifting focus to another item)
     if (editing) setTimeout(() => textArea(indexFromId.get(tmpid)).focus(), 0);
 
@@ -475,7 +478,7 @@
         );
         layoutPending = true;
         setTimeout(() => {
-          onEditorChange(editorText);
+          updateItemLayout();
           layoutPending = false;
         }, 250);
       }
@@ -586,7 +589,7 @@
     if (editing) {
       // started editing
       editingItems.push(index);
-      onEditorChange(editorText);
+      onEditorChange(editorText); // editing state has changed
       // NOTE: setTimeout is required for editor to be added to the Dom
       if (iOS()) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
@@ -605,7 +608,7 @@
         if (item.text.length == 0) {
           // delete
           items.splice(index, 1);
-          updateItemIndices();
+          updateItemLayout();
           items = items; // trigger dom update
           deletedItems.unshift({
             time: item.savedTime,
@@ -619,7 +622,7 @@
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
           if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
-          onEditorChange(editorText); // update sorting of items (at least time or text has changed)
+          onEditorChange(editorText); // item time and/or text has changed
         }
 
         // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
@@ -866,7 +869,7 @@
             else items[index].text = appendBlock(items[index].text, type, text);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             items[index].time = Date.now();
-            onEditorChange(editorText);
+            onEditorChange(editorText); // item time/text has changed
             // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
             if (!type.endsWith("_tmp")) saveItem(index);
           };
@@ -894,11 +897,19 @@
       });
     };
 
+    // wrapper for c3.generate that stores a reference (_chart) on the DOM element
+    // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
+    window["_chart"] = function (selector: string, spec: object) {
+      const chart = window["c3"].generate(Object.assign(spec, { bindto: selector }));
+      Array.from(document.querySelectorAll(selector)).forEach((elem) => (elem["_chart"] = chart));
+      return chart;
+    };
+
     // Visual viewport resize/scroll handlers ...
-    // NOTE: These seem to respond to font resizing also, so no need for polling below
+    // NOTE: font resizing is handled in a periodic task, see onMount below
     let lastScrollTime = 0;
-    let lastOuterWidth = 0;
-    let lastOuterHeight = 0;
+    let lastOuterWidth = outerWidth;
+    let lastOuterHeight = outerHeight;
     visualViewport.addEventListener("scroll", (e) => {
       lastScrollTime = Date.now();
     });
@@ -908,7 +919,8 @@
       // if (visualViewport.scale > 1) return; // ignore while zooming
       if (Date.now() - lastScrollTime > 250) {
         if (outerWidth != lastOuterWidth || outerHeight != lastOuterHeight) {
-          onEditorChange(editorText);
+          console.log(`window size changed from ${lastOuterWidth}x${lastOuterHeight} to ${outerWidth}x${outerHeight}`);
+          updateItemLayout();
           lastOuterWidth = outerWidth;
           lastOuterHeight = outerHeight;
         }
@@ -932,13 +944,24 @@
   }
 
   import { onMount, onDestroy } from "svelte";
-  let pollingInterval = 0;
+  let pollingTask;
+  let lastHeaderWidth;
   onMount(() => {
     // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial paging
     setTimeout(() => onEditorChange(""), 0);
-    // pollingInterval = setInterval(()=>{}, 250)
+    pollingTask = setInterval(() => {
+      if (headerdiv && lastHeaderWidth && lastHeaderWidth != headerdiv.offsetWidth) {
+        console.log(`font size (header width) changed from ${headerdiv.offsetWidth} to ${lastHeaderWidth}`);
+        updateItemLayout();
+        // also trigger resize of all charts on the page ...
+        Array.from(document.querySelectorAll(".c3")).map((div) => {
+          if (div["_chart"]) div["_chart"].resize();
+        });
+      }
+      lastHeaderWidth = headerdiv.offsetWidth;
+    }, 250);
   });
-  onDestroy(() => clearInterval(pollingInterval));
+  onDestroy(() => clearInterval(pollingTask));
 </script>
 
 <style>
@@ -954,7 +977,7 @@
   #header {
     width: 100%;
     /* max-width same as .super-container in Item.svelte */
-    max-width: 750px;
+    /* max-width: 750px; */
     padding-bottom: 8px;
   }
   #header-container {
@@ -1014,7 +1037,7 @@
   {#each pages as page}
     <div class="items">
       {#if page == 0}
-        <div id="header" on:click={() => textArea(-1).focus()}>
+        <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
           <div id="header-container" class:focused>
             <div id="editor">
               <Editor
