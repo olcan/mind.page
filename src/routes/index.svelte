@@ -88,6 +88,7 @@
       item.index = index;
       item.page = pageIndex;
       indexFromId.set(item.id, index);
+      if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.label) {
         indicesFromLabel.set(item.label, [...(indicesFromLabel.get(item.label) || []), index]);
       }
@@ -354,7 +355,7 @@
         } else if (text.match(/^\/\s+/s)) {
           text = text.replace(/^\/\s+/s, "");
         }
-        text = appendJSOutput(text);
+        // text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
       }
     }
@@ -362,9 +363,12 @@
     let itemToSave = { time: time, text: text };
     let item = { ...itemToSave, id: tmpid, saving: true, editing: editing };
     items = [item, ...items];
+    // NOTE: we append JS output here so that we can specify item index and plug in _{id}
+    itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
     editorText = "";
+    textArea(-1).blur(); // disable debounce
     onEditorChange(editorText);
-    textArea(-1).focus();
+    textArea(-1).focus(); // refocus (necessary on iOS for shifting focus to another item)
     if (editing) setTimeout(() => textArea(indexFromId.get(tmpid)).focus(), 0);
 
     firestore()
@@ -372,20 +376,21 @@
       .add(itemToSave)
       .then((doc) => {
         let index = indexFromId.get(tmpid); // since index can change
-        let textarea = textArea(index);
-        let selectionStart = textarea ? textarea.selectionStart : 0;
-        let selectionEnd = textarea ? textarea.selectionEnd : 0;
         if (index == undefined) {
           // item was deleted before it could be saved
           doc.delete().catch(console.error);
           return;
         }
-        items[index].saving = false; // assigning to item object in array triggers dom update for item
-        items[index].savedText = text;
-        items[index].savedTime = time;
+        let textarea = textArea(index);
+        let selectionStart = textarea ? textarea.selectionStart : 0;
+        let selectionEnd = textarea ? textarea.selectionEnd : 0;
         items[index].id = doc.id;
         indexFromId.set(doc.id, index);
-        indexFromId.delete(tmpid);
+        // NOTE: we maintain mapping from tmpid in case there is async JS with _{id} plugged in
+        indexFromId.set(tmpid, index);
+        items[index].tmpid = tmpid; // to enable updates in updateItemIndices()
+        onItemSaved(doc.id);
+
         if (focusedItem == index)
           // maintain focus (and caret placement) through id/element change
           setTimeout(() => {
@@ -404,8 +409,9 @@
           .catch(console.error);
       })
       .catch((error) => {
+        let index = indexFromId.get(tmpid); // since index can change
         console.error(error);
-        items[0].error = true;
+        items[index].error = true;
       });
   }
 
@@ -495,9 +501,9 @@
 
   let evalIndex = -1;
   function evalJSInput(text: string, label: string = "", index: number = -1): string {
-    const jsin = extractBlock(text, "js_input");
+    let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
-
+    if (index >= 0) jsin = jsin.replace(/_{id}/g, items[index].id);
     try {
       evalIndex = index;
       let out = eval("(function(){" + jsin + "})()");
@@ -848,6 +854,7 @@
       // NOTE: write is always async in case triggered by eval during onItemEditing
       setTimeout(() => {
         let indices = indicesForItem(item);
+        // console.log("_write", indices, item);
         indices.map((index) => {
           if (items[index].editing) {
             console.log("can not _write to item while editing");
