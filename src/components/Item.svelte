@@ -43,6 +43,7 @@
   // NOTE: required props should not have default values
   export let index: number;
   export let id: string;
+  export let tmpid: string; // temporary id for items created in current session
   export let page: number;
   export let itemCount: number;
   export let matchingItemCount: number;
@@ -182,7 +183,7 @@
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(/(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs, (m, _html) =>
-        _html.replace(/_{id}/g, id).replace(/_{hash}/g, textHash)
+        _html.replace(/_{id}/g, tmpid ? tmpid : id).replace(/_{hash}/g, textHash)
       ) /*unwrap _html_ blocks*/;
 
     if (isMenu) {
@@ -392,9 +393,9 @@
       // wait for all scripts to be done, then update height in case it changes
       let pendingScripts = scripts.length;
       if (pendingScripts > 0) {
-        console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
+        // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
         Array.from(scripts).forEach((script) => {
-          if (!script.parentElement.hasAttribute("_cache_key")) {
+          if (!script.parentElement.hasAttribute("_cache_key") && !script.hasAttribute("_uncached")) {
             console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
           }
           script.remove(); // remove script once executed
@@ -407,7 +408,7 @@
           clone.onload = function () {
             pendingScripts--;
             if (pendingScripts == 0) {
-              console.log(`all scripts done in item ${index + 1}`);
+              // console.log(`all scripts done in item ${index + 1}`);
               if (itemdiv) {
                 onResized(itemdiv);
                 cacheElems(); // cache elems with _cache_key that had scripts in them

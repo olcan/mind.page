@@ -361,7 +361,7 @@
     }
     let tmpid = Date.now().toString();
     let itemToSave = { time: time, text: text };
-    let item = { ...itemToSave, id: tmpid, saving: true, editing: editing };
+    let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
     items = [item, ...items];
     // NOTE: we append JS output here so that we can specify item index and plug in _{id}
     itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
@@ -387,8 +387,8 @@
         items[index].id = doc.id;
         indexFromId.set(doc.id, index);
         // NOTE: we maintain mapping from tmpid in case there is async JS with _{id} plugged in
+        //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
         indexFromId.set(tmpid, index);
-        items[index].tmpid = tmpid; // to enable updates in updateItemIndices()
         onItemSaved(doc.id);
 
         if (focusedItem == index)
@@ -867,7 +867,8 @@
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             items[index].time = Date.now();
             onEditorChange(editorText);
-            saveItem(index);
+            // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
+            if (!type.endsWith("_tmp")) saveItem(index);
           };
           if (items[index].saving) {
             items[index].saveClosure = saveClosure;
@@ -877,6 +878,20 @@
           }
         });
       }, 0);
+    };
+
+    window["_task"] = function (interval: number, task: Function, item: string = "") {
+      let indices = indicesForItem(item);
+      if (!window["_tasks"]) window["_tasks"] = {};
+      indices.map((index) => {
+        // clear any previous tasks for item, under id or tmpid
+        clearInterval(window["_tasks"][items[index].id]);
+        clearInterval(window["_tasks"][items[index].tmpid]);
+        delete window["_tasks"][items[index].id];
+        delete window["_tasks"][items[index].tmpid];
+        window["_tasks"][items[index].id] = setInterval(task, interval);
+        task(); //  also execute immediately
+      });
     };
 
     // Visual viewport resize/scroll handlers ...
@@ -1050,6 +1065,7 @@
             bind:height={item.height}
             bind:time={item.time}
             id={item.id}
+            tmpid={item.tmpid}
             index={item.index}
             page={item.page}
             itemCount={items.length}
