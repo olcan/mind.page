@@ -54,7 +54,6 @@
   let indicesFromLabel;
   let headerdiv;
   let pages = [];
-  let pageHeights = [];
   let maxSectionHeight = 0;
   function updateItemLayout() {
     editingItems = [];
@@ -69,8 +68,7 @@
     let pageIndex = 0;
     let pageHeight = 0;
     let timeString = "";
-    pages = [0];
-    pageHeights = []; // needs a final append for last page
+    pages = [{ index: 0, start: 0 }];
     const itemsCanBreak = true; // if true, sections == pages (should match break-inside setting for .super-container)
 
     // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
@@ -133,16 +131,18 @@
         item.pageStart = columnCount > 1 && (itemsCanBreak || sectionIndex % columnCount == 0);
       }
       if (item.pageStart) {
-        pageHeights.push(pageHeight * (itemsCanBreak ? 1.0 / columnCount : 1));
+        pages[pages.length - 1].height = pageHeight * (itemsCanBreak ? 1.0 / columnCount : 1);
         pageHeight = sectionHeight;
         pageIndex++;
         item.page++;
         item.timeString = timeString; // always include time string for new page
-        pages.push(item.page);
+        pages[pages.length - 1].end = item.index;
+        pages.push({ index: item.page, start: item.index });
       }
     });
-    pageHeights.push(pageHeight); // last page height
-    // console.log(pageHeights);
+    pages[pages.length - 1].end = items.length;
+    pages[pages.length - 1].height = pageHeight;
+    console.log(pages);
 
     if (focusedItem >= 0) {
       // maintain focus on item
@@ -1036,7 +1036,7 @@
 
   {#each pages as page}
     <div class="items">
-      {#if page == 0}
+      {#if page.index == 0}
         <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
           <div id="header-container" class:focused>
             <div id="editor">
@@ -1063,43 +1063,36 @@
         {/if}
       {/if}
 
-      {#if page > 0}
+      {#if page.index > 0}
         <div class="page-separator" />
       {/if}
 
-      {#each items as item (item.id)}
-        <!-- NOTE: we are currently iterating over all items once for each page, but that should be ok for now -->
-        <!-- (splitting into a pages array caused update issues that are not worth debugging right now) -->
-        {#if item.page == page}
-          <!-- NOTE: pageStart based splitting was slow unless we allowed breaking inside items, which caused spurious height changes -->
-          <!-- {#if item.pageStart} <div class="page-separator" /> {/if} -->
-          <!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
-          <Item
-            onEditing={onItemEditing}
-            onFocused={onItemFocused}
-            onResized={onItemResized}
-            {onTagClick}
-            onPrev={onPrevItem}
-            onNext={onNextItem}
-            bind:text={item.text}
-            bind:editing={item.editing}
-            bind:focused={item.focused}
-            bind:saving={item.saving}
-            bind:height={item.height}
-            bind:time={item.time}
-            id={item.id}
-            tmpid={item.tmpid}
-            index={item.index}
-            page={item.page}
-            itemCount={items.length}
-            matchingItemCount={item.matchingItemCount}
-            matchingTerms={item.matchingTerms.join(' ')}
-            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-            timeString={item.timeString}
-            timeOutOfOrder={item.timeOutOfOrder}
-            updateTime={item.updateTime}
-            createTime={item.createTime} />
-        {/if}
+      {#each items.slice(page.start, page.end) as item (item.id)}
+        <Item
+          onEditing={onItemEditing}
+          onFocused={onItemFocused}
+          onResized={onItemResized}
+          {onTagClick}
+          onPrev={onPrevItem}
+          onNext={onNextItem}
+          bind:text={item.text}
+          bind:editing={item.editing}
+          bind:focused={item.focused}
+          bind:saving={item.saving}
+          bind:height={item.height}
+          bind:time={item.time}
+          id={item.id}
+          tmpid={item.tmpid}
+          index={item.index}
+          page={item.page}
+          itemCount={items.length}
+          matchingItemCount={item.matchingItemCount}
+          matchingTerms={item.matchingTerms.join(' ')}
+          matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+          timeString={item.timeString}
+          timeOutOfOrder={item.timeOutOfOrder}
+          updateTime={item.updateTime}
+          createTime={item.createTime} />
       {/each}
     </div>
   {/each}
