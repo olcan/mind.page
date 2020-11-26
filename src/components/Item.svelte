@@ -223,19 +223,20 @@
   import { afterUpdate } from "svelte";
 
   function cacheElems() {
-    // cache (restore) elements with attribute _cache_key to (from) window[_cached_divs][_cache_key]
-    if (window["_cached_divs"] == undefined) window["_cached_divs"] = {};
+    // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
+    if (window["_cache"] == undefined) window["_cache"] = {};
     Array.from(itemdiv.querySelectorAll("[_cache_key]")).forEach((elem) => {
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
-      if (window["_cached_divs"].hasOwnProperty(key)) {
+      if (window["_cache"].hasOwnProperty(key)) {
         // console.log("reusing cached element", key, elem.tagName);
-        elem.replaceWith(window["_cached_divs"][key]);
+        elem.replaceWith(window["_cache"][key]);
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
+        elem.setAttribute("_item", id); // for invalidating cached elems on errors
         // console.log("caching element", key, elem.tagName);
-        window["_cached_divs"][key] = elem; //.cloneNode(true);
+        window["_cache"][key] = elem; //.cloneNode(true);
       }
     });
   }
@@ -392,6 +393,7 @@
       const scripts = itemdiv.getElementsByTagName("script");
       // wait for all scripts to be done, then update height in case it changes
       let pendingScripts = scripts.length;
+      let scriptErrors = [];
       if (pendingScripts > 0) {
         // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
         Array.from(scripts).forEach((script) => {
@@ -402,23 +404,33 @@
           let clone = document.createElement("script");
           clone.type = script.type || "text/javascript";
           clone.id = Math.random().toString();
-          // console.log("executing script", script);
+          // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
+          // if (script.hasAttribute("src")) clone.src = script.src;
+          clone.innerHTML = `(function(){ ${script.innerHTML} })()`;
+          window["_script_item_id"] = id;
+          window["_errors"] = [];
           document.head.appendChild(clone);
-          setTimeout(() => document.head.removeChild(clone), 0);
-          clone.onload = function () {
-            pendingScripts--;
-            if (pendingScripts == 0) {
-              // console.log(`all scripts done in item ${index + 1}`);
-              if (itemdiv) {
-                onResized(itemdiv);
-                cacheElems(); // cache elems with _cache_key that had scripts in them
+          document.head.removeChild(clone);
+          window["_script_item_id"] = "";
+          scriptErrors = scriptErrors.concat(window["_errors"]);
+
+          pendingScripts--;
+          if (pendingScripts == 0) {
+            // console.log(`all scripts done in item ${index + 1}`);
+            if (itemdiv) {
+              onResized(itemdiv);
+              // if no errors, cache elems with _cache_key that had scripts in them
+              // if error occurred, invalidate all cached elements for item (necessary e.g. for c3 charts)
+              if (scriptErrors.length == 0) cacheElems();
+              else {
+                Object.values(window["_cache"]).filter((elem: HTMLElement) => {
+                  if (elem.getAttribute("_item") == id) {
+                    console.log(`removing cached element for item ${index + 1}`);
+                    delete window["_cache"][elem.getAttribute("_cache_key")];
+                  }
+                });
               }
             }
-          };
-          if (script.hasAttribute("src")) {
-            clone.src = script.src;
-          } else {
-            clone.innerHTML = `(function(){window._script_item_id='${id}'; ${script.innerHTML}; window._script_item_id=''; document.getElementById('${clone.id}').onload()})()`;
           }
         });
       }

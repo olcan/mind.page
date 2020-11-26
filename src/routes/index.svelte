@@ -142,7 +142,7 @@
     });
     pages[pages.length - 1].end = items.length;
     pages[pages.length - 1].height = pageHeight;
-    console.log(pages);
+    // console.log(pages);
 
     if (focusedItem >= 0) {
       // maintain focus on item
@@ -683,20 +683,6 @@
     setTimeout(() => textArea(index + inc).focus(), 0);
   }
 
-  function disableEditorShortcuts(e: KeyboardEvent) {
-    // disable save/forward/back shortcuts on window, focus on editor instead
-    if (focusedItem >= 0) return; // already focused on an item
-    if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey))
-    ) {
-      e.preventDefault();
-      textArea(-1).focus();
-      window.top.scrollTo(0, 0);
-    }
-  }
-
   if (isClient) {
     // initialize indices and savedText/Time
     onEditorChange(""); // initial sort, index assignment, etc
@@ -943,6 +929,28 @@
     console.log("first script run, items:", items.length);
   }
 
+  // disable editor shortcuts
+  function onKeyPress(e: KeyboardEvent) {
+    // disable save/forward/back shortcuts on window, focus on editor instead
+    if (focusedItem >= 0) return; // already focused on an item
+    if (
+      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
+      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey))
+    ) {
+      e.preventDefault();
+      textArea(-1).focus();
+      window.top.scrollTo(0, 0);
+    }
+  }
+
+  // redirect error to alert
+  function onError(e) {
+    alert(`${e.message} (lineno:${e.lineno}, colno:${e.colno})`);
+    if (!window["_errors"]) window["_errors"] = [];
+    window["_errors"].push(e);
+  }
+
   import { onMount, onDestroy } from "svelte";
   let pollingTask;
   let lastHeaderWidth;
@@ -1114,4 +1122,4 @@
   ?
 {/if}
 
-<svelte:window on:keypress={disableEditorShortcuts} />
+<svelte:window on:keypress={onKeyPress} on:error={onError} />
