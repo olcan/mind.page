@@ -10,7 +10,7 @@
     "start_functions": "npm run shell",
     "deploy": "npm run build && firebase deploy",
     "logs": "firebase functions:log",
-    "build_ts": "tsc src/firebase/*.ts --outDir lib/firebase --esModuleInterop",
+    "build_ts": "tsc src/firebase/*.ts --outDir lib/firebase --tsBuildInfoFile lib/firebase/build.json --incremental --esModuleInterop",
     "build_sapper": "sapper build",
     "build": "npm run build_ts && sapper build",
     "dev": "npm run build_ts && sapper dev",
