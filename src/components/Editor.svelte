@@ -79,8 +79,8 @@
 
     // wrap hidden sections
     html = html.replace(
-      /\n(\s*?&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
-      '\n<div class="hidden">$1</div>'
+      /(^|\n\s*?)(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      '$1<div class="hidden">$2</div>'
     );
 
     highlights.innerHTML = html;

@@ -182,8 +182,13 @@
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
-      .replace(/(?:^|\n)```_html\w*?\n\s*(<.*?>)\s*\n```/gs, (m, _html) =>
-        _html.replace(/_{id}/g, tmpid ? tmpid : id).replace(/_{hash}/g, textHash)
+      .replace(
+        /(?:^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
+        (m, _html) =>
+          _html
+            .replace(/\$id/g, tmpid ? tmpid : id)
+            .replace(/\$hash/g, textHash)
+            .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
       ) /*unwrap _html_ blocks*/;
 
     if (isMenu) {
@@ -195,8 +200,7 @@
     }
 
     // apply hidden divs
-    text = text.replace(/<!--\s*hidden\s*-->/g, '<div style="display:none">');
-    text = text.replace(/<!--\s*\/hidden\s*-->/g, "</div>");
+    text = text.replace(/<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->/gs, '<div style="display:none">$1</div>');
 
     text = marked(text);
     if (isMenu) text = '<div class="menu">' + text + "</div>";
@@ -403,9 +407,9 @@
           script.remove(); // remove script once executed
           let clone = document.createElement("script");
           clone.type = script.type || "text/javascript";
-          clone.id = Math.random().toString();
           // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
           // if (script.hasAttribute("src")) clone.src = script.src;
+          // console.log(script.innerHTML);
           clone.innerHTML = `(function(){ ${script.innerHTML} })()`;
           window["_script_item_id"] = id;
           window["_errors"] = [];

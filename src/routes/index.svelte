@@ -367,7 +367,7 @@
     let itemToSave = { time: time, text: text };
     let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
     items = [item, ...items];
-    // NOTE: we append JS output here so that we can specify item index and plug in _{id}
+    // NOTE: we append JS output here so that we can specify item index and plug in $id
     itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange((editorText = ""));
@@ -389,7 +389,7 @@
         let selectionEnd = textarea ? textarea.selectionEnd : 0;
         items[index].id = doc.id;
         indexFromId.set(doc.id, index);
-        // NOTE: we maintain mapping from tmpid in case there is async JS with _{id} plugged in
+        // NOTE: we maintain mapping from tmpid in case there is async JS with $id plugged in
         //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
         indexFromId.set(tmpid, index);
         onItemSaved(doc.id);
@@ -506,7 +506,7 @@
   function evalJSInput(text: string, label: string = "", index: number = -1): string {
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
-    if (index >= 0) jsin = jsin.replace(/_{id}/g, items[index].id);
+    if (index >= 0) jsin = jsin.replace(/\$id/g, items[index].id);
     try {
       evalIndex = index;
       let out = eval("(function(){" + jsin + "})()");
