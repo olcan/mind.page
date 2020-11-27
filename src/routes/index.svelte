@@ -885,8 +885,11 @@
 
     // wrapper for c3.generate that stores a reference (_chart) on the DOM element
     // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
+    // also sets some default options
     window["_chart"] = function (selector: string, spec: object) {
-      const chart = window["c3"].generate(Object.assign(spec, { bindto: selector }));
+      const chart = window["c3"].generate(
+        Object.assign(spec, { bindto: selector, point: { r: 5 }, padding: { top: 10, right: 5 } })
+      );
       Array.from(document.querySelectorAll(selector)).forEach((elem) => (elem["_chart"] = chart));
       return chart;
     };

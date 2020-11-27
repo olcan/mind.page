@@ -38,3 +38,10 @@ td {
   stroke: none !important;
   font-size: 15px;
 }
+.c3-line {
+  stroke-width: 3px !important;
+}
+
+.c3-texts .c3-text {
+  transform: translate(0, -5px);
+}

@@ -108,10 +108,18 @@
       } else {
         textarea.selectionStart = lineStart;
       }
-      textarea.selectionEnd = Math.max(
-        textarea.selectionStart,
-        textarea.value.substring(0, textarea.selectionEnd).trimEnd().length
-      );
+      // expand selection to end of last line
+      // if selection ends right after a new line, exclude the last line
+      if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == "\n")
+        textarea.selectionEnd--;
+      let lastLineStart = textarea.value.substring(0, textarea.selectionEnd).replace(/[^\n]*$/, "").length;
+      let lineEnd =
+        lastLineStart +
+        textarea.value
+          .substring(lastLineStart)
+          .replace(/^([^\n]*).*?$/s, "$1")
+          .trimEnd().length;
+      textarea.selectionEnd = lineEnd;
       // NOTE: execCommand maintains undo/redo history.
       document.execCommand(
         "insertText",
@@ -124,13 +132,12 @@
         // restore expanded selection
         textarea.selectionStart = Math.min(lineStart, oldStart);
         textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
-        // textarea.selectionEnd = Math.min(
-        //   oldEnd + (textarea.value.length - oldLength),
-        //   oldEnd - 1 + (textarea.value.substring(oldEnd) + "\n").indexOf("\n")
-        // );
       } else {
         // move forward
-        textarea.selectionStart = textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
+        textarea.selectionStart = textarea.selectionEnd = Math.max(
+          lineStart,
+          oldEnd + (textarea.value.length - oldLength)
+        );
       }
       onInput();
       return;
