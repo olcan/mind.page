@@ -961,7 +961,8 @@
     // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial paging
     setTimeout(() => onEditorChange(""), 0);
     pollingTask = setInterval(() => {
-      if (headerdiv && lastHeaderWidth && lastHeaderWidth != headerdiv.offsetWidth) {
+      if (!headerdiv) return;
+      if (lastHeaderWidth && lastHeaderWidth != headerdiv.offsetWidth) {
         console.log(`font size (header width) changed from ${headerdiv.offsetWidth} to ${lastHeaderWidth}`);
         updateItemLayout();
         // also trigger resize of all charts on the page ...
