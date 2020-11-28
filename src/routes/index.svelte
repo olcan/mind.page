@@ -510,6 +510,10 @@
     try {
       evalIndex = index;
       let out = eval("(function(){" + jsin + "})()");
+      if (out && out.length > 1024) {
+        alert(`js output too large (${out.length})`);
+        out = "";
+      }
       evalIndex = -1;
       return out;
     } catch (e) {
@@ -851,6 +855,10 @@
           }
           const prevSaveClosure = items[index].saveClosure;
           const saveClosure = (index) => {
+            if (text.length > 1024) {
+              alert(`_write too large (${text.length})`);
+              text = "";
+            }
             if (type == "") items[index].text = text;
             else items[index].text = appendBlock(items[index].text, type, text);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
