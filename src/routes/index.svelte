@@ -69,7 +69,7 @@
     let pageHeight = 0;
     let timeString = "";
     pages = [{ index: 0, start: 0 }];
-    const itemsCanBreak = true; // if true, sections == pages (should match break-inside setting for .super-container)
+    const itemsCanBreak = false; // if true, sections == pages (should match break-inside setting for .super-container)
 
     // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
     if (headerdiv) {
@@ -855,7 +855,7 @@
           }
           const prevSaveClosure = items[index].saveClosure;
           const saveClosure = (index) => {
-            if (text.length > 1024) {
+            if (text && text.length > 1024) {
               alert(`_write too large (${text.length})`);
               text = "";
             }
@@ -900,6 +900,36 @@
       );
       Array.from(document.querySelectorAll(selector)).forEach((elem) => (elem["_chart"] = chart));
       return chart;
+    };
+
+    window["_histogram"] = function (
+      numbers: Array<number>,
+      bins: number = 10,
+      min: number = Infinity,
+      max: number = -Infinity,
+      digits: number = 2
+    ) {
+      if (min > max) {
+        // determine range using data
+        numbers.forEach((num) => {
+          if (num < min) min = num;
+          else if (num > max) max = num;
+        });
+      } else {
+        numbers = numbers.filter((num) => num >= min && num <= max);
+      }
+      const size = (max - min) / bins;
+      const counts = new Array(bins).fill(0);
+      numbers.forEach((num) => {
+        counts[num == max ? bins - 1 : Math.floor((num - min) / size)]++;
+      });
+      let histogram = {};
+      counts.forEach((count, index) => {
+        let key = `[${(min + index * size).toFixed(digits)}, `;
+        key += index == bins - 1 ? `${max.toFixed(digits)}]` : `${(min + (index + 1) * size).toFixed(digits)})`;
+        histogram[key] = count;
+      });
+      return histogram;
     };
 
     // Visual viewport resize/scroll handlers ...
