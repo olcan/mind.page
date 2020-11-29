@@ -897,7 +897,12 @@
     window["_chart"] = function (selector: string, spec: object) {
       let rotated = spec["axis"] && spec["axis"]["rotated"];
       let labeled = spec["data"] && spec["data"]["labels"];
-      spec = Object.assign(spec, { bindto: selector, point: { r: 5 }, padding: { top: 10, right: 5 } });
+      spec = Object.assign(spec, {
+        bindto: selector,
+        point: { r: 5 },
+        padding: { top: 10, right: 5 },
+        grid: { focus: { show: false } },
+      });
       if (rotated) {
         Array.from(document.querySelectorAll(selector)).forEach((elem) => elem.classList.add("c3-rotated"));
       }
