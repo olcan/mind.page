@@ -331,7 +331,7 @@
   :global(.block-delimiter) {
     color: #666;
   }
-  :global(.code, .math) {
+  :global(#editor .code, #editor .math) {
     background: #171717;
     padding: 2px 4px;
     margin: -2px -4px;

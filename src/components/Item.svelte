@@ -525,31 +525,31 @@
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
-  .item :global(h1, h2, h3, h4, h5, h6, p, ul, blockquote, pre) {
+  :global(h1, h2, h3, h4, h5, h6, p, ul, blockquote, pre) {
     margin: 0;
   }
-  .item :global(li) {
+  :global(.item li) {
     text-indent: -3px;
   }
-  .item :global(ul) {
+  :global(.item ul) {
     padding-left: 21px;
     /* border-left: 1px solid #333; */
   }
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
-  .item :global(blockquote) {
+  :global(.item blockquote) {
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
   }
   /* NOTE: these font sizes should match those in Editor */
-  .item :global(pre) {
+  :global(.item pre) {
     padding-left: 15px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
     font-size: 15px;
     line-height: 25px;
   }
-  .item :global(code) {
+  :global(.item code) {
     font-size: 15px;
     line-height: 25px;
     white-space: pre; /* preserve whitespace, break on \n only */
@@ -557,22 +557,22 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
-  .item :global(pre code) {
+  :global(.item pre code) {
     background: none;
     padding: 0;
     border-radius: 0;
   }
-  .item :global(br:last-child) {
+  :global(.item br:last-child) {
     display: none;
   }
-  .item :global(a) {
+  :global(.item a) {
     color: #79e;
     background: #222;
     padding: 1px 4px;
     border-radius: 4px;
     text-decoration: none;
   }
-  .item :global(mark) {
+  :global(.item mark) {
     color: black;
     background: #999;
     /* remove negative margins used to align with textarea text */
@@ -580,78 +580,78 @@
     margin: 0;
   }
   /* .menu styling: paragraphs become flex boxes */
-  .item :global(.menu p) {
+  :global(.item .menu p) {
     display: flex;
     width: 95%; /* leave some extra space for editing and item count/index indicators */
   }
-  .item :global(.menu a, .menu mark) {
-    padding: 8px !important;
+  :global(.item .menu a, .item .menu mark) {
+    padding: 8px;
   }
-  .item :global(.menu p a, .menu p mark) {
+  :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
     text-align: center;
-    margin: 2px !important;
+    margin: 2px;
   }
-  .item :global(.menu img) {
+  :global(.item .menu img) {
     width: 24px;
     height: 24px;
     min-width: 24px; /* necessary on smaller device */
     vertical-align: middle;
   }
 
-  .item :global(mark.selected) {
+  :global(.item mark.selected) {
     background: lightgreen;
   }
-  .item :global(mark.secondary-selected) {
+  :global(.item mark.secondary-selected) {
     background: white;
   }
-  .item :global(span.highlight) {
+  :global(.item span.highlight) {
     color: black;
     background: lightgreen;
     border-radius: 4px;
   }
-  .item :global(mark span.highlight) {
+  :global(.item mark span.highlight) {
     color: black;
     background: lightgreen;
     padding: 1px 0;
   }
-  .item :global(.vertical-bar) {
+  :global(.item .vertical-bar) {
     color: #444;
   }
-  .item :global(.math) {
-    background: #222;
+  :global(.item .math) {
+    /* background: #222; */
     padding: 2px 4px;
     border-radius: 4px;
   }
-  .item :global(hr) {
+  :global(.item hr) {
     background: transparent;
     border: 0;
     border-top: 1px dashed #222;
     height: 1px; /* disappears if both height and border are 0 */
     margin: 10px 0;
   }
-  .item :global(img) {
+  :global(.item img) {
     max-width: 100%;
   }
   /* NOTE: this caused first <mark> under .menu > p to lose its upper margin and lose alignment */
-  /* .item :global(:first-child) {
-    margin-top: 0 !important;
+  /* :global(.item :first-child) {
+    margin-top: 0;
   } */
-  .item :global(:last-child) {
-    margin-bottom: 0 !important;
+  :global(.item :last-child) {
+    margin-bottom: 0;
   }
-  .item :global(.MathJax) {
-    margin-bottom: 0 !important;
+  :global(.item .MathJax) {
+    margin-bottom: 0;
   }
-  .item :global(blockquote .MathJax) {
+  :global(.item blockquote .MathJax) {
     display: block;
     padding-top: 5px;
     padding-bottom: 5px;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
-    .item :global(.menu a, .menu mark) {
-      padding: 8px 4px !important;
+    :global(.item .menu a, .item .menu mark) {
+      padding: 8px 4px;
     }
     .item {
       font-size: 16px;
@@ -661,9 +661,9 @@
       font-size: 14px;
     }
     /* NOTE: these font sizes should match those in Editor */
-    .item :global(pre, code) {
-      font-size: 13px !important; /* !important is sometimes necessary if you use commas in selector */
-      line-height: 22px !important;
+    :global(.item pre, .item code) {
+      font-size: 13px;
+      line-height: 22px;
     }
   }
 </style>
