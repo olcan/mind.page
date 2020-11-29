@@ -897,17 +897,19 @@
     window["_chart"] = function (selector: string, spec: object) {
       let rotated = spec["axis"] && spec["axis"]["rotated"];
       let labeled = spec["data"] && spec["data"]["labels"];
+      let barchart = spec["data"] && spec["data"]["type"] == "bar";
       spec = Object.assign(spec, {
         bindto: selector,
         point: { r: 5 },
         padding: { top: 10, right: 5 },
         grid: { focus: { show: false } },
       });
-      if (rotated) {
-        Array.from(document.querySelectorAll(selector)).forEach((elem) => elem.classList.add("c3-rotated"));
-      }
+      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+        if (labeled) elem.classList.add("c3-labeled");
+        if (rotated) elem.classList.add("c3-rotated");
+        if (barchart) elem.classList.add("c3-barchart");
+      });
       if (labeled) {
-        Array.from(document.querySelectorAll(selector)).forEach((elem) => elem.classList.add("c3-labeled"));
         // adjust padding if labeled (s.t. y axis will be hidden)
         // NOTE: this seems to also fix uneven bar spacing
         if (rotated) spec["padding"]["bottom"] = -15;

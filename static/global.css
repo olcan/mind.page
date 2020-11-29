@@ -55,3 +55,11 @@ td {
 .c3-rotated .c3-text {
   transform: translate(0, 0) !important;
 }
+
+.c3-barchart .c3-axis-x .tick line {
+  display: none;
+}
+
+.c3-barchart .c3-axis-x .domain {
+  display: none;
+}
