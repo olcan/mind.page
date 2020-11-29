@@ -187,10 +187,18 @@
       e.preventDefault();
       return;
     }
+
+    // "close" non-empty item with backspace (w/o modifier keys) at the start
+    if (e.code == "Backspace" && !(e.shiftKey || e.metaKey || e.ctrlKey) && textarea.selectionStart == 0) {
+      onDone(text /* maintain text */, e /* report backspace, which can be used to maintain time */);
+      e.preventDefault();
+      return;
+    }
+
     // delete non-empty item with Shift/Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start of the item
+      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start
       if (e.metaKey || e.ctrlKey || !navigator.platform.startsWith("iPhone") || textarea.selectionStart == 0) {
         onDone((text = ""), e);
         e.preventDefault();

@@ -59,7 +59,7 @@
   export let height = 0;
   const placeholder = " ";
   let error = false;
-  export let onEditing = (index: number, editing: boolean) => {};
+  export let onEditing = (index: number, editing: boolean, backspace: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onResized = (itemdiv) => {};
   export let onPrev = () => {};
@@ -70,13 +70,13 @@
   $: debugString = `${page} ${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   import { firestore } from "../../firebase.js";
-  function onDone() {
-    onEditing(index, (editing = false));
+  function onDone(editorText: string, e: KeyboardEvent) {
+    onEditing(index, (editing = false), e.key == "Backspace");
   }
   function onClick() {
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
-    onEditing(index, (editing = true));
+    onEditing(index, (editing = true), false);
   }
 
   export let onTagClick = (tag: string) => {};

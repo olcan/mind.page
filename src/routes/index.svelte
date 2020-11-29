@@ -585,10 +585,13 @@
     );
   }
 
-  function onItemEditing(index: number, editing: boolean) {
+  function onItemEditing(index: number, editing: boolean, backspace: boolean) {
     let item = items[index];
     // for non-log items, update time whenever the item is "touched"
     if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
+
+    // for backspace-triggered closings, we always restore savedTime and only save if text has changed
+    if (backspace) item.time = item.savedTime;
 
     if (editing) {
       // started editing
@@ -620,11 +623,13 @@
           }); // for /undelete
           firestore().collection("items").doc(item.id).delete().catch(console.error);
         } else {
-          // empty out any *_output blocks as they should be re-generated
-          item.text = item.text.replace(/\n```(\w*?_output)\n.*?\n```/gs, "\n```$1\n\n```");
-          // console.log(item.text);
-          // NOTE: these appends may trigger async _write
-          item.text = appendJSOutput(item.text, index);
+          // clear _output and execute javascript unless backspace-triggered
+          if (!backspace) {
+            // empty out any *_output blocks as they should be re-generated
+            item.text = item.text.replace(/\n```(\w*?_output)\n.*?\n```/gs, "\n```$1\n\n```");
+            // NOTE: these appends may trigger async _write
+            item.text = appendJSOutput(item.text, index);
+          }
           if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
           onEditorChange(editorText); // item time and/or text has changed
         }
