@@ -156,13 +156,17 @@
           // do not allow extra chars (consistent w/ marked)
           insideBlock = false;
 
-        // preserve line breaks by inserting <br> outside of code blocks
-        if (!insideBlock && !str.match(/^```|^    |^</))
-          // |^\> (breaking blockquotes for now)
-          str += "<br>\n";
+        // preserve inline whitespace and line breaks by inserting &nbsp; and <br> outside of code blocks
+        // (we exclude |^\> to break inside blockquotes for now)
+        if (!insideBlock && !str.match(/^```|^    \s*[^\-\*]|^</)) {
+          str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
+            return pfx + space.replace(/  /g, " &nbsp;");
+          });
+          str = str + "<br>\n";
+        }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^```|^</)) str += "\n";
-        if (!insideBlock && !str.match(/^```|^</)) {
+        if (!insideBlock && !str.match(/^```|^    \s*[^\-\*]|^</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
             str = str.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
@@ -620,7 +624,7 @@
   }
   :global(.item .math) {
     /* background: #222; */
-    padding: 2px 4px;
+    /* padding: 2px 4px; */
     border-radius: 4px;
   }
   :global(.item hr) {

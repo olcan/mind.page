@@ -71,7 +71,8 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
+        if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
+        else html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
     // append unclosed block as regular markdown
@@ -125,8 +126,8 @@
         "insertText",
         false,
         e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
-          ? textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)    /g, "$1")
-          : textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)/g, "$1    ")
+          ? textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)  /g, "$1")
+          : textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)/g, "$1  ")
       );
       if (oldStart < oldEnd) {
         // restore expanded selection
@@ -173,10 +174,10 @@
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
-      textarea.selectionStart >= 4 &&
-      textarea.value.substring(textarea.selectionStart - 4, textarea.selectionStart) == "    "
+      textarea.selectionStart >= 2 &&
+      textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
     ) {
-      textarea.selectionStart = textarea.selectionStart - 4;
+      textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
       e.preventDefault();
     }
@@ -211,12 +212,12 @@
       e.preventDefault();
       if (!e.shiftKey) {
         // forward tab
-        document.execCommand("insertText", false, "    ");
+        document.execCommand("insertText", false, "  ");
       } else if (
-        textarea.selectionStart >= 4 &&
-        textarea.value.substring(textarea.selectionStart - 4, textarea.selectionStart) == "    "
+        textarea.selectionStart >= 2 &&
+        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "    "
       ) {
-        textarea.selectionStart = textarea.selectionStart - 4;
+        textarea.selectionStart = textarea.selectionStart - 2;
         document.execCommand("delete", false);
       }
       onInput();
@@ -251,8 +252,8 @@
     // force replace tabs with spaces
     if (textarea.value.indexOf("\t") >= 0) {
       // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      if (textarea.value.match(/^[-*]\s/)) textarea.value = textarea.value.replace(/(\t+)/g, "$1 - ");
-      textarea.value = textarea.value.replace(/\t/g, "    ");
+      if (textarea.value.match(/^[-*]\s/)) textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
+      textarea.value = textarea.value.replace(/\t/g, "  ");
     }
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
