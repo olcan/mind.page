@@ -15,6 +15,7 @@
         "source": "**",
         "function": "ssr"
       }
-    ]
+    ],
+    "postdeploy": ["touch src/routes/index.svelte"]
   }
 }
