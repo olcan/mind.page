@@ -893,12 +893,25 @@
 
     // wrapper for c3.generate that stores a reference (_chart) on the DOM element
     // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
-    // also sets some default options
+    // also sets some default options and classes (e.g. c3-labeled and c3-rotated) for custom styling
     window["_chart"] = function (selector: string, spec: object) {
-      const chart = window["c3"].generate(
-        Object.assign(spec, { bindto: selector, point: { r: 5 }, padding: { top: 10, right: 5 } })
-      );
-      Array.from(document.querySelectorAll(selector)).forEach((elem) => (elem["_chart"] = chart));
+      let rotated = spec["axis"] && spec["axis"]["rotated"];
+      let labeled = spec["data"] && spec["data"]["labels"];
+      spec = Object.assign(spec, { bindto: selector, point: { r: 5 }, padding: { top: 10, right: 5 } });
+      if (rotated) {
+        Array.from(document.querySelectorAll(selector)).forEach((elem) => elem.classList.add("c3-rotated"));
+      }
+      if (labeled) {
+        Array.from(document.querySelectorAll(selector)).forEach((elem) => elem.classList.add("c3-labeled"));
+        // adjust padding if labeled (s.t. y axis will be hidden)
+        // NOTE: this seems to also fix uneven bar spacing
+        if (rotated) spec["padding"]["bottom"] = -15;
+        else spec["padding"]["left"] = 5;
+      }
+      const chart = window["c3"].generate(spec);
+      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+        elem["_chart"] = chart;
+      });
       return chart;
     };
 

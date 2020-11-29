@@ -42,8 +42,16 @@ td {
   stroke-width: 3px !important;
 }
 
-/* move data labels up to accommodate larger point radius */
-/* NOTE: this needs to be disabled/adjusted for rotated charts (unable to select via css) */
+/* hide y axis on labeled charts */
+.c3-labeled .c3-axis-y {
+  display: none;
+}
+
+/* move data labels up on un-rotated charts to accommodate larger point radius */
 .c3-text {
   transform: translate(0, -5px);
+}
+
+.c3-rotated .c3-text {
+  transform: translate(0, 0) !important;
 }
