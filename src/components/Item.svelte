@@ -185,6 +185,7 @@
           );
         }
         // close blockquotes with an extra \n before next line
+        // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
         if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = "\n" + str;
         lastLine = line;
         return str;
