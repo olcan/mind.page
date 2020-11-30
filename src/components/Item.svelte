@@ -359,7 +359,7 @@
     // trigger typesetting of any math elements
     Array.from(itemdiv.getElementsByClassName("math")).forEach((math) => {
       if (math.hasAttribute("_rendered")) return;
-      console.log("rendering math", math.innerHTML);
+      // console.log("rendering math", math.innerHTML);
       math.setAttribute("_rendered", Date.now().toString());
       window["MathJax"]
         .typesetPromise([math])

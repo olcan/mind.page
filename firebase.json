@@ -16,6 +16,6 @@
         "function": "ssr"
       }
     ],
-    "postdeploy": ["touch src/routes/index.svelte"]
+    "postdeploy": ["touch src/server.ts"]
   }
 }
