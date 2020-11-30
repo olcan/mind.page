@@ -145,31 +145,34 @@
 
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
+    let lastLine = "";
     text = text
       .split("\n")
       .map((line) => {
         let str = line;
-        if (!insideBlock && str.match(/^```/s))
+        if (!insideBlock && str.match(/^\s*```/s))
           // allow extra chars (consistent w/ marked)
           insideBlock = true;
-        else if (insideBlock && str.match(/^```\s*$/s))
+        else if (insideBlock && str.match(/^\s*```\s*$/s))
           // do not allow extra chars (consistent w/ marked)
           insideBlock = false;
 
         // preserve inline whitespace and line breaks by inserting &nbsp; and <br> outside of code blocks
-        // (we exclude |^\> to break inside blockquotes for now)
-        if (!insideBlock && !str.match(/^```|^    \s*[^\-\*]|^</)) {
+        // (we exclude |^> to break inside blockquotes for now)
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>/)) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
             return pfx + space.replace(/  /g, " &nbsp;");
           });
           str = str + "<br>\n";
         }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^```|^</)) str += "\n";
-        if (!insideBlock && !str.match(/^```|^    \s*[^\-\*]|^</)) {
+        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+        // NOTE: for blockquotes (>...) we need to break lines using double-space
+        if (!insideBlock && str.match(/^\s*>/)) str += "  ";
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
-            str = str.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
+            str = str.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
@@ -181,6 +184,9 @@
               } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
           );
         }
+        // close blockquotes with an extra \n before next line
+        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = "\n" + str;
+        lastLine = line;
         return str;
       })
       .join("\n")
@@ -626,6 +632,7 @@
     color: #444;
   }
   :global(.item .math) {
+    display: inline-block;
     /* background: #222; */
     /* padding: 2px 4px; */
     border-radius: 4px;

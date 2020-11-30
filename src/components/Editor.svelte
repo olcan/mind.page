@@ -40,7 +40,7 @@
       .replace(/'/g, "&#039;");
   let highlightTags = (t) => t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
   let highlightCode = (t) => t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
-  let highlightMath = (t) => t.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
+  let highlightMath = (t) => t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
@@ -49,9 +49,9 @@
     let code = "";
     let html = "";
     text.split("\n").map((line) => {
-      if (!insideBlock && line.match(/^```(\w+)$/)) {
+      if (!insideBlock && line.match(/^\s*```(\w+)$/)) {
         insideBlock = true;
-        language = line.match(/^```(\w+)$/).pop();
+        language = line.match(/^\s*```(\w+)$/).pop();
         if (language == "js_input") language = "js";
         if (language == "webppl") language = "js";
         if (language == "_html") language = "html";
@@ -60,7 +60,7 @@
         html += '<span class="block-delimiter">';
         html += escapeHTML(line);
         html += "</span>\n";
-      } else if (insideBlock && line.match(/^```/)) {
+      } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
         html += hljs.highlight(language, code).value;
         html += "</div>";

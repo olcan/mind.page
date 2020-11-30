@@ -508,13 +508,13 @@
   function extractBlock(text: string, type: string) {
     // NOTE: this logic is consistent with onInput() in Editor.svelte
     let insideBlock = false;
-    let regex = RegExp("^```" + type + "(\\s|$)");
+    let regex = RegExp("^\\s*```" + type + "(\\s|$)");
     return text
       .split("\n")
       .map((line) => {
         if (!insideBlock && line.match(regex)) insideBlock = true;
-        else if (insideBlock && line.match(/^```/)) insideBlock = false;
-        if (line.match(/^```/)) return "";
+        else if (insideBlock && line.match(/^\s*```/)) insideBlock = false;
+        if (line.match(/^\s*```/)) return "";
         return insideBlock ? line : "";
       })
       .filter((t) => t)
@@ -547,7 +547,7 @@
 
   function appendBlock(text: string, type: string, block: string) {
     block = "\n```" + type + "\n" + block + "\n```";
-    const regex = "\\n```" + type + "\\n.*?\\n```";
+    const regex = "\\n\\s*```" + type + "\\n.*?\\n\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -557,7 +557,7 @@
   }
 
   function appendJSOutput(text: string, index: number = -1): string {
-    if (!text.match(/```js_input\s/)) return text; // no js code in text
+    if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
     // execute JS code, including any tag-referenced items (using latest tags/label)
     const lctext = text.toLowerCase();
     const tags = itemTags(lctext);
@@ -646,7 +646,7 @@
           // clear _output and execute javascript unless backspace-triggered
           if (!backspace) {
             // empty out any *_output blocks as they should be re-generated
-            item.text = item.text.replace(/\n```(\w*?_output)\n.*?\n```/gs, "\n```$1\n\n```");
+            item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
             // NOTE: these appends may trigger async _write
             item.text = appendJSOutput(item.text, index);
           }
