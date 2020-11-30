@@ -281,7 +281,10 @@
 
   function onTagClick(tag: string, e: MouseEvent) {
     // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
-    let range = document.caretRangeFromPoint(e.pageX, e.pageY - document.documentElement.scrollTop);
+    let range = document.caretRangeFromPoint(
+      e.pageX - document.documentElement.scrollLeft,
+      e.pageY - document.documentElement.scrollTop
+    );
     if (range) {
       let tagNode = e.target as Node;
       // if target is not the tag node, it must be a highlight, so we move to the parent
