@@ -660,8 +660,6 @@
   }
   :global(.item blockquote .MathJax) {
     display: block;
-    padding-top: 5px;
-    padding-bottom: 5px;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {

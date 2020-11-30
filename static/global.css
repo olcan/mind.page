@@ -77,17 +77,17 @@ td {
   height: 100%;
   width: auto;
 }
-.graph .node > * {
+.graph .node * {
   stroke: none;
   fill: #999;
 }
-.graph .edge > path {
+.graph .edge * {
+  stroke: none;
+  fill: #999;
+}
+.graph .edge path {
   stroke: #999;
   stroke-width: 3px;
-}
-.graph .edge > polygon {
-  stroke: #999;
-  fill: #999;
 }
 
 .graph text {
