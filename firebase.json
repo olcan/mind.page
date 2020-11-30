@@ -16,6 +16,6 @@
         "function": "ssr"
       }
     ],
-    "postdeploy": ["touch src/server.ts"]
+    "postdeploy": []
   }
 }
