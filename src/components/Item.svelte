@@ -532,6 +532,9 @@
   :global(h1, h2, h3, h4, h5, h6, p, ul, blockquote, pre) {
     margin: 0;
   }
+  /* :global(h1, h2, h3, h4, h5, h6) {
+    clear: both;
+  } */
   :global(.item li) {
     text-indent: -3px;
   }
@@ -633,6 +636,7 @@
     border-top: 1px dashed #222;
     height: 1px; /* disappears if both height and border are 0 */
     margin: 10px 0;
+    clear: both; /* clear floats on both sides by default */
   }
   :global(.item img) {
     max-width: 100%;

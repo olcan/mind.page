@@ -162,7 +162,7 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1].replace(/^#_/, "#"));
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -547,7 +547,7 @@
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        jsout.push(evalJSInput(items[index].text, items[index].label) || "", index);
+        jsout.push(evalJSInput(items[index].text, items[index].label, index) || "");
       });
     });
     jsout.push(evalJSInput(text, label, index) || "");
@@ -838,14 +838,20 @@
       return ids.length == 1 ? ids[0] : ids;
     };
 
-    window["_read"] = function (type: string = "", item: string = "") {
+    window["_read"] = function (type: string = "", item: string = "", include_tagrefs: boolean = false) {
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
+        if (include_tagrefs) {
+          const lctext = items[index].text.toLowerCase();
+          const tags = itemTags(lctext);
+          const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+          tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, include_tagrefs)));
+        }
         if (type == "") content.push(items[index].text);
         else content.push(extractBlock(items[index].text, type));
       });
-      return content.length == 1 ? content[0] : content;
+      return content.join("\n");
     };
 
     window["_write"] = function (item: string, text: string, type: string = "_output") {
