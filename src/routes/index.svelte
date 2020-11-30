@@ -279,7 +279,24 @@
     lastEditorChangeTime = Infinity; // force minimum wait for next change
   }
 
-  function onTagClick(tag: string) {
+  function onTagClick(tag: string, e: MouseEvent) {
+    // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
+    let range = document.caretRangeFromPoint(e.pageX, e.pageY - document.documentElement.scrollTop);
+    if (range) {
+      let tagNode = e.target as Node;
+      // if target is not the tag node, it must be a highlight, so we move to the parent
+      if ((tagNode as HTMLElement).tagName != "MARK") tagNode = tagNode.parentNode;
+      // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
+      // if tag node contains highlight, we have to adjust click position
+      let pos = range.startOffset;
+      for (const child of Array.from(tagNode.childNodes)) {
+        if (child.contains(range.startContainer)) break;
+        pos += child.textContent.length;
+      }
+      tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
+    } else {
+      console.warn("got null range for tag click: ", tag, e);
+    }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     onEditorChange(editorText);
     window.top.scrollTo(0, 0);

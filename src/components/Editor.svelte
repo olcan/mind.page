@@ -118,7 +118,7 @@
         lastLineStart +
         textarea.value
           .substring(lastLineStart)
-          .replace(/^([^\n]*).*?$/s, "$1")
+          .match(/^[^\n]*/)[0]
           .trimEnd().length;
       textarea.selectionEnd = lineEnd;
       // NOTE: execCommand maintains undo/redo history.

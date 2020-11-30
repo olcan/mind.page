@@ -79,9 +79,9 @@
     onEditing(index, (editing = true), false);
   }
 
-  export let onTagClick = (tag: string) => {};
-  window["handleTagClick"] = (tag: string) => {
-    onTagClick(tag);
+  export let onTagClick = (tag: string, e: MouseEvent) => {};
+  window["handleTagClick"] = (tag: string, e: MouseEvent) => {
+    onTagClick(tag, e);
   };
 
   function regexEscape(str) {
@@ -178,7 +178,7 @@
             (match, pfx, tag) =>
               `${pfx}<mark ${
                 terms.has(tag) ? 'class="selected"' : termsSecondary.has(tag) ? 'class="secondary-selected"' : ""
-              } onclick="handleTagClick('${tag}');event.stopPropagation()">${tag}</mark>`
+              } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
           );
         }
         return str;
