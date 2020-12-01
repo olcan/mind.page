@@ -89,13 +89,14 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    // console.log(e)
+    // console.log(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
-    // indent selection
+    // indent/comment selection or current line
     if (
       ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
-      (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart)
+      (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart) ||
+      (e.code == "Slash" && (e.metaKey || e.ctrlKey))
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
@@ -121,14 +122,21 @@
           .match(/^[^\n]*/)[0]
           .trimEnd().length;
       textarea.selectionEnd = lineEnd;
-      // NOTE: execCommand maintains undo/redo history.
+
+      // NOTE: execCommand maintains undo/redo history
+      let selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
       document.execCommand(
         "insertText",
         false,
-        e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
-          ? textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)  /g, "$1")
-          : textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).replace(/(^|\n)/g, "$1  ")
+        e.code == "Slash"
+          ? selectedText.match(/(^|\n)\s*\/\//)
+            ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, "$1")
+            : selectedText.replace(/((?:^|\n)\s*)([^\/])/g, "$1// $2")
+          : e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
+          ? selectedText.replace(/(^|\n)  /g, "$1")
+          : selectedText.replace(/(^|\n)/g, "$1  ")
       );
+
       if (oldStart < oldEnd) {
         // restore expanded selection
         textarea.selectionStart = Math.min(lineStart, oldStart);
