@@ -983,6 +983,20 @@
       return histogram;
     };
 
+    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2) {
+      dist = dist.getDist();
+      let keys = Object.keys(dist).map((k) => k.toString());
+      let values = Object.values(dist).map((v) => v["prob"]);
+      let indices = Array.from(Array(values.length).keys());
+      indices = stableSort(indices, (i, j) => values[j] - values[i]);
+      values = values.map((v) => v.toFixed(digits));
+      indices = indices.filter((i) => values[i] > 0);
+      indices.length = Math.min(indices.length, limit);
+      let pmf = {};
+      indices.forEach((i) => (pmf[keys[i]] = values[i]));
+      return pmf;
+    };
+
     // Visual viewport resize/scroll handlers ...
     // NOTE: font resizing is handled in a periodic task, see onMount below
     let lastScrollTime = 0;
