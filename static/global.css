@@ -54,7 +54,15 @@ td {
 }
 
 .c3-rotated .c3-text {
-  transform: translate(0, 0) !important;
+  transform: translate(0, 0);
+}
+
+/* rotated chart text adjustments for pixel-perfect alignment with Avenir Next fonts */
+.c3-rotated .c3-axis-x {
+  transform: translate(0, 2px);
+}
+.c3-rotated .c3-texts .c3-text {
+  transform: translate(0, -1px);
 }
 
 .c3-barchart .c3-axis-x .tick line {
