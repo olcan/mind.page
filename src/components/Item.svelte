@@ -435,16 +435,28 @@
             if (itemdiv) {
               onResized(itemdiv);
               // if no errors, cache elems with _cache_key that had scripts in them
-              // if error occurred, invalidate all cached elements for item (necessary e.g. for c3 charts)
+              // if error occurred, remove any cached elements for item to force restore/rerun scripts
               if (scriptErrors.length == 0) cacheElems();
               else {
                 Object.values(window["_cache"]).filter((elem: HTMLElement) => {
                   if (elem.getAttribute("_item") == id) {
                     console.log(`removing cached element for item ${index + 1}`);
                     delete window["_cache"][elem.getAttribute("_cache_key")];
+                    // destroy any c3 charts inside element
+                    Array.from(elem.querySelectorAll(".c3")).map((div) => {
+                      if (div["_chart"]) {
+                        div["_chart"].destroy();
+                        delete div["_chart"];
+                      }
+                    });
                   }
                 });
               }
+              // redraw c3 charts inside item
+              // TODO: first confirm the missing chart issue is not due to console errors
+              // Array.from(itemdiv.querySelectorAll(".c3")).map((div) => {
+              //   if (div["_chart"]) div["_chart"].resize();
+              // });
             }
           }
         });

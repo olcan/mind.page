@@ -540,7 +540,8 @@
       evalIndex = -1;
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
-      alert(msg);
+      if (console["_eval_error"]) console["_eval_error"](msg);
+      else alert(msg);
       return undefined;
     }
   }
@@ -730,6 +731,44 @@
           // user logged in
           user = authUser;
           loggedIn = true;
+
+          // copy console into #console if it exists
+          const consolediv = document.getElementById("console");
+          if (consolediv) {
+            // NOTE:
+            console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
+            console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
+            ["log", "debug", "info", "warn", "error", "_window_error", "_eval_error"].forEach(function (verb) {
+              console[verb] = (function (method, verb, div) {
+                return function (...args) {
+                  method(...args);
+                  var entry = document.createElement("div");
+                  if (verb.endsWith("error")) verb = "error";
+                  entry.classList.add("console-" + verb);
+                  let item; // if the source is an item
+                  if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
+                    item = items[indexFromId.get(window["_script_item_id"])];
+                  } else if (evalIndex) {
+                    item = items[evalIndex];
+                  }
+                  if (item) {
+                    // prepent item index, label (if any)
+                    // NOTE: item.label can be outdated at this point due to pending save
+                    const lctext = item.text.toLowerCase();
+                    const tags = itemTags(lctext);
+                    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+                    if (label) args.unshift(label + ":");
+                    args.unshift(`[${item.index}]`);
+                  }
+                  entry.textContent = args.join(" ") + "\n";
+                  div.appendChild(entry);
+                  // auto-remove after 10 seconds ...
+                  setTimeout(() => div.removeChild(entry), 10000);
+                };
+              })(console[verb].bind(console), verb, consolediv);
+            });
+          }
+
           console.log("signed in", user.email);
           localStorage.setItem("user", JSON.stringify(user));
 
@@ -742,7 +781,7 @@
               .getIdToken(false /*force refresh*/)
               .then((token) => {
                 document.cookie = "__session=" + token + ";max-age=86400";
-                console.log("updated cookie", error || "no error");
+                console.log("updated cookie", error || "(no error)");
                 // reload with new cookie if we are on error page
                 if (error) location.reload();
               })
@@ -1052,9 +1091,11 @@
     }
   }
 
-  // redirect error to alert
+  // redirect error to alert or console._window_error if it exists
   function onError(e) {
-    alert(`${e.message} (lineno:${e.lineno}, colno:${e.colno})`);
+    const msg = `${e.message} (lineno:${e.lineno}, colno:${e.colno})`;
+    if (console["_window_error"]) console["_window_error"](msg);
+    else alert(msg);
     if (!window["_errors"]) window["_errors"] = [];
     window["_errors"].push(e);
   }
@@ -1121,6 +1162,16 @@
     background: gray;
     cursor: pointer;
   }
+  #console {
+    font-family: monospace;
+    padding-left: 5px;
+  }
+  :global(.console-warn) {
+    color: yellow;
+  }
+  :global(.console-error) {
+    color: red;
+  }
   .items {
     column-count: auto;
     column-fill: balance;
@@ -1170,6 +1221,7 @@
             {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
           </div>
         </div>
+        <div id="console" />
         <!-- auto-focus on the editor unless on iPhone -->
         {#if loggedIn}
           <script>
