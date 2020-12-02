@@ -436,8 +436,9 @@
               onResized(itemdiv);
               // if no errors, cache elems with _cache_key that had scripts in them
               // if error occurred, remove any cached elements for item to force restore/rerun scripts
-              if (scriptErrors.length == 0) cacheElems();
-              else {
+              if (scriptErrors.length == 0) {
+                cacheElems();
+              } else {
                 Object.values(window["_cache"]).filter((elem: HTMLElement) => {
                   if (elem.getAttribute("_item") == id) {
                     console.log(`removing cached element for item ${index + 1}`);
@@ -452,11 +453,6 @@
                   }
                 });
               }
-              // redraw c3 charts inside item
-              // TODO: first confirm the missing chart issue is not due to console errors
-              // Array.from(itemdiv.querySelectorAll(".c3")).map((div) => {
-              //   if (div["_chart"]) div["_chart"].resize();
-              // });
             }
           }
         });

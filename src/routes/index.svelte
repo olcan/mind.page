@@ -964,6 +964,7 @@
     // wrapper for c3.generate that stores a reference (_chart) on the DOM element
     // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
     // also sets some default options and classes (e.g. c3-labeled and c3-rotated) for custom styling
+    // also ensures element style.height matches size.height if specified (otherwise sizing is lost on window resize)
     window["_chart"] = function (selector: string, spec: object) {
       let rotated = spec["axis"] && spec["axis"]["rotated"];
       let labeled = spec["data"] && spec["data"]["labels"];
@@ -987,6 +988,7 @@
       }
       const chart = window["c3"].generate(spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+        if (spec["size"] && spec["size"]["height"]) (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
         elem["_chart"] = chart;
       });
       return chart;
