@@ -546,18 +546,18 @@
     text-indent: -3px;
   }
   :global(.item ul) {
-    padding-left: 21px;
+    padding-left: 20px;
     /* border-left: 1px solid #333; */
   }
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
-    padding-left: 15px;
+    padding-left: 5px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
   }
   /* NOTE: these font sizes should match those in Editor */
   :global(.item pre) {
-    padding-left: 15px;
+    padding-left: 5px;
     margin-bottom: 10px;
     border-left: 1px solid #333;
     font-size: 15px;
