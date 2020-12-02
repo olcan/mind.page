@@ -131,7 +131,7 @@
         e.code == "Slash"
           ? selectedText.match(/^\s*\/\//) // match(/(^|\n)\s*\/\//)
             ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, "$1")
-            : selectedText.replace(/((?:^|\n)\s*)([^\/])/g, "$1// $2")
+            : selectedText.replace(/((?:^|\n)\s*)(.*)/g, "$1// $2")
           : e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
           ? selectedText.replace(/(^|\n)  /g, "$1")
           : selectedText.replace(/(^|\n)/g, "$1  ")
