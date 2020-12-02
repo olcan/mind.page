@@ -223,7 +223,7 @@
         document.execCommand("insertText", false, "  ");
       } else if (
         textarea.selectionStart >= 2 &&
-        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "    "
+        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
       ) {
         textarea.selectionStart = textarea.selectionStart - 2;
         document.execCommand("delete", false);
