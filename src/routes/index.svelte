@@ -994,6 +994,28 @@
       return chart;
     };
 
+    // wrapper for d3 graphviz
+    window["_dot"] = function (selector: string, dot: string) {
+      // NOTE: best way to define defaults seems to be by inserting attributes into the dot, which are turned into SVG attributes by d3 graphviz, which take lowest priority (as opposed to inline styles which would take highest, see https://stackoverflow.com/a/24294284) and can be easily modified either in the dot code or using CSS
+      const nodedefs =
+        'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",fontsize=20,shape=circle,fixedsize=true';
+      const edgedefs = 'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
+      const graphdefs = `bgcolor=invis; color="#999999"; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
+      const subgraphdefs = `edge[minlen=2]`;
+      dot = dot.replace(/(subgraph.*?{)/g, `$1\n${subgraphdefs};\n`);
+      dot = dot.replace(/(subgraph.*?){(.+?)}/gs, `$1{{$2}}`); // double {{...}} allows rank=same
+      dot = dot.replace(/(graph.*?{)/g, `$1\n${graphdefs};\n`);
+      window["d3"]
+        .select(selector)
+        .graphviz()
+        .zoom(false)
+        .renderDot(dot, function () {
+          const elem = document.querySelector(selector);
+          // NOTE: _dotrendered is defined automatically in Item.svelte
+          if (elem && elem["_dotrendered"]) elem["_dotrendered"]();
+        });
+    };
+
     window["_histogram"] = function (
       numbers: Array<number>,
       bins: number = 10,
@@ -1036,13 +1058,6 @@
       let pmf = {};
       indices.forEach((i) => (pmf[keys[i]] = values[i]));
       return pmf;
-    };
-
-    window["_dotrendered"] = function (selector: string) {
-      return function () {
-        const dot = document.querySelector(selector);
-        if (dot && dot["_dotrendered"]) dot["_dotrendered"]();
-      };
     };
 
     // Visual viewport resize/scroll handlers ...

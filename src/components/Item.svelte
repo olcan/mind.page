@@ -459,20 +459,25 @@
                     });
                     renderMath(math, function () {
                       dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
-                        let dotnode = elem.parentNode.parentNode.parentNode.parentNode;
-                        let noderect = (dotnode.children[1] as SVGGraphicsElement).getBBox();
-                        let textrect = dotnode.children[2]["_bbox"];
-                        let textscale = textrect.height / noderect.height;
+                        let math = elem as SVGGraphicsElement;
+                        let dot = elem.parentNode.parentNode.parentNode.parentNode;
+                        let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+                        let shaperect = shape.getBBox();
+                        let text = dot.children[2]; // text is second child
+                        let textrect = text["_bbox"]; // recover text bbox pre-mathjax
+                        let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
                         elem.parentElement.parentElement.parentElement.remove(); // remove text node
-                        dotnode.appendChild(elem);
-                        // center math inside node
-                        let mathrect = (elem as SVGGraphicsElement).getBBox();
-                        let scale = (textscale * noderect.height) / mathrect.height;
-                        let xt = -mathrect.x;
-                        let yt = -mathrect.y;
-                        let xt2 = noderect.x + noderect.width / 2 - (mathrect.width * scale) / 2;
-                        let yt2 = -noderect.height / 2 + (mathrect.height * scale) / 2;
-                        (elem as HTMLElement).style.transform = `translate(${xt2}px, ${yt2}px) scale(${scale},-${scale}) translate(${xt}px, ${yt}px)`;
+                        dot.appendChild(elem);
+                        let mathrect = math.getBBox();
+                        let scale = (textscale * shaperect.height) / mathrect.height;
+                        let xt0 = -mathrect.x;
+                        let yt0 = -mathrect.y;
+                        let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
+                        let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2;
+                        elem.setAttribute(
+                          "transform",
+                          `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
+                        );
                       });
                     });
                   };
