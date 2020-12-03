@@ -450,6 +450,17 @@
                 Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
                   dot["_dotrendered"] = function () {
                     if (!itemdiv || !itemdiv.contains(dot)) return;
+                    // render "stack" clusters (subgraphs)
+                    Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
+                      let path = cluster.children[1]; // first child is title
+                      let pathbg = path.cloneNode();
+                      (pathbg as HTMLElement).setAttribute("transform", "translate(3,3)");
+                      (pathbg as HTMLElement).setAttribute("opacity", "0.9");
+                      (path as HTMLElement).setAttribute("fill", "#111");
+                      cluster.insertBefore(pathbg, path);
+                    });
+
+                    // render math in text nodes
                     let math = [];
                     Array.from(dot.querySelectorAll("text")).forEach((text) => {
                       if (text.textContent.match(/^\$.+\$$/)) {
@@ -461,9 +472,10 @@
                       dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
                         let math = elem as SVGGraphicsElement;
                         let dot = elem.parentNode.parentNode.parentNode.parentNode;
+                        // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
                         let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+                        let text = dot.children[dot.children.length - 1]; // text is last child
                         let shaperect = shape.getBBox();
-                        let text = dot.children[2]; // text is second child
                         let textrect = text["_bbox"]; // recover text bbox pre-mathjax
                         let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
                         elem.parentElement.parentElement.parentElement.remove(); // remove text node

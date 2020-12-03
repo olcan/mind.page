@@ -1000,10 +1000,9 @@
       const nodedefs =
         'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",fontsize=20,shape=circle,fixedsize=true';
       const edgedefs = 'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
-      const graphdefs = `bgcolor=invis; color="#999999"; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
-      const subgraphdefs = `edge[minlen=2]`;
+      const graphdefs = `bgcolor=invis; color="#666666"; fontcolor="#666666"; fontname="Avenir Next, Helvetica"; fontsize=20; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
+      const subgraphdefs = `labeljust="r"; labelloc="b"; edge[minlen=2]`;
       dot = dot.replace(/(subgraph.*?{)/g, `$1\n${subgraphdefs};\n`);
-      dot = dot.replace(/(subgraph.*?){(.+?)}/gs, `$1{{$2}}`); // double {{...}} allows rank=same
       dot = dot.replace(/(graph.*?{)/g, `$1\n${graphdefs};\n`);
       window["d3"]
         .select(selector)
