@@ -473,7 +473,6 @@
                         let xt2 = noderect.x + noderect.width / 2 - (mathrect.width * scale) / 2;
                         let yt2 = -noderect.height / 2 + (mathrect.height * scale) / 2;
                         (elem as HTMLElement).style.transform = `translate(${xt2}px, ${yt2}px) scale(${scale},-${scale}) translate(${xt}px, ${yt}px)`;
-                        //scale(${scale}, -${scale})
                       });
                     });
                   };
