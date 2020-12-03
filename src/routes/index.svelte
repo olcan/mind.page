@@ -1038,6 +1038,13 @@
       return pmf;
     };
 
+    window["_dotrendered"] = function (selector: string) {
+      return function () {
+        const dot = document.querySelector(selector);
+        if (dot && dot["_dotrendered"]) dot["_dotrendered"]();
+      };
+    };
+
     // Visual viewport resize/scroll handlers ...
     // NOTE: font resizing is handled in a periodic task, see onMount below
     let lastScrollTime = 0;

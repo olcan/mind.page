@@ -256,6 +256,21 @@
     });
   }
 
+  function renderMath(elems, done = null) {
+    if (elems.length == 0) return;
+    window["MathJax"]
+      .typesetPromise(elems)
+      .then(() => {
+        if (itemdiv) {
+          // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
+          itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
+          if (done) done();
+          onResized(itemdiv);
+        }
+      })
+      .catch(console.error);
+  }
+
   afterUpdate(() => {
     if (!itemdiv) return; // itemdiv is null if editing
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
@@ -364,21 +379,14 @@
     }, 0);
 
     // trigger typesetting of any math elements
-    Array.from(itemdiv.getElementsByClassName("math")).forEach((math) => {
-      if (math.hasAttribute("_rendered")) return;
+    let math = [];
+    Array.from(itemdiv.getElementsByClassName("math")).forEach((elem) => {
+      if (elem.hasAttribute("_rendered")) return;
       // console.log("rendering math", math.innerHTML);
-      math.setAttribute("_rendered", Date.now().toString());
-      window["MathJax"]
-        .typesetPromise([math])
-        .then(() => {
-          if (itemdiv) {
-            // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-            itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
-            onResized(itemdiv);
-          }
-        })
-        .catch(console.error);
+      elem.setAttribute("_rendered", Date.now().toString());
+      math.push(elem);
     });
+    renderMath(math);
 
     // set up img tags to enable caching and invoke onResized onload
     Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
@@ -438,6 +446,38 @@
               // if error occurred, remove any cached elements for item to force restore/rerun scripts
               if (scriptErrors.length == 0) {
                 cacheElems();
+                // render new math inside dot graph nodes that may have been rendered by the script
+                Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
+                  dot["_dotrendered"] = function () {
+                    if (!itemdiv || !itemdiv.contains(dot)) return;
+                    let math = [];
+                    Array.from(dot.querySelectorAll("text")).forEach((text) => {
+                      if (text.textContent.match(/^\$.+\$$/)) {
+                        text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
+                        math.push(text);
+                      }
+                    });
+                    renderMath(math, function () {
+                      dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
+                        let dotnode = elem.parentNode.parentNode.parentNode.parentNode;
+                        let noderect = (dotnode.children[1] as SVGGraphicsElement).getBBox();
+                        let textrect = dotnode.children[2]["_bbox"];
+                        let textscale = textrect.height / noderect.height;
+                        elem.parentElement.parentElement.parentElement.remove(); // remove text node
+                        dotnode.appendChild(elem);
+                        // center math inside node
+                        let mathrect = (elem as SVGGraphicsElement).getBBox();
+                        let scale = (textscale * noderect.height) / mathrect.height;
+                        let xt = -mathrect.x;
+                        let yt = -mathrect.y;
+                        let xt2 = noderect.x + noderect.width / 2 - (mathrect.width * scale) / 2;
+                        let yt2 = -noderect.height / 2 + (mathrect.height * scale) / 2;
+                        (elem as HTMLElement).style.transform = `translate(${xt2}px, ${yt2}px) scale(${scale},-${scale}) translate(${xt}px, ${yt}px)`;
+                        //scale(${scale}, -${scale})
+                      });
+                    });
+                  };
+                });
               } else {
                 Object.values(window["_cache"]).filter((elem: HTMLElement) => {
                   if (elem.getAttribute("_item") == id) {
