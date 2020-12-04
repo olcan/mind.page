@@ -50,7 +50,7 @@ td {
 /* fix an annoying alignment issue where x axis line does not align with bottom tick of y axis */
 .c3-axis-x .domain,
 .c3-axis-x .tick line {
-  transform: translate(0, 0.5px);
+  transform: translate(0, 0.5pt);
 }
 
 /* hide y axis on labeled charts */
