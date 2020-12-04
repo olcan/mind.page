@@ -47,6 +47,12 @@ td {
   stroke-width: 3px !important;
 }
 
+/* fix an annoying alignment issue where x axis line does not align with bottom tick of y axis */
+.c3-axis-x .domain,
+.c3-axis-x .tick line {
+  transform: translate(0, 0.5px);
+}
+
 /* hide y axis on labeled charts */
 .c3-labeled .c3-axis-y {
   display: none;
@@ -86,6 +92,7 @@ td {
   display: block;
   height: 100%;
   width: auto;
+  max-width: 100%;
   margin: auto;
 }
 .dot {

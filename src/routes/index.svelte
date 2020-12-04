@@ -53,8 +53,7 @@
   let indexFromId;
   let indicesFromLabel;
   let headerdiv;
-  let pages = [];
-  let maxSectionHeight = 0;
+  let columns;
   function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
@@ -62,30 +61,15 @@
     let prevTimeString = "";
     indexFromId = new Map();
     indicesFromLabel = new Map();
-    let sectionHeight = 0;
-    let columnCount = 1;
-    let sectionIndex = 0;
-    let pageIndex = 0;
-    let pageHeight = 0;
     let timeString = "";
-    pages = [{ index: 0, start: 0 }];
-    const itemsCanBreak = false; // if true, sections == pages (should match break-inside setting for .super-container)
+    // NOTE: we use document width as it scales with font size consistently on iOS and Mac
+    let columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
+    columns = [...Array(columnCount).keys()];
+    let columnHeights = new Array(columnCount).fill(0);
+    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column contains header
 
-    // Once header is available, we can calculate actual # columns and maxSectionHeight. Until then we can still estimate column count but we can not determine accurate paging until item heights are available.
-    if (headerdiv) {
-      // NOTE: we use outerWidth as it is not subject to zooming/scaling
-      columnCount = Math.round(outerWidth / headerdiv.offsetWidth);
-      // NOTE: on iOS both visualViewport.height and window.innerHeight account for top bar but only visualViewport accounts for the keyboard overlay. Both are subject to zooming (scale>1) while window.outerHeight is not.
-      maxSectionHeight = outerHeight * (itemsCanBreak ? columnCount : 1);
-      // console.log(columnCount, maxSectionHeight);
-      sectionHeight = headerdiv.offsetHeight; // first page includes header
-    } else {
-      // console.log("header not yet available for columnCount");
-      columnCount = Math.floor(outerWidth / 500); // guess based on column-width (~min-width)
-    }
     items.forEach((item, index) => {
       item.index = index;
-      item.page = pageIndex;
       indexFromId.set(item.id, index);
       if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.label) {
@@ -107,42 +91,12 @@
         prevTimeString = timeString;
         prevTime = item.time;
       }
-      item.sectionStart = false;
-      if (maxSectionHeight > 0) {
-        // page based on item heights (plus super-container padding/margin and timeString height)
-        let sectionHeightPreItem = sectionHeight;
-        pageHeight = Math.max(pageHeight, sectionHeightPreItem);
-        sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
-        // NOTE: if paging at this item cuts page height by more than half, then we page on next item
-        item.sectionStart =
-          columnCount > 1 && sectionHeight > maxSectionHeight && sectionHeightPreItem >= maxSectionHeight / 2;
-        if (item.sectionStart) {
-          sectionHeight = item.height + 8 + (item.timeString ? 24 : 0);
-          // console.log(
-          //   `cutting off section ${sectionIndex} at index ${index}, height ${sectionHeightPreItem} (max ${maxSectionHeight}), new section at height ${sectionHeight}`
-          // );
-        }
-      } else {
-        item.sectionStart = index > 0 && index % 5 == 0; // 5 items per section
-      }
-      item.pageStart = false;
-      if (item.sectionStart) {
-        sectionIndex++;
-        item.pageStart = columnCount > 1 && (itemsCanBreak || sectionIndex % columnCount == 0);
-      }
-      if (item.pageStart) {
-        pages[pages.length - 1].height = pageHeight * (itemsCanBreak ? 1.0 / columnCount : 1);
-        pageHeight = sectionHeight;
-        pageIndex++;
-        item.page++;
-        item.timeString = timeString; // always include time string for new page
-        pages[pages.length - 1].end = item.index;
-        pages.push({ index: item.page, start: item.index });
-      }
+
+      // determine column
+      if (item.pinned) item.column = 0;
+      else item.column = columnHeights.indexOf(Math.min.apply(null, columnHeights));
+      columnHeights[item.column] += (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
     });
-    pages[pages.length - 1].end = items.length;
-    pages[pages.length - 1].height = pageHeight;
-    // console.log(pages);
 
     if (focusedItem >= 0) {
       // maintain focus on item
@@ -482,7 +436,7 @@
       );
     }
     items[index].height = height;
-    // NOTE: reported height can apparently fluctuate when items can be broken across columns (i.e. break-inside != avoid, so we only consider layout (paging) changes when item heights change significantly, e.g. from zero to non-zero, by +100px or by -50%+. When the layout is updated, the latest known heights are used for all items, but layout (i.e. paging) can be stale in the meantime, with some pages being slightly smaller/larger than they should be until next layout.
+    // NOTE: We only consider layout changes when item heights change significantly, e.g. from zero to non-zero, by +100px or by -50%+. When the layout is updated, the latest known heights are used for all items, but layout can be stale in the meantime, with some pages being slightly smaller/larger than they should be until next layout. This was originally done due to fluctuations in height in multi-column layout with breaking.
     if (
       height == 0 ||
       items[index].height == 0 ||
@@ -712,6 +666,8 @@
     }
     setTimeout(() => textArea(index + inc).focus(), 0);
   }
+
+  import { onMount } from "svelte";
 
   if (isClient) {
     // initialize indices and savedText/Time
@@ -982,6 +938,10 @@
           bindto: selector,
           point: { r: 5 },
           padding: { top: 10, right: 5 },
+          axis: {
+            x: { tick: { outer: false }, padding: 0 },
+            y: { tick: { outer: false }, padding: 5 },
+          },
         },
         spec
       );
@@ -1071,23 +1031,26 @@
     };
 
     // Visual viewport resize/scroll handlers ...
-    // NOTE: font resizing is handled in a periodic task, see onMount below
+    // NOTE: we use document width because it is invariant to zoom scale
+    //       window.outerWidth is also invariant but can be stale after device rotation in iOS Safari
+    // NOTE: font resizing does not trigger resize events and is handled in a periodic task, see onMount below
     let lastScrollTime = 0;
-    let lastOuterWidth = outerWidth;
-    let lastOuterHeight = outerHeight;
+    let lastDocumentWidth = 0;
     visualViewport.addEventListener("scroll", (e) => {
       lastScrollTime = Date.now();
     });
     let resizePending = false;
     function tryResize() {
-      // NOTE: no need to ignore while zooming as long as we use outer width/height
-      // if (visualViewport.scale > 1) return; // ignore while zooming
       if (Date.now() - lastScrollTime > 250) {
-        if (outerWidth != lastOuterWidth || outerHeight != lastOuterHeight) {
-          console.log(`window size changed from ${lastOuterWidth}x${lastOuterHeight} to ${outerWidth}x${outerHeight}`);
+        const documentWidth = document.documentElement.clientWidth;
+        if (documentWidth != lastDocumentWidth) {
+          console.log(`document width changed from ${lastDocumentWidth} to ${documentWidth}`);
           updateItemLayout();
-          lastOuterWidth = outerWidth;
-          lastOuterHeight = outerHeight;
+          // also trigger resize of all charts on the page ...
+          Array.from(document.querySelectorAll(".c3")).map((div) => {
+            if (div["_chart"]) div["_chart"].resize();
+          });
+          lastDocumentWidth = documentWidth;
         }
       } else if (!resizePending) {
         resizePending = true;
@@ -1098,6 +1061,12 @@
       }
     }
     visualViewport.addEventListener("resize", tryResize);
+
+    onMount(() => {
+      // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial layout
+      setTimeout(() => onEditorChange(""), 0);
+      setInterval(tryResize, 250); // no need to destroy since page-level
+    });
 
     // Restore user from localStorage for faster init
     // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
@@ -1133,27 +1102,6 @@
     if (!window["_errors"]) window["_errors"] = [];
     window["_errors"].push(e);
   }
-
-  import { onMount, onDestroy } from "svelte";
-  let pollingTask;
-  let lastHeaderWidth;
-  onMount(() => {
-    // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial paging
-    setTimeout(() => onEditorChange(""), 0);
-    pollingTask = setInterval(() => {
-      if (!headerdiv) return;
-      if (lastHeaderWidth && lastHeaderWidth != headerdiv.offsetWidth) {
-        console.log(`font size (header width) changed from ${headerdiv.offsetWidth} to ${lastHeaderWidth}`);
-        updateItemLayout();
-        // also trigger resize of all charts on the page ...
-        Array.from(document.querySelectorAll(".c3")).map((div) => {
-          if (div["_chart"]) div["_chart"].resize();
-        });
-      }
-      lastHeaderWidth = headerdiv.offsetWidth;
-    }, 250);
-  });
-  onDestroy(() => clearInterval(pollingTask));
 </script>
 
 <style>
@@ -1168,8 +1116,6 @@
   }
   #header {
     width: 100%;
-    /* max-width same as .super-container in Item.svelte */
-    /* max-width: 750px; */
     padding-bottom: 8px;
   }
   #header-container {
@@ -1207,18 +1153,14 @@
     color: red;
   }
   .items {
-    column-count: auto;
-    column-fill: balance;
-    column-width: 500px; /* acts like min-width; max-width is on #header and .super-container (in Item.svelte) */
-    column-gap: 0;
-    /* margin-top: 4px; */
+    width: 100%;
+    display: flex;
   }
-  .page-separator {
-    column-span: all;
-    display: block;
-    height: 1px;
-    border-top: 1px dashed #444;
-    margin: 20px 0;
+  .column {
+    flex: 1;
+    /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
+    min-width: 0px;
+    max-width: 750px;
   }
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
@@ -1236,69 +1178,68 @@
 {#if user && allowedUsers.includes(user.uid) && !error}
   <!-- all good! user logged in, has permissions, and no error from server -->
 
-  {#each pages as page}
-    <div class="items">
-      {#if page.index == 0}
-        <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-          <div id="header-container" class:focused>
-            <div id="editor">
-              <Editor
-                bind:text={editorText}
-                bind:focused
-                onFocused={onEditorFocused}
-                onChange={onEditorChange}
-                onDone={onEditorDone}
-                onPrev={onPrevItem}
-                onNext={onNextItem} />
+  <div class="items">
+    {#each columns as column}
+      <div class="column">
+        {#if column == 0}
+          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div id="header-container" class:focused>
+              <div id="editor">
+                <Editor
+                  bind:text={editorText}
+                  bind:focused
+                  onFocused={onEditorFocused}
+                  onChange={onEditorChange}
+                  onDone={onEditorDone}
+                  onPrev={onPrevItem}
+                  onNext={onNextItem} />
+              </div>
+              <div class="spacer" />
+              {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
-            <div class="spacer" />
-            {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
           </div>
-        </div>
-        <div id="console" />
-        <!-- auto-focus on the editor unless on iPhone -->
-        {#if loggedIn}
-          <script>
-            // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
-            //       autofocus except in certain unexpected situations (like coming back to app)
-            if (!navigator.platform.startsWith("iPhone")) document.getElementById("textarea-editor").focus();
-          </script>
+          <div id="console" />
+          <!-- auto-focus on the editor unless on iPhone -->
+          {#if loggedIn}
+            <script>
+              // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
+              //       autofocus except in certain unexpected situations (like coming back to app)
+              if (!navigator.platform.startsWith("iPhone")) document.getElementById("textarea-editor").focus();
+            </script>
+          {/if}
         {/if}
-      {/if}
 
-      {#if page.index > 0}
-        <div class="page-separator" />
-      {/if}
-
-      {#each items.slice(page.start, page.end) as item (item.id)}
-        <Item
-          onEditing={onItemEditing}
-          onFocused={onItemFocused}
-          onResized={onItemResized}
-          {onTagClick}
-          onPrev={onPrevItem}
-          onNext={onNextItem}
-          bind:text={item.text}
-          bind:editing={item.editing}
-          bind:focused={item.focused}
-          bind:saving={item.saving}
-          bind:height={item.height}
-          bind:time={item.time}
-          id={item.id}
-          tmpid={item.tmpid}
-          index={item.index}
-          page={item.page}
-          itemCount={items.length}
-          matchingItemCount={item.matchingItemCount}
-          matchingTerms={item.matchingTerms.join(' ')}
-          matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-          timeString={item.timeString}
-          timeOutOfOrder={item.timeOutOfOrder}
-          updateTime={item.updateTime}
-          createTime={item.createTime} />
-      {/each}
-    </div>
-  {/each}
+        {#each items as item (item.id)}
+          {#if item.column == column}
+            <Item
+              onEditing={onItemEditing}
+              onFocused={onItemFocused}
+              onResized={onItemResized}
+              {onTagClick}
+              onPrev={onPrevItem}
+              onNext={onNextItem}
+              bind:text={item.text}
+              bind:editing={item.editing}
+              bind:focused={item.focused}
+              bind:saving={item.saving}
+              bind:height={item.height}
+              bind:time={item.time}
+              id={item.id}
+              tmpid={item.tmpid}
+              index={item.index}
+              itemCount={items.length}
+              matchingItemCount={item.matchingItemCount}
+              matchingTerms={item.matchingTerms.join(' ')}
+              matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+              timeString={item.timeString}
+              timeOutOfOrder={item.timeOutOfOrder}
+              updateTime={item.updateTime}
+              createTime={item.createTime} />
+          {/if}
+        {/each}
+      </div>
+    {/each}
+  </div>
 {:else if user && !allowedUsers.includes(user.uid)}
   <!-- user logged in but not allowed -->
   Hello

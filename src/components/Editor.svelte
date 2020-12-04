@@ -277,8 +277,6 @@
     position: relative;
     width: 100%;
     cursor: text;
-    /* splitting the editor does not work on iOS */
-    break-inside: avoid-column;
   }
   .backdrop,
   textarea {

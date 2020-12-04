@@ -44,7 +44,6 @@
   export let index: number;
   export let id: string;
   export let tmpid: string; // temporary id for items created in current session
-  export let page: number;
   export let itemCount: number;
   export let matchingItemCount: number;
   export let matchingTerms: any;
@@ -67,7 +66,7 @@
 
   let debugString;
   // NOTE: the debugString also helps get rid of the "unused property" warning
-  $: debugString = `${page} ${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
+  $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   import { firestore } from "../../firebase.js";
   function onDone(editorText: string, e: KeyboardEvent) {
@@ -528,10 +527,8 @@
 
 <style>
   .super-container {
-    break-inside: avoid;
     padding: 4px 0;
     padding-right: 8px;
-    /* max-width: 750px; */
   }
   .container {
     position: relative;
@@ -600,6 +597,7 @@
     font-size: 18px;
     line-height: 28px;
     /* cursor: pointer; */
+    overflow: hidden; /* prevent overflow which causes stuck zoom-out on iOS Safari */
   }
   .saving {
     opacity: 0.5;
