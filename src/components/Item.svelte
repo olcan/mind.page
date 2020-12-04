@@ -481,7 +481,7 @@
                         elem.parentElement.parentElement.parentElement.remove(); // remove text node
                         dot.appendChild(elem);
                         let mathrect = math.getBBox();
-                        let scale = (textscale * shaperect.height) / mathrect.height;
+                        let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
                         let xt0 = -mathrect.x;
                         let yt0 = -mathrect.y;
                         let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
