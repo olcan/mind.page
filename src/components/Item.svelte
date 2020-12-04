@@ -453,11 +453,15 @@
                     // render "stack" clusters (subgraphs)
                     Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
                       let path = cluster.children[1]; // first child is title
-                      let pathbg = path.cloneNode();
-                      (pathbg as HTMLElement).setAttribute("transform", "translate(3,3)");
-                      (pathbg as HTMLElement).setAttribute("opacity", "0.9");
                       (path as HTMLElement).setAttribute("fill", "#111");
-                      cluster.insertBefore(pathbg, path);
+                      let path2 = path.cloneNode();
+                      (path2 as HTMLElement).setAttribute("transform", "translate(-3,3)");
+                      (path2 as HTMLElement).setAttribute("opacity", "0.75");
+                      cluster.insertBefore(path2, path);
+                      let path3 = path.cloneNode();
+                      (path3 as HTMLElement).setAttribute("transform", "translate(-6,6)");
+                      (path3 as HTMLElement).setAttribute("opacity", "0.5");
+                      cluster.insertBefore(path3, path2);
                     });
 
                     // render math in text nodes
