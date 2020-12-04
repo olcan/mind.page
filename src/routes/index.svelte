@@ -961,6 +961,14 @@
       });
     };
 
+    // recursive version of Object.assign that does a deep merge
+    function recursiveAssign(a, b) {
+      if (a == undefined || typeof b !== "object") return b;
+      if (typeof a !== "object") a = {};
+      for (let key in b) a[key] = recursiveAssign(a[key], b[key]);
+      return a;
+    }
+
     // wrapper for c3.generate that stores a reference (_chart) on the DOM element
     // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
     // also sets some default options and classes (e.g. c3-labeled and c3-rotated) for custom styling
@@ -969,12 +977,15 @@
       let rotated = spec["axis"] && spec["axis"]["rotated"];
       let labeled = spec["data"] && spec["data"]["labels"];
       let barchart = spec["data"] && spec["data"]["type"] == "bar";
-      spec = Object.assign(spec, {
-        bindto: selector,
-        point: { r: 5 },
-        padding: { top: 10, right: 5 },
-        grid: { focus: { show: false } },
-      });
+      spec = recursiveAssign(
+        {
+          bindto: selector,
+          point: { r: 5 },
+          padding: { top: 10, right: 5 },
+        },
+        spec
+      );
+
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
         if (labeled) elem.classList.add("c3-labeled");
         if (rotated) elem.classList.add("c3-rotated");

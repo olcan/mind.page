@@ -29,6 +29,10 @@ text {
 td {
   background-color: #222 !important;
 }
+.c3-grid {
+  opacity: 0.5;
+}
+
 .c3 {
   /* background: #171717; */
   border-radius: 4px;
@@ -70,6 +74,10 @@ td {
 }
 
 .c3-barchart .c3-axis-x .domain {
+  display: none;
+}
+
+.c3-barchart .c3-grid .c3-xgrid-focus {
   display: none;
 }
 
