@@ -261,12 +261,11 @@
     window["MathJax"]
       .typesetPromise(elems)
       .then(() => {
-        if (itemdiv) {
-          // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-          itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
-          if (done) done();
-          onResized(itemdiv);
-        }
+        const itemdiv = elems[0].closest(".item");
+        // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
+        itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
+        if (done) done();
+        onResized(itemdiv);
       })
       .catch(console.error);
   }
@@ -449,7 +448,6 @@
                 // render new math inside dot graph nodes that may have been rendered by the script
                 Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
                   dot["_dotrendered"] = function () {
-                    if (!itemdiv || !itemdiv.contains(dot)) return;
                     // render "stack" clusters (subgraphs)
                     Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
                       let path = cluster.children[1]; // first child is title
