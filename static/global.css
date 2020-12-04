@@ -80,7 +80,11 @@ td {
   width: auto;
   margin: auto;
 }
-.graph text {
+.dot {
+  padding: 5px 0;
+  width: fit-content; /* left-aligns graph assuming it has width:auto */
+}
+.dot .graph text {
   stroke: none !important;
 }
 

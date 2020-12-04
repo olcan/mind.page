@@ -419,10 +419,17 @@
       if (pendingScripts > 0) {
         // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
         Array.from(scripts).forEach((script) => {
-          if (!script.parentElement.hasAttribute("_cache_key") && !script.hasAttribute("_uncached")) {
-            console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
+          if (!script.hasAttribute("_uncached")) {
+            if (!script.parentElement.hasAttribute("_cache_key")) {
+              // auto-cache non-item parent with item-unique id (that contains $id) with _cache_key="<id>-$hash"
+              if (script.parentElement.id.indexOf(id) >= 0 && !script.parentElement.classList.contains("item")) {
+                script.parentElement.setAttribute("_cache_key", script.parentElement.id + "-" + textHash);
+              } else {
+                console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
+              }
+            }
           }
-          script.remove(); // remove script once executed
+          script.remove(); // remove script to indicate execution
           let clone = document.createElement("script");
           clone.type = script.type || "text/javascript";
           // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
