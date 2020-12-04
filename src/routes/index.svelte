@@ -1,11 +1,5 @@
 <script context="module" lang="ts">
-  import {
-    isClient,
-    firebase,
-    firestore,
-    firebaseConfig,
-    firebaseAdmin,
-  } from "../../firebase.js";
+  import { isClient, firebase, firestore, firebaseConfig, firebaseAdmin } from "../../firebase.js";
   const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"]; // user.uid for olcans@gmail.com
 
   // NOTE: Preload function can be called on either client or server
@@ -13,16 +7,9 @@
   export async function preload(page, session) {
     // console.log("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-    const user: any = await firebaseAdmin()
-      .auth()
-      .verifyIdToken(session.cookie)
-      .catch(console.error);
+    const user: any = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
     if (user && allowedUsers.includes(user.uid)) {
-      let items = await firebaseAdmin()
-        .firestore()
-        .collection("items")
-        .orderBy("time", "desc")
-        .get();
+      let items = await firebaseAdmin().firestore().collection("items").orderBy("time", "desc").get();
       // return {}
       return {
         items: items.docs.map((doc) =>
@@ -65,42 +52,28 @@
 
   let indexFromId;
   let indicesFromLabel;
-  let pages = [];
-  function updateItemIndices() {
+  let headerdiv;
+  let columns;
+  function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
     let prevTime = Infinity;
     let prevTimeString = "";
     indexFromId = new Map();
     indicesFromLabel = new Map();
-    let sectionHeight = 0;
-    let maxSectionHeight = 0;
-    let columnCount = 1;
-    let sectionIndex = 0;
-    let pageIndex = 0;
     let timeString = "";
-    pages = [0];
-    // NOTE: once header is available, we can calculate # columns and maxPageHeight
-    if (document.getElementById("header")) {
-      columnCount = Math.round(
-        window.innerWidth / document.getElementById("header").clientWidth
-      );
-      // NOTE: window.visualViewport.height (vs window.innerHeight) includes decorations on iOS
-      //       (but can cause undesirable shifting if this function is triggered too often or at bad times)
-      maxSectionHeight = window.visualViewport.height;
-      // disable any paging on single-column layout
-      if (columnCount == 1) maxSectionHeight = Infinity;
-      sectionHeight = document.getElementById("header").offsetHeight; // first page includes header
-    }
+    // NOTE: we use document width as it scales with font size consistently on iOS and Mac
+    let columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
+    columns = [...Array(columnCount).keys()];
+    let columnHeights = new Array(columnCount).fill(0);
+    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column contains header
+
     items.forEach((item, index) => {
       item.index = index;
-      item.page = pageIndex;
       indexFromId.set(item.id, index);
+      if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.label) {
-        indicesFromLabel.set(item.label, [
-          ...(indicesFromLabel.get(item.label) || []),
-          index,
-        ]);
+        indicesFromLabel.set(item.label, [...(indicesFromLabel.get(item.label) || []), index]);
       }
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
@@ -113,38 +86,22 @@
       } else {
         timeString = itemTimeString((Date.now() - item.time) / 1000);
         item.timeOutOfOrder = item.time > prevTime; // for special styling
-        item.timeString =
-          timeString == prevTimeString && !item.timeOutOfOrder
-            ? ""
-            : timeString;
+        item.timeString = timeString == prevTimeString && !item.timeOutOfOrder ? "" : timeString;
         // item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
         prevTimeString = timeString;
         prevTime = item.time;
       }
-      item.sectionStart = false;
-      if (maxSectionHeight > 0) {
-        // page based on item heights (plus super-container padding/margin and timeString height)
-        sectionHeight += item.height + 8 + (item.timeString ? 24 : 0); // include margins and timeString
-        // NOTE: if paging at this item cuts page height by more than half, then we page on next item
-        item.sectionStart =
-          sectionHeight > maxSectionHeight &&
-          sectionHeight - item.height >= maxSectionHeight / 2;
-        if (item.sectionStart)
-          sectionHeight = item.height + 8 + (item.timeString ? 24 : 0);
-      } else {
-        item.sectionStart = index > 0 && index % 5 == 0; // 5 items per section
+
+      // determine item column
+      if (index == 0) item.column = 0;
+      else {
+        // stay on same column unless column height exceeds minimum column height by screen height
+        const lastColumn = items[index - 1].column;
+        const minColumnHeight = Math.min.apply(null, columnHeights);
+        if (columnHeights[lastColumn] < minColumnHeight + outerHeight) item.column = lastColumn;
+        else item.column = columnHeights.indexOf(minColumnHeight);
       }
-      item.pageStart = false;
-      if (item.sectionStart) {
-        sectionIndex++;
-        item.pageStart = columnCount > 1 && sectionIndex % columnCount == 0;
-      }
-      if (item.pageStart) {
-        pageIndex++;
-        item.page++;
-        item.timeString = timeString; // always include time string for new page
-        pages.push(item.page);
-      }
+      columnHeights[item.column] += (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
     });
 
     if (focusedItem >= 0) {
@@ -157,15 +114,6 @@
     }
   }
 
-  // initialize indices and savedText/Time
-  if (isClient) {
-    onEditorChange(""); // initial sort, index assignment, etc
-    items.forEach((item) => {
-      item.savedText = item.text;
-      item.savedTime = item.time;
-    });
-  }
-
   function stableSort(array, compare) {
     return array
       .map((item, index) => ({ item, index }))
@@ -174,23 +122,39 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1]);
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1].replace(/^#_/, "#"));
   }
 
+  // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
+  //       Invoke updateItemLayout directly if only item sizes have changed.
+  const editorDebounceTime = 500;
+  let lastEditorChangeTime = 0;
+  let editorChangePending = false;
   function onEditorChange(text: string) {
+    // if editor has focus and it is too soon since last change/return, debounce
+    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
+      lastEditorChangeTime = Date.now(); // reset timer at each postponed change
+      if (!editorChangePending) {
+        editorChangePending = true;
+        setTimeout(() => {
+          editorChangePending = false;
+          onEditorChange(editorText);
+        }, editorDebounceTime);
+      }
+      return;
+    }
+    lastEditorChangeTime = Infinity; // force minimum wait for next change
+
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [
-      ...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/))),
-    ].filter((t) => t);
+    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/)))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
       if (term[0] != "#") return;
       let pos;
       let tag = term;
-      while ((pos = tag.lastIndexOf("/")) >= 0)
-        termsSecondary.push((tag = tag.slice(0, pos)));
+      while ((pos = tag.lastIndexOf("/")) >= 0) termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
     // let matchingTermCounts = new Map<string, number>();
@@ -210,20 +174,16 @@
       item.prefixMatch = lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
-        item.prefixMatchTerm =
-          terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
+        item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
       // use first exact-match item as "listing" item
-      if (item.prefixMatchTerm == terms[0] && listing.length == 0)
-        listing = item.tags.reverse(); // so that last is best and default (-1) is worst
+      if (item.prefixMatchTerm == terms[0] && listing.length == 0) listing = item.tags.reverse(); // so that last is best and default (-1) is worst
 
       item.matchingTerms = [];
       if (item.pinned) {
         // match only tags for pinned items
         // item.matchingTerms = terms.filter((t) => item.tags.indexOf(t) >= 0);
-        item.matchingTerms = terms.filter(
-          (t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
-        );
+        item.matchingTerms = terms.filter((t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0);
       } else {
         item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
       }
@@ -234,9 +194,7 @@
         // );
       }
       item.matchingTermsSecondary = [];
-      item.matchingTermsSecondary = termsSecondary.filter(
-        (t) => lctext.indexOf(t) >= 0
-      );
+      item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
     });
 
     // Store matching item/term counts in items
@@ -251,8 +209,7 @@
     // Update times for editing items to maintain their ordering when one is saved
     let now = Date.now();
     items.forEach((item) => {
-      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/))
-        item.time = now;
+      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = now;
     });
 
     // NOTE: undefined values produce NaN, which is treated as 0
@@ -263,8 +220,7 @@
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
         // position in item with exact match on first term
-        listing.indexOf(b.prefixMatchTerm) -
-          listing.indexOf(a.prefixMatchTerm) ||
+        listing.indexOf(b.prefixMatchTerm) - listing.indexOf(a.prefixMatchTerm) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // alphanumeric ordering on prefix-matching term
@@ -279,10 +235,31 @@
         b.time - a.time
       );
     });
-    updateItemIndices();
+    updateItemLayout();
+    lastEditorChangeTime = Infinity; // force minimum wait for next change
   }
 
-  function onTagClick(tag: string) {
+  function onTagClick(tag: string, e: MouseEvent) {
+    // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
+    let range = document.caretRangeFromPoint(
+      e.pageX - document.documentElement.scrollLeft,
+      e.pageY - document.documentElement.scrollTop
+    );
+    if (range) {
+      let tagNode = e.target as Node;
+      // if target is not the tag node, it must be a highlight, so we move to the parent
+      if ((tagNode as HTMLElement).tagName != "MARK") tagNode = tagNode.parentNode;
+      // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
+      // if tag node contains highlight, we have to adjust click position
+      let pos = range.startOffset;
+      for (const child of Array.from(tagNode.childNodes)) {
+        if (child.contains(range.startContainer)) break;
+        pos += child.textContent.length;
+      }
+      tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
+    } else {
+      console.warn("got null range for tag click: ", tag, e);
+    }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     onEditorChange(editorText);
     window.top.scrollTo(0, 0);
@@ -305,6 +282,7 @@
     // NOTE: text is already trimmed for onDone
     if (e && e.code == "Backspace") {
       // just clear and return
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange((editorText = ""));
       return;
     }
@@ -325,9 +303,7 @@
           return;
         }
         let item = items[editingItems[0]];
-        text = `${new Date(item.time)}\n${new Date(
-          item.updateTime
-        )}\n${new Date(item.createTime)}`;
+        text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
       }
       case "/tweet": {
@@ -340,8 +316,7 @@
           return;
         }
         let item = items[editingItems[0]];
-        location.href =
-          "twitter://post?message=" + encodeURIComponent(item.text);
+        location.href = "twitter://post?message=" + encodeURIComponent(item.text);
         return;
       }
       case "/undelete": {
@@ -357,22 +332,26 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text = "```js_input\n" + text.replace(/\/js\s*/, "").trim() + "\n```";
-        } else if (text.startsWith("/")) {
-          alert(`unknown command ${text}`);
+          text = "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
+        } else if (text.match(/^\/\w+/)) {
+          alert(`unknown command ${text.match(/^\/\w+/)[0]}`);
           return;
+        } else if (text.match(/^\/\s+/s)) {
+          text = text.replace(/^\/\s+/s, "");
         }
-        text = appendJSOutput(text);
+        // text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
       }
     }
     let tmpid = Date.now().toString();
     let itemToSave = { time: time, text: text };
-    let item = { ...itemToSave, id: tmpid, saving: true, editing: editing };
+    let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
     items = [item, ...items];
-    editorText = "";
-    onEditorChange(editorText);
-    textArea(-1).focus();
+    // NOTE: we append JS output here so that we can specify item index and plug in $id
+    itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
+    onEditorChange((editorText = ""));
+    textArea(-1).focus(); // refocus (necessary on iOS for shifting focus to another item)
     if (editing) setTimeout(() => textArea(indexFromId.get(tmpid)).focus(), 0);
 
     firestore()
@@ -385,15 +364,27 @@
           doc.delete().catch(console.error);
           return;
         }
-        items[index].saving = false; // assigning to item object in array triggers dom update for item
-        items[index].savedText = text;
-        items[index].savedTime = time;
+        let textarea = textArea(index);
+        let selectionStart = textarea ? textarea.selectionStart : 0;
+        let selectionEnd = textarea ? textarea.selectionEnd : 0;
         items[index].id = doc.id;
         indexFromId.set(doc.id, index);
-        indexFromId.delete(tmpid);
+        // NOTE: we maintain mapping from tmpid in case there is async JS with $id plugged in
+        //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
+        indexFromId.set(tmpid, index);
+        onItemSaved(doc.id);
+
         if (focusedItem == index)
-          // maintain focus through id change ...
-          setTimeout(() => textArea(indexFromId.get(doc.id)).focus(), 0);
+          // maintain focus (and caret placement) through id/element change
+          setTimeout(() => {
+            let index = indexFromId.get(doc.id);
+            if (index == undefined) return;
+            let textarea = textArea(index);
+            if (!textarea) return;
+            textarea.selectionStart = selectionStart;
+            textarea.selectionEnd = selectionEnd;
+            textarea.focus();
+          }, 0);
         // also save to items-history ...
         firestore()
           .collection("items-history")
@@ -401,8 +392,9 @@
           .catch(console.error);
       })
       .catch((error) => {
+        let index = indexFromId.get(tmpid); // since index can change
         console.error(error);
-        items[0].error = true;
+        items[index].error = true;
       });
   }
 
@@ -435,49 +427,54 @@
   }
 
   let layoutPending = false;
-  function onItemResized(id: string, height: number) {
+  function onItemResized(itemdiv) {
+    const id = itemdiv.id;
     const index = indexFromId.get(id);
-    if (index == undefined) return; // item was deleted
-    if (height == 0) {
+    if (index == undefined) return;
+    // const height = parseInt(window.getComputedStyle(itemdiv).height);
+    // const height = Math.min(itemdiv.clientHeight, itemdiv.offsetHeight);
+    // const height = itemdiv.getBoundingClientRect().height;
+    const height = itemdiv.offsetHeight;
+    if (height == 0 && items[index].height > 0) {
       console.warn(
-        `zero height reported (last known height ${items[index].height}) for item ${id} at index ${index}`,
+        `zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
         items[index].text.substring(0, Math.min(items[index].text.length, 80))
       );
-      return;
     }
-    if (items[index].height != height) {
-      // height change, trigger layout in 250ms
+    items[index].height = height;
+    // NOTE: We only consider layout changes when item heights change significantly, e.g. from zero to non-zero, by +100px or by -50%+. When the layout is updated, the latest known heights are used for all items, but layout can be stale in the meantime, with some pages being slightly smaller/larger than they should be until next layout. This was originally done due to fluctuations in height in multi-column layout with breaking.
+    if (
+      height == 0 ||
+      items[index].height == 0 ||
+      height >= items[index].height + 100 ||
+      height <= 0.5 * items[index].height
+      // height != items[index].height
+    ) {
+      // significant height change, trigger layout in 250ms
       if (!layoutPending) {
-        // console.log(
-        //   `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
+        console.log(
+          `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
+          items[index].text.substring(0, Math.min(items[index].text.length, 80))
+        );
         layoutPending = true;
         setTimeout(() => {
-          onEditorChange(editorText);
+          updateItemLayout();
           layoutPending = false;
         }, 250);
-      } else if (items[index].height != 0) {
-        // also log non-trivial height change
-        // console.log(
-        //   `height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-        //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        // );
       }
-      items[index].height = height;
     }
   }
 
   function extractBlock(text: string, type: string) {
     // NOTE: this logic is consistent with onInput() in Editor.svelte
     let insideBlock = false;
-    let regex = RegExp("^```" + type + "(\\s|$)");
+    let regex = RegExp("^\\s*```" + type + "(\\s|$)");
     return text
       .split("\n")
       .map((line) => {
         if (!insideBlock && line.match(regex)) insideBlock = true;
-        else if (insideBlock && line.match(/^```/)) insideBlock = false;
-        if (line.match(/^```/)) return "";
+        else if (insideBlock && line.match(/^\s*```/)) insideBlock = false;
+        if (line.match(/^\s*```/)) return "";
         return insideBlock ? line : "";
       })
       .filter((t) => t)
@@ -486,31 +483,32 @@
   }
 
   let evalIndex = -1;
-  function evalJSInput(
-    text: string,
-    label: string = "",
-    index: number = -1
-  ): string {
-    const jsin = extractBlock(text, "js_input");
+  function evalJSInput(text: string, label: string = "", index: number = -1): string {
+    let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
-
+    if (index >= 0) jsin = jsin.replace(/\$id/g, items[index].id);
     try {
       evalIndex = index;
       let out = eval("(function(){" + jsin + "})()");
+      if (out && out.length > 1024) {
+        alert(`js output too large (${out.length})`);
+        out = "";
+      }
       evalIndex = -1;
       return out;
     } catch (e) {
       evalIndex = -1;
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
-      alert(msg);
+      if (console["_eval_error"]) console["_eval_error"](msg);
+      else alert(msg);
       return undefined;
     }
   }
 
   function appendBlock(text: string, type: string, block: string) {
     block = "\n```" + type + "\n" + block + "\n```";
-    const regex = "\\n```" + type + "\\n.*?\\n```";
+    const regex = "\\n\\s*```" + type + "\\n.*?\\n\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -520,7 +518,7 @@
   }
 
   function appendJSOutput(text: string, index: number = -1): string {
-    if (!text.match(/```js_input\s/)) return text; // no js code in text
+    if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
     // execute JS code, including any tag-referenced items (using latest tags/label)
     const lctext = text.toLowerCase();
     const tags = itemTags(lctext);
@@ -530,10 +528,7 @@
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        jsout.push(
-          evalJSInput(items[index].text, items[index].label) || "",
-          index
-        );
+        jsout.push(evalJSInput(items[index].text, items[index].label, index) || "");
       });
     });
     jsout.push(evalJSInput(text, label, index) || "");
@@ -565,28 +560,24 @@
   // https://stackoverflow.com/a/9039885
   function iOS() {
     return (
-      [
-        "iPad Simulator",
-        "iPhone Simulator",
-        "iPod Simulator",
-        "iPad",
-        "iPhone",
-        "iPod",
-      ].includes(navigator.platform) ||
+      ["iPad Simulator", "iPhone Simulator", "iPod Simulator", "iPad", "iPhone", "iPod"].includes(navigator.platform) ||
       // iPad on iOS 13 detection
       (navigator.userAgent.includes("Mac") && "ontouchend" in document)
     );
   }
 
-  function onItemEditing(index: number, editing: boolean) {
+  function onItemEditing(index: number, editing: boolean, backspace: boolean) {
     let item = items[index];
     // for non-log items, update time whenever the item is "touched"
     if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
 
+    // for backspace-triggered closings, we always restore savedTime and only save if text has changed
+    if (backspace) item.time = item.savedTime;
+
     if (editing) {
       // started editing
       editingItems.push(index);
-      onEditorChange(editorText);
+      onEditorChange(editorText); // editing state has changed
       // NOTE: setTimeout is required for editor to be added to the Dom
       if (iOS()) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
@@ -605,37 +596,28 @@
         if (item.text.length == 0) {
           // delete
           items.splice(index, 1);
-          updateItemIndices();
+          updateItemLayout();
           items = items; // trigger dom update
           deletedItems.unshift({
             time: item.savedTime,
             text: item.savedText,
           }); // for /undelete
-          firestore()
-            .collection("items")
-            .doc(item.id)
-            .delete()
-            .catch(console.error);
+          firestore().collection("items").doc(item.id).delete().catch(console.error);
         } else {
-          // empty out any *_output blocks as they should be re-generated
-          item.text = item.text.replace(
-            /\n```(\w*?_output)\n.*?\n```/gs,
-            "\n```$1\n\n```"
-          );
-          // console.log(item.text);
-          // NOTE: these appends may trigger async _write
-          item.text = appendJSOutput(item.text, index);
-          if (item.time != item.savedTime || item.text != item.savedText)
-            saveItem(index);
-          onEditorChange(editorText); // update sorting of items (at least time or text has changed)
+          // clear _output and execute javascript unless backspace-triggered
+          if (!backspace) {
+            // empty out any *_output blocks as they should be re-generated
+            item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
+            // NOTE: these appends may trigger async _write
+            item.text = appendJSOutput(item.text, index);
+          }
+          if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
+          onEditorChange(editorText); // item time and/or text has changed
         }
 
         // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
         //       that is not worth the benefit without an attached keyboard (which is harder to detect)
-        if (
-          editingItems.length > 0 ||
-          !navigator.platform.startsWith("iPhone")
-        ) {
+        if (editingItems.length > 0 || !navigator.platform.startsWith("iPhone")) {
           focusOnNearestEditingItem(index);
         } else {
           (document.activeElement as HTMLElement).blur();
@@ -657,9 +639,7 @@
   }
 
   function textArea(index: number): HTMLTextAreaElement {
-    return document.getElementById(
-      "textarea-" + (index < 0 ? "editor" : items[index].id)
-    ) as HTMLTextAreaElement;
+    return document.getElementById("textarea-" + (index < 0 ? "editor" : items[index].id)) as HTMLTextAreaElement;
   }
 
   function onPrevItem(inc = -1) {
@@ -693,22 +673,16 @@
     setTimeout(() => textArea(index + inc).focus(), 0);
   }
 
-  function disableEditorShortcuts(e: KeyboardEvent) {
-    // disable save/forward/back shortcuts on window, focus on editor instead
-    if (focusedItem >= 0) return; // already focused on an item
-    if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
-        (e.metaKey || e.ctrlKey))
-    ) {
-      e.preventDefault();
-      textArea(-1).focus();
-      window.top.scrollTo(0, 0);
-    }
-  }
+  import { onMount } from "svelte";
 
   if (isClient) {
+    // initialize indices and savedText/Time
+    onEditorChange(""); // initial sort, index assignment, etc
+    items.forEach((item) => {
+      item.savedText = item.text;
+      item.savedTime = item.time;
+    });
+
     // Sign in user as needed ...
     if (error) console.log(error); // log server-side error
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
@@ -719,6 +693,44 @@
           // user logged in
           user = authUser;
           loggedIn = true;
+
+          // copy console into #console if it exists
+          const consolediv = document.getElementById("console");
+          if (consolediv) {
+            // NOTE:
+            console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
+            console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
+            ["log", "debug", "info", "warn", "error", "_window_error", "_eval_error"].forEach(function (verb) {
+              console[verb] = (function (method, verb, div) {
+                return function (...args) {
+                  method(...args);
+                  var entry = document.createElement("div");
+                  if (verb.endsWith("error")) verb = "error";
+                  entry.classList.add("console-" + verb);
+                  let item; // if the source is an item
+                  if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
+                    item = items[indexFromId.get(window["_script_item_id"])];
+                  } else if (evalIndex) {
+                    item = items[evalIndex];
+                  }
+                  if (item) {
+                    // prepent item index, label (if any)
+                    // NOTE: item.label can be outdated at this point due to pending save
+                    const lctext = item.text.toLowerCase();
+                    const tags = itemTags(lctext);
+                    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+                    if (label) args.unshift(label + ":");
+                    args.unshift(`[${item.index}]`);
+                  }
+                  entry.textContent = args.join(" ") + "\n";
+                  div.appendChild(entry);
+                  // auto-remove after 10 seconds ...
+                  setTimeout(() => div.removeChild(entry), 10000);
+                };
+              })(console[verb].bind(console), verb, consolediv);
+            });
+          }
+
           console.log("signed in", user.email);
           localStorage.setItem("user", JSON.stringify(user));
 
@@ -731,7 +743,7 @@
               .getIdToken(false /*force refresh*/)
               .then((token) => {
                 document.cookie = "__session=" + token + ";max-age=86400";
-                console.log("updated cookie", error || "no error");
+                console.log("updated cookie", error || "(no error)");
                 // reload with new cookie if we are on error page
                 if (error) location.reload();
               })
@@ -769,14 +781,10 @@
       textArea(-1).focus();
     };
     window["_append"] = function (text: string) {
-      onEditorChange(
-        (editorText = (editorText.trim() + " " + text).trimStart())
-      );
+      onEditorChange((editorText = (editorText.trim() + " " + text).trimStart()));
     };
     window["_append_edit"] = function (text: string) {
-      onEditorChange(
-        (editorText = (editorText.trim() + " " + text).trim() + " ")
-      );
+      onEditorChange((editorText = (editorText.trim() + " " + text).trim() + " "));
       textArea(-1).focus();
     };
     window["_enter"] = function (text: string) {
@@ -799,9 +807,7 @@
         .then((urlstr) => {
           try {
             let url = new URL(urlstr);
-            window["_append_edit"](
-              `${prefix}[${title || url.host}](${urlstr})${suffix}`
-            );
+            window["_append_edit"](`${prefix}[${title || url.host}](${urlstr})${suffix}`);
             if (enter) window["_enter"]();
           } catch (_) {
             alert("clipboard content is not a URL");
@@ -813,12 +819,12 @@
       return encodeURIComponent(editorText.trim());
     };
     window["_google"] = function () {
-      let query = editorText.trim();
+      let query = editorText.replace(/^\/\s+/s, "").trim();
       onEditorChange((editorText = ""));
       window.open("https://google.com/search?q=" + encodeURIComponent(query));
     };
     window["_tweet"] = function () {
-      let tweet = editorText.trim();
+      let tweet = editorText.replace(/^\/\s+/s, "").trim();
       onEditorChange((editorText = ""));
       if (tweet == "") {
         onEditorDone("/tweet", null);
@@ -828,20 +834,14 @@
     };
     window["_eval"] = function (tag: string) {
       const indices = indicesFromLabel.get(tag) || [];
-      const jsout = indices.map((index) =>
-        evalJSInput(items[index].text, items[index].label)
-      );
+      const jsout = indices.map((index) => evalJSInput(items[index].text, items[index].label));
       return jsout.length == 1 ? jsout[0] : jsout;
     };
 
     function indicesForItem(item: string) {
       if (item == "" && evalIndex >= 0) {
         return [evalIndex];
-      } else if (
-        item == "" &&
-        window["_script_item_id"] &&
-        indexFromId.has(window["_script_item_id"])
-      ) {
+      } else if (item == "" && window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
         return [indexFromId.get(window["_script_item_id"])];
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
@@ -859,24 +859,27 @@
       return ids.length == 1 ? ids[0] : ids;
     };
 
-    window["_read"] = function (type: string = "", item: string = "") {
+    window["_read"] = function (type: string = "", item: string = "", include_tagrefs: boolean = false) {
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
+        if (include_tagrefs) {
+          const lctext = items[index].text.toLowerCase();
+          const tags = itemTags(lctext);
+          const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+          tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, include_tagrefs)));
+        }
         if (type == "") content.push(items[index].text);
         else content.push(extractBlock(items[index].text, type));
       });
-      return content.length == 1 ? content[0] : content;
+      return content.join("\n");
     };
 
-    window["_write"] = function (
-      item: string,
-      text: string,
-      type: string = "_output"
-    ) {
+    window["_write"] = function (item: string, text: string, type: string = "_output") {
       // NOTE: write is always async in case triggered by eval during onItemEditing
       setTimeout(() => {
         let indices = indicesForItem(item);
+        // console.log("_write", indices, item);
         indices.map((index) => {
           if (items[index].editing) {
             console.log("can not _write to item while editing");
@@ -884,12 +887,17 @@
           }
           const prevSaveClosure = items[index].saveClosure;
           const saveClosure = (index) => {
+            if (text && text.length > 1024) {
+              alert(`_write too large (${text.length})`);
+              text = "";
+            }
             if (type == "") items[index].text = text;
             else items[index].text = appendBlock(items[index].text, type, text);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             items[index].time = Date.now();
-            onEditorChange(editorText);
-            saveItem(index);
+            onEditorChange(editorText); // item time/text has changed
+            // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
+            if (!type.endsWith("_tmp")) saveItem(index);
           };
           if (items[index].saving) {
             items[index].saveClosure = saveClosure;
@@ -901,27 +909,154 @@
       }, 0);
     };
 
-    // Window resize/scroll handlers ...
-    // NOTE: These seem to respond to font resizing also, so no need for polling below
+    window["_task"] = function (interval: number, task: Function, item: string = "") {
+      let indices = indicesForItem(item);
+      if (!window["_tasks"]) window["_tasks"] = {};
+      indices.map((index) => {
+        // clear any previous tasks for item, under id or tmpid
+        clearInterval(window["_tasks"][items[index].id]);
+        clearInterval(window["_tasks"][items[index].tmpid]);
+        delete window["_tasks"][items[index].id];
+        delete window["_tasks"][items[index].tmpid];
+        window["_tasks"][items[index].id] = setInterval(task, interval);
+        task(); //  also execute immediately
+      });
+    };
+
+    // recursive version of Object.assign that does a deep merge
+    function recursiveAssign(a, b) {
+      if (a == undefined || typeof b !== "object") return b;
+      if (typeof a !== "object") a = {};
+      for (let key in b) a[key] = recursiveAssign(a[key], b[key]);
+      return a;
+    }
+
+    // wrapper for c3.generate that stores a reference (_chart) on the DOM element
+    // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
+    // also sets some default options and classes (e.g. c3-labeled and c3-rotated) for custom styling
+    // also ensures element style.height matches size.height if specified (otherwise sizing is lost on window resize)
+    window["_chart"] = function (selector: string, spec: object) {
+      let rotated = spec["axis"] && spec["axis"]["rotated"];
+      let labeled = spec["data"] && spec["data"]["labels"];
+      let barchart = spec["data"] && spec["data"]["type"] == "bar";
+      spec = recursiveAssign(
+        {
+          bindto: selector,
+          point: { r: 5 },
+          padding: { top: 10, right: 5 },
+          axis: {
+            x: { tick: { outer: false }, padding: 0 },
+            y: { tick: { outer: false }, padding: 5 },
+          },
+        },
+        spec
+      );
+
+      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+        if (labeled) elem.classList.add("c3-labeled");
+        if (rotated) elem.classList.add("c3-rotated");
+        if (barchart) elem.classList.add("c3-barchart");
+      });
+      if (labeled) {
+        // adjust padding if labeled (s.t. y axis will be hidden)
+        // NOTE: this seems to also fix uneven bar spacing
+        if (rotated) spec["padding"]["bottom"] = -15;
+        else spec["padding"]["left"] = 5;
+      }
+      const chart = window["c3"].generate(spec);
+      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+        if (spec["size"] && spec["size"]["height"]) (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
+        elem["_chart"] = chart;
+      });
+      return chart;
+    };
+
+    // wrapper for d3 graphviz
+    window["_dot"] = function (selector: string, dot: string) {
+      // NOTE: best way to define defaults seems to be by inserting attributes into the dot, which are turned into SVG attributes by d3 graphviz, which take lowest priority (as opposed to inline styles which would take highest, see https://stackoverflow.com/a/24294284) and can be easily modified either in the dot code or using CSS
+      const nodedefs =
+        'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",fontsize=20,shape=circle,fixedsize=true';
+      const edgedefs = 'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
+      const graphdefs = `bgcolor=invis; color="#666666"; fontcolor="#666666"; fontname="Avenir Next, Helvetica"; fontsize=20; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
+      const subgraphdefs = `labeljust="r"; labelloc="b"; edge[minlen=2]`;
+      dot = dot.replace(/(subgraph.*?{)/g, `$1\n${subgraphdefs};\n`);
+      dot = dot.replace(/(graph.*?{)/g, `$1\n${graphdefs};\n`);
+      window["d3"]
+        .select(selector)
+        .graphviz()
+        .zoom(false)
+        .renderDot(dot, function () {
+          const elem = document.querySelector(selector);
+          // NOTE: _dotrendered is defined automatically in Item.svelte
+          if (elem && elem["_dotrendered"]) elem["_dotrendered"]();
+        });
+    };
+
+    window["_histogram"] = function (
+      numbers: Array<number>,
+      bins: number = 10,
+      min: number = Infinity,
+      max: number = -Infinity,
+      digits: number = 2
+    ) {
+      if (min > max) {
+        // determine range using data
+        numbers.forEach((num) => {
+          if (num < min) min = num;
+          else if (num > max) max = num;
+        });
+      } else {
+        numbers = numbers.filter((num) => num >= min && num <= max);
+      }
+      const size = (max - min) / bins;
+      const counts = new Array(bins).fill(0);
+      numbers.forEach((num) => {
+        counts[num == max ? bins - 1 : Math.floor((num - min) / size)]++;
+      });
+      let histogram = {};
+      counts.forEach((count, index) => {
+        let key = `[${(min + index * size).toFixed(digits)}, `;
+        key += index == bins - 1 ? `${max.toFixed(digits)}]` : `${(min + (index + 1) * size).toFixed(digits)})`;
+        histogram[key] = count;
+      });
+      return histogram;
+    };
+
+    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2) {
+      dist = dist.getDist();
+      let keys = Object.keys(dist).map((k) => k.toString());
+      let values = Object.values(dist).map((v) => v["prob"]);
+      let indices = Array.from(Array(values.length).keys());
+      indices = stableSort(indices, (i, j) => values[j] - values[i]);
+      values = values.map((v) => v.toFixed(digits));
+      indices = indices.filter((i) => values[i] > 0);
+      indices.length = Math.min(indices.length, limit);
+      let pmf = {};
+      indices.forEach((i) => (pmf[keys[i]] = values[i]));
+      return pmf;
+    };
+
+    // Visual viewport resize/scroll handlers ...
+    // NOTE: we use document width because it is invariant to zoom scale
+    //       window.outerWidth is also invariant but can be stale after device rotation in iOS Safari
+    // NOTE: font resizing does not trigger resize events and is handled in a periodic task, see onMount below
     let lastScrollTime = 0;
-    let lastViewportWidth = 0;
-    let minViewportHeight = Infinity; // only respond if it gets smaller
-    window.visualViewport.addEventListener("scroll", (e) => {
+    let lastDocumentWidth = 0;
+    visualViewport.addEventListener("scroll", (e) => {
       lastScrollTime = Date.now();
     });
     let resizePending = false;
     function tryResize() {
       if (Date.now() - lastScrollTime > 250) {
-        if (
-          window.visualViewport.width != lastViewportWidth ||
-          window.visualViewport.height < minViewportHeight
-        ) {
-          onEditorChange(editorText);
-          lastViewportWidth = window.visualViewport.width;
-          minViewportHeight = Math.min(
-            minViewportHeight,
-            window.visualViewport.height
-          );
+        const documentWidth = document.documentElement.clientWidth;
+        if (documentWidth != lastDocumentWidth) {
+          console.log(`document width changed from ${lastDocumentWidth} to ${documentWidth}`);
+          updateItemLayout();
+          // also trigger resize of all charts on the page ...
+          Array.from(document.querySelectorAll(".c3")).map((div) => {
+            if (div["_chart"]) div["_chart"].resize();
+          });
+          lastDocumentWidth = documentWidth;
         }
       } else if (!resizePending) {
         resizePending = true;
@@ -931,7 +1066,13 @@
         }, 250);
       }
     }
-    window.visualViewport.addEventListener("resize", tryResize);
+    visualViewport.addEventListener("resize", tryResize);
+
+    onMount(() => {
+      // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial layout
+      setTimeout(() => onEditorChange(""), 0);
+      setInterval(tryResize, 250); // no need to destroy since page-level
+    });
 
     // Restore user from localStorage for faster init
     // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
@@ -942,14 +1083,31 @@
     console.log("first script run, items:", items.length);
   }
 
-  import { onMount, onDestroy } from "svelte";
-  let pollingInterval = 0;
-  onMount(() => {
-    // NOTE: invoking onEditorChange on a timeout allows item heights to be available for paging
-    setTimeout(() => onEditorChange(""), 0);
-    // pollingInterval = setInterval(()=>{}, 250)
-  });
-  onDestroy(() => clearInterval(pollingInterval));
+  // disable editor shortcuts
+  function onKeyPress(e: KeyboardEvent) {
+    // disable save/forward/back shortcuts on window, focus on editor instead
+    if (focusedItem >= 0) return; // already focused on an item
+    if (
+      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
+      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
+      (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
+      e.code == "Tab"
+    ) {
+      e.preventDefault();
+      textArea(-1).focus();
+      window.top.scrollTo(0, 0);
+    }
+  }
+
+  // redirect error to alert or console._window_error if it exists
+  function onError(e) {
+    const msg = `${e.message} (lineno:${e.lineno}, colno:${e.colno})`;
+    if (console["_window_error"]) console["_window_error"](msg);
+    else alert(msg);
+    if (!window["_errors"]) window["_errors"] = [];
+    window["_errors"].push(e);
+  }
 </script>
 
 <style>
@@ -964,8 +1122,6 @@
   }
   #header {
     width: 100%;
-    /* max-width same as .super-container in Item.svelte */
-    max-width: 750px;
     padding-bottom: 8px;
   }
   #header-container {
@@ -992,23 +1148,30 @@
     background: gray;
     cursor: pointer;
   }
-  .items {
-    column-count: auto;
-    column-width: 500px; /* minimum width; max-width is on #header and .super-container (in Item.svelte) */
-    column-gap: 0;
-    column-fill: auto;
-    /* margin-top: 4px; */
+  #console {
+    font-family: monospace;
+    padding-left: 5px;
   }
-  .page-separator {
-    column-span: all;
-    display: block;
-    height: 1px;
-    border-top: 1px dashed #444;
-    margin: 20px 0;
+  :global(.console-warn) {
+    color: yellow;
+  }
+  :global(.console-error) {
+    color: red;
+  }
+  .items {
+    width: 100%;
+    display: flex;
+  }
+  .column {
+    flex: 1;
+    /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
+    min-width: 0px;
+    max-width: 750px;
   }
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
+    color: #666;
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
@@ -1021,80 +1184,68 @@
 {#if user && allowedUsers.includes(user.uid) && !error}
   <!-- all good! user logged in, has permissions, and no error from server -->
 
-  {#each pages as page}
-    <div class="items">
-      {#if page == 0}
-        <div id="header" on:click={() => textArea(-1).focus()}>
-          <div id="header-container" class:focused>
-            <div id="editor">
-              <Editor
-                bind:text={editorText}
-                bind:focused
-                onFocused={onEditorFocused}
-                onChange={onEditorChange}
-                onDone={onEditorDone}
-                onPrev={onPrevItem}
-                onNext={onNextItem} />
+  <div class="items">
+    {#each columns as column}
+      <div class="column">
+        {#if column == 0}
+          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div id="header-container" class:focused>
+              <div id="editor">
+                <Editor
+                  bind:text={editorText}
+                  bind:focused
+                  onFocused={onEditorFocused}
+                  onChange={onEditorChange}
+                  onDone={onEditorDone}
+                  onPrev={onPrevItem}
+                  onNext={onNextItem} />
+              </div>
+              <div class="spacer" />
+              {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
-            <div class="spacer" />
-            {#if loggedIn}
-              <img
-                id="user"
-                src={user.photoURL}
-                alt={user.email}
-                on:click={signOut} />
-            {/if}
           </div>
-        </div>
-        <!-- auto-focus on the editor unless on iPhone -->
-        {#if loggedIn}
-          <script>
-            // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
-            //       autofocus except in certain unexpected situations (like coming back to app)
-            if (!navigator.platform.startsWith("iPhone"))
-              document.getElementById("textarea-editor").focus();
-          </script>
+          <div id="console" />
+          <!-- auto-focus on the editor unless on iPhone -->
+          {#if loggedIn}
+            <script>
+              // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
+              //       autofocus except in certain unexpected situations (like coming back to app)
+              if (!navigator.platform.startsWith("iPhone")) document.getElementById("textarea-editor").focus();
+            </script>
+          {/if}
         {/if}
-      {/if}
 
-      {#if page > 0}
-        <div class="page-separator" />
-      {/if}
-
-      {#each items as item (item.id)}
-        <!-- NOTE: we are currently iterating over all items once for each page, but that should be ok for now -->
-        <!-- (splitting into a pages array caused update issues that are not worth debugging right now) -->
-        {#if item.page == page}
-          <!-- NOTE: pageStart based splitting was slow unless we allowed breaking inside items, which caused spurious height changes -->
-          <!-- {#if item.pageStart} <div class="page-separator" /> {/if} -->
-          <!-- WARNING: Binding does not work for asynchronous updates since the underlying component may be destroyed -->
-          <Item
-            onEditing={onItemEditing}
-            onFocused={onItemFocused}
-            onResized={onItemResized}
-            {onTagClick}
-            onPrev={onPrevItem}
-            onNext={onNextItem}
-            bind:text={item.text}
-            bind:editing={item.editing}
-            bind:focused={item.focused}
-            bind:saving={item.saving}
-            bind:height={item.height}
-            bind:time={item.time}
-            id={item.id}
-            index={item.index}
-            itemCount={items.length}
-            matchingItemCount={item.matchingItemCount}
-            matchingTerms={item.matchingTerms.join(' ')}
-            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-            timeString={item.timeString}
-            timeOutOfOrder={item.timeOutOfOrder}
-            updateTime={item.updateTime}
-            createTime={item.createTime} />
-        {/if}
-      {/each}
-    </div>
-  {/each}
+        {#each items as item (item.id)}
+          {#if item.column == column}
+            <Item
+              onEditing={onItemEditing}
+              onFocused={onItemFocused}
+              onResized={onItemResized}
+              {onTagClick}
+              onPrev={onPrevItem}
+              onNext={onNextItem}
+              bind:text={item.text}
+              bind:editing={item.editing}
+              bind:focused={item.focused}
+              bind:saving={item.saving}
+              bind:height={item.height}
+              bind:time={item.time}
+              id={item.id}
+              tmpid={item.tmpid}
+              index={item.index}
+              itemCount={items.length}
+              matchingItemCount={item.matchingItemCount}
+              matchingTerms={item.matchingTerms.join(' ')}
+              matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+              timeString={item.timeString}
+              timeOutOfOrder={item.timeOutOfOrder}
+              updateTime={item.updateTime}
+              createTime={item.createTime} />
+          {/if}
+        {/each}
+      </div>
+    {/each}
+  </div>
 {:else if user && !allowedUsers.includes(user.uid)}
   <!-- user logged in but not allowed -->
   Hello
@@ -1113,4 +1264,4 @@
   ?
 {/if}
 
-<svelte:window on:keypress={disableEditorShortcuts} />
+<svelte:window on:keypress={onKeyPress} on:error={onError} />

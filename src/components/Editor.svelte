@@ -38,12 +38,9 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
-  let highlightTags = (t) =>
-    t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
-  let highlightCode = (t) =>
-    t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
-  let highlightMath = (t) =>
-    t.replace(/(\$.+?\$)/g, '<span class="math">$1</span>');
+  let highlightTags = (t) => t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
+  let highlightCode = (t) => t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
+  let highlightMath = (t) => t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
@@ -52,9 +49,9 @@
     let code = "";
     let html = "";
     text.split("\n").map((line) => {
-      if (!insideBlock && line.match(/^```(\w+)$/)) {
+      if (!insideBlock && line.match(/^\s*```(\w+)$/)) {
         insideBlock = true;
-        language = line.match(/^```(\w+)$/).pop();
+        language = line.match(/^\s*```(\w+)$/).pop();
         if (language == "js_input") language = "js";
         if (language == "webppl") language = "js";
         if (language == "_html") language = "html";
@@ -63,7 +60,7 @@
         html += '<span class="block-delimiter">';
         html += escapeHTML(line);
         html += "</span>\n";
-      } else if (insideBlock && line.match(/^```/)) {
+      } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
         html += hljs.highlight(language, code).value;
         html += "</div>";
@@ -74,18 +71,17 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        html +=
-          highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
+        if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
+        else html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock)
-      html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
+    if (insideBlock) html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
 
     // wrap hidden sections
     html = html.replace(
-      /\n(\s*?&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
-      '\n<div class="hidden">$1</div>'
+      /(^|\n\s*?)(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      '$1<div class="hidden">$2</div>'
     );
 
     highlights.innerHTML = html;
@@ -93,14 +89,14 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    // console.log(e)
+    // console.log(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
-    // indent selection
+    // indent/comment selection or current line
     if (
-      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
-        (e.metaKey || e.ctrlKey)) ||
-      (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart)
+      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
+      (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart) ||
+      (e.code == "Slash" && (e.metaKey || e.ctrlKey))
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
@@ -108,45 +104,49 @@
       let oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
       // move selection to line start
-      let lineStart = textarea.value
-        .substring(0, textarea.selectionStart)
-        .replace(/[^\n]*$/, "").length;
-      if (
-        textarea.selectionStart == textarea.selectionEnd &&
-        e.code == "BracketRight"
-      ) {
+      let lineStart = textarea.value.substring(0, textarea.selectionStart).replace(/[^\n]*$/, "").length;
+      if (textarea.selectionStart == textarea.selectionEnd && e.code == "BracketRight") {
         textarea.selectionStart = textarea.selectionEnd = lineStart;
       } else {
         textarea.selectionStart = lineStart;
       }
-      textarea.selectionEnd = Math.max(
-        textarea.selectionStart,
-        textarea.value.substring(0, textarea.selectionEnd).trimEnd().length
-      );
-      // NOTE: execCommand maintains undo/redo history.
+      // expand selection to end of last line
+      // if selection ends right after a new line, exclude the last line
+      if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == "\n")
+        textarea.selectionEnd--;
+      let lastLineStart = textarea.value.substring(0, textarea.selectionEnd).replace(/[^\n]*$/, "").length;
+      let lineEnd =
+        lastLineStart +
+        textarea.value
+          .substring(lastLineStart)
+          .match(/^[^\n]*/)[0]
+          .trimEnd().length;
+      textarea.selectionEnd = lineEnd;
+
+      // NOTE: execCommand maintains undo/redo history
+      let selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
       document.execCommand(
         "insertText",
         false,
-        e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
-          ? textarea.value
-              .substring(textarea.selectionStart, textarea.selectionEnd)
-              .replace(/(^|\n)    /g, "$1")
-          : textarea.value
-              .substring(textarea.selectionStart, textarea.selectionEnd)
-              .replace(/(^|\n)/g, "$1    ")
+        e.code == "Slash"
+          ? selectedText.match(/^\s*\/\//) // match(/(^|\n)\s*\/\//)
+            ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, "$1")
+            : selectedText.replace(/((?:^|\n)\s*)(.*)/g, "$1// $2")
+          : e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
+          ? selectedText.replace(/(^|\n)  /g, "$1")
+          : selectedText.replace(/(^|\n)/g, "$1  ")
       );
+
       if (oldStart < oldEnd) {
         // restore expanded selection
         textarea.selectionStart = Math.min(lineStart, oldStart);
         textarea.selectionEnd = oldEnd + (textarea.value.length - oldLength);
-        // textarea.selectionEnd = Math.min(
-        //   oldEnd + (textarea.value.length - oldLength),
-        //   oldEnd - 1 + (textarea.value.substring(oldEnd) + "\n").indexOf("\n")
-        // );
       } else {
         // move forward
-        textarea.selectionStart = textarea.selectionEnd =
-          oldEnd + (textarea.value.length - oldLength);
+        textarea.selectionStart = textarea.selectionEnd = Math.max(
+          lineStart,
+          oldEnd + (textarea.value.length - oldLength)
+        );
       }
       onInput();
       return;
@@ -157,28 +157,20 @@
     // create line on Enter, maintain indentation
     // NOTE: there can be slight delay on caret update, but seems to be a Mac-only problem
     if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      let spaces = textarea.value
-        .substring(0, textarea.selectionStart)
-        .match(/(?:^|\n)( *).*?$/);
+      let spaces = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/);
       document.execCommand("insertText", false, "\n" + spaces[1] || "");
       e.preventDefault();
     }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      if (
-        (e.code == "ArrowUp" || e.code == "ArrowLeft") &&
-        textarea.selectionStart == 0
-      ) {
+      if ((e.code == "ArrowUp" || e.code == "ArrowLeft") && textarea.selectionStart == 0) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
-      if (
-        (e.code == "ArrowDown" || e.code == "ArrowRight") &&
-        textarea.selectionStart == textarea.value.length
-      ) {
+      if ((e.code == "ArrowDown" || e.code == "ArrowRight") && textarea.selectionStart == textarea.value.length) {
         e.stopPropagation();
         e.preventDefault();
         onNext();
@@ -190,37 +182,33 @@
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
-      textarea.selectionStart >= 4 &&
-      textarea.value.substring(
-        textarea.selectionStart - 4,
-        textarea.selectionStart
-      ) == "    "
+      textarea.selectionStart >= 2 &&
+      textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
     ) {
-      textarea.selectionStart = textarea.selectionStart - 4;
+      textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
       e.preventDefault();
     }
 
     // delete empty item with backspace
-    if (
-      e.code == "Backspace" &&
-      textarea.value.trim() == "" &&
-      textarea.selectionStart == 0
-    ) {
+    if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
       onDone((text = ""), e);
       e.preventDefault();
       return;
     }
+
+    // "close" non-empty item with backspace (w/o modifier keys) at the start
+    if (e.code == "Backspace" && !(e.shiftKey || e.metaKey || e.ctrlKey) && textarea.selectionStart == 0) {
+      onDone(text /* maintain text */, e /* report backspace, which can be used to maintain time */);
+      e.preventDefault();
+      return;
+    }
+
     // delete non-empty item with Shift/Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start of the item
-      if (
-        e.metaKey ||
-        e.ctrlKey ||
-        !navigator.platform.startsWith("iPhone") ||
-        textarea.selectionStart == 0
-      ) {
+      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start
+      if (e.metaKey || e.ctrlKey || !navigator.platform.startsWith("iPhone") || textarea.selectionStart == 0) {
         onDone((text = ""), e);
         e.preventDefault();
         return;
@@ -232,15 +220,12 @@
       e.preventDefault();
       if (!e.shiftKey) {
         // forward tab
-        document.execCommand("insertText", false, "    ");
+        document.execCommand("insertText", false, "  ");
       } else if (
-        textarea.selectionStart >= 4 &&
-        textarea.value.substring(
-          textarea.selectionStart - 4,
-          textarea.selectionStart
-        ) == "    "
+        textarea.selectionStart >= 2 &&
+        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
       ) {
-        textarea.selectionStart = textarea.selectionStart - 4;
+        textarea.selectionStart = textarea.selectionStart - 2;
         document.execCommand("delete", false);
       }
       onInput();
@@ -275,9 +260,8 @@
     // force replace tabs with spaces
     if (textarea.value.indexOf("\t") >= 0) {
       // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      if (textarea.value.match(/^[-*]\s/))
-        textarea.value = textarea.value.replace(/(\t+)/g, "$1 - ");
-      textarea.value = textarea.value.replace(/\t/g, "    ");
+      if (textarea.value.match(/^[-*]\s/)) textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
+      textarea.value = textarea.value.replace(/\t/g, "  ");
     }
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
@@ -293,8 +277,6 @@
     position: relative;
     width: 100%;
     cursor: text;
-    /* splitting the editor does not work on iOS */
-    break-inside: avoid-column;
   }
   .backdrop,
   textarea {
@@ -356,7 +338,7 @@
   :global(.block-delimiter) {
     color: #666;
   }
-  :global(.code, .math) {
+  :global(#editor .code, #editor .math) {
     background: #171717;
     padding: 2px 4px;
     margin: -2px -4px;

@@ -1,0 +1,23 @@
+{
+  "editor.fontSize": 14,
+  "refreshBrowser.browser": "Safari",
+  "refreshBrowser.runBuildTask": true,
+  "editor.wrappingIndent": "indent",
+  "editor.wordWrap": "on",
+  "git.enableSmartCommit": true,
+  "editor.minimap.enabled": false,
+  "breadcrumbs.enabled": true,
+  "workbench.activityBar.visible": true,
+  "workbench.statusBar.visible": true,
+  "window.zoomLevel": 0,
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "prettier.printWidth": 120,
+  "diffEditor.renderSideBySide": false,
+  "javascript.suggest.autoImports": false,
+  "typescript.suggest.autoImports": false
+}

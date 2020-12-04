@@ -1,25 +1,110 @@
 /* NOTE: this "static" file is not hot-reloaded by development server. Try _layout.svelte for styles that require live reload. */
 html {
-	-webkit-text-size-adjust: 100%; /* prevent font scaling in landscape in ios safari */
+  -webkit-text-size-adjust: 100%; /* prevent font scaling in landscape in ios safari */
 }
 body {
-	color: #ddd;
-	background: #111;
-	margin: 0; /* eliminate default margins around body */	
-	/* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
-	touch-action: manipulation;
+  color: #ddd;
+  background: #111;
+  margin: 0; /* eliminate default margins around body */
+  /* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
+  touch-action: manipulation;
 }
 
 /* global c3 styles (local ones can go into each item) */
 /* modifications to https://github.com/c3js/c3/blob/master/c3.css */
-path.domain { stroke: gray !important; }
-.tick line, text { stroke: gray !important; }
-.c3-legend-item text { stroke: gray !important; }
-.c3-tooltip { background-color: #111 !important; }
-.c3-tooltip th, td { background-color: #222 !important; }
-.c3 { background: #171717; border-radius: 4px; }
-.c3 text { 
-	fill: gray;
-	stroke: none !important;
-	font-size: 15px;
+path.domain {
+  stroke: gray !important;
 }
+.tick line,
+text {
+  stroke: gray !important;
+}
+.c3-legend-item text {
+  stroke: gray !important;
+}
+.c3-tooltip {
+  background-color: #111 !important;
+}
+.c3-tooltip th,
+td {
+  background-color: #222 !important;
+}
+.c3-grid {
+  opacity: 0.5;
+}
+
+.c3 {
+  /* background: #171717; */
+  border-radius: 4px;
+}
+.c3 text {
+  fill: gray;
+  stroke: none !important;
+  font-size: 15px;
+  font-family: Avenir Next, Helvetica;
+}
+.c3-line {
+  stroke-width: 3px !important;
+}
+
+/* fix an annoying alignment issue where x axis line does not align with bottom tick of y axis */
+.c3-axis-x .domain,
+.c3-axis-x .tick line {
+  transform: translate(0, 0.5pt);
+}
+
+/* hide y axis on labeled charts */
+.c3-labeled .c3-axis-y {
+  display: none;
+}
+
+/* move data labels up on un-rotated charts to accommodate larger point radius */
+.c3-text {
+  transform: translate(0, -5px);
+}
+
+.c3-rotated .c3-text {
+  transform: translate(0, 0);
+}
+
+/* rotated chart text adjustments for pixel-perfect alignment with Avenir Next fonts */
+.c3-rotated .c3-axis-x {
+  transform: translate(0, 2px);
+}
+.c3-rotated .c3-texts .c3-text {
+  transform: translate(0, -1px);
+}
+
+.c3-barchart .c3-axis-x .tick line {
+  display: none;
+}
+
+.c3-barchart .c3-axis-x .domain {
+  display: none;
+}
+
+.c3-barchart .c3-grid .c3-xgrid-focus {
+  display: none;
+}
+
+/* NOTE: global CSS for graphviz are not defaults but forced values due to low priority of dot/svg attributes */
+.dot > svg {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  margin: auto;
+}
+.dot {
+  padding: 5px 0;
+  width: fit-content; /* left-aligns graph assuming it has width:auto */
+}
+.dot .graph text {
+  stroke: none !important;
+}
+
+/* styling for MathJax svg inside graphviz nodes */
+/* .graph .node > g * {
+  stroke: black !important;
+  fill: black !important;
+} */

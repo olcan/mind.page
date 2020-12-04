@@ -15,6 +15,7 @@
         "source": "**",
         "function": "ssr"
       }
-    ]
+    ],
+    "postdeploy": []
   }
 }
