@@ -92,9 +92,15 @@
         prevTime = item.time;
       }
 
-      // determine column
-      if (item.pinned) item.column = 0;
-      else item.column = columnHeights.indexOf(Math.min.apply(null, columnHeights));
+      // determine item column
+      if (index == 0) item.column = 0;
+      else {
+        // stay on same column unless column height exceeds minimum column height by screen height
+        const lastColumn = items[index - 1].column;
+        const minColumnHeight = Math.min.apply(null, columnHeights);
+        if (columnHeights[lastColumn] < minColumnHeight + outerHeight) item.column = lastColumn;
+        else item.column = columnHeights.indexOf(minColumnHeight);
+      }
       columnHeights[item.column] += (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
     });
 
