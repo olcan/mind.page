@@ -60,7 +60,7 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean, backspace: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onResized = (itemdiv) => {};
+  export let onResized = (itemdiv, trigger: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -217,19 +217,34 @@
     if (isMenu) text = '<div class="menu">' + text + "</div>";
 
     // process images to transform src and add _cache_key attribute
-    text = text.replace(/<img .*?src="(.+?)".*?>/gi, function (m, src) {
+    text = text.replace(/<img .*?src\s*=\s*"(.+?)".*?>/gi, function (m, src) {
       if (m.match(/_cache_key/i)) {
-        console.warn("img with self-assigned _cache_key");
+        console.warn("img with self-assigned _cache_key in item at index", index + 1);
         return m;
       }
       // convert dropbox image src urls to direct download
       src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
-      m = m.replace(/ _cache_key=[^> ]*/, "");
+      // m = m.replace(/ _cache_key=[^> ]*/, "");
       // console.log("img src", src, m);
       return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${src}">`;
     });
 
+    // process divs with item-unique id to add _cache_key="<id>-$hash" automatically
+    text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
+      if (m.match(/_cache_key/i)) {
+        console.warn("div with self-assigned _cache_key in item at index", index + 1);
+        return m;
+      }
+      if (divid.indexOf(tmpid ? tmpid : id) < 0) {
+        console.warn('div without proper id (of the form "type-$id") in item at index', index + 1);
+        return m;
+      }
+      // m = m.replace(/ _cache_key=[^> ]*/, "");
+      // console.log("img src", src, m);
+      const key = divid + "-" + textHash;
+      return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
+    });
     return text;
   }
 
@@ -245,6 +260,7 @@
       const key = elem.getAttribute("_cache_key");
       if (window["_cache"].hasOwnProperty(key)) {
         // console.log("reusing cached element", key, elem.tagName);
+        // if (window["_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_cache"][key]);
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
@@ -265,7 +281,7 @@
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
         if (done) done();
-        onResized(itemdiv);
+        onResized(itemdiv, "math rendered");
       })
       .catch(console.error);
   }
@@ -374,7 +390,7 @@
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
-      if (itemdiv) onResized(itemdiv);
+      if (itemdiv) onResized(itemdiv, "afterUpdate");
     }, 0);
 
     // trigger typesetting of any math elements
@@ -403,7 +419,7 @@
         return;
       }
       img.onload = () => {
-        if (itemdiv) onResized(itemdiv);
+        if (itemdiv) onResized(itemdiv, "img.onload");
         img.setAttribute("_loaded", Date.now().toString());
       };
     });
@@ -414,114 +430,111 @@
       if (!itemdiv) return;
       const scripts = itemdiv.getElementsByTagName("script");
       // wait for all scripts to be done, then update height in case it changes
+      if (scripts.length == 0) return;
       let pendingScripts = scripts.length;
       let scriptErrors = [];
-      if (pendingScripts > 0) {
-        // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
-        Array.from(scripts).forEach((script) => {
-          if (!script.hasAttribute("_uncached")) {
-            if (!script.parentElement.hasAttribute("_cache_key")) {
-              // auto-cache non-item parent with item-unique id (that contains $id) with _cache_key="<id>-$hash"
-              if (script.parentElement.id.indexOf(id) >= 0 && !script.parentElement.classList.contains("item")) {
-                script.parentElement.setAttribute("_cache_key", script.parentElement.id + "-" + textHash);
-              } else {
-                console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
-              }
+      // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
+      Array.from(scripts).forEach((script) => {
+        // console.log(script.parentElement);
+        // console.log(Array.from(script.parentElement.getElementsByTagName("script")));
+        if (!script.hasAttribute("_uncached") && !script.parentElement.hasAttribute("_cache_key")) {
+          console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
+        }
+        script.remove(); // remove script to indicate execution
+        let clone = document.createElement("script");
+        clone.type = script.type || "text/javascript";
+        // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
+        clone.innerHTML = `(function(){ ${script.innerHTML} })()`;
+
+        // NOTE: we track script id which helps with logging and some helper functions, but this only works for sychronous execution; for async scripts tracking requires a context object to be passed around which does not seem worth the trouble for now
+        window["_script_item_id"] = id;
+        window["_errors"] = [];
+        document.head.appendChild(clone);
+        document.head.removeChild(clone);
+        window["_script_item_id"] = "";
+        scriptErrors = scriptErrors.concat(window["_errors"]);
+
+        pendingScripts--;
+        if (pendingScripts == 0) {
+          // console.log(`all scripts done in item ${index + 1}`);
+          // if (itemdiv.querySelector("script")) console.warn("item still contains script(s)!");
+          if (itemdiv) {
+            setTimeout(() => {
+              if (itemdiv) onResized(itemdiv, "scripts done");
+            }, 0);
+            // if no errors, cache elems with _cache_key that had scripts in them
+            // if error occurred, remove any cached elements for item to force restore/rerun scripts
+            if (scriptErrors.length == 0) {
+              cacheElems();
+              // render new math inside dot graph nodes that may have been rendered by the script
+              Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
+                dot["_dotrendered"] = function () {
+                  // render "stack" clusters (subgraphs)
+                  Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
+                    let path = cluster.children[1]; // first child is title
+                    (path as HTMLElement).setAttribute("fill", "#111");
+                    let path2 = path.cloneNode();
+                    (path2 as HTMLElement).setAttribute("transform", "translate(-3,3)");
+                    (path2 as HTMLElement).setAttribute("opacity", "0.75");
+                    cluster.insertBefore(path2, path);
+                    let path3 = path.cloneNode();
+                    (path3 as HTMLElement).setAttribute("transform", "translate(-6,6)");
+                    (path3 as HTMLElement).setAttribute("opacity", "0.5");
+                    cluster.insertBefore(path3, path2);
+                  });
+
+                  // render math in text nodes
+                  let math = [];
+                  Array.from(dot.querySelectorAll("text")).forEach((text) => {
+                    if (text.textContent.match(/^\$.+\$$/)) {
+                      text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
+                      math.push(text);
+                    }
+                  });
+                  renderMath(math, function () {
+                    dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
+                      let math = elem as SVGGraphicsElement;
+                      let dot = elem.parentNode.parentNode.parentNode.parentNode;
+                      // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
+                      let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+                      let text = dot.children[dot.children.length - 1]; // text is last child
+                      let shaperect = shape.getBBox();
+                      let textrect = text["_bbox"]; // recover text bbox pre-mathjax
+                      let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
+                      elem.parentElement.parentElement.parentElement.remove(); // remove text node
+                      dot.appendChild(elem);
+                      let mathrect = math.getBBox();
+                      let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
+                      let xt0 = -mathrect.x;
+                      let yt0 = -mathrect.y;
+                      let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
+                      let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2;
+                      elem.setAttribute(
+                        "transform",
+                        `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
+                      );
+                    });
+                  });
+                };
+              });
+            } else {
+              Object.values(window["_cache"]).filter((elem: HTMLElement) => {
+                if (elem.getAttribute("_item") == id) {
+                  console.log(`removing cached element for item ${index + 1}`);
+                  delete window["_cache"][elem.getAttribute("_cache_key")];
+                  // destroy any c3 charts inside element
+                  Array.from(elem.querySelectorAll(".c3")).map((div) => {
+                    if (div["_chart"]) {
+                      div["_chart"].destroy();
+                      delete div["_chart"];
+                    }
+                  });
+                }
+              });
             }
           }
-          script.remove(); // remove script to indicate execution
-          let clone = document.createElement("script");
-          clone.type = script.type || "text/javascript";
-          // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
-          // if (script.hasAttribute("src")) clone.src = script.src;
-          // console.log(script.innerHTML);
-          clone.innerHTML = `(function(){ ${script.innerHTML} })()`;
-          window["_script_item_id"] = id;
-          window["_errors"] = [];
-          document.head.appendChild(clone);
-          document.head.removeChild(clone);
-          window["_script_item_id"] = "";
-          scriptErrors = scriptErrors.concat(window["_errors"]);
-
-          pendingScripts--;
-          if (pendingScripts == 0) {
-            // console.log(`all scripts done in item ${index + 1}`);
-            if (itemdiv) {
-              onResized(itemdiv);
-              // if no errors, cache elems with _cache_key that had scripts in them
-              // if error occurred, remove any cached elements for item to force restore/rerun scripts
-              if (scriptErrors.length == 0) {
-                cacheElems();
-                // render new math inside dot graph nodes that may have been rendered by the script
-                Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
-                  dot["_dotrendered"] = function () {
-                    // render "stack" clusters (subgraphs)
-                    Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
-                      let path = cluster.children[1]; // first child is title
-                      (path as HTMLElement).setAttribute("fill", "#111");
-                      let path2 = path.cloneNode();
-                      (path2 as HTMLElement).setAttribute("transform", "translate(-3,3)");
-                      (path2 as HTMLElement).setAttribute("opacity", "0.75");
-                      cluster.insertBefore(path2, path);
-                      let path3 = path.cloneNode();
-                      (path3 as HTMLElement).setAttribute("transform", "translate(-6,6)");
-                      (path3 as HTMLElement).setAttribute("opacity", "0.5");
-                      cluster.insertBefore(path3, path2);
-                    });
-
-                    // render math in text nodes
-                    let math = [];
-                    Array.from(dot.querySelectorAll("text")).forEach((text) => {
-                      if (text.textContent.match(/^\$.+\$$/)) {
-                        text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
-                        math.push(text);
-                      }
-                    });
-                    renderMath(math, function () {
-                      dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
-                        let math = elem as SVGGraphicsElement;
-                        let dot = elem.parentNode.parentNode.parentNode.parentNode;
-                        // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
-                        let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
-                        let text = dot.children[dot.children.length - 1]; // text is last child
-                        let shaperect = shape.getBBox();
-                        let textrect = text["_bbox"]; // recover text bbox pre-mathjax
-                        let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
-                        elem.parentElement.parentElement.parentElement.remove(); // remove text node
-                        dot.appendChild(elem);
-                        let mathrect = math.getBBox();
-                        let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
-                        let xt0 = -mathrect.x;
-                        let yt0 = -mathrect.y;
-                        let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
-                        let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2;
-                        elem.setAttribute(
-                          "transform",
-                          `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
-                        );
-                      });
-                    });
-                  };
-                });
-              } else {
-                Object.values(window["_cache"]).filter((elem: HTMLElement) => {
-                  if (elem.getAttribute("_item") == id) {
-                    console.log(`removing cached element for item ${index + 1}`);
-                    delete window["_cache"][elem.getAttribute("_cache_key")];
-                    // destroy any c3 charts inside element
-                    Array.from(elem.querySelectorAll(".c3")).map((div) => {
-                      if (div["_chart"]) {
-                        div["_chart"].destroy();
-                        delete div["_chart"];
-                      }
-                    });
-                  }
-                });
-              }
-            }
-          }
-        });
-      }
+        }
+      });
     }, 0);
   });
 </script>

@@ -65,8 +65,7 @@
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
     let columnHeights = new Array(columnCount).fill(0);
-    // NOTE: we account for header height plus empty console height (since its contents are temporary)
-    columnHeights[0] = (headerdiv ? headerdiv.offsetHeight : 0) + 8;
+    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
 
     items.forEach((item, index) => {
       item.index = index;
@@ -434,7 +433,7 @@
   }
 
   let layoutPending = false;
-  function onItemResized(itemdiv) {
+  function onItemResized(itemdiv, trigger: string) {
     const id = itemdiv.id;
     const index = indexFromId.get(id);
     if (index == undefined) return;
@@ -442,31 +441,33 @@
     // const height = Math.min(itemdiv.clientHeight, itemdiv.offsetHeight);
     // const height = itemdiv.getBoundingClientRect().height;
     const height = itemdiv.offsetHeight;
-    if (height == 0 && items[index].height > 0) {
-      console.warn(
-        `zero height (last known height ${items[index].height}) for item ${id} at index ${index}`,
-        items[index].text.substring(0, Math.min(items[index].text.length, 80))
-      );
+    const prevHeight = items[index].height;
+    if (height == prevHeight) return; // nothing has changed
+    // NOTE: on iOS, editing items can trigger zero height to be reported, which we ignore
+    //       (seems to make sense generally since items should not have zero height)
+    if (height == 0 && prevHeight > 0) {
+      // console.warn(
+      //   `zero height (last known height ${prevHeight}) for item ${id} at index ${index+1}`,
+      //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
+      // );
+      return;
     }
-    if (
-      height == 0 ||
-      items[index].height == 0 ||
-      // height >= items[index].height + 100 ||
-      // height <= 0.5 * items[index].height
-      height != items[index].height
-    ) {
+
+    const lctext = items[index].text.toLowerCase();
+    const tags = itemTags(lctext);
+    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
+    console.log(`[${index + 1}] ${label ? label + ": " : ""} height changed ${prevHeight} → ${height} (${trigger})`);
+    items[index].height = height;
+
+    // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
+    if (height == 0 || prevHeight == 0 || height != prevHeight) {
       if (!layoutPending) {
-        console.log(
-          `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
-          items[index].text.substring(0, Math.min(items[index].text.length, 80))
-        );
         layoutPending = true;
         setTimeout(() => {
           updateItemLayout();
           layoutPending = false;
         }, 250);
       }
-      items[index].height = height;
     }
   }
 
@@ -712,7 +713,7 @@
                   var entry = document.createElement("div");
                   if (verb.endsWith("error")) verb = "error";
                   entry.classList.add("console-" + verb);
-                  let item; // if the source is an item
+                  let item; // if the source is an item (and the logging is done _synchronously_)
                   if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
                     item = items[indexFromId.get(window["_script_item_id"])];
                   } else if (evalIndex) {
@@ -725,7 +726,7 @@
                     const tags = itemTags(lctext);
                     const label = lctext.startsWith(tags[0]) ? tags[0] : "";
                     if (label) args.unshift(label + ":");
-                    args.unshift(`[${item.index}]`);
+                    args.unshift(`[${item.index + 1}]`);
                   }
                   entry.textContent = args.join(" ") + "\n";
                   div.appendChild(entry);
@@ -1127,6 +1128,7 @@
   }
   #header {
     width: 100%;
+    padding-bottom: 8px;
   }
   #header-container {
     display: flex;
@@ -1153,8 +1155,16 @@
     cursor: pointer;
   }
   #console {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 10;
+    color: #999;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 0 0 0 4px;
     font-family: monospace;
     padding: 4px; /* for 8px total padding between header and first item */
+    pointer-events: none;
   }
   :global(.console-warn) {
     color: yellow;
@@ -1232,8 +1242,8 @@
               <div class="spacer" />
               {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
+            <div id="console" />
           </div>
-          <div id="console" />
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
             <script>
