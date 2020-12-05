@@ -1175,12 +1175,13 @@
   .section-separator {
     height: 30px; /* 40px offsetHeigt is assumed during layout */
     margin-bottom: 10px;
+    padding-top: 15px;
     margin-right: 8px; /* matches padding-right of .super-container from Item.svelte */
-    padding-top: 10px;
     border-left: 2px dashed #444;
     color: #666;
-    font-size: 14px;
-    font-family: Avenir Next, Helvetica;
+    font-size: 20px;
+    line-height: 14px;
+    font-family: monospace;
     text-align: center;
   }
 
@@ -1188,8 +1189,8 @@
     display: inline-block;
     vertical-align: middle;
     background: transparent;
-    margin: 5px;
-    margin-bottom: 7px;
+    margin: 0;
+    margin-top: 0.5px;
     border: 0;
     border-top: 2px dashed #444;
     width: 54px; /* 5 dashes in iOS Safari on the Mac */
