@@ -53,7 +53,7 @@
   let indexFromId;
   let indicesFromLabel;
   let headerdiv;
-  let columns;
+  let columnCount = 0;
   function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
@@ -63,8 +63,7 @@
     indicesFromLabel = new Map();
     let timeString = "";
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
-    let columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
-    columns = [...Array(columnCount).keys()];
+    columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
     let columnHeights = new Array(columnCount).fill(0);
     // NOTE: we account for header height plus empty console height (since its contents are temporary)
     columnHeights[0] = (headerdiv ? headerdiv.offsetHeight : 0) + 8;
@@ -94,7 +93,7 @@
       }
 
       // determine item column
-      item.lastInSection = false;
+      item.nextColumn = -1;
       item.outerHeight = (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
       if (index == 0) item.column = 0;
       else {
@@ -105,7 +104,7 @@
           item.column = lastColumn;
         else item.column = columnHeights.indexOf(minColumnHeight);
         if (item.column != lastColumn) {
-          items[index - 1].lastInSection = true;
+          items[index - 1].nextColumn = item.column;
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
@@ -1174,21 +1173,27 @@
     max-width: 750px;
   }
   .section-separator {
-    display: flex;
-    align-items: center;
-    height: 40px; /* 40px is assumed during layout */
+    height: 30px; /* 40px offsetHeigt is assumed during layout */
+    margin-bottom: 10px;
     margin-right: 8px; /* matches padding-right of .super-container from Item.svelte */
+    padding-top: 10px;
     border-left: 2px dashed #444;
+    color: #666;
+    font-size: 14px;
+    font-family: Avenir Next, Helvetica;
+    text-align: center;
   }
 
   :global(.section-separator hr) {
-    display: none;
+    display: inline-block;
+    vertical-align: middle;
     background: transparent;
+    margin: 5px;
+    margin-bottom: 7px;
     border: 0;
-    border-top: 1px dashed #222;
-    border-bottom: 1px dashed #222;
-    width: 100%;
-    height: 5px; /* disappears if both height and border are 0 */
+    border-top: 2px dashed #444;
+    width: 54px; /* 5 dashes in iOS Safari on the Mac */
+    height: 1px; /* disappears if both height and border are 0 */
   }
 
   /* override italic comment style of sunburst */
@@ -1208,7 +1213,7 @@
   <!-- all good! user logged in, has permissions, and no error from server -->
 
   <div class="items">
-    {#each columns as column}
+    {#each { length: columnCount } as _, column}
       <div class="column">
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
@@ -1264,9 +1269,17 @@
               timeOutOfOrder={item.timeOutOfOrder}
               updateTime={item.updateTime}
               createTime={item.createTime} />
-            {#if item.lastInSection}
+            {#if item.nextColumn >= 0}
               <div class="section-separator">
-                <hr />
+                {#if item.nextColumn < item.column}
+                  ↖
+                  {#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
+                  <hr />
+                {:else}
+                  <hr />
+                  {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}
+                  ↗
+                {/if}
               </div>
             {/if}
           {/if}
