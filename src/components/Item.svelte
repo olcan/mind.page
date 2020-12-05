@@ -64,6 +64,7 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
+  let showDebugString = false;
   let debugString;
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
@@ -534,6 +535,7 @@
     position: relative;
     /* border: 1px solid transparent; */
     border-left: 2px solid #444;
+    border-radius: 0 4px 4px 0;
     /* overflow: hidden; */
     background: #111;
   }
@@ -547,7 +549,7 @@
     right: 0;
     z-index: 1;
     color: #666;
-    /* padding-right: 4px; */
+    padding-right: 2px;
     font-family: Avenir Next, Helvetica;
     text-align: right;
     opacity: 0.5;
@@ -557,6 +559,7 @@
   }
   .index .itemCount {
     color: #ddd;
+    padding-right: 2px;
   }
   .index .matchingItemCount {
     color: lightgreen;
@@ -757,7 +760,9 @@
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
-  <div class="debug">{debugString}</div>
+  {#if { showDebugString }}
+    <div class="debug">{debugString}</div>
+  {/if}
   <div class="container" class:editing class:focused class:timeOutOfOrder>
     <div class="index" class:matching={matchingTerms.length > 0}>
       {#if index == 0}
