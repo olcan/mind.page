@@ -535,6 +535,7 @@
     /* border: 1px solid transparent; */
     border-left: 2px solid #444;
     /* overflow: hidden; */
+    background: #111;
   }
   .container.focused {
     /* border: 1px solid #666; */
@@ -588,7 +589,6 @@
     color: #ddd;
     width: 100%;
     /* min-height: 42px; */
-    background: transparent;
     padding: 10px;
     box-sizing: border-box;
     /* white-space: pre-wrap; */

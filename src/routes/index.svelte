@@ -66,7 +66,8 @@
     let columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
     columns = [...Array(columnCount).keys()];
     let columnHeights = new Array(columnCount).fill(0);
-    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column contains header
+    // NOTE: we account for header height plus empty console height (since its contents are temporary)
+    columnHeights[0] = (headerdiv ? headerdiv.offsetHeight : 0) + 8;
 
     items.forEach((item, index) => {
       item.index = index;
@@ -93,15 +94,22 @@
       }
 
       // determine item column
+      item.lastInSection = false;
+      item.outerHeight = (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
       if (index == 0) item.column = 0;
       else {
-        // stay on same column unless column height exceeds minimum column height by screen height
+        // stay on same column unless column height would exceed minimum column height by 90% of screen height
         const lastColumn = items[index - 1].column;
         const minColumnHeight = Math.min.apply(null, columnHeights);
-        if (columnHeights[lastColumn] < minColumnHeight + outerHeight) item.column = lastColumn;
+        if (columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight)
+          item.column = lastColumn;
         else item.column = columnHeights.indexOf(minColumnHeight);
+        if (item.column != lastColumn) {
+          items[index - 1].lastInSection = true;
+          columnHeights[lastColumn] += 40; // .section-separator height including margins
+        }
       }
-      columnHeights[item.column] += (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
+      columnHeights[item.column] += item.outerHeight;
     });
 
     if (focusedItem >= 0) {
@@ -441,16 +449,13 @@
         items[index].text.substring(0, Math.min(items[index].text.length, 80))
       );
     }
-    items[index].height = height;
-    // NOTE: We only consider layout changes when item heights change significantly, e.g. from zero to non-zero, by +100px or by -50%+. When the layout is updated, the latest known heights are used for all items, but layout can be stale in the meantime, with some pages being slightly smaller/larger than they should be until next layout. This was originally done due to fluctuations in height in multi-column layout with breaking.
     if (
       height == 0 ||
       items[index].height == 0 ||
-      height >= items[index].height + 100 ||
-      height <= 0.5 * items[index].height
-      // height != items[index].height
+      // height >= items[index].height + 100 ||
+      // height <= 0.5 * items[index].height
+      height != items[index].height
     ) {
-      // significant height change, trigger layout in 250ms
       if (!layoutPending) {
         console.log(
           `updating layout due to height change (${items[index].height} to ${height}) for item ${id} at index ${index}`,
@@ -462,6 +467,7 @@
           layoutPending = false;
         }, 250);
       }
+      items[index].height = height;
     }
   }
 
@@ -1122,7 +1128,6 @@
   }
   #header {
     width: 100%;
-    padding-bottom: 8px;
   }
   #header-container {
     display: flex;
@@ -1150,7 +1155,7 @@
   }
   #console {
     font-family: monospace;
-    padding-left: 5px;
+    padding: 4px; /* for 8px total padding between header and first item */
   }
   :global(.console-warn) {
     color: yellow;
@@ -1168,6 +1173,11 @@
     min-width: 0px;
     max-width: 750px;
   }
+  .section-separator {
+    margin: 20px 0; /* for total height 40 */
+    border-top: 2px dashed #444;
+  }
+
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
@@ -1241,6 +1251,9 @@
               timeOutOfOrder={item.timeOutOfOrder}
               updateTime={item.updateTime}
               createTime={item.createTime} />
+            {#if item.lastInSection}
+              <div class="section-separator" />
+            {/if}
           {/if}
         {/each}
       </div>
