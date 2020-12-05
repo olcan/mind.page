@@ -1174,9 +1174,21 @@
     max-width: 750px;
   }
   .section-separator {
-    margin: 20px 0; /* for total height 40 */
-    border-top: 2px dashed #444;
+    display: flex;
+    align-items: center;
+    height: 40px; /* 40px is assumed during layout */
     margin-right: 8px; /* matches padding-right of .super-container from Item.svelte */
+    border-left: 2px dashed #444;
+  }
+
+  :global(.section-separator hr) {
+    display: none;
+    background: transparent;
+    border: 0;
+    border-top: 1px dashed #222;
+    border-bottom: 1px dashed #222;
+    width: 100%;
+    height: 5px; /* disappears if both height and border are 0 */
   }
 
   /* override italic comment style of sunburst */
@@ -1253,7 +1265,9 @@
               updateTime={item.updateTime}
               createTime={item.createTime} />
             {#if item.lastInSection}
-              <div class="section-separator" />
+              <div class="section-separator">
+                <hr />
+              </div>
             {/if}
           {/if}
         {/each}
