@@ -1176,6 +1176,7 @@
   .section-separator {
     margin: 20px 0; /* for total height 40 */
     border-top: 2px dashed #444;
+    margin-right: 8px; /* matches padding-right of .super-container from Item.svelte */
   }
 
   /* override italic comment style of sunburst */
