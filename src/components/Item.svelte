@@ -44,8 +44,6 @@
   export let index: number;
   export let id: string;
   export let tmpid: string; // temporary id for items created in current session
-  export let itemCount: number;
-  export let matchingItemCount: number;
   export let matchingTerms: any;
   export let matchingTermsSecondary: any;
   export let time: number;
@@ -53,6 +51,7 @@
   export let timeOutOfOrder: boolean;
   export let updateTime: number;
   export let createTime: number;
+  export let dotted: boolean;
 
   export let text: string;
   export let height = 0;
@@ -570,13 +569,6 @@
   .index.matching {
     color: lightgreen;
   }
-  .index .itemCount {
-    color: #ddd;
-    padding-right: 2px;
-  }
-  .index .matchingItemCount {
-    color: lightgreen;
-  }
 
   .time {
     color: #444;
@@ -777,7 +769,7 @@
   }
 </style>
 
-<div class="super-container" on:click={onClick}>
+<div class="super-container" class:dotted on:click={onClick}>
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -786,10 +778,6 @@
   {/if}
   <div class="container" class:editing class:focused class:timeOutOfOrder>
     <div class="index" class:matching={matchingTerms.length > 0}>
-      {#if index == 0}
-        <span class="itemCount">{itemCount}</span><br />
-        {#if matchingItemCount > 0}<span class="matchingItemCount">{matchingItemCount}</span><br />{/if}
-      {/if}
       {index + 1}
       <!-- <br /> {height} -->
     </div>

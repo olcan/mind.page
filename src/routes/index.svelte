@@ -53,6 +53,8 @@
   let indexFromId;
   let indicesFromLabel;
   let headerdiv;
+  let consolediv;
+  let dotCount = 0;
   let columnCount = 0;
   function updateItemLayout() {
     editingItems = [];
@@ -62,15 +64,18 @@
     indexFromId = new Map();
     indicesFromLabel = new Map();
     let timeString = "";
+    dotCount = 0;
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
+    columnHeights[0] -= consolediv && consolediv.style.display == "block" ? consolediv.offsetHeight : 0; // exclude console since temporary
 
     items.forEach((item, index) => {
       item.index = index;
       indexFromId.set(item.id, index);
+      if (item.dotted) dotCount++;
       if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.label) {
         indicesFromLabel.set(item.label, [...(indicesFromLabel.get(item.label) || []), index]);
@@ -142,6 +147,7 @@
   //       Invoke updateItemLayout directly if only item sizes have changed.
   const editorDebounceTime = 500;
   let lastEditorChangeTime = 0;
+  let matchingItemCount = 0;
   let editorChangePending = false;
   function onEditorChange(text: string) {
     // if editor has focus and it is too soon since last change/return, debounce
@@ -171,7 +177,6 @@
     });
 
     // let matchingTermCounts = new Map<string, number>();
-    let matchingItemCount = 0;
     let listing = [];
     items.forEach((item) => {
       const lctext = item.text.toLowerCase();
@@ -181,9 +186,11 @@
 
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-      const pintags = item.tags.filter((t) => t.match(/^#_?pin(?:\/|$)/));
+      const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
       item.pinned = pintags.length > 0;
       item.pinTerm = pintags[0] || "";
+      item.dotted = pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
+      item.dotTerm = pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
       item.prefixMatch = lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
@@ -200,23 +207,9 @@
       } else {
         item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
       }
-      if (item.matchingTerms.length > 0) {
-        matchingItemCount++;
-        // item.matchingTerms.forEach((term) =>
-        //   matchingTermCounts.set(term, (matchingTermCounts.get(term) || 0) + 1)
-        // );
-      }
+      if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
-    });
-
-    // Store matching item/term counts in items
-    items.forEach((item) => {
-      item.matchingItemCount = matchingItemCount;
-      // item.matchingTermCounts = [];
-      // item.matchingTerms.forEach((term) =>
-      //   item.matchingTermCounts.push(matchingTermCounts.get(term))
-      // );
     });
 
     // Update times for editing items to maintain their ordering when one is saved
@@ -229,6 +222,9 @@
     items = stableSort(items, (a, b) => {
       // pinned (contains #pin)
       return (
+        b.dotted - a.dotted ||
+        // alphanumeric ordering on #pin/dot/* term
+        a.dotTerm.localeCompare(b.dotTerm) ||
         b.pinned - a.pinned ||
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
@@ -686,6 +682,46 @@
     setTimeout(() => textArea(index + inc).focus(), 0);
   }
 
+  function updateDotted() {
+    (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
+    (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
+    Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
+      (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
+    });
+    consolediv.style.display = showDotted ? "block" : "none";
+  }
+
+  let lastScrollTime = 0;
+  let scrollToggleLocked = false; // prevent repeated toggle
+  let showDotted = false;
+  let showDottedPending = false;
+  function onScroll() {
+    lastScrollTime = Date.now();
+    if (window.scrollY <= -100 && !scrollToggleLocked) {
+      scrollToggleLocked = true;
+      showDotted = !showDotted;
+      // NOTE: display:none on any elements (even spans) while bouncing breaks the bounce animation on iOS
+      // (playing around with visibility/height/position/etc did not work either)
+      showDottedPending = true;
+      (document.querySelector("span.dots") as HTMLElement).style.visibility = "visible";
+      (document.querySelector("span.dots") as HTMLElement).style.opacity = "0.5";
+    } else if (window.scrollY >= -25) {
+      scrollToggleLocked = false;
+      if (window.scrollY >= 0) {
+        if (showDottedPending) {
+          updateDotted();
+          showDottedPending = false;
+        }
+      }
+    }
+  }
+
+  function onStatusClick(e) {
+    e.stopPropagation();
+    showDotted = !showDotted;
+    updateDotted();
+  }
+
   import { onMount } from "svelte";
 
   if (isClient) {
@@ -708,18 +744,17 @@
           loggedIn = true;
 
           // copy console into #console if it exists
-          const consolediv = document.getElementById("console");
           if (consolediv) {
-            // NOTE:
+            // NOTE: some errors do not go through console.error but are reported via window.onerror
             console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
             console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
             ["log", "debug", "info", "warn", "error", "_window_error", "_eval_error"].forEach(function (verb) {
               console[verb] = (function (method, verb, div) {
                 return function (...args) {
                   method(...args);
-                  var entry = document.createElement("div");
+                  var elem = document.createElement("div");
                   if (verb.endsWith("error")) verb = "error";
-                  entry.classList.add("console-" + verb);
+                  elem.classList.add("console-" + verb);
                   let item; // if the source is an item (and the logging is done _synchronously_)
                   if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
                     item = items[indexFromId.get(window["_script_item_id"])];
@@ -735,12 +770,19 @@
                     if (label) args.unshift(label + ":");
                     args.unshift(`[${item.index + 1}]`);
                   }
-                  entry.textContent = args.join(" ") + "\n";
-                  div.appendChild(entry);
+                  elem.textContent = args.join(" ") + "\n";
+                  div.appendChild(elem);
                   div.style.opacity = "1";
+                  const summaryDiv = document.getElementById("console-summary");
+                  const summaryElem = document.createElement("span");
+                  summaryElem.innerText = "·";
+                  summaryElem.classList.add("console-" + verb);
+                  summaryDiv.appendChild(summaryElem);
+
                   // auto-remove after 10 seconds ...
                   setTimeout(() => {
-                    entry.remove();
+                    elem.remove();
+                    summaryElem.remove();
                     if (div.childNodes.length == 0) div.style.opacity = "0";
                   }, 10000);
                 };
@@ -1061,11 +1103,7 @@
     // NOTE: we use document width because it is invariant to zoom scale
     //       window.outerWidth is also invariant but can be stale after device rotation in iOS Safari
     // NOTE: font resizing does not trigger resize events and is handled in a periodic task, see onMount below
-    let lastScrollTime = 0;
     let lastDocumentWidth = 0;
-    visualViewport.addEventListener("scroll", (e) => {
-      lastScrollTime = Date.now();
-    });
     let resizePending = false;
     function tryResize() {
       if (Date.now() - lastScrollTime > 250) {
@@ -1088,11 +1126,13 @@
       }
     }
     visualViewport.addEventListener("resize", tryResize);
+    visualViewport.addEventListener("scroll", onScroll);
 
     onMount(() => {
       // NOTE: invoking onEditorChange on a timeout allows item heights to be available for initial layout
       setTimeout(() => onEditorChange(""), 0);
       setInterval(tryResize, 250); // no need to destroy since page-level
+      updateDotted();
     });
 
     // Restore user from localStorage for faster init
@@ -1143,7 +1183,6 @@
   }
   #header {
     width: 100%;
-    padding-bottom: 8px;
   }
   #header-container {
     display: flex;
@@ -1170,16 +1209,17 @@
     cursor: pointer;
   }
   #console {
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 10;
+    /* position: absolute; */
+    /* top: 0; */
+    /* right: 0; */
+    /* z-index: 10; */
     color: #999;
     background: rgba(0, 0, 0, 0.85);
     border-radius: 0 0 0 4px;
     font-family: monospace;
-    padding: 4px; /* for 8px total padding between header and first item */
+    padding-top: 4px; /* for 8px total padding between header and first item */
     pointer-events: none;
+    text-align: left;
   }
   :global(.console-warn) {
     color: yellow;
@@ -1187,6 +1227,21 @@
   :global(.console-error) {
     color: red;
   }
+  #status {
+    padding: 4px;
+    padding-right: 8px;
+    text-align: left;
+    font-family: Avenir Next, Helvetica;
+    font-size: 12px;
+    color: #999;
+  }
+  #status .counts {
+    float: right;
+  }
+  #status .matching {
+    color: lightgreen;
+  }
+
   .items {
     width: 100%;
     display: flex;
@@ -1251,7 +1306,17 @@
               <div class="spacer" />
               {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
-            <div id="console" />
+            <div id="status" on:click={onStatusClick}>
+              <span id="console-summary" />
+              <span class="dots">
+                {#each { length: dotCount } as _}•{/each}
+              </span>
+              <div class="counts">
+                {items.length}
+                {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
+              </div>
+              <div id="console" bind:this={consolediv} />
+            </div>
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
@@ -1281,14 +1346,13 @@
               id={item.id}
               tmpid={item.tmpid}
               index={item.index}
-              itemCount={items.length}
-              matchingItemCount={item.matchingItemCount}
               matchingTerms={item.matchingTerms.join(' ')}
               matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
               timeString={item.timeString}
               timeOutOfOrder={item.timeOutOfOrder}
               updateTime={item.updateTime}
-              createTime={item.createTime} />
+              createTime={item.createTime}
+              dotted={item.dotted} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
                 {item.index + 2}
@@ -1325,4 +1389,4 @@
   ?
 {/if}
 
-<svelte:window on:keypress={onKeyPress} on:error={onError} />
+<svelte:window on:keypress={onKeyPress} on:error={onError} on:scroll={onScroll} />
