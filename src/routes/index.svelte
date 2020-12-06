@@ -737,8 +737,12 @@
                   }
                   entry.textContent = args.join(" ") + "\n";
                   div.appendChild(entry);
+                  div.style.opacity = "1";
                   // auto-remove after 10 seconds ...
-                  setTimeout(() => div.removeChild(entry), 10000);
+                  setTimeout(() => {
+                    entry.remove();
+                    if (div.childNodes.length == 0) div.style.opacity = "0";
+                  }, 10000);
                 };
               })(console[verb].bind(console), verb, consolediv);
             });
