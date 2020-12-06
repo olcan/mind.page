@@ -1196,7 +1196,7 @@
     padding-top: 7px;
     padding-left: 8px;
     padding-right: 8px; /* matches padding-right of .super-container from Item.svelte */
-    border-left: 2px dashed #333;
+    /* border-left: 2px dashed #333; */
     color: #333;
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
