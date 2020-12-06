@@ -1230,7 +1230,7 @@
   #status {
     padding: 4px;
     padding-right: 8px;
-    text-align: left;
+    text-align: center;
     font-family: Avenir Next, Helvetica;
     font-size: 12px;
     color: #999;
