@@ -194,9 +194,9 @@
       .replace(/\\<br>\n\n/g, "")
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
       .replace(
-        /(?:^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
-        (m, _html) =>
-          _html
+        /(^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
+        (m, pfx, _html) =>
+          (pfx + _html)
             .replace(/\$id/g, tmpid ? tmpid : id)
             .replace(/\$hash/g, textHash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
@@ -629,12 +629,20 @@
   /* :global(h1, h2, h3, h4, h5, h6) {
     clear: both;
   } */
-  :global(.item li) {
-    text-indent: -3px;
-  }
   :global(.item ul) {
     padding-left: 20px;
-    /* border-left: 1px solid #333; */
+  }
+  /* additional space between list items */
+  :global(.item ul > li:not(:last-of-type)) {
+    padding-bottom: 5px;
+  }
+  /* reduced space between nested list items */
+  :global(.item ul > li ul > li:not(:last-of-type)) {
+    padding-bottom: 1px;
+  }
+  /* additional space below nested lists for inner list items */
+  :global(.item li:not(:last-of-type) > ul) {
+    padding-bottom: 3px;
   }
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {

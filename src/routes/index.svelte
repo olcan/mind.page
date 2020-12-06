@@ -1203,10 +1203,6 @@
     text-align: center;
   }
 
-  .section-separator .next-item {
-    float: left;
-  }
-
   .section-separator .arrows {
     font-family: monospace;
     font-size: 20px;
@@ -1287,16 +1283,14 @@
               createTime={item.createTime} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
-                <div class="next-item">
-                  {item.index + 2}
-                  <span class="arrows">
-                    {#if item.nextColumn < item.column}
-                      ↖{#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
-                    {:else}
-                      {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}↗
-                    {/if}
-                  </span>
-                </div>
+                {item.index + 2}
+                <span class="arrows">
+                  {#if item.nextColumn < item.column}
+                    ↖{#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
+                  {:else}
+                    {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}↗
+                  {/if}
+                </span>
                 {#if item.nextItemInColumn >= 0}{item.nextItemInColumn + 1}<span class="arrows">↓</span>{/if}
               </div>
             {/if}
