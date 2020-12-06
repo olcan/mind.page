@@ -65,6 +65,7 @@
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
     let columnHeights = new Array(columnCount).fill(0);
+    let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
 
     items.forEach((item, index) => {
@@ -93,13 +94,17 @@
 
       // determine item column
       item.nextColumn = -1;
+      item.nextItemInColumn = -1;
       item.outerHeight = (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
         const lastColumn = items[index - 1].column;
         const minColumnHeight = Math.min.apply(null, columnHeights);
-        if (columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight)
+        if (
+          columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
+          columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight
+        )
           item.column = lastColumn;
         else item.column = columnHeights.indexOf(minColumnHeight);
         if (item.column != lastColumn) {
@@ -108,6 +113,8 @@
         }
       }
       columnHeights[item.column] += item.outerHeight;
+      items[columnItems[item.column]].nextItemInColumn = index;
+      columnItems[item.column] = item.index;
     });
 
     if (focusedItem >= 0) {
@@ -1183,28 +1190,26 @@
     max-width: 750px;
   }
   .section-separator {
-    height: 30px; /* 40px offsetHeigt is assumed during layout */
-    margin-bottom: 10px;
-    padding-top: 15px;
-    margin-right: 8px; /* matches padding-right of .super-container from Item.svelte */
-    border-left: 2px dashed #444;
-    color: #666;
-    font-size: 20px;
-    line-height: 14px;
-    font-family: monospace;
+    height: 33px; /* 4 full dashes on left border, 40px offsetHeigt is assumed during layout */
+    margin-top: 2px;
+    margin-bottom: 5px;
+    padding-top: 7px;
+    padding-left: 8px;
+    padding-right: 8px; /* matches padding-right of .super-container from Item.svelte */
+    border-left: 2px dashed #333;
+    color: #333;
+    font-size: 16px;
+    font-family: Avenir Next, Helvetica;
     text-align: center;
   }
 
-  :global(.section-separator hr) {
-    display: inline-block;
-    vertical-align: middle;
-    background: transparent;
-    margin: 0;
-    margin-top: 0.5px;
-    border: 0;
-    border-top: 2px dashed #444;
-    width: 54px; /* 5 dashes in iOS Safari on the Mac */
-    height: 1px; /* disappears if both height and border are 0 */
+  .section-separator .next-item {
+    float: left;
+  }
+
+  .section-separator .arrows {
+    font-family: monospace;
+    font-size: 20px;
   }
 
   /* override italic comment style of sunburst */
@@ -1282,15 +1287,17 @@
               createTime={item.createTime} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
-                {#if item.nextColumn < item.column}
-                  ↖
-                  {#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
-                  <hr />
-                {:else}
-                  <hr />
-                  {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}
-                  ↗
-                {/if}
+                <div class="next-item">
+                  {item.index + 2}
+                  <span class="arrows">
+                    {#if item.nextColumn < item.column}
+                      ↖{#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
+                    {:else}
+                      {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}↗
+                    {/if}
+                  </span>
+                </div>
+                {#if item.nextItemInColumn >= 0}{item.nextItemInColumn + 1}<span class="arrows">↓</span>{/if}
               </div>
             {/if}
           {/if}
