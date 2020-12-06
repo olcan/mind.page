@@ -246,6 +246,7 @@
     });
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
+    setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
   function onTagClick(tag: string, e: MouseEvent) {
@@ -683,12 +684,15 @@
   }
 
   function updateDotted() {
+    // auto-hide dotted items (and console) when empty
+    if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
+    document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
     Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
-    consolediv.style.display = showDotted ? "block" : "none";
+    consolediv.style.display = showDotted && consolediv.childNodes.length > 0 ? "block" : "none";
   }
 
   let lastScrollTime = 0;
@@ -1307,6 +1311,7 @@
               {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
             <div id="status" on:click={onStatusClick}>
+              &nbsp;
               <span id="console-summary" />
               <span class="dots">
                 {#each { length: dotCount } as _}•{/each}
