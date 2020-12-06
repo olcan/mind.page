@@ -959,7 +959,7 @@
           padding: { top: 10, right: 5 },
           axis: {
             x: { tick: { outer: false }, padding: 0 },
-            y: { tick: { outer: false }, padding: 5 },
+            y: { tick: { outer: false }, padding: { bottom: 5, top: rotated && labeled ? 60 : 5 } },
           },
         },
         spec
