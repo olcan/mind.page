@@ -52,11 +52,6 @@ td {
   transform: translate(0, 0.5pt);
 }
 
-/* hide y axis on labeled charts */
-.c3-labeled .c3-axis-y {
-  display: none;
-}
-
 /* move data labels up on un-rotated charts to accommodate larger point radius */
 .c3-text {
   transform: translate(0, -5px);
@@ -79,10 +74,6 @@ td {
 }
 
 .c3-barchart .c3-axis-x .domain {
-  display: none;
-}
-
-.c3-barchart .c3-grid .c3-xgrid-focus {
   display: none;
 }
 

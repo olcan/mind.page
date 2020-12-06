@@ -952,30 +952,34 @@
       let rotated = spec["axis"] && spec["axis"]["rotated"];
       let labeled = spec["data"] && spec["data"]["labels"];
       let barchart = spec["data"] && spec["data"]["type"] == "bar";
-      spec = recursiveAssign(
-        {
-          bindto: selector,
-          point: { r: 5 },
-          padding: { top: 10, right: 5 },
-          axis: {
-            x: { tick: { outer: false }, padding: 0 },
-            y: { tick: { outer: false }, padding: { bottom: 5, top: rotated && labeled ? 60 : 5 } },
+      let defaults = {
+        bindto: selector,
+        point: { r: 5 },
+        padding: { top: 10, right: 5 },
+        axis: {
+          x: {
+            show: true,
+            tick: { outer: false },
+            padding: 0,
+          },
+          y: {
+            show: !labeled,
+            tick: { outer: false, multiline: false },
+            padding: { bottom: 5, top: rotated && labeled ? 70 : labeled ? 40 : 5 },
           },
         },
-        spec
-      );
-
+        grid: { focus: { show: !barchart } },
+      };
+      if (labeled) {
+        if (rotated) defaults.padding["bottom"] = 15;
+        else defaults.padding["left"] = 5;
+      }
+      spec = recursiveAssign(defaults, spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
         if (labeled) elem.classList.add("c3-labeled");
         if (rotated) elem.classList.add("c3-rotated");
         if (barchart) elem.classList.add("c3-barchart");
       });
-      if (labeled) {
-        // adjust padding if labeled (s.t. y axis will be hidden)
-        // NOTE: this seems to also fix uneven bar spacing
-        if (rotated) spec["padding"]["bottom"] = -15;
-        else spec["padding"]["left"] = 5;
-      }
       const chart = window["c3"].generate(spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
         if (spec["size"] && spec["size"]["height"]) (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
@@ -1030,7 +1034,7 @@
       counts.forEach((count, index) => {
         let key = `[${(min + index * size).toFixed(digits)}, `;
         key += index == bins - 1 ? `${max.toFixed(digits)}]` : `${(min + (index + 1) * size).toFixed(digits)})`;
-        histogram[key] = count;
+        histogram[key] = count > 0 ? count : null; // replace 0 -> null
       });
       return histogram;
     };
