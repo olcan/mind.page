@@ -189,7 +189,11 @@
             /(^|\s)(#[\/\w]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
-                terms.has(tag) ? 'class="selected"' : termsSecondary.has(tag) ? 'class="secondary-selected"' : ""
+                terms.has(tag.toLowerCase())
+                  ? 'class="selected"'
+                  : termsSecondary.has(tag.toLowerCase())
+                  ? 'class="secondary-selected"'
+                  : ""
               } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
           );
         }
@@ -421,10 +425,6 @@
       }
       if (!img.hasAttribute("_cache_key")) {
         console.warn("img missing _cache_key (should be automatically added)");
-        return;
-      }
-      if (img.getAttribute("_cache_key") != img.src) {
-        console.warn("img _cache_key does not match src");
         return;
       }
       img.onload = () => {
