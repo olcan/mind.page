@@ -197,8 +197,13 @@
       if (item.prefixMatch) {
         item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
-      // use first exact-match item as "listing" item
-      if (item.prefixMatchTerm == terms[0] && listing.length == 0) listing = item.tags.reverse(); // so that last is best and default (-1) is worst
+      // use first exact-match (=label-match) item as "listing" item
+      // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
+      if (item.label == terms[0] && listing.length == 0)
+        listing = item.tags
+          .reverse()
+          .filter((t) => t != terms[0])
+          .concat([item.label]);
 
       item.matchingTerms = [];
       if (item.pinned) {
