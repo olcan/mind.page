@@ -247,7 +247,7 @@
     });
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
-    setTimeout(updateDotted, 0); // show/hide dotted/undotted items
+    if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
   function onTagClick(tag: string, e: MouseEvent) {
@@ -686,14 +686,14 @@
 
   function updateDotted() {
     // auto-hide dotted items (and console) when empty
-    if (dotCount == 0 && (!consolediv || consolediv.childNodes.length == 0)) showDotted = false;
+    if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
     document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
     Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
-    consolediv.style.display = showDotted && consolediv && consolediv.childNodes.length > 0 ? "block" : "none";
+    consolediv.style.display = showDotted && consolediv.childNodes.length > 0 ? "block" : "none";
   }
 
   let lastScrollTime = 0;
@@ -722,6 +722,11 @@
   }
 
   function onStatusClick(e) {
+    // ignore click if text is selected
+    if (window.getSelection().type == "Range") {
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     showDotted = !showDotted;
     updateDotted();
@@ -1239,6 +1244,7 @@
     font-family: Avenir Next, Helvetica;
     font-size: 12px;
     color: #999;
+    cursor: pointer;
   }
   #status .counts {
     float: right;
