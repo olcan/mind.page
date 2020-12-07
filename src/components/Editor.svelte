@@ -179,11 +179,12 @@
     }
 
     // remove spaced tabs with backspace
+    // (for backspace, unlike shift-tab, we require/allow an extra space)
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
       textarea.selectionStart >= 2 &&
-      textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
+      textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "   "
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
@@ -207,8 +208,8 @@
     // delete non-empty item with Shift/Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      // For shift-backspace, to reduce accidental deletion on iPhone, we require that the caret be placed at the start
-      if (e.metaKey || e.ctrlKey || !navigator.platform.startsWith("iPhone") || textarea.selectionStart == 0) {
+      // For shift-backspace, to reduce accidental deletion, we require that the caret be placed at the start
+      if (e.metaKey || e.ctrlKey || textarea.selectionStart == 0) {
         onDone((text = ""), e);
         e.preventDefault();
         return;

@@ -28,10 +28,20 @@
     highlight: function (code, language) {
       // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
       //if (language=="") return hljs.highlightAuto(code).value;
+      if (language == "_log") {
+        return code
+          .split("\n")
+          .map((line) =>
+            line
+              .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+              .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
+              .replace(/^(running ...)$/, '<span class="log-running">$1</span>')
+          )
+          .join("\n");
+      }
       if (language == "js_input" || language == "webppl") language = "js";
       if (language == "_html") language = "html";
       language = hljs.getLanguage(language) ? language : "plaintext";
-      // console.log("highlighting", validLanguage, code);
       return hljs.highlight(language, code).value;
     },
   });
@@ -376,21 +386,21 @@
       }
     });
 
-    // remove <code></code> wrapper block
-    Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
-    });
-
-    // replace <pre></pre> wrapper with <blockquote></blockquote>
-    Array.from(itemdiv.getElementsByTagName("pre")).forEach((pre) => {
-      if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
-        pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
-    });
-
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
       if (itemdiv) onResized(itemdiv, "afterUpdate");
     }, 0);
+
+    // remove <code></code> wrapper block for math blocks
+    Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
+    });
+
+    // replace <pre></pre> wrapper with <blockquote></blockquote> for math blocks
+    Array.from(itemdiv.getElementsByTagName("pre")).forEach((pre) => {
+      if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
+        pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
+    });
 
     // trigger typesetting of any math elements
     let math = [];
@@ -643,13 +653,13 @@
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
     padding-left: 5px;
-    margin-bottom: 10px;
+    margin-top: 5px;
     border-left: 1px solid #333;
   }
   /* NOTE: these font sizes should match those in Editor */
   :global(.item pre) {
     padding-left: 5px;
-    margin-bottom: 10px;
+    margin-top: 5px;
     border-left: 1px solid #333;
     font-size: 15px;
     line-height: 25px;
@@ -740,10 +750,9 @@
   :global(.item img) {
     max-width: 100%;
   }
-  /* NOTE: this caused first <mark> under .menu > p to lose its upper margin and lose alignment */
-  /* :global(.item :first-child) {
+  :global(.item :first-child) {
     margin-top: 0;
-  } */
+  }
   :global(.item :last-child) {
     margin-bottom: 0;
   }
@@ -753,6 +762,20 @@
   :global(.item blockquote .MathJax) {
     display: block;
   }
+  :global(.item .language-_log) {
+    display: block;
+    border-radius: 0 4px 4px 0;
+    /* border: 1px dashed #444; */
+    border-left: 0;
+    padding: 4px 0;
+    opacity: 0.75;
+    font-size: 80%;
+    line-height: 150%;
+  }
+  :global(.item .log-running) {
+    color: lightgreen;
+  }
+
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     :global(.item .menu a, .item .menu mark) {

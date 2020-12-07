@@ -498,6 +498,7 @@
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
     if (index >= 0) jsin = jsin.replace(/\$id/g, items[index].id);
+    let start = Date.now();
     try {
       evalIndex = index;
       let out = eval("(function(){" + jsin + "})()");
@@ -513,6 +514,10 @@
       if (label) msg = label + ": " + msg;
       if (console["_eval_error"]) console["_eval_error"](msg);
       else alert(msg);
+      // automatically _write_log any errors into item
+      if (index >= 0) {
+        window["_write_log"](items[index].id, start);
+      }
       return undefined;
     }
   }
@@ -617,8 +622,9 @@
         } else {
           // clear _output and execute javascript unless backspace-triggered
           if (!backspace) {
-            // empty out any *_output blocks as they should be re-generated
+            // empty out any *_output|*_log blocks as they should be re-generated
             item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
+            item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
             // NOTE: these appends may trigger async _write
             item.text = appendJSOutput(item.text, index);
           }
@@ -786,6 +792,7 @@
                     args.unshift(`[${item.index + 1}]`);
                   }
                   elem.textContent = args.join(" ") + "\n";
+                  elem.setAttribute("_time", Date.now().toString());
                   div.appendChild(elem);
                   div.style.opacity = "1";
                   const summaryDiv = document.getElementById("console-summary");
@@ -981,6 +988,18 @@
           }
         });
       }, 0);
+    };
+
+    window["_write_log"] = function (item: string, since: number = 0) {
+      let log = [];
+      consolediv.childNodes.forEach((elem) => {
+        if (elem.getAttribute("_time") < since) return;
+        let prefix = "";
+        if (elem.classList.contains("console-error")) prefix = "ERROR: ";
+        else if (elem.classList.contains("console-warn")) prefix = "WARNING: ";
+        log.push(prefix + elem.innerText.trim());
+      });
+      window["_write"](item, log.join("\n"), "_log");
     };
 
     window["_task"] = function (interval: number, task: Function, item: string = "") {
