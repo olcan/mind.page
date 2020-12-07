@@ -234,9 +234,9 @@
       // convert dropbox image src urls to direct download
       src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
-      // m = m.replace(/ _cache_key=[^> ]*/, "");
+      const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // console.log("img src", src, m);
-      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${src}">`;
+      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}">`;
     });
 
     // process divs with item-unique id to add _cache_key="<id>-$hash" automatically
