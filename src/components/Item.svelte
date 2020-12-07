@@ -653,7 +653,7 @@
   :global(.item code) {
     font-size: 15px;
     line-height: 25px;
-    white-space: pre; /* preserve whitespace, break on \n only */
+    white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
     border-radius: 4px;
