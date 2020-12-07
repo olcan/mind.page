@@ -697,12 +697,15 @@
   }
 
   let lastScrollTime = 0;
+  let lastScrolledDownTime = 0;
   let scrollToggleLocked = false; // prevent repeated toggle
   let showDotted = false;
   let showDottedPending = false;
   function onScroll() {
     lastScrollTime = Date.now();
-    if (window.scrollY <= -100 && !scrollToggleLocked) {
+    if (window.scrollY > 0) lastScrolledDownTime = lastScrollTime;
+    if (window.scrollY == 0) lastScrolledDownTime = 0;
+    if (window.scrollY <= -100 && !scrollToggleLocked && Date.now() - lastScrolledDownTime > 1000) {
       scrollToggleLocked = true;
       showDotted = !showDotted;
       // NOTE: display:none on any elements (even spans) while bouncing breaks the bounce animation on iOS
