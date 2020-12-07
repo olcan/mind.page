@@ -176,6 +176,7 @@
       while ((pos = tag.lastIndexOf("/")) >= 0) termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
+    matchingItemCount = 0;
     // let matchingTermCounts = new Map<string, number>();
     let listing = [];
     items.forEach((item) => {
@@ -685,14 +686,14 @@
 
   function updateDotted() {
     // auto-hide dotted items (and console) when empty
-    if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
+    if (dotCount == 0 && (!consolediv || consolediv.childNodes.length == 0)) showDotted = false;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
     document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
     Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
-    consolediv.style.display = showDotted && consolediv.childNodes.length > 0 ? "block" : "none";
+    consolediv.style.display = showDotted && consolediv && consolediv.childNodes.length > 0 ? "block" : "none";
   }
 
   let lastScrollTime = 0;
