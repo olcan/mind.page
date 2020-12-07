@@ -545,14 +545,18 @@
   }
   .container {
     position: relative;
-    /* border: 1px solid transparent; */
+    border: 1px solid transparent;
     border-left: 2px solid #444;
     border-radius: 0 4px 4px 0;
     /* overflow: hidden; */
     background: #111;
   }
+  .container.editing {
+    border: 1px dashed #666;
+    border-left: 2px solid #444;
+  }
   .container.focused {
-    /* border: 1px solid #666; */
+    border: 1px solid #666;
     border-left: 2px solid #aaa;
   }
   .index {
@@ -713,7 +717,7 @@
   }
   :global(.item mark span.highlight) {
     color: black;
-    background: lightgreen;
+    background: white;
     padding: 1px 0;
   }
   :global(.item .vertical-bar) {

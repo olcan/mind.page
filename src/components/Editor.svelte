@@ -305,8 +305,7 @@
   textarea {
     position: absolute;
     background: transparent;
-    /* color: #ddd; */
-    caret-color: #ddd;
+    caret-color: red;
     color: transparent;
     width: 100%;
     margin: 0;
