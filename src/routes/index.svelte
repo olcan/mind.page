@@ -687,6 +687,8 @@
   function updateDotted() {
     // auto-hide dotted items (and console) when empty
     if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
+    // force show dotted items when any of them are editing
+    if (editingItems.findIndex((i) => items[i].dotted) >= 0) showDotted = true;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
     document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
