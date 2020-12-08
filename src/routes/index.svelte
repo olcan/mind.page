@@ -335,6 +335,21 @@
         location.href = "twitter://post?message=" + encodeURIComponent(item.text);
         return;
       }
+      case "/duplicate": {
+        if (editingItems.length == 0) {
+          alert("/duplicate: no item selected");
+          return;
+        }
+        if (editingItems.length > 1) {
+          alert("/duplicate: too many items selected");
+          return;
+        }
+        let item = items[editingItems[0]];
+        time = item.time;
+        text = item.text;
+        editing = false;
+        break;
+      }
       case "/undelete": {
         if (deletedItems.length == 0) {
           alert("/undelete: nothing to undelete (in this session)");
