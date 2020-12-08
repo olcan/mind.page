@@ -35,6 +35,8 @@
             line
               .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
               .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
+              .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
+              .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
               .replace(/^(running ...)$/, '<span class="log-running">$1</span>')
           )
           .join("\n");

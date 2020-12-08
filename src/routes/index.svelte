@@ -466,7 +466,7 @@
     const lctext = items[index].text.toLowerCase();
     const tags = itemTags(lctext);
     const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-    console.log(`[${index + 1}] ${label ? label + ": " : ""} height changed ${prevHeight} → ${height} (${trigger})`);
+    console.debug(`[${index + 1}] ${label ? label + ": " : ""} height changed ${prevHeight} → ${height} (${trigger})`);
     items[index].height = height;
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
@@ -774,7 +774,8 @@
             // NOTE: some errors do not go through console.error but are reported via window.onerror
             console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
             console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-            ["log", "debug", "info", "warn", "error", "_window_error", "_eval_error"].forEach(function (verb) {
+            const levels = ["debug", "info", "log", "warn", "error", "_window_error", "_eval_error"];
+            levels.forEach(function (verb) {
               console[verb] = (function (method, verb, div) {
                 return function (...args) {
                   method(...args);
@@ -798,6 +799,7 @@
                   }
                   elem.textContent = args.join(" ") + "\n";
                   elem.setAttribute("_time", Date.now().toString());
+                  elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
                   div.style.opacity = "1";
                   const summaryDiv = document.getElementById("console-summary");
@@ -995,13 +997,13 @@
       }, 0);
     };
 
-    window["_write_log"] = function (item: string, since: number = 0) {
+    window["_write_log"] = function (item: string, since: number = 0, level: number = 0) {
       let log = [];
       consolediv.childNodes.forEach((elem) => {
         if (elem.getAttribute("_time") < since) return;
-        let prefix = "";
-        if (elem.classList.contains("console-error")) prefix = "ERROR: ";
-        else if (elem.classList.contains("console-warn")) prefix = "WARNING: ";
+        if (elem.getAttribute("_level") < level) return;
+        const type = elem.className.substring(elem.className.indexOf("-") + 1);
+        const prefix = type == "log" ? "" : type.toUpperCase() + ": ";
         log.push(prefix + elem.innerText.trim());
       });
       window["_write"](item, log.join("\n"), "_log");
@@ -1259,6 +1261,15 @@
     padding-top: 4px; /* for 8px total padding between header and first item */
     pointer-events: none;
     text-align: left;
+  }
+  :global(.console-debug) {
+    color: #555;
+  }
+  :global(.console-info) {
+    color: #777;
+  }
+  :global(.console-log) {
+    color: #999;
   }
   :global(.console-warn) {
     color: yellow;
