@@ -107,7 +107,7 @@
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
         const lastColumn = items[index - 1].column;
-        const minColumnHeight = Math.min.apply(null, columnHeights);
+        const minColumnHeight = Math.min(...columnHeights);
         if (
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
           columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight
@@ -142,7 +142,7 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s]+)/g), (m) => m[1].replace(/^#_/, "#"));
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;]+)/g), (m) => m[1].replace(/^#_/, "#"));
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -168,7 +168,9 @@
 
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[^#\/\w]+/)))].filter((t) => t);
+    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[.,!$%\^&\*;:{}=\-_`~()]/)))]
+      .concat(itemTags(text))
+      .filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
@@ -349,7 +351,7 @@
         let item = items[editingItems[0]];
         time = item.time;
         text = item.text;
-        editing = false;
+        editing = true;
         break;
       }
       case "/undelete": {
@@ -372,7 +374,6 @@
         } else if (text.match(/^\/\s+/s)) {
           text = text.replace(/^\/\s+/s, "");
         }
-        // text = appendJSOutput(text);
         editing = text.length == 0; // if text is empty, continue editing
       }
     }
@@ -380,10 +381,17 @@
     let itemToSave = { time: time, text: text };
     let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
     items = [item, ...items];
-    // NOTE: we append JS output here so that we can specify item index and plug in $id
-    itemToSave.text = item.text = appendJSOutput(text, 0 /*temporary index is 0*/);
     lastEditorChangeTime = 0; // disable debounce even if editor focused
-    onEditorChange((editorText = ""));
+    onEditorChange((editorText = "")); // integrate new item at index 0
+    // NOTE: if not editing, append JS output and trigger another layout if necessary
+    if (!editing) {
+      itemToSave.text = item.text = appendJSOutput(text, indexFromId.get(tmpid));
+      if (item.text != text) {
+        // invoke onEditorChange again due to text change
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange("");
+      }
+    }
     textArea(-1).focus(); // refocus (necessary on iOS for shifting focus to another item)
     if (editing) setTimeout(() => textArea(indexFromId.get(tmpid)).focus(), 0);
 
@@ -433,11 +441,8 @@
 
   function focusOnNearestEditingItem(index: number) {
     // console.log("focusOnNearestEditingItem, editingItems",editingItems)
-    let near = Math.min.apply(
-      null,
-      editingItems.filter((i) => i > index)
-    );
-    if (near == Infinity) near = Math.max.apply(null, [-1, ...editingItems]);
+    let near = Math.min(...editingItems.filter((i) => i > index));
+    if (near == Infinity) near = Math.max(...[-1, ...editingItems]);
     focusedItem = near;
     textArea(near).focus();
     // NOTE: a second dispatched focus() call can sometimes be necessary
@@ -1020,7 +1025,8 @@
         if (elem.getAttribute("_time") < since) return;
         if (elem.getAttribute("_level") < level) return;
         const type = elem.className.substring(elem.className.indexOf("-") + 1);
-        const prefix = type == "log" ? "" : type.toUpperCase() + ": ";
+        let prefix = type == "log" ? "" : type.toUpperCase() + ": ";
+        if (prefix == "WARN: ") prefix = "WARNING: ";
         log.push(prefix + elem.innerText.trim());
       });
       window["_write"](item, log.join("\n"), "_log");
@@ -1114,12 +1120,14 @@
     };
 
     window["_histogram"] = function (
-      numbers: Array<number>,
+      numbers: any,
       bins: number = 10,
       min: number = Infinity,
       max: number = -Infinity,
       digits: number = 2
     ) {
+      // if numbers is a distribution, attempt to extract values using window._samples
+      if (numbers["getDist"]) numbers = window["_samples"](numbers);
       if (min > max) {
         // determine range using data
         numbers.forEach((num) => {
@@ -1163,15 +1171,23 @@
     window["_pmf"] = function (dist, limit: number = 10, digits: number = 2) {
       dist = dist.getDist();
       let keys = Object.keys(dist).map((k) => k.toString());
-      let values = Object.values(dist).map((v) => v["prob"]);
-      let indices = Array.from(Array(values.length).keys());
-      indices = stableSort(indices, (i, j) => values[j] - values[i]);
-      values = values.map((v) => v.toFixed(digits));
-      indices = indices.filter((i) => values[i] > 0);
+      let probs = Object.values(dist).map((v) => v["prob"]);
+      let indices = Array.from(Array(probs.length).keys());
+      indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
+      probs = probs.map((v) => v.toFixed(digits));
+      indices = indices.filter((i) => probs[i] > 0);
       indices.length = Math.min(indices.length, limit);
       let pmf = {};
-      indices.forEach((i) => (pmf[keys[i]] = values[i]));
+      indices.forEach((i) => (pmf[keys[i]] = probs[i]));
       return pmf;
+    };
+
+    window["_samples"] = function (dist) {
+      dist = dist.getDist();
+      let values = Object.keys(dist).map(parseFloat);
+      let probs = Object.values(dist).map((v) => v["prob"]);
+      if (Math.min(...probs) != Math.max(...probs)) console.warn("sample weights ignored by _samples (or _histogram)");
+      return values;
     };
 
     // Visual viewport resize/scroll handlers ...
