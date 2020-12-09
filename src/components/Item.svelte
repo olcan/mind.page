@@ -64,6 +64,7 @@
   export let updateTime: number;
   export let createTime: number;
   export let dotted: boolean;
+  export let playable: boolean;
 
   export let text: string;
   export let height = 0;
@@ -71,6 +72,7 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean, backspace: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
+  export let onPlayed = (index: number) => {};
   export let onResized = (itemdiv, trigger: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -88,6 +90,12 @@
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
     onEditing(index, (editing = true), false);
+  }
+
+  function onPlayClick(e) {
+    if (!playable) return;
+    e.stopPropagation();
+    onPlayed(index);
   }
 
   export let onTagClick = (tag: string, e: MouseEvent) => {};
@@ -266,6 +274,7 @@
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
+  import type { stop_propagation } from "svelte/internal";
 
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
@@ -575,7 +584,6 @@
     position: absolute;
     top: 0;
     right: 0;
-    z-index: 1;
     color: #666;
     padding-right: 2px;
     font-family: Avenir Next, Helvetica;
@@ -584,6 +592,22 @@
   }
   .index.matching {
     color: #9f9;
+  }
+  .play {
+    display: none;
+    cursor: pointer;
+    opacity: 0.5;
+    vertical-align: middle;
+  }
+  :global(.playable .play) {
+    display: inline;
+  }
+  :global(.playable .index) {
+    cursor: pointer; /* since we moved onClick to index */
+  }
+  :global(.saving .play),
+  :global(.editing .play) {
+    display: none;
   }
 
   .time {
@@ -805,9 +829,10 @@
   {#if { showDebugString }}
     <div class="debug">{debugString}</div>
   {/if}
-  <div class="container" class:editing class:focused class:timeOutOfOrder>
-    <div class="index" class:matching={matchingTerms.length > 0}>
+  <div class="container" class:editing class:saving class:focused class:playable class:timeOutOfOrder>
+    <div class="index" class:matching={matchingTerms.length > 0} on:click={onPlayClick}>
       {index + 1}
+      <span class="play">▶</span>
       <!-- <br /> {height} -->
     </div>
     {#if editing}
@@ -820,7 +845,7 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
-      <div class="item" {id} bind:this={itemdiv} class:saving class:error>
+      <div class="item" {id} bind:this={itemdiv} class:error>
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}

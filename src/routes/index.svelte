@@ -220,6 +220,8 @@
       if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
+
+      item.playable = lctext.match(/\s*```js_input\s/);
     });
 
     // Update times for editing items to maintain their ordering when one is saved
@@ -678,6 +680,16 @@
     if (focused) focusedItem = index;
     else focusedItem = -1;
     // console.log(`item ${index} focused: ${focused}, focusedItem:${focusedItem}`);
+  }
+
+  function onItemPlayed(index: number) {
+    // empty out any *_output|*_log blocks as they should be re-generated
+    items[index].text = items[index].text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
+    items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
+    items[index].text = appendJSOutput(items[index].text, index);
+    items[index].time = Date.now();
+    onEditorChange(editorText); // item time/text has changed
+    saveItem(index);
   }
 
   function editItem(index: number) {
@@ -1438,6 +1450,7 @@
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
+              onPlayed={onItemPlayed}
               onResized={onItemResized}
               {onTagClick}
               onPrev={onPrevItem}
@@ -1457,7 +1470,8 @@
               timeOutOfOrder={item.timeOutOfOrder}
               updateTime={item.updateTime}
               createTime={item.createTime}
-              dotted={item.dotted} />
+              dotted={item.dotted}
+              playable={item.playable} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
                 {item.index + 2}
