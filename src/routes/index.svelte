@@ -168,7 +168,7 @@
 
     text = text.toLowerCase().trim();
     // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[.,!$%\^&\*;:{}=\-_`~()]/)))]
+    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/)))]
       .concat(itemTags(text))
       .filter((t) => t);
     if (text.startsWith("/")) terms = [];
@@ -276,7 +276,10 @@
         if (child.contains(range.startContainer)) break;
         pos += child.textContent.length;
       }
-      tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
+      // we only take partial tag if the current tag is "selected" (i.e. full exact match)
+      // (makes it easier to click on tags without accidentally getting a partial tag)
+      if ((tagNode as HTMLElement).classList.contains("selected"))
+        tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
     } else {
       console.warn("got null range for tag click: ", tag, e);
     }
