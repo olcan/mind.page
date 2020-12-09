@@ -66,7 +66,9 @@
     let timeString = "";
     dotCount = 0;
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
-    columnCount = Math.max(1, Math.floor(document.documentElement.clientWidth / 500));
+    const documentWidth = document.documentElement.clientWidth;
+    const minColumnWidth = 500; // minimum column width for multiple columns
+    columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
@@ -140,7 +142,7 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[\/\w]+)/g), (m) => m[1].replace(/^#_/, "#"));
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s]+)/g), (m) => m[1].replace(/^#_/, "#"));
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.

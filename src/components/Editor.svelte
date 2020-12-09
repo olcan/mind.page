@@ -38,7 +38,7 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
-  let highlightTags = (t) => t.replace(/(^|\s)(#[\/\w]+)/g, "$1<mark>$2</mark>");
+  let highlightTags = (t) => t.replace(/(^|\s)(#[^#\s]+)/g, "$1<mark>$2</mark>");
   let highlightCode = (t) => t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
   let highlightMath = (t) => t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
 

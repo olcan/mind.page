@@ -188,7 +188,7 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
-            /(^|\s)(#[\/\w]+)/g,
+            /(^|\s)(#[^#\s]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
                 terms.has(tag.toLowerCase())
