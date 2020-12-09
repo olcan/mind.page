@@ -583,7 +583,7 @@
     opacity: 0.5;
   }
   .index.matching {
-    color: lightgreen;
+    color: #ff7;
   }
 
   .time {
@@ -717,19 +717,19 @@
   }
 
   :global(.item mark.selected) {
-    background: lightgreen;
+    background: #9f9;
   }
   :global(.item mark.secondary-selected) {
-    background: white;
+    background: #eee;
   }
   :global(.item span.highlight) {
     color: black;
-    background: lightgreen;
+    background: #ff7;
     border-radius: 4px;
   }
   :global(.item mark span.highlight) {
     color: black;
-    background: white;
+    background: #9c9;
     padding: 1px 0;
   }
   :global(.item .vertical-bar) {
@@ -775,7 +775,7 @@
     line-height: 150%;
   }
   :global(.item .log-running) {
-    color: lightgreen;
+    color: #9c9;
   }
 
   /* adapt to smaller windows/devices */
