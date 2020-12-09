@@ -583,7 +583,7 @@
     opacity: 0.5;
   }
   .index.matching {
-    color: #ff7;
+    color: #9f9;
   }
 
   .time {
@@ -724,7 +724,7 @@
   }
   :global(.item span.highlight) {
     color: black;
-    background: #ff7;
+    background: #9f9;
     border-radius: 4px;
   }
   :global(.item mark span.highlight) {

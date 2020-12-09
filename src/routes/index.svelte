@@ -1340,7 +1340,7 @@
     float: right;
   }
   #status .matching {
-    color: #ff7;
+    color: #9f9;
   }
 
   .items {
