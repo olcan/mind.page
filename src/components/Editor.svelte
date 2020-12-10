@@ -205,15 +205,12 @@
       return;
     }
 
-    // delete non-empty item with Shift/Cmd/Ctrl+Backspace
+    // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
-    if (e.code == "Backspace" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      // For shift-backspace, to reduce accidental deletion, we require that the caret be placed at the start
-      if (e.metaKey || e.ctrlKey || textarea.selectionStart == 0) {
-        onDone((text = ""), e);
-        e.preventDefault();
-        return;
-      }
+    if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
+      onDone((text = ""), e);
+      e.preventDefault();
+      return;
     }
 
     // insert spaces on Tab
@@ -291,17 +288,21 @@
     position: absolute;
     overflow: auto;
     width: 100%;
-    background: #1b1b1b;
-    border-radius: 0 4px 4px 0;
+    background: #111;
     width: 100%;
     margin: 0;
     padding: 10px;
+    border-radius: 0 4px 4px 0;
+    border: 1px dashed #444;
+    border-left: 0;
     box-sizing: border-box; /* essential for proper sizing of textarea */
     white-space: pre-wrap;
     word-wrap: break-word;
   }
   .backdrop.focused {
-    background: #222;
+    background: #171717;
+    border: 1px solid #444;
+    border-left: 0;
   }
   textarea {
     position: absolute;
@@ -311,10 +312,10 @@
     width: 100%;
     margin: 0;
     padding: 10px;
-    box-sizing: border-box; /* essential for proper sizing of textarea */
     outline: none;
-    border: 0;
     border-radius: 0;
+    border: 1px solid transparent;
+    box-sizing: border-box; /* essential for proper sizing of textarea */
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }

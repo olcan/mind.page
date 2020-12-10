@@ -64,15 +64,15 @@
   export let updateTime: number;
   export let createTime: number;
   export let dotted: boolean;
-  export let playable: boolean;
+  export let runnable: boolean;
 
   export let text: string;
   export let height = 0;
   const placeholder = " ";
   let error = false;
-  export let onEditing = (index: number, editing: boolean, backspace: boolean) => {};
+  export let onEditing = (index: number, editing: boolean, cancelled: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onPlayed = (index: number) => {};
+  export let onRun = (index: number) => {};
   export let onResized = (itemdiv, trigger: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -82,9 +82,8 @@
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
-  import { firestore } from "../../firebase.js";
   function onDone(editorText: string, e: KeyboardEvent) {
-    onEditing(index, (editing = false), e.key == "Backspace");
+    onEditing(index, (editing = false), e.key == "Backspace" /* cancelled? */);
   }
   function onClick() {
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
@@ -92,10 +91,30 @@
     onEditing(index, (editing = true), false);
   }
 
-  function onPlayClick(e) {
-    if (!playable) return;
+  function onRunClick(e) {
+    if (!runnable) return;
     e.stopPropagation();
-    onPlayed(index);
+    e.preventDefault();
+    onRun(index);
+  }
+
+  function onSaveClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    onEditing(index, (editing = false), false);
+  }
+
+  function onCancelClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    onEditing(index, (editing = false), true /* cancelled */);
+  }
+
+  function onDeleteClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    text = ""; // indicates deletion
+    onEditing(index, (editing = false), true /* cancelled */);
   }
 
   export let onTagClick = (tag: string, e: MouseEvent) => {};
@@ -274,7 +293,6 @@
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
-  import type { stop_propagation } from "svelte/internal";
 
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
@@ -566,48 +584,63 @@
   }
   .container {
     position: relative;
-    border: 1px solid transparent;
     border-left: 2px solid #444;
     border-radius: 0 4px 4px 0;
-    /* overflow: hidden; */
     background: #111;
   }
   .container.editing {
-    border: 1px dashed #666;
     border-left: 2px solid #444;
   }
   .container.focused {
-    border: 1px solid #666;
     border-left: 2px solid #aaa;
   }
   .corner {
     position: absolute;
     top: 0;
     right: 0;
+    z-index: 1;
     color: #666;
     padding-right: 2px;
+    padding-left: 4px;
     font-family: monospace;
     text-align: right;
     opacity: 0.5;
   }
-  .corner.matching {
+  .corner.editing {
+    background: #666;
+    border-radius: 4px 4px 0 4px;
+    opacity: 1;
+    top: -6px;
+  }
+
+  .index {
+    cursor: pointer;
+  }
+  .index.matching {
     color: #9f9;
   }
-  .play {
+  .run,
+  .delete,
+  .cancel,
+  .save {
     display: none;
     cursor: pointer;
-    font-size: 140%;
-    margin-left: 2px;
   }
-  :global(.playable .play) {
+  .delete {
+    color: red;
+  }
+  :global(.runnable:not(.saving):not(.editing) .run) {
+    display: inline-block;
+  }
+  .editing .save,
+  .editing .delete,
+  .editing .cancel,
+  .editing .index {
     display: inline;
+    color: black;
   }
-  :global(.playable .corner) {
-    cursor: pointer; /* since we moved onClick to index */
-  }
-  :global(.saving .play),
-  :global(.editing .play) {
-    display: none;
+  .editing .delete {
+    color: #900;
   }
 
   .time {
@@ -829,9 +862,13 @@
   {#if { showDebugString }}
     <div class="debug">{debugString}</div>
   {/if}
-  <div class="container" class:editing class:saving class:focused class:playable class:timeOutOfOrder>
-    <div class="corner" class:matching={matchingTerms.length > 0} on:click={onPlayClick}>
-      {index + 1}<span class="play">▶</span>
+  <div class="container" class:editing class:saving class:focused class:runnable class:timeOutOfOrder>
+    <div class="corner" class:editing>
+      <span class="run" on:click={onRunClick}>run</span>
+      <span class="cancel" on:click={onCancelClick}>cancel</span>
+      <span class="save" on:click={onSaveClick}>save</span>
+      <span class="delete" on:click={onDeleteClick}>delete</span>
+      <span class="index" class:matching={matchingTerms.length > 0} on:click={onSaveClick}>{index + 1}</span>
       <!-- <br /> {height} -->
     </div>
     {#if editing}

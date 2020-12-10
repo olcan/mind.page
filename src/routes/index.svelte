@@ -221,7 +221,7 @@
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
 
-      item.playable = lctext.match(/\s*```js_input\s/);
+      item.runnable = lctext.match(/\s*```js_input\s/);
     });
 
     // Update times for editing items to maintain their ordering when one is saved
@@ -614,18 +614,22 @@
     );
   }
 
-  function onItemEditing(index: number, editing: boolean, backspace: boolean) {
+  function onItemEditing(index: number, editing: boolean, cancelled: boolean) {
     let item = items[index];
-    // for non-log items, update time whenever the item is "touched"
-    if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
 
-    // for backspace-triggered closings, we always restore savedTime and only save if text has changed
-    if (backspace) item.time = item.savedTime;
+    // if cancelled, restore savedTime and savedText (unless empty, which indicates deletion)
+    if (cancelled) {
+      item.time = item.savedTime;
+      if (item.text) item.text = item.savedText;
+    } else {
+      // for non-log items, update time whenever the item is "touched"
+      if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
+    }
 
     if (editing) {
       // started editing
       editingItems.push(index);
-      onEditorChange(editorText); // editing state has changed
+      if (item.time != item.savedTime) onEditorChange(editorText); // time has changed
       // NOTE: setTimeout is required for editor to be added to the Dom
       if (iOS()) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
@@ -638,39 +642,38 @@
     } else {
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
-      if (focusedItem == index) {
-        focusedItem = -1;
-
-        if (item.text.length == 0) {
-          // delete
-          items.splice(index, 1);
-          updateItemLayout();
-          items = items; // trigger dom update
-          deletedItems.unshift({
-            time: item.savedTime,
-            text: item.savedText,
-          }); // for /undelete
-          firestore().collection("items").doc(item.id).delete().catch(console.error);
-        } else {
-          // clear _output and execute javascript unless backspace-triggered
-          if (!backspace) {
-            // empty out any *_output|*_log blocks as they should be re-generated
-            item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-            item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
-            // NOTE: these appends may trigger async _write
-            item.text = appendJSOutput(item.text, index);
-          }
-          if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
-          onEditorChange(editorText); // item time and/or text has changed
+      if (focusedItem == index) focusedItem = -1;
+      if (item.text.length == 0) {
+        // delete
+        items.splice(index, 1);
+        updateItemLayout();
+        items = items; // trigger dom update
+        deletedItems.unshift({
+          time: item.savedTime,
+          text: item.savedText,
+        }); // for /undelete
+        firestore().collection("items").doc(item.id).delete().catch(console.error);
+      } else {
+        // clear _output and execute javascript unless cancelled
+        if (!cancelled) {
+          // empty out any *_output|*_log blocks as they should be re-generated
+          item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
+          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
+          // NOTE: these appends may trigger async _write
+          item.text = appendJSOutput(item.text, index);
         }
+        if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
+        onEditorChange(editorText); // item time and/or text has changed
+      }
 
-        // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
-        //       that is not worth the benefit without an attached keyboard (which is harder to detect)
-        if (editingItems.length > 0 || !navigator.platform.startsWith("iPhone")) {
-          focusOnNearestEditingItem(index);
-        } else {
-          (document.activeElement as HTMLElement).blur();
-        }
+      // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
+      //       that is not worth the benefit without an attached keyboard (which is harder to detect)
+      //       (actually we no longer do that on non-iphone either)
+      if (editingItems.length > 0) {
+        // || !navigator.platform.startsWith("iPhone")) {
+        focusOnNearestEditingItem(index);
+      } else {
+        (document.activeElement as HTMLElement).blur();
       }
     }
     // console.log(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
@@ -682,7 +685,7 @@
     // console.log(`item ${index} focused: ${focused}, focusedItem:${focusedItem}`);
   }
 
-  function onItemPlayed(index: number) {
+  function onItemRun(index: number) {
     // empty out any *_output|*_log blocks as they should be re-generated
     items[index].text = items[index].text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
     items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
@@ -1308,15 +1311,19 @@
     display: flex;
     padding: 4px 0;
     border-left: 2px solid #444;
-    background: #1b1b1b; /* matches unfocused editor */
+    background: #111; /* matches unfocused editor */
   }
   #header-container.focused {
-    background: #1b1b1b;
+    background: #111;
     border-left: 2px solid #aaa;
   }
   #editor {
     margin-right: 4px;
     width: 100%;
+  }
+  /* remove dashed border when top editor is unfocused */
+  :global(#editor .backdrop:not(.focused)) {
+    border: 0;
   }
   .spacer {
     flex-grow: 1;
@@ -1478,7 +1485,7 @@
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
-              onPlayed={onItemPlayed}
+              onRun={onItemRun}
               onResized={onItemResized}
               {onTagClick}
               onPrev={onPrevItem}
@@ -1499,7 +1506,7 @@
               updateTime={item.updateTime}
               createTime={item.createTime}
               dotted={item.dotted}
-              playable={item.playable} />
+              runnable={item.runnable} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
                 {item.index + 2}
