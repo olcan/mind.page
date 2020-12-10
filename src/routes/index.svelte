@@ -1322,8 +1322,8 @@
     width: 100%;
   }
   /* remove dashed border when top editor is unfocused */
-  :global(#editor .backdrop:not(.focused)) {
-    border: 0;
+  :global(#header #editor .backdrop:not(.focused)) {
+    border: 1px solid transparent;
   }
   .spacer {
     flex-grow: 1;

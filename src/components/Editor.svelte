@@ -286,11 +286,11 @@
     /* color: transparent; */
     color: #ddd;
     position: absolute;
-    overflow: auto;
+    /* top: -1px; */ /* NOTE: backdrop is 2px taller (presumably due to border) but aligns correctly */
+    overflow: hidden;
     width: 100%;
     background: #111;
     width: 100%;
-    margin: 0;
     padding: 10px;
     border-radius: 0 4px 4px 0;
     border: 1px dashed #444;
@@ -315,6 +315,7 @@
     outline: none;
     border-radius: 0;
     border: 1px solid transparent;
+    overflow: hidden;
     box-sizing: border-box; /* essential for proper sizing of textarea */
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
@@ -331,7 +332,7 @@
     background: #7bf;
   }
   :global(.block) {
-    background: #171717;
+    background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
     padding: 1px;
     margin: -1px;
@@ -340,7 +341,7 @@
     color: #666;
   }
   :global(#editor .code, #editor .math) {
-    background: #171717;
+    background: rgba(0, 0, 0, 0.5);
     padding: 2px 4px;
     margin: -2px -4px;
     border-radius: 4px;
