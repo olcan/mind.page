@@ -49,9 +49,9 @@
     let code = "";
     let html = "";
     text.split("\n").map((line) => {
-      if (!insideBlock && line.match(/^\s*```(\w+)$/)) {
+      if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
         insideBlock = true;
-        language = line.match(/^\s*```(\w+)$/).pop();
+        language = line.match(/^\s*```(\w*)$/).pop();
         if (language == "js_input") language = "js";
         if (language == "webppl") language = "js";
         if (language == "_html") language = "html";
@@ -71,7 +71,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
+        if (line.match(/^\s*[^\-\*]/)) html += line + "\n";
         else html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
@@ -292,9 +292,8 @@
     background: #111;
     width: 100%;
     padding: 10px;
-    border-radius: 0 4px 4px 0;
+    border-radius: 4px;
     border: 1px dashed #444;
-    border-left: 0;
     box-sizing: border-box; /* essential for proper sizing of textarea */
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -302,7 +301,6 @@
   .backdrop.focused {
     background: #171717;
     border: 1px solid #444;
-    border-left: 0;
   }
   textarea {
     position: absolute;

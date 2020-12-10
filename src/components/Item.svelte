@@ -205,7 +205,7 @@
         }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
-        // NOTE: for blockquotes (>...) we need to break lines using double-space
+        // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
           // wrap math inside span.math (unless text matches search terms)
@@ -580,19 +580,11 @@
 <style>
   .super-container {
     padding: 4px 0;
-    padding-right: 8px;
   }
   .container {
     position: relative;
-    border-left: 2px solid #444;
-    border-radius: 0 4px 4px 0;
+    border-radius: 4px;
     background: #111;
-  }
-  .container.editing {
-    border-left: 2px solid #444;
-  }
-  .container.focused {
-    border-left: 2px solid #aaa;
   }
   .corner {
     position: absolute;
@@ -654,10 +646,8 @@
   }
   .time.timeOutOfOrder {
     background: #666;
-    padding-left: 15px;
-    padding-bottom: 1px;
     color: black;
-    border-radius: 0 4px 4px 0;
+    border-radius: 4px;
     /* display: block; */
   }
   .debug {
@@ -717,9 +707,9 @@
   }
   /* NOTE: these font sizes should match those in Editor */
   :global(.item pre) {
-    padding-left: 5px;
+    /* padding-left: 5px; */
     margin-top: 5px;
-    border-left: 1px solid #333;
+    /* border-left: 1px solid #333; */
     font-size: 15px;
     line-height: 25px;
   }
@@ -735,9 +725,6 @@
     background: none;
     padding: 0;
     border-radius: 0;
-  }
-  :global(.item br:last-child) {
-    display: none;
   }
   :global(.item a) {
     color: #79e;
@@ -824,7 +811,6 @@
   :global(.item .language-_log) {
     display: block;
     border-radius: 0 4px 4px 0;
-    /* border: 1px dashed #444; */
     border-left: 0;
     padding: 4px 0;
     opacity: 0.75;

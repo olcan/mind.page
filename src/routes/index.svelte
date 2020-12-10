@@ -69,6 +69,7 @@
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
+
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
@@ -1305,17 +1306,16 @@
     background-size: 200px;
   }
   #header {
-    width: 100%;
+    max-width: 100%;
   }
   #header-container {
     display: flex;
     padding: 4px 0;
-    border-left: 2px solid #444;
     background: #111; /* matches unfocused editor */
+    border-radius: 0 0 4px 4px;
   }
   #header-container.focused {
     background: #111;
-    border-left: 2px solid #aaa;
   }
   #editor {
     margin-right: 4px;
@@ -1368,7 +1368,6 @@
   }
   #status {
     padding: 4px;
-    padding-right: 8px;
     text-align: center;
     font-family: monospace;
     font-size: 12px;
@@ -1388,7 +1387,7 @@
     position: absolute;
     right: 0;
     top: 0;
-    padding-right: 11px; /* matches .corner inset on first item */
+    padding-right: 3px; /* matches .corner inset on first item */
     padding-top: 4px;
   }
   #status .matching {
@@ -1405,14 +1404,14 @@
     min-width: 0px;
     max-width: 750px;
   }
+  .column:not(:last-child) {
+    padding-right: 8px;
+  }
   .section-separator {
     height: 33px; /* 4 full dashes on left border, 40px offsetHeigt is assumed during layout */
     margin-top: 2px;
     margin-bottom: 5px;
     padding-top: 7px;
-    padding-left: 8px;
-    padding-right: 8px; /* matches padding-right of .super-container from Item.svelte */
-    /* border-left: 2px dashed #333; */
     color: #333;
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
@@ -1440,7 +1439,7 @@
 {#if user && allowedUsers.includes(user.uid) && !error}
   <!-- all good! user logged in, has permissions, and no error from server -->
 
-  <div class="items">
+  <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
       <div class="column">
         {#if column == 0}
