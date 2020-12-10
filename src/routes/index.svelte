@@ -1000,9 +1000,22 @@
       return content.join("\n");
     };
 
+    let _writePendingItem = "";
+    let _writePendingItemLog = "";
     window["_write"] = function (item: string, text: string, type: string = "_output") {
+      // if writing _log to item pending another _write, attach to that write
+      if (type == "_log" && item == _writePendingItem) {
+        _writePendingItemLog = text;
+        return;
+      }
       // NOTE: write is always async in case triggered by eval during onItemEditing
+      _writePendingItem = item;
       setTimeout(() => {
+        let log = "";
+        if (_writePendingItem == item) {
+          log = _writePendingItemLog;
+          _writePendingItemLog = _writePendingItem = "";
+        }
         let indices = indicesForItem(item);
         // console.log("_write", indices, item);
         indices.map((index) => {
@@ -1018,6 +1031,7 @@
             }
             if (type == "") items[index].text = text;
             else items[index].text = appendBlock(items[index].text, type, text);
+            if (log) items[index].text = appendBlock(items[index].text, "_log", log);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             items[index].time = Date.now();
             onEditorChange(editorText); // item time/text has changed
@@ -1326,6 +1340,9 @@
     padding-top: 4px; /* for 8px total padding between header and first item */
     pointer-events: none;
     text-align: left;
+    -webkit-touch-callout: auto;
+    -webkit-user-select: auto;
+    user-select: auto;
   }
   :global(.console-debug) {
     color: #555;
@@ -1346,13 +1363,26 @@
     padding: 4px;
     padding-right: 8px;
     text-align: center;
-    font-family: Avenir Next, Helvetica;
+    font-family: monospace;
     font-size: 12px;
     color: #999;
     cursor: pointer;
+    position: relative;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #status #console-summary {
+    position: absolute;
+    left: 0;
+    padding-left: 4px;
   }
   #status .counts {
-    float: right;
+    position: absolute;
+    right: 0;
+    top: 0;
+    padding-right: 11px; /* matches .corner inset on first item */
+    padding-top: 4px;
   }
   #status .matching {
     color: #9f9;
@@ -1423,9 +1453,7 @@
               {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
             <div id="status" on:click={onStatusClick}>
-              &nbsp;
-              <span id="console-summary" />
-              <span class="dots">
+              <span id="console-summary" />&nbsp;<span class="dots">
                 {#each { length: dotCount } as _}•{/each}
               </span>
               <div class="counts">

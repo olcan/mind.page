@@ -580,29 +580,29 @@
     border: 1px solid #666;
     border-left: 2px solid #aaa;
   }
-  .index {
+  .corner {
     position: absolute;
     top: 0;
     right: 0;
     color: #666;
     padding-right: 2px;
-    font-family: Avenir Next, Helvetica;
+    font-family: monospace;
     text-align: right;
     opacity: 0.5;
   }
-  .index.matching {
+  .corner.matching {
     color: #9f9;
   }
   .play {
     display: none;
     cursor: pointer;
-    opacity: 0.5;
-    vertical-align: middle;
+    font-size: 140%;
+    margin-left: 2px;
   }
   :global(.playable .play) {
     display: inline;
   }
-  :global(.playable .index) {
+  :global(.playable .corner) {
     cursor: pointer; /* since we moved onClick to index */
   }
   :global(.saving .play),
@@ -830,9 +830,8 @@
     <div class="debug">{debugString}</div>
   {/if}
   <div class="container" class:editing class:saving class:focused class:playable class:timeOutOfOrder>
-    <div class="index" class:matching={matchingTerms.length > 0} on:click={onPlayClick}>
-      {index + 1}
-      <span class="play">▶</span>
+    <div class="corner" class:matching={matchingTerms.length > 0} on:click={onPlayClick}>
+      {index + 1}<span class="play">▶</span>
       <!-- <br /> {height} -->
     </div>
     {#if editing}
