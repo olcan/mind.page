@@ -796,7 +796,8 @@
   :global(.item mark span.highlight) {
     color: black;
     background: #9c9;
-    padding: 1px 0;
+    padding-left: 0;
+    padding-right: 0;
   }
   :global(.item .vertical-bar) {
     color: #444;

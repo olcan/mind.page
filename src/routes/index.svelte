@@ -211,7 +211,7 @@
           .concat([item.label]);
 
       item.matchingTerms = [];
-      if (item.pinned) {
+      if (false && item.pinned) {
         // match only tags for pinned items
         // item.matchingTerms = terms.filter((t) => item.tags.indexOf(t) >= 0);
         item.matchingTerms = terms.filter((t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0);
