@@ -849,6 +849,7 @@
     }
     .item {
       font-size: 16px;
+      line-height: 24px;
     }
     .time {
       font-size: 14px;
