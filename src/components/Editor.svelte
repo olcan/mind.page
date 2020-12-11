@@ -356,7 +356,7 @@
     .backdrop,
     textarea {
       font-size: 13px;
-      line-height: 22px;
+      line-height: 21px;
     }
   }
 </style>

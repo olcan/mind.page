@@ -849,7 +849,7 @@
     }
     .item {
       font-size: 16px;
-      line-height: 24px;
+      line-height: 23px;
     }
     .time {
       font-size: 14px;
@@ -857,7 +857,7 @@
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
       font-size: 13px;
-      line-height: 22px;
+      line-height: 21px;
     }
   }
 </style>
