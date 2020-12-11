@@ -687,6 +687,9 @@
   :global(.item ul) {
     padding-left: 20px;
   }
+  :global(.item ul ul) {
+    padding-left: 10px;
+  }
   /* additional space between list items */
   :global(.item ul > li:not(:last-of-type)) {
     padding-bottom: 5px;
