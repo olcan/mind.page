@@ -71,7 +71,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^\s*[^\-\*]/)) html += line + "\n";
+        if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
         else html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
       }
     });
