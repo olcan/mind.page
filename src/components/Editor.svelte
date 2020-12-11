@@ -280,7 +280,7 @@
   textarea {
     font-family: monospace;
     font-size: 15px;
-    line-height: 25px;
+    line-height: 24px;
   }
   .backdrop {
     /* color: transparent; */

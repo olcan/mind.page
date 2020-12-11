@@ -255,8 +255,14 @@
     // apply hidden divs
     text = text.replace(/<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->/gs, '<div style="display:none">$1</div>');
 
+    // convert markdown to html
     text = marked(text);
+
+    // wrap menu items
     if (isMenu) text = '<div class="menu">' + text + "</div>";
+
+    // wrap list items in span to control spacing from bullets
+    text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
 
     // process images to transform src and add _cache_key attribute
     text = text.replace(/<img .*?src\s*=\s*"(.+?)".*?>/gi, function (m, src) {
@@ -666,7 +672,7 @@
     word-wrap: break-word;
     font-family: Avenir Next, Helvetica;
     font-size: 18px;
-    line-height: 28px;
+    line-height: 26px;
     /* cursor: pointer; */
     overflow: hidden; /* prevent overflow which causes stuck zoom-out on iOS Safari */
   }
@@ -687,29 +693,29 @@
   :global(.item ul) {
     padding-left: 20px;
   }
-  :global(.item ul ul) {
-    padding-left: 10px;
+  :global(.item span.list-item) {
+    display: block;
+    margin-left: -5px;
   }
-
   /* additional space between list items */
-  /* :global(.item ul > li:not(:last-of-type)) {
-    padding-bottom: 5px;
-  } */
+  :global(.item ul > li:not(:last-of-type)) {
+    padding-bottom: 2px;
+  }
   /* reduced space between nested list items */
-  /* :global(.item ul > li ul > li:not(:last-of-type)) {
+  :global(.item ul > li ul > li:not(:last-of-type)) {
     padding-bottom: 1px;
-  } */
+  }
   /* additional space below nested lists for inner list items */
-  /* :global(.item li:not(:last-of-type) > ul) {
-    padding-bottom: 3px;
-  } */
-  /* add some space before/after lists for more even spacing */
-  /* :global(.item > ul:not(:first-child)) {
-    padding-top: 5px;
+  :global(.item li:not(:last-of-type) > ul) {
+    padding-bottom: 2px;
+  }
+  /* add some space before/after lists for more even spacing with surrounding text */
+  :global(.item > ul:not(:first-child)) {
+    padding-top: 2px;
   }
   :global(.item > ul:not(:last-child)) {
-    padding-bottom: 5px;
-  } */
+    padding-bottom: 2px;
+  }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
@@ -723,11 +729,11 @@
     margin-top: 5px;
     /* border-left: 1px solid #333; */
     font-size: 15px;
-    line-height: 25px;
+    line-height: 24px;
   }
   :global(.item code) {
     font-size: 15px;
-    line-height: 25px;
+    line-height: 24px;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -741,7 +747,7 @@
   :global(.item a) {
     color: #79e;
     background: #222;
-    padding: 1px 4px;
+    padding: 0 4px;
     border-radius: 4px;
     text-decoration: none;
   }
@@ -749,20 +755,24 @@
     color: black;
     background: #999;
     /* remove negative margins used to align with textarea text */
-    padding: 1px 4px;
+    padding: 0 4px;
     margin: 0;
   }
   /* .menu styling: paragraphs become flex boxes */
   :global(.item .menu p) {
     display: flex;
+    line-height: 24px; /* match image height */
     width: 95%; /* leave some extra space for editing and item count/index indicators */
   }
-  :global(.item .menu a, .item .menu mark) {
+  :global(.item .menu a),
+  :global(.item .menu mark) {
     padding: 8px;
   }
   :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
-    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     margin: 2px;
   }
   :global(.item .menu img) {
@@ -827,7 +837,6 @@
     padding: 4px 0;
     opacity: 0.75;
     font-size: 80%;
-    line-height: 150%;
   }
   :global(.item .log-running) {
     color: #9c9;
@@ -840,7 +849,6 @@
     }
     .item {
       font-size: 16px;
-      line-height: 25px;
     }
     .time {
       font-size: 14px;
