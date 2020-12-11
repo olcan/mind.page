@@ -690,18 +690,27 @@
   :global(.item ul ul) {
     padding-left: 10px;
   }
+
   /* additional space between list items */
-  :global(.item ul > li:not(:last-of-type)) {
+  /* :global(.item ul > li:not(:last-of-type)) {
     padding-bottom: 5px;
-  }
+  } */
   /* reduced space between nested list items */
-  :global(.item ul > li ul > li:not(:last-of-type)) {
+  /* :global(.item ul > li ul > li:not(:last-of-type)) {
     padding-bottom: 1px;
-  }
+  } */
   /* additional space below nested lists for inner list items */
-  :global(.item li:not(:last-of-type) > ul) {
+  /* :global(.item li:not(:last-of-type) > ul) {
     padding-bottom: 3px;
+  } */
+  /* add some space before/after lists for more even spacing */
+  /* :global(.item > ul:not(:first-child)) {
+    padding-top: 5px;
   }
+  :global(.item > ul:not(:last-child)) {
+    padding-bottom: 5px;
+  } */
+
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
     padding-left: 5px;
