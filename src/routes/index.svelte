@@ -73,7 +73,6 @@
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
-    columnHeights[0] -= consolediv && consolediv.style.display == "block" ? consolediv.offsetHeight : 0; // exclude console since temporary
 
     items.forEach((item, index) => {
       item.index = index;
@@ -846,7 +845,7 @@
                   elem.setAttribute("_time", Date.now().toString());
                   elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
-                  div.style.opacity = "1";
+                  div.style.display = showDotted ? "block" : "none";
                   const summaryDiv = document.getElementById("console-summary");
                   const summaryElem = document.createElement("span");
                   summaryElem.innerText = "·";
@@ -857,7 +856,7 @@
                   setTimeout(() => {
                     elem.remove();
                     summaryElem.remove();
-                    if (div.childNodes.length == 0) div.style.opacity = "0";
+                    if (div.childNodes.length == 0) div.style.display = "none";
                   }, 10000);
                 };
               })(console[verb].bind(console), verb, consolediv);
@@ -1341,15 +1340,15 @@
     cursor: pointer;
   }
   #console {
-    /* position: absolute; */
-    /* top: 0; */
-    /* right: 0; */
-    /* z-index: 10; */
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    padding: 4px;
     color: #999;
     background: rgba(0, 0, 0, 0.85);
-    border-radius: 0 0 0 4px;
+    border-radius: 0 0 4px 0;
     font-family: monospace;
-    padding-top: 4px; /* for 8px total padding between header and first item */
     pointer-events: none;
     text-align: left;
     -webkit-touch-callout: auto;
@@ -1471,8 +1470,8 @@
                 {items.length}
                 {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
               </div>
-              <div id="console" bind:this={consolediv} />
             </div>
+            <div id="console" bind:this={consolediv} />
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
