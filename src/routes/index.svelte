@@ -168,10 +168,15 @@
     lastEditorChangeTime = Infinity; // force minimum wait for next change
 
     text = text.toLowerCase().trim();
-    // let terms = [...new Set(text.split(/[^#\/\w]+/))].filter((t) => t);
-    let terms = [...new Set(text.split(/\s+/).concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/)))]
-      .concat(itemTags(text))
-      .filter((t) => t);
+    let terms = [
+      ...new Set(
+        text
+          .split(/\s+/)
+          // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
+          .concat(itemTags(text))
+      ),
+    ].filter((t) => t);
+    // let terms = [...new Set([text].concat(itemTags(text)))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
@@ -210,14 +215,13 @@
           .filter((t) => t != terms[0])
           .concat([item.label]);
 
-      item.matchingTerms = [];
-      if (false && item.pinned) {
-        // match only tags for pinned items
-        // item.matchingTerms = terms.filter((t) => item.tags.indexOf(t) >= 0);
-        item.matchingTerms = terms.filter((t) => item.tags.findIndex((tag) => tag.startsWith(t)) >= 0);
-      } else {
-        item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
-      }
+      // match terms
+      item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
+      // match regex:* terms
+      item.matchingTerms = item.matchingTerms.concat(
+        terms.filter((t) => t.match(/^regex:\S+/) && lctext.match(new RegExp(t.substring(6))))
+      );
+
       if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
@@ -1098,7 +1102,7 @@
       let defaults = {
         bindto: selector,
         point: { r: 5 },
-        padding: { top: 10, right: 5 },
+        padding: { top: 10, right: 10 },
         axis: {
           x: {
             show: true,
@@ -1112,6 +1116,7 @@
           },
         },
         grid: { focus: { show: !barchart } },
+        legend: { show: false },
       };
       if (labeled) {
         if (rotated) defaults.padding["bottom"] = 15;
