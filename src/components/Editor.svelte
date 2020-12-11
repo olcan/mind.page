@@ -205,6 +205,14 @@
       return;
     }
 
+    // clear item (from current position to start) with shift-backspace
+    if (e.code == "Backspace" && e.shiftKey) {
+      textarea.selectionStart = 0;
+      document.execCommand("delete", false);
+      e.preventDefault();
+      return;
+    }
+
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
