@@ -551,9 +551,7 @@
       if (console["_eval_error"]) console["_eval_error"](msg);
       else alert(msg);
       // automatically _write_log any errors into item
-      if (index >= 0) {
-        window["_write_log"](items[index].id, start);
-      }
+      if (index >= 0) window["_write_log"](items[index].id, start);
       return undefined;
     }
   }
@@ -575,18 +573,18 @@
     const lctext = text.toLowerCase();
     const tags = itemTags(lctext);
     const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-    let jsout = [];
+    let prefix = "";
     tags.forEach((tag) => {
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        jsout.push(evalJSInput(items[index].text, items[index].label, index) || "");
+        prefix += extractBlock(items[index].text, "js_input") + "\n";
       });
     });
-    jsout.push(evalJSInput(text, label, index) || "");
-    let jsoutString = jsout.join("\n").trim();
-    if (!jsoutString) return text; // no output
-    return appendBlock(text, "js_output", jsoutString);
+    if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
+    let jsout = evalJSInput(prefix + text, label, index) || "";
+    if (!jsout) return text.replace(/\n\s*```js_output\n.*?\n\s*```/gs, ""); // no output
+    return appendBlock(text, "js_output", jsout);
   }
 
   function saveItem(index: number) {
@@ -662,7 +660,7 @@
         if (!cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
+          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
@@ -692,7 +690,7 @@
   function onItemRun(index: number) {
     // empty out any *_output|*_log blocks as they should be re-generated
     items[index].text = items[index].text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-    items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "\n```$1\nrunning ...\n```");
+    items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
     items[index].text = appendJSOutput(items[index].text, index);
     items[index].time = Date.now();
     onEditorChange(editorText); // item time/text has changed

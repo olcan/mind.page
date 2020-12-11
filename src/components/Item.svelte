@@ -37,7 +37,6 @@
               .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
               .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
               .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
-              .replace(/^(running ...)$/, '<span class="log-running">$1</span>')
           )
           .join("\n");
       }
@@ -458,7 +457,7 @@
         console.warn("img missing src");
         return;
       }
-      if (!img.hasAttribute("_cache_key")) {
+      if (!img.hasAttribute("_cache_key") && !img.src.endsWith("loading.gif")) {
         console.warn("img missing _cache_key (should be automatically added)");
         return;
       }
@@ -818,6 +817,12 @@
   }
   :global(.item img) {
     max-width: 100%;
+    max-height: 100%;
+  }
+  /* set default size/padding of loading images */
+  :global(.item img[src$="loading.gif"]) {
+    width: 120px;
+    padding: 10px;
   }
   :global(.item :first-child) {
     margin-top: 0;
@@ -838,6 +843,7 @@
     padding: 4px 0;
     opacity: 0.75;
     font-size: 80%;
+    line-height: 150%;
   }
   :global(.item .log-running) {
     color: #9c9;
