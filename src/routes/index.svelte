@@ -1297,7 +1297,10 @@
 
   // redirect error to alert or console._window_error if it exists
   function onError(e) {
-    const msg = `${e.message} (lineno:${e.lineno}, colno:${e.colno})`;
+    // NOTE: if this is from onunhandledrejection, then we need to use e.reason
+    let msg = e.reason
+      ? `${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
+      : `${e.message} (line:${e.lineno}, col:${e.colno})`;
     if (console["_window_error"]) console["_window_error"](msg);
     else alert(msg);
     if (!window["_errors"]) window["_errors"] = [];
@@ -1335,6 +1338,10 @@
   :global(#header #editor .backdrop:not(.focused)) {
     border: 1px solid transparent;
   }
+  /* lighten up border when focused */
+  /* :global(#header #editor .backdrop.focused) {
+    border: 1px solid #383838;
+  } */
   .spacer {
     flex-grow: 1;
   }
@@ -1552,4 +1559,4 @@
   ?
 {/if}
 
-<svelte:window on:keypress={onKeyPress} on:error={onError} on:scroll={onScroll} />
+<svelte:window on:keypress={onKeyPress} on:error={onError} on:unhandledrejection={onError} on:scroll={onScroll} />
