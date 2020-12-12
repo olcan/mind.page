@@ -1286,7 +1286,8 @@
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
       ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
-      e.code == "Tab"
+      e.code == "Tab" ||
+      e.code == "Escape"
     ) {
       e.preventDefault();
       textArea(-1).focus();
