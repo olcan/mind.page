@@ -72,6 +72,7 @@
   export let onEditing = (index: number, editing: boolean, cancelled: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onRun = (index: number) => {};
+  export let onTouch = (index: number) => {};
   export let onResized = (itemdiv, trigger: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -95,6 +96,12 @@
     e.stopPropagation();
     e.preventDefault();
     onRun(index);
+  }
+
+  function onIndexClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    onTouch(index);
   }
 
   function onSaveClick(e) {
@@ -882,7 +889,7 @@
       <span class="cancel" on:click={onCancelClick}>cancel</span>
       <span class="save" on:click={onSaveClick}>save</span>
       <span class="delete" on:click={onDeleteClick}>delete</span>
-      <span class="index" class:matching={matchingTerms.length > 0} on:click={onSaveClick}>{index + 1}</span>
+      <span class="index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</span>
       <!-- <br /> {height} -->
     </div>
     {#if editing}

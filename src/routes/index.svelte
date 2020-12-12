@@ -693,8 +693,14 @@
     items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
     items[index].text = appendJSOutput(items[index].text, index);
     items[index].time = Date.now();
-    onEditorChange(editorText); // item time/text has changed
     saveItem(index);
+    onEditorChange(editorText); // item time/text has changed
+  }
+
+  function onItemTouch(index: number) {
+    items[index].time = Date.now();
+    saveItem(index);
+    onEditorChange(editorText); // item time has changed
   }
 
   function editItem(index: number) {
@@ -1040,9 +1046,9 @@
             if (log) items[index].text = appendBlock(items[index].text, "_log", log);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             items[index].time = Date.now();
-            onEditorChange(editorText); // item time/text has changed
             // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
             if (!type.endsWith("_tmp")) saveItem(index);
+            onEditorChange(editorText); // item time/text has changed
           };
           if (items[index].saving) {
             items[index].saveClosure = saveClosure;
@@ -1513,6 +1519,7 @@
               onEditing={onItemEditing}
               onFocused={onItemFocused}
               onRun={onItemRun}
+              onTouch={onItemTouch}
               onResized={onItemResized}
               {onTagClick}
               onPrev={onPrevItem}
