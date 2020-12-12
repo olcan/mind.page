@@ -1211,15 +1211,14 @@
       return out;
     };
 
-    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2) {
+    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2, keydigits: number = 2) {
       dist = dist.getDist();
       let keys = Object.keys(dist).map((k) => k.toString());
       let probs = Object.values(dist).map((v) => v["prob"]);
       let indices = Array.from(Array(probs.length).keys());
       indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
-      // if keys are numeric, then apply digits to keys (and re-aggregate probs) also
-      if (keys.length > 0 && parseFloat(keys[0])) {
-        keys = keys.map((k) => parseFloat(k).toFixed(digits));
+      if (keydigits >= 0 && keys.length > 0 && parseFloat(keys[0])) {
+        keys = keys.map((k) => parseFloat(k).toFixed(keydigits));
         let pmf = {};
         indices.forEach((i) => (pmf[keys[i]] = (pmf[keys[i]] || 0) + probs[i]));
         keys = Object.keys(pmf);
@@ -1227,7 +1226,7 @@
         indices = Array.from(Array(probs.length).keys());
         indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
       }
-      probs = probs.map((v) => v.toFixed(digits));
+      if (digits >= 0) probs = probs.map((v) => v.toFixed(digits));
       indices = indices.filter((i) => probs[i] > 0);
       indices.length = Math.min(indices.length, limit);
       let pmf = {};
