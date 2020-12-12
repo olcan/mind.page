@@ -738,6 +738,7 @@
   }
 
   function updateDotted() {
+    if (!consolediv) return; // can happen during login process
     // auto-hide dotted items (and console) when empty
     if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
     // force show dotted items when any of them are editing
@@ -1297,6 +1298,7 @@
 
   // redirect error to alert or console._window_error if it exists
   function onError(e) {
+    if (!consolediv) return; // can happen during login process
     // NOTE: if this is from onunhandledrejection, then we need to use e.reason
     let msg = e.reason
       ? `${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
