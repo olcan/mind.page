@@ -1186,21 +1186,28 @@
       return histogram;
     };
 
-    window["_counts"] = function (list, limit: number = 10) {
+    // NOTE: this sorts by decreasing counts unless keys are integers or specified as array
+    window["_counts"] = function (list, range: any = 10) {
       let counts = {};
       list.forEach((x) => {
-        x = JSON.stringify(x);
+        if (typeof x != "string") x = JSON.stringify(x);
         counts[x] = (counts[x] || 0) + 1;
       });
+      if (typeof range == "object") {
+        let out = {};
+        range.forEach((k) => (out[k] = counts[k] || 0));
+        return out;
+      }
       let keys = Object.keys(counts);
       let values = Object.values(counts) as Array<number>;
       let indices = Array.from(Array(values.length).keys());
       indices = stableSort(indices, (i, j) => values[j] - values[i]);
       indices = indices.filter((i) => values[i] > 0);
-      indices.length = Math.min(indices.length, limit);
-      counts = {};
-      indices.forEach((i) => (counts[keys[i]] = values[i]));
-      return counts;
+      console.log(indices);
+      indices.length = Math.min(indices.length, range);
+      let out = {};
+      indices.forEach((i) => (out[keys[i]] = values[i]));
+      return out;
     };
 
     window["_pmf"] = function (dist, limit: number = 10, digits: number = 2) {
