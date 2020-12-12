@@ -81,8 +81,8 @@
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
-  function onDone(editorText: string, e: KeyboardEvent) {
-    onEditing(index, (editing = false), e.key == "Backspace" /* cancelled? */);
+  function onDone(editorText: string, cancelled: boolean) {
+    onEditing(index, (editing = false), cancelled);
   }
   function onClick() {
     if (window.getSelection().type == "Range") return; // ignore click if text is selected

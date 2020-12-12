@@ -4,7 +4,7 @@
   export let focused = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
-  export let onDone = (text: string, e: KeyboardEvent) => {};
+  export let onDone = (text: string, cancelled: boolean = false) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -193,14 +193,14 @@
 
     // delete empty item with backspace
     if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
-      onDone((text = ""), e);
+      onDone((text = ""));
       e.preventDefault();
       return;
     }
 
-    // "close" non-empty item with backspace (w/o modifier keys) at the start
-    if (e.code == "Backspace" && !(e.shiftKey || e.metaKey || e.ctrlKey) && textarea.selectionStart == 0) {
-      onDone(text /* maintain text */, e /* report backspace, which can be used to maintain time */);
+    // cancel edit with escape
+    if (e.code == "Escape") {
+      onDone(text /* maintain text */, true /* cancelled */);
       e.preventDefault();
       return;
     }
@@ -216,7 +216,7 @@
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
-      onDone((text = ""), e);
+      onDone((text = ""));
       e.preventDefault();
       return;
     }
@@ -257,7 +257,7 @@
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value.trim()), e);
+      onDone((text = textarea.value.trim()));
       return;
     }
   }

@@ -307,9 +307,9 @@
   }
 
   let editorText = "";
-  function onEditorDone(text: string, e: KeyboardEvent = null) {
+  function onEditorDone(text: string, cancelled: boolean = false) {
     // NOTE: text is already trimmed for onDone
-    if (e && e.code == "Backspace") {
+    if (cancelled) {
       // just clear and return
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange((editorText = ""));
