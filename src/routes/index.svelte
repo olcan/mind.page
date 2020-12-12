@@ -1217,6 +1217,8 @@
       let probs = Object.values(dist).map((v) => v["prob"]);
       let indices = Array.from(Array(probs.length).keys());
       indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
+      // if keys are numeric, then apply digits to keys also
+      if (keys.length > 0 && parseFloat(keys[0])) keys = keys.map((k) => parseFloat(k).toFixed(digits));
       probs = probs.map((v) => v.toFixed(digits));
       indices = indices.filter((i) => probs[i] > 0);
       indices.length = Math.min(indices.length, limit);
