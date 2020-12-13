@@ -156,7 +156,7 @@
 
     // parse header tags
     const headerTags = new Set(
-      Array.from((text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#[^#\s<>,.;]+)\s+/g), (m) => m[1])
+      Array.from((text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#[^#\s<>,.;:]+)\s+/g), (m) => m[1])
     );
     const isMenu = headerTags.has("#menu") || headerTags.has("#_menu");
 
@@ -221,7 +221,7 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
-            /(^|\s)(#[^#\s<>,.;]+)/g,
+            /(^|\s)(#[^#\s<>,.;:]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
                 terms.has(tag.toLowerCase())
