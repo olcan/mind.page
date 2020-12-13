@@ -71,7 +71,7 @@
   let error = false;
   export let onEditing = (index: number, editing: boolean, cancelled: boolean) => {};
   export let onFocused = (index: number, focused: boolean) => {};
-  export let onRun = (index: number) => {};
+  export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
   export let onResized = (itemdiv, trigger: string) => {};
   export let onPrev = () => {};
@@ -636,8 +636,11 @@
   .delete {
     color: red;
   }
-  :global(.runnable:not(.saving):not(.editing) .run) {
-    display: inline-block;
+  .runnable:not(.saving) .run {
+    display: inline;
+  }
+  .editing .run {
+    color: black;
   }
   .editing .save,
   .editing .delete,
@@ -888,8 +891,8 @@
   {/if}
   <div class="container" class:editing class:saving class:focused class:runnable class:timeOutOfOrder>
     <div class="corner" class:editing>
-      <span class="run" on:click={onRunClick}>run</span>
       <span class="cancel" on:click={onCancelClick}>cancel</span>
+      <span class="run" on:click={onRunClick}>run</span>
       <span class="save" on:click={onSaveClick}>save</span>
       <span class="delete" on:click={onDeleteClick}>delete</span>
       <span class="index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</span>
@@ -900,6 +903,7 @@
         {id}
         bind:text
         bind:focused
+        {onRun}
         {onPrev}
         {onNext}
         onFocused={(focused) => onFocused(index, focused)}

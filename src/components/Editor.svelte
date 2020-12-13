@@ -5,6 +5,7 @@
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
   export let onDone = (text: string, cancelled: boolean = false) => {};
+  export let onRun = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -253,6 +254,18 @@
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       onDone((text = textarea.value.trim()));
+      return;
+    }
+    // run item with Cmd/Ctrl+Shift+R
+    if (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      e.stopPropagation(); // do not propagate to window
+      let selection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+      onRun();
+      setTimeout(() => {
+        textarea.selectionStart = selection.start;
+        textarea.selectionEnd = selection.end;
+      }, 0);
       return;
     }
   }

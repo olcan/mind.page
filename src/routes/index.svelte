@@ -543,6 +543,8 @@
         out = "";
       }
       evalIndex = -1;
+      // automatically _write_log into item
+      if (index >= 0) window["_write_log"](items[index].id, start);
       return out;
     } catch (e) {
       evalIndex = -1;
@@ -550,7 +552,7 @@
       if (label) msg = label + ": " + msg;
       if (console["_eval_error"]) console["_eval_error"](msg);
       else alert(msg);
-      // automatically _write_log any errors into item
+      // automatically _write_log into item
       if (index >= 0) window["_write_log"](items[index].id, start);
       return undefined;
     }
@@ -687,13 +689,16 @@
     // console.log(`item ${index} focused: ${focused}, focusedItem:${focusedItem}`);
   }
 
-  function onItemRun(index: number) {
+  function onItemRun(index: number = -1) {
+    if (index < 0) index = focusedItem;
+    let item = items[index];
+    if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
-    items[index].text = items[index].text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-    items[index].text = items[index].text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
-    items[index].text = appendJSOutput(items[index].text, index);
-    items[index].time = Date.now();
-    saveItem(index);
+    item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
+    item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
+    item.text = appendJSOutput(item.text, index);
+    item.time = Date.now();
+    if (!item.editing) saveItem(index);
     onEditorChange(editorText); // item time/text has changed
   }
 
@@ -1034,27 +1039,33 @@
         let indices = indicesForItem(item);
         // console.log("_write", indices, item);
         indices.map((index) => {
-          if (items[index].editing) {
-            console.log("can not _write to item while editing");
+          let item = items[index];
+          // if item is editing, then write immediately without saving
+          if (item.editing) {
+            if (type == "") item.text = text;
+            else item.text = appendBlock(item.text, type, text);
+            if (log) item.text = appendBlock(item.text, "_log", log);
+            item.time = Date.now();
+            onEditorChange(editorText); // item time/text has changed
             return;
           }
-          const prevSaveClosure = items[index].saveClosure;
+          const prevSaveClosure = item.saveClosure;
           const saveClosure = (index) => {
             if (text && text.length > 1024) {
               alert(`_write too large (${text.length})`);
               text = "";
             }
-            if (type == "") items[index].text = text;
-            else items[index].text = appendBlock(items[index].text, type, text);
-            if (log) items[index].text = appendBlock(items[index].text, "_log", log);
+            if (type == "") item.text = text;
+            else item.text = appendBlock(item.text, type, text);
+            if (log) item.text = appendBlock(item.text, "_log", log);
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
-            items[index].time = Date.now();
+            item.time = Date.now();
             // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
             if (!type.endsWith("_tmp")) saveItem(index);
             onEditorChange(editorText); // item time/text has changed
           };
-          if (items[index].saving) {
-            items[index].saveClosure = saveClosure;
+          if (item.saving) {
+            item.saveClosure = saveClosure;
             // console.log("_write is postponed until saving is complete");
           } else {
             saveClosure(index); // write and save immediately
@@ -1073,7 +1084,9 @@
         if (prefix == "WARN: ") prefix = "WARNING: ";
         log.push(prefix + elem.innerText.trim());
       });
-      window["_write"](item, log.join("\n"), "_log");
+      if (log.length > 0) {
+        window["_write"](item, log.join("\n"), "_log");
+      }
     };
 
     window["_task"] = function (interval: number, task: Function, item: string = "") {
@@ -1298,11 +1311,12 @@
 
   // disable editor shortcuts
   function onKeyPress(e: KeyboardEvent) {
-    // disable save/forward/back shortcuts on window, focus on editor instead
+    // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (
       (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) ||
       ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
       e.code == "Tab" ||
