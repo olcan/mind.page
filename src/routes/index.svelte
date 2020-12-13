@@ -142,7 +142,7 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;:]+)/g), (m) => m[1].replace(/^#_/, "#"));
+    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g), (m) => m[1].replace(/^#_/, "#"));
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
