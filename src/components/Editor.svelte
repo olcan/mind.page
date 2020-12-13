@@ -31,6 +31,7 @@
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
+  // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
   let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
   let highlightTags = (t) => t.replace(/(^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
   let highlightCode = (t) => t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
@@ -74,7 +75,7 @@
 
     // wrap hidden sections
     html = html.replace(
-      /(^|\n\s*?)(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      /(^|\n\s*?)(&lt!--\s*?hidden\s*?--&gt.+?&lt!--\s*?\/hidden\s*?--&gt\s*?\n)/gs,
       '$1<div class="hidden">$2</div>'
     );
 

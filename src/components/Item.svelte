@@ -497,7 +497,7 @@
         let clone = document.createElement("script");
         clone.type = script.type || "text/javascript";
         // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
-        clone.innerHTML = `(function(){ ${script.innerHTML} })()`;
+        clone.innerHTML = `(function(){\n ${script.innerHTML} \n})()`;
 
         // NOTE: we track script id which helps with logging and some helper functions, but this only works for sychronous execution; for async scripts tracking requires a context object to be passed around which does not seem worth the trouble for now
         window["_script_item_id"] = id;

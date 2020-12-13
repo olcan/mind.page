@@ -537,7 +537,7 @@
     let start = Date.now();
     try {
       evalIndex = index;
-      let out = eval("(function(){" + jsin + "})()");
+      let out = eval("(function(){\n" + jsin + "\n})()");
       if (out && out.length > 1024) {
         alert(`js output too large (${out.length})`);
         out = "";
@@ -996,20 +996,23 @@
       return ids.length == 1 ? ids[0] : ids;
     };
 
-    window["_read"] = function (type: string = "", item: string = "", include_tagrefs: boolean = false) {
+    window["_read"] = function (type: string = "", item: string = "", options: object = {}) {
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
-        if (include_tagrefs) {
+        if (options["include_tagrefs"]) {
           const lctext = items[index].text.toLowerCase();
           const tags = itemTags(lctext);
           const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-          tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, include_tagrefs)));
+          tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, options)));
         }
         if (type == "") content.push(items[index].text);
         else content.push(extractBlock(items[index].text, type));
       });
       return content.join("\n");
+    };
+    window["_read_deep"] = function (type: string = "", item: string = "", options: object = {}) {
+      return window["_read"](type, item, Object.assign({ include_tagrefs: true }, options));
     };
 
     let _writePendingItem = "";
