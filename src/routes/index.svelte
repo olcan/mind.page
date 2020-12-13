@@ -530,6 +530,7 @@
   }
 
   let evalIndex = -1;
+  let evalTime = 0;
   function evalJSInput(text: string, label: string = "", index: number = -1): string {
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
@@ -537,6 +538,7 @@
     let start = Date.now();
     try {
       evalIndex = index;
+      evalTime = Date.now();
       let out = eval("(function(){\n" + jsin + "\n})()");
       if (out && out.length > 1024) {
         alert(`js output too large (${out.length})`);
@@ -569,22 +571,14 @@
     return text;
   }
 
-  function appendJSOutput(text: string, index: number = -1): string {
+  function appendJSOutput(text: string, index: number): string {
     if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
-    // execute JS code, including any tag-referenced items (using latest tags/label)
-    const lctext = text.toLowerCase();
-    const tags = itemTags(lctext);
-    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-    let prefix = "";
-    tags.forEach((tag) => {
-      if (tag == label) return;
-      const indices = indicesFromLabel.get(tag) || [];
-      indices.forEach((index) => {
-        prefix += window["_read_deep"]("js_input", items[index].id) + "\n";
-      });
-    });
+    // execute JS code, including any 'js' blocks from this and any tag-referenced items
+    // NOTE: js_input blocks are assumed "local", i.e. not intended for export
+    let item = items[index];
+    let prefix = window["_read_deep"]("js", item.id);
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
-    let jsout = evalJSInput(prefix + text, label, index) || "";
+    let jsout = evalJSInput(prefix + text, item.label, index) || "";
     if (!jsout) return text.replace(/\n\s*```js_output\n.*?\n\s*```/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
@@ -692,6 +686,8 @@
   function onItemRun(index: number = -1) {
     if (index < 0) index = focusedItem;
     let item = items[index];
+    // update runnable flag in case item text has changed since last onEditorChange
+    item.runnable = item.text.toLowerCase().match(/\s*```js_input\s/);
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
@@ -1074,15 +1070,20 @@
       }, 0);
     };
 
-    window["_write_log"] = function (item: string, since: number = 0, level: number = 0) {
+    // default level (1) excludes debug messages, and default since (-1) is last evalTime
+    window["_write_log"] = function (item: string, since: number = -1, level: number = 1) {
       let log = [];
+      if (since < 0) since = evalTime;
       consolediv.childNodes.forEach((elem) => {
         if (elem.getAttribute("_time") < since) return;
         if (elem.getAttribute("_level") < level) return;
         const type = elem.className.substring(elem.className.indexOf("-") + 1);
         let prefix = type == "log" ? "" : type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
-        log.push(prefix + elem.innerText.trim());
+        let text = elem.innerText.trim();
+        // remove item index/label prefix since redundant (assuming writing to item itself)
+        text = text.replace(/^\[\d+?\]\s*/, "").replace(/^#.+?:\s*/, "");
+        log.push(prefix + text);
       });
       if (log.length > 0) {
         window["_write"](item, log.join("\n"), "_log");
@@ -1262,6 +1263,25 @@
       let probs = Object.values(dist).map((v) => v["prob"]);
       if (Math.min(...probs) != Math.max(...probs)) console.warn("sample weights ignored by _samples (or _histogram)");
       return values;
+    };
+
+    window["_run_webppl"] = function (id: string = "", options: object = {}) {
+      if (!id) {
+        if (evalIndex < 0) return; // must be invoked from synchronous js_input
+        id = items[evalIndex].id;
+      }
+      let start = Date.now();
+      window["webppl"].run(
+        window["_read_deep"]("webppl", id),
+        function (s, x) {
+          let time = Date.now() - start;
+          if (x != undefined) window["_write"](id, JSON.stringify(x));
+          if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
+          console.log("webppl took", time, "ms");
+          window["_write_log"](id, start, 1);
+        },
+        options
+      );
     };
 
     // Visual viewport resize/scroll handlers ...
