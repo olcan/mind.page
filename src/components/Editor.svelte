@@ -246,18 +246,15 @@
   }
 
   function onKeyPress(e: KeyboardEvent) {
-    // add/save item with Cmd/Ctrl/Shift+Enter or Cmd/Ctrl+S
-    if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
-    ) {
+    // add/save item with Cmd/Ctrl+S or Cmd/Ctrl+Enter
+    if ((e.code == "Enter" && (e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       onDone((text = textarea.value.trim()));
       return;
     }
-    // run item with Cmd/Ctrl+Shift+R
-    if (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+    // run item with Cmd/Ctrl+Shift+R or Shift+Enter
+    if ((e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) || (e.code == "Enter" && e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       let selection = { start: textarea.selectionStart, end: textarea.selectionEnd };
