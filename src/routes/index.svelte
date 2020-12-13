@@ -578,7 +578,7 @@
       if (tag == label) return;
       const indices = indicesFromLabel.get(tag) || [];
       indices.forEach((index) => {
-        prefix += extractBlock(items[index].text, "js_input") + "\n";
+        prefix += window["_read_deep"]("js_input", items[index].id) + "\n";
       });
     });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
@@ -1382,7 +1382,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 0 0 4px 0;
     font-family: monospace;
-    pointer-events: none;
+    /* pointer-events: none; */
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -1504,7 +1504,7 @@
                 {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
               </div>
             </div>
-            <div id="console" bind:this={consolediv} />
+            <div id="console" bind:this={consolediv} on:click={onStatusClick} />
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
