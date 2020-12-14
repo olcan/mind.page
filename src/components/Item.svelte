@@ -631,7 +631,7 @@
   }
   .index {
     display: inline-flex;
-    padding-right: 2px;
+    padding-right: 4px;
   }
   .index.matching {
     color: #9f9;

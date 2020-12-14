@@ -1485,7 +1485,7 @@
     position: absolute;
     right: 0;
     top: 0;
-    padding-right: 3px; /* matches .corner inset on first item */
+    padding-right: 4px; /* matches .corner inset on first item */
     padding-top: 4px;
   }
   #status .matching {
