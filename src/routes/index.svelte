@@ -664,11 +664,9 @@
         onEditorChange(editorText); // item time and/or text has changed
       }
 
-      // NOTE: we do not focus back up on the editor on the iPhone as it can cause a disorienting jump
-      //       that is not worth the benefit without an attached keyboard (which is harder to detect)
-      //       (actually we no longer do that on non-iphone either)
-      if (editingItems.length > 0) {
-        // || !navigator.platform.startsWith("iPhone")) {
+      // NOTE: we do not focus back up on the editor unless we are already at the top
+      //       (especially bad on iphone due to lack of keyboard focus benefit)
+      if (editingItems.length > 0 || window.scrollY == 0) {
         focusOnNearestEditingItem(index);
       } else {
         (document.activeElement as HTMLElement).blur();
@@ -747,16 +745,14 @@
   function updateDotted() {
     if (!consolediv) return; // can happen during login process
     // auto-hide dotted items (and console) when empty
-    if (dotCount == 0 && consolediv.childNodes.length == 0) showDotted = false;
+    if (dotCount == 0) showDotted = false;
     // force show dotted items when any of them are editing
     if (editingItems.findIndex((i) => items[i].dotted) >= 0) showDotted = true;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
-    document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
     Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
-    consolediv.style.display = showDotted && consolediv.childNodes.length > 0 ? "block" : "none";
   }
 
   let lastScrollTime = 0;
@@ -796,6 +792,24 @@
     e.stopPropagation();
     showDotted = !showDotted;
     updateDotted();
+  }
+
+  function onConsoleClick(e) {
+    // ignore click if text is selected
+    if (window.getSelection().type == "Range") {
+      e.stopPropagation();
+      return;
+    }
+    e.stopPropagation();
+    consolediv.style.display = "none";
+    document.getElementById("console-summary").style.visibility = "visible";
+  }
+  function onConsoleSummaryClick(e) {
+    if (consolediv.childNodes.length > 0) {
+      e.stopPropagation();
+      consolediv.style.display = "block";
+      document.getElementById("console-summary").style.visibility = "hidden";
+    }
   }
 
   import { onMount } from "svelte";
@@ -851,18 +865,23 @@
                   elem.setAttribute("_time", Date.now().toString());
                   elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
-                  div.style.display = showDotted ? "block" : "none";
+                  document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
                   const summaryDiv = document.getElementById("console-summary");
                   const summaryElem = document.createElement("span");
                   summaryElem.innerText = "·";
                   summaryElem.classList.add("console-" + verb);
                   summaryDiv.appendChild(summaryElem);
+                  // if console is hidden, make sure summary is visible
+                  if (div.style.display == "none") summaryDiv.style.visibility = "visible";
 
                   // auto-remove after 10 seconds ...
                   setTimeout(() => {
                     elem.remove();
                     summaryElem.remove();
-                    if (div.childNodes.length == 0) div.style.display = "none";
+                    if (div.childNodes.length == 0) {
+                      div.style.display = "none";
+                      summaryDiv.style.visibility = "visible";
+                    }
                   }, 10000);
                 };
               })(console[verb].bind(console), verb, consolediv);
@@ -1407,6 +1426,7 @@
     cursor: pointer;
   }
   #console {
+    display: none;
     position: absolute;
     top: 0;
     left: 0;
@@ -1439,6 +1459,7 @@
   }
   #status {
     padding: 4px;
+    height: 20px;
     text-align: center;
     font-family: monospace;
     font-size: 12px;
@@ -1452,6 +1473,12 @@
   #status #console-summary {
     position: absolute;
     left: 0;
+    top: 0;
+    height: 28px; /* matches #status height+padding above, including */
+    min-width: 60px; /* ensure clickability */
+    max-width: 30%; /* try not to cover center (item dots) */
+    text-align: left;
+    overflow: hidden;
     padding-left: 4px;
   }
   #status .counts {
@@ -1520,6 +1547,7 @@
                 <Editor
                   bind:text={editorText}
                   bind:focused
+                  cancelOnDelete={true}
                   onFocused={onEditorFocused}
                   onChange={onEditorChange}
                   onDone={onEditorDone}
@@ -1530,7 +1558,8 @@
               {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
             </div>
             <div id="status" on:click={onStatusClick}>
-              <span id="console-summary" />&nbsp;<span class="dots">
+              <span id="console-summary" on:click={onConsoleSummaryClick} />
+              <span class="dots">
                 {#each { length: dotCount } as _}•{/each}
               </span>
               <div class="counts">
@@ -1538,7 +1567,7 @@
                 {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
               </div>
             </div>
-            <div id="console" bind:this={consolediv} on:click={onStatusClick} />
+            <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}

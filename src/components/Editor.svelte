@@ -2,6 +2,7 @@
   export let id = "editor";
   export let text = "";
   export let focused = false;
+  export let cancelOnDelete = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
   export let onDone = (text: string, cancelled: boolean = false) => {};
@@ -189,7 +190,7 @@
 
     // delete empty item with backspace
     if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
-      onDone((text = ""));
+      onDone((text = ""), cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
     }
@@ -212,7 +213,7 @@
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
-      onDone((text = ""));
+      onDone((text = ""), cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
     }
@@ -246,15 +247,18 @@
   }
 
   function onKeyPress(e: KeyboardEvent) {
-    // add/save item with Cmd/Ctrl+S or Cmd/Ctrl+Enter
-    if ((e.code == "Enter" && (e.metaKey || e.ctrlKey)) || (e.code == "KeyS" && (e.metaKey || e.ctrlKey))) {
+    // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
+    if (
+      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
+    ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       onDone((text = textarea.value.trim()));
       return;
     }
-    // run item with Cmd/Ctrl+Shift+R or Shift+Enter
-    if ((e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) || (e.code == "Enter" && e.shiftKey)) {
+    // run item with Cmd/Ctrl+Shift+R
+    if (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       let selection = { start: textarea.selectionStart, end: textarea.selectionEnd };

@@ -607,37 +607,42 @@
     right: 0;
     z-index: 1;
     color: #666;
-    padding-right: 2px;
-    padding-left: 4px;
     font-family: monospace;
     text-align: right;
     opacity: 0.5;
   }
-  .corner.editing {
+  .editing .corner {
     background: #666;
     border-radius: 4px 4px 0 4px;
     opacity: 1;
-    top: -6px;
+    top: -10px;
   }
 
-  .index {
-    cursor: pointer;
-  }
-  .index.matching {
-    color: #9f9;
-  }
+  .index,
   .run,
   .delete,
   .cancel,
   .save {
     display: none;
     cursor: pointer;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+  }
+  .index {
+    display: inline-flex;
+    padding-right: 2px;
+  }
+  .index.matching {
+    color: #9f9;
   }
   .delete {
     color: red;
+    padding-left: 15px;
   }
   .runnable:not(.saving) .run {
-    display: inline;
+    display: inline-flex;
+    padding-left: 12px;
   }
   .editing .run {
     color: black;
@@ -646,11 +651,14 @@
   .editing .delete,
   .editing .cancel,
   .editing .index {
-    display: inline;
+    display: inline-flex;
     color: black;
   }
   .editing .delete {
     color: #900;
+  }
+  .editing:not(.runnable) .save {
+    padding-left: 12px;
   }
 
   .time {
@@ -890,12 +898,13 @@
     <div class="debug">{debugString}</div>
   {/if}
   <div class="container" class:editing class:saving class:focused class:runnable class:timeOutOfOrder>
-    <div class="corner" class:editing>
-      <span class="cancel" on:click={onCancelClick}>cancel</span>
-      <span class="run" on:click={onRunClick}>run</span>
-      <span class="save" on:click={onSaveClick}>save</span>
-      <span class="delete" on:click={onDeleteClick}>delete</span>
-      <span class="index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</span>
+    <div class="corner">
+      <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
+        class="cancel"
+        on:click={onCancelClick}>cancel</span><span class="delete" on:click={onDeleteClick}>delete</span><span
+        class="index"
+        class:matching={matchingTerms.length > 0}
+        on:click={onIndexClick}>{index + 1}</span>
       <!-- <br /> {height} -->
     </div>
     {#if editing}
