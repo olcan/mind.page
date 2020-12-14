@@ -1205,8 +1205,15 @@
       digits: number = 2
     ) {
       let weights;
-      // if numbers is a distribution, extract
-      if (numbers["getDist"]) {
+      // if numbers is a distribution, extract samples or distribution
+      if (numbers["samples"]) {
+        let samples = numbers["samples"];
+        numbers = samples.map((s) => s["value"]);
+        weights = new Array(numbers.length).fill(1);
+        // weights = samples.map((s) => Math.exp(s["score"]));
+        // let sum = weights.reduce((a, b) => a + b, 0);
+        // weights = weights.map((w) => w / sum);
+      } else if (numbers["getDist"]) {
         let dist = numbers["getDist"]();
         numbers = Object.keys(dist).map(parseFloat);
         weights = Object.values(dist).map((v) => v["prob"]);
