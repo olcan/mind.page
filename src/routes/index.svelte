@@ -1204,27 +1204,34 @@
       max: number = -Infinity,
       digits: number = 2
     ) {
-      // if numbers is a distribution, attempt to extract values using window._samples
-      if (numbers["getDist"]) numbers = window["_samples"](numbers);
+      let weights;
+      // if numbers is a distribution, extract
+      if (numbers["getDist"]) {
+        let dist = numbers["getDist"]();
+        numbers = Object.keys(dist).map(parseFloat);
+        weights = Object.values(dist).map((v) => v["prob"]);
+      } else {
+        // assume unit weights to display counts
+        weights = new Array(numbers.length).fill(1);
+      }
       if (min > max) {
         // determine range using data
         numbers.forEach((num) => {
           if (num < min) min = num;
           else if (num > max) max = num;
         });
-      } else {
-        numbers = numbers.filter((num) => num >= min && num <= max);
       }
       const size = (max - min) / bins;
       const counts = new Array(bins).fill(0);
-      numbers.forEach((num) => {
-        counts[num == max ? bins - 1 : Math.floor((num - min) / size)]++;
+      numbers.forEach((num, index) => {
+        if (num < min || num > max) return;
+        counts[num == max ? bins - 1 : Math.floor((num - min) / size)] += weights[index];
       });
       let histogram = {};
       counts.forEach((count, index) => {
         let key = `[${(min + index * size).toFixed(digits)}, `;
         key += index == bins - 1 ? `${max.toFixed(digits)}]` : `${(min + (index + 1) * size).toFixed(digits)})`;
-        histogram[key] = count > 0 ? count : null; // replace 0 -> null
+        histogram[key] = count > 0 ? count.toFixed(2) : null; // replace 0 -> null
       });
       return histogram;
     };
@@ -1274,14 +1281,6 @@
       let pmf = {};
       indices.forEach((i) => (pmf[keys[i]] = probs[i]));
       return pmf;
-    };
-
-    window["_samples"] = function (dist) {
-      dist = dist.getDist();
-      let values = Object.keys(dist).map(parseFloat);
-      let probs = Object.values(dist).map((v) => v["prob"]);
-      if (Math.min(...probs) != Math.max(...probs)) console.warn("sample weights ignored by _samples (or _histogram)");
-      return values;
     };
 
     window["_run_webppl"] = function (id: string = "", options: object = {}) {
@@ -1477,7 +1476,8 @@
     position: absolute;
     left: 0;
     top: 0;
-    height: 28px; /* matches #status height+padding above, including */
+    padding-top: 4px;
+    height: 24px; /* matches #status height(+padding) above */
     min-width: 60px; /* ensure clickability */
     max-width: 30%; /* try not to cover center (item dots) */
     text-align: left;
