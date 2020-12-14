@@ -601,7 +601,7 @@
     border-radius: 4px;
     background: #111;
   }
-  .corner {
+  .menu {
     position: absolute;
     top: 0;
     right: 0;
@@ -611,11 +611,11 @@
     text-align: right;
     opacity: 0.5;
   }
-  .editing .corner {
+  .editing .menu {
     background: #666;
     border-radius: 4px 4px 0 4px;
     opacity: 1;
-    top: -10px;
+    top: -14px;
   }
 
   .index,
@@ -898,7 +898,7 @@
     <div class="debug">{debugString}</div>
   {/if}
   <div class="container" class:editing class:saving class:focused class:runnable class:timeOutOfOrder>
-    <div class="corner">
+    <div class="menu">
       <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
         class="cancel"
         on:click={onCancelClick}>cancel</span><span class="delete" on:click={onDeleteClick}>delete</span><span

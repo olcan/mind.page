@@ -882,7 +882,7 @@
                       div.style.display = "none";
                       summaryDiv.style.visibility = "visible";
                     }
-                  }, 10000);
+                  }, 15000);
                 };
               })(console[verb].bind(console), verb, consolediv);
             });
@@ -1428,6 +1428,8 @@
   #console {
     display: none;
     position: absolute;
+    min-height: 28px; /* covers #console-summary below */
+    min-width: 60px; /* covers #console-summary below */
     top: 0;
     left: 0;
     z-index: 10;
@@ -1435,6 +1437,7 @@
     color: #999;
     background: rgba(0, 0, 0, 0.85);
     border-radius: 0 0 4px 0;
+    border: 1px solid #222;
     font-family: monospace;
     /* pointer-events: none; */
     text-align: left;
@@ -1566,8 +1569,8 @@
                 {items.length}
                 {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
               </div>
+              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
             </div>
-            <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
