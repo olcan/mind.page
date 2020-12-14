@@ -900,7 +900,7 @@
               .getIdToken(false /*force refresh*/)
               .then((token) => {
                 document.cookie = "__session=" + token + ";max-age=86400";
-                console.log("updated cookie", error || "(no error)");
+                // console.log("updated cookie", error || "(no error)");
                 // reload with new cookie if we are on error page
                 if (error) location.reload();
               })
@@ -1419,7 +1419,7 @@
     flex-grow: 1;
   }
   #user {
-    height: 45px; /* must match height of single-line editor (also see @media query below) */
+    height: 44px; /* must match height of single-line editor (also see @media query below) */
     margin-right: 4px;
     border-radius: 50%;
     background: gray;
@@ -1428,15 +1428,15 @@
   #console {
     display: none;
     position: absolute;
-    min-height: 28px; /* covers #console-summary below */
-    min-width: 60px; /* covers #console-summary below */
+    min-height: 20px; /* covers #console-summary (w/ +8px padding) */
+    min-width: 60px; /* covers #console-summary */
     top: 0;
     left: 0;
     z-index: 10;
     padding: 4px;
     color: #999;
     background: rgba(0, 0, 0, 0.85);
-    border-radius: 0 0 4px 0;
+    border-radius: 4px;
     border: 1px solid #222;
     font-family: monospace;
     /* pointer-events: none; */
@@ -1532,7 +1532,7 @@
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     #user {
-      height: 42px; /* must match height of single-line editor (on narrow window) */
+      height: 41px; /* must match height of single-line editor (on narrow window) */
     }
   }
 </style>

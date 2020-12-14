@@ -288,7 +288,7 @@
 </script>
 
 <style>
-  #editor {
+  .editor {
     position: relative;
     width: 100%;
     cursor: text;
@@ -355,7 +355,7 @@
   :global(.block-delimiter) {
     color: #666;
   }
-  :global(#editor .code, #editor .math) {
+  :global(.editor .code, .editor .math) {
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 4px;
     margin: -2px -4px;
@@ -378,7 +378,7 @@
   }
 </style>
 
-<div bind:this={editor} id="editor">
+<div bind:this={editor} class="editor">
   <div class="backdrop" class:focused bind:this={backdrop}>
     <div id="highlights" bind:this={highlights}>{placeholder}</div>
   </div>
