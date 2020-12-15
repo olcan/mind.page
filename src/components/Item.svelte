@@ -671,8 +671,9 @@
     font-size: 15px;
   }
   .time.timeOutOfOrder {
-    background: #666;
-    color: black;
+    color: #aaa;
+    background: #111;
+    /* color: black; */
     border-radius: 4px;
     /* display: block; */
   }

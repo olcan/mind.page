@@ -44,7 +44,7 @@
   }
 
   function itemTimeString(delta: number) {
-    if (delta < 60) return ""; //"<1m"
+    if (delta < 60) return "<1m";
     if (delta < 3600) return Math.floor(delta / 60).toString() + "m";
     if (delta < 24 * 3600) return Math.floor(delta / 3600).toString() + "h";
     return Math.floor(delta / (24 * 3600)).toString() + "d";
@@ -59,20 +59,17 @@
   function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
-    let prevTime = Infinity;
-    let prevTimeString = "";
     indexFromId = new Map();
     indicesFromLabel = new Map();
-    let timeString = "";
     dotCount = 0;
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
-
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
+    let lastTimeString = "";
 
     items.forEach((item, index) => {
       item.index = index;
@@ -86,18 +83,17 @@
       if (item.focused) focusedItem = index;
       // if (document.activeElement == textArea(index)) focusedItem = index;
 
-      if (item.pinned) {
-        // ignore time for pinned items
-        item.timeString = "";
-        item.timeOutOfOrder = false;
-      } else {
-        timeString = itemTimeString((Date.now() - item.time) / 1000);
-        item.timeOutOfOrder = item.time > prevTime; // for special styling
-        item.timeString = timeString == prevTimeString && !item.timeOutOfOrder ? "" : timeString;
-        // item.timeString = Math.floor((Date.now() - item.time)/1000).toString()
-        prevTimeString = timeString;
-        prevTime = item.time;
+      let timeString = itemTimeString((Date.now() - item.time) / 1000);
+      // let timeString = Math.round((Date.now() - item.time) / 1000).toString();
+      let lastItem = items[index - 1];
+      item.timeString = "";
+      item.timeOutOfOrder = false;
+      if (!item.pinned && (index == 0 || timeString != lastTimeString)) {
+        item.timeString = timeString;
+        item.timeOutOfOrder =
+          index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString;
       }
+      lastTimeString = timeString;
 
       // determine item column
       item.nextColumn = -1;
@@ -106,7 +102,7 @@
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
-        const lastColumn = items[index - 1].column;
+        const lastColumn = lastItem.column;
         const minColumnHeight = Math.min(...columnHeights);
         if (
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
@@ -115,9 +111,14 @@
           item.column = lastColumn;
         else item.column = columnHeights.indexOf(minColumnHeight);
         if (item.column != lastColumn) {
-          items[index - 1].nextColumn = item.column;
+          lastItem.nextColumn = item.column;
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
+      }
+      // if item is first in column and missing time string, add it now
+      if (columnHeights[item.column] == 0 && !item.timeString) {
+        item.timeString = timeString;
+        item.outerHeight += 24;
       }
       columnHeights[item.column] += item.outerHeight;
       items[columnItems[item.column]].nextItemInColumn = index;
@@ -576,7 +577,7 @@
     // execute JS code, including any 'js' blocks from this and any tag-referenced items
     // NOTE: js_input blocks are assumed "local", i.e. not intended for export
     let item = items[index];
-    let prefix = window["_read_deep"]("js", item.id);
+    let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
     if (!jsout) return text.replace(/\n\s*```js_output\n.*?\n\s*```/gs, ""); // no output
@@ -1026,8 +1027,10 @@
           const label = lctext.startsWith(tags[0]) ? tags[0] : "";
           tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, options)));
         }
-        if (type == "") content.push(items[index].text);
-        else content.push(extractBlock(items[index].text, type));
+        let text = items[index].text;
+        if (type) text = extractBlock(items[index].text, type);
+        if (options["replace_$id"]) text = text.replace(/\$id/g, items[index].id);
+        content.push(text);
       });
       return content.join("\n");
     };
@@ -1297,7 +1300,7 @@
       }
       let start = Date.now();
       window["webppl"].run(
-        window["_read_deep"]("webppl", id),
+        window["_read_deep"]("webppl", id, { replace_$id: true }),
         function (s, x) {
           let time = Date.now() - start;
           if (x != undefined) window["_write"](id, JSON.stringify(x));
