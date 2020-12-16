@@ -901,7 +901,7 @@
   }
 
   :global(.item code:empty:before) {
-    content: "empty block (" attr(class) ")";
+    content: "empty " attr(class);
   }
 
   :global(.item .log-running) {

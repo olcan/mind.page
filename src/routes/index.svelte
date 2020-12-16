@@ -1053,6 +1053,14 @@
     window["_read_deep"] = function (type: string = "", item: string = "", options: object = {}) {
       return window["_read"](type, item, Object.assign({ include_tagrefs: true }, options));
     };
+    window["_eval"] = function (code: string = "", item: string = "", options: object = {}) {
+      let prefix = window["_read_deep"](
+        "js",
+        item,
+        Object.assign({ include_tagrefs: true, replace_$id: true }, options)
+      );
+      return eval(prefix + "\n" + code);
+    };
 
     let _writePendingItem = "";
     let _writePendingItemLog = "";
