@@ -379,7 +379,7 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text = "```js_input\n" + text.replace(/\/js\s+/s, "").trim() + "\n```";
+          text = "```js_input\n" + text.replace(/\/js(\s|$)/s, "").trim() + "\n```";
         } else if (text.match(/^\/\w+/)) {
           alert(`unknown command ${text.match(/^\/\w+/)[0]}`);
           return;
