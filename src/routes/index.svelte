@@ -318,6 +318,7 @@
     }
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
+    let origText = text;
     // NOTE: text is already trimmed for onDone
     switch (text) {
       case "/signout": {
@@ -409,6 +410,7 @@
     if (editing) {
       let selectionStart = textarea.selectionStart;
       let selectionEnd = textarea.selectionEnd;
+      if (text != origText) selectionStart = selectionEnd = text.length;
       setTimeout(() => {
         let textarea = textArea(indexFromId.get(tmpid));
         textarea.selectionStart = selectionStart;
