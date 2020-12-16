@@ -5,7 +5,7 @@
   export let cancelOnDelete = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
-  export let onDone = (text: string, cancelled: boolean = false) => {};
+  export let onDone = (text: string, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -153,7 +153,7 @@
 
     // create line on Enter, maintain indentation
     // NOTE: there can be slight delay on caret update, but seems to be a Mac-only problem
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
       let spaces = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/);
       document.execCommand("insertText", false, "\n" + spaces[1] || "");
       e.preventDefault();
@@ -247,6 +247,7 @@
   }
 
   function onKeyPress(e: KeyboardEvent) {
+    // console.log(e);
     // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
     if (
       (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
@@ -254,11 +255,11 @@
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value.trim()));
+      onDone((text = textarea.value.trim()), false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
       return;
     }
-    // run item with Cmd/Ctrl+Shift+R
-    if (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+    // run item with Alt/Option+Enter
+    if (e.code == "Enter" && e.altKey) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       let selection = { start: textarea.selectionStart, end: textarea.selectionEnd };

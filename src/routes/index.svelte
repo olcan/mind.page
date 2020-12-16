@@ -27,6 +27,7 @@
 </script>
 
 <script lang="ts">
+  import { Circle2, DoubleBounce } from "svelte-loading-spinners";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
   export let items = [];
@@ -308,8 +309,7 @@
   }
 
   let editorText = "";
-  function onEditorDone(text: string, cancelled: boolean = false) {
-    // NOTE: text is already trimmed for onDone
+  function onEditorDone(text: string, cancelled: boolean = false, run: boolean = false) {
     if (cancelled) {
       // just clear and return
       lastEditorChangeTime = 0; // disable debounce even if editor focused
@@ -318,6 +318,7 @@
     }
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
+    // NOTE: text is already trimmed for onDone
     switch (text) {
       case "/signout": {
         signOut();
@@ -384,9 +385,10 @@
         } else if (text.match(/^\/\s+/s)) {
           text = text.replace(/^\/\s+/s, "");
         }
-        editing = text.length == 0; // if text is empty, continue editing
+        // editing = text.length == 0; // if text is empty, continue editing
       }
     }
+
     let tmpid = Date.now().toString();
     let itemToSave = { time: time, text: text };
     let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
@@ -402,8 +404,18 @@
         onEditorChange("");
       }
     }
-    textArea(-1).focus(); // refocus (necessary on iOS for shifting focus to another item)
-    if (editing) setTimeout(() => textArea(indexFromId.get(tmpid)).focus(), 0);
+    let textarea = textArea(-1);
+    textarea.focus(); // refocus (necessary on iOS for shifting focus to another item)
+    if (editing) {
+      let selectionStart = textarea.selectionStart;
+      let selectionEnd = textarea.selectionEnd;
+      setTimeout(() => {
+        let textarea = textArea(indexFromId.get(tmpid));
+        textarea.selectionStart = selectionStart;
+        textarea.selectionEnd = selectionEnd;
+        textarea.focus();
+      }, 0);
+    }
 
     firestore()
       .collection("items")
@@ -613,7 +625,7 @@
     );
   }
 
-  function onItemEditing(index: number, editing: boolean, cancelled: boolean) {
+  function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
     let item = items[index];
 
     // if cancelled, restore savedTime and savedText (unless empty, which indicates deletion)
@@ -653,8 +665,8 @@
         }); // for /undelete
         firestore().collection("items").doc(item.id).delete().catch(console.error);
       } else {
-        // clear _output and execute javascript unless cancelled
-        if (!cancelled) {
+        // // clear _output and execute javascript unless cancelled
+        if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
           item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
@@ -1298,18 +1310,39 @@
         if (evalIndex < 0) return; // must be invoked from synchronous js_input
         id = items[evalIndex].id;
       }
-      let start = Date.now();
-      window["webppl"].run(
-        window["_read_deep"]("webppl", id, { replace_$id: true }),
-        function (s, x) {
-          let time = Date.now() - start;
-          if (x != undefined) window["_write"](id, JSON.stringify(x));
-          if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
-          console.log("webppl took", time, "ms");
-          window["_write_log"](id, start, 1);
-        },
-        options
-      );
+      let item = items[indexFromId.get(id)];
+      if (!item) return; // item not found
+      item.running = true;
+
+      let prevRunClosure = window["webppl"].runClosure;
+      let runClosure = function () {
+        if (prevRunClosure) prevRunClosure();
+        let start = Date.now();
+        window["webppl"].running = true;
+        window["webppl"].run(
+          window["_read_deep"]("webppl", id, { replace_$id: true }),
+          function (s, x) {
+            let time = Date.now() - start;
+            if (x != undefined) window["_write"](id, JSON.stringify(x));
+            if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
+            console.log("webppl took", time, "ms");
+            window["_write_log"](id, start, 1);
+            window["webppl"].running = false;
+            let item = items[indexFromId.get(id)];
+            if (item) item.running = false;
+            if (window["webppl"].runClosure) {
+              window["webppl"].runClosure();
+              delete window["webppl"].runClosure;
+            }
+          },
+          options
+        );
+      };
+      if (window["webppl"].running) {
+        window["webppl"].runClosure = runClosure;
+      } else {
+        runClosure();
+      }
     };
 
     // Visual viewport resize/scroll handlers ...
@@ -1362,9 +1395,8 @@
     // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
+      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyR" && e.shiftKey && (e.metaKey || e.ctrlKey)) ||
       ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
       e.code == "Tab" ||
@@ -1392,13 +1424,17 @@
 
 <style>
   #loading {
+    position: absolute;
+    top: 0;
+    left: 0;
     display: flex;
-    min-height: 100vh;
+    width: 100%;
+    height: 100%;
     min-height: -webkit-fill-available; /*consider bottom bar on iOS Safari*/
     justify-content: center;
     align-items: center;
-    background: #111 url(/loading.gif) no-repeat center;
-    background-size: 200px;
+    /* background: url(/loading.gif) no-repeat center; */
+    /* background-size: 200px; */
   }
   #header {
     max-width: 100%;
@@ -1549,7 +1585,6 @@
 
 {#if user && allowedUsers.includes(user.uid) && !error}
   <!-- all good! user logged in, has permissions, and no error from server -->
-
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
       <div class="column">
@@ -1607,6 +1642,7 @@
               bind:editing={item.editing}
               bind:focused={item.focused}
               bind:saving={item.saving}
+              bind:running={item.running}
               bind:height={item.height}
               bind:time={item.time}
               id={item.id}
@@ -1644,13 +1680,14 @@
   {user.email}!
 {:else if error}
   <!-- user logged in, has permissions, but server returned error -->
-  <div id="loading" />
+  <div id="loading">
+    <DoubleBounce size="60" unit="px" />
+  </div>
 {:else if !user && !error}
   <!-- user not logged in and no errors from server yet (login in progress) -->
-  <script>
-    console.log("loading ...");
-  </script>
-  <div id="loading" />
+  <div id="loading">
+    <Circle2 size="60" unit="px" />
+  </div>
 {:else}
   <!-- should not happen -->
   ?

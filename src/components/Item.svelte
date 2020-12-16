@@ -47,10 +47,12 @@
     },
   });
 
+  import { Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
   export let editing = false;
   export let focused = false;
   export let saving = false;
+  export let running = false;
   // NOTE: required props should not have default values
   export let index: number;
   export let id: string;
@@ -69,7 +71,7 @@
   export let height = 0;
   const placeholder = " ";
   let error = false;
-  export let onEditing = (index: number, editing: boolean, cancelled: boolean) => {};
+  export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
@@ -82,13 +84,13 @@
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
-  function onDone(editorText: string, cancelled: boolean) {
-    onEditing(index, (editing = false), cancelled);
+  function onDone(editorText: string, cancelled: boolean, run: boolean) {
+    onEditing(index, (editing = false), cancelled, run);
   }
   function onClick() {
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
-    onEditing(index, (editing = true), false);
+    onEditing(index, (editing = true));
   }
 
   function onRunClick(e) {
@@ -107,7 +109,7 @@
   function onSaveClick(e) {
     e.stopPropagation();
     e.preventDefault();
-    onEditing(index, (editing = false), false);
+    onEditing(index, (editing = false));
   }
 
   function onCancelClick(e) {
@@ -594,6 +596,7 @@
 
 <style>
   .super-container {
+    position: relative;
     padding: 4px 0;
   }
   .container {
@@ -640,12 +643,10 @@
     color: red;
     padding-left: 15px;
   }
-  .runnable:not(.saving) .run {
+  .runnable:not(.saving):not(.running) .run {
     display: inline-flex;
     padding-left: 12px;
-  }
-  .editing .run {
-    color: black;
+    color: #0b0;
   }
   .editing .save,
   .editing .delete,
@@ -697,11 +698,29 @@
     /* cursor: pointer; */
     overflow: hidden; /* prevent overflow which causes stuck zoom-out on iOS Safari */
   }
+
+  /* .running {
+    border: 1px solid #0b0;
+    margin: -1px;
+  } */
   .saving {
     opacity: 0.5;
   }
   .error {
-    color: red;
+    border: 1px solid red;
+    margin: -1px;
+  }
+
+  .loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.5);
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
@@ -898,7 +917,7 @@
   {#if { showDebugString }}
     <div class="debug">{debugString}</div>
   {/if}
-  <div class="container" class:editing class:saving class:focused class:runnable class:timeOutOfOrder>
+  <div class="container" class:editing class:saving class:running class:focused class:runnable class:timeOutOfOrder>
     <div class="menu">
       <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
         class="cancel"
@@ -921,6 +940,11 @@
     {:else}
       <div class="item" {id} bind:this={itemdiv} class:error>
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
+      </div>
+    {/if}
+    {#if running}
+      <div class="loading">
+        <Circle2 size="60" unit="px" />
       </div>
     {/if}
   </div>
