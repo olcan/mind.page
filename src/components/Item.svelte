@@ -17,6 +17,29 @@
   hljs.registerLanguage("json", json);
   import xml from "highlight.js/lib/languages/xml.js";
   hljs.registerLanguage("xml", xml); // including html
+  hljs.configure({
+    tabReplace: "  ",
+  });
+  function highlight(code, language) {
+    // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
+    //if (language=="") return hljs.highlightAuto(code).value;
+    if (language == "_log") {
+      return code
+        .split("\n")
+        .map((line) =>
+          line
+            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+            .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
+            .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
+            .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
+        )
+        .join("\n");
+    }
+    if (language == "js_input" || language == "webppl") language = "js";
+    if (language == "_html") language = "html";
+    language = hljs.getLanguage(language) ? language : "plaintext";
+    return hljs.highlight(language, code).value;
+  }
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
@@ -25,26 +48,8 @@
   // marked.use({ renderer });
   marked.setOptions({
     renderer: renderer,
-    highlight: function (code, language) {
-      // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
-      //if (language=="") return hljs.highlightAuto(code).value;
-      if (language == "_log") {
-        return code
-          .split("\n")
-          .map((line) =>
-            line
-              .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
-              .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
-              .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
-              .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
-          )
-          .join("\n");
-      }
-      if (language == "js_input" || language == "webppl") language = "js";
-      if (language == "_html") language = "html";
-      language = hljs.getLanguage(language) ? language : "plaintext";
-      return hljs.highlight(language, code).value;
-    },
+    highlight: highlight,
+    langPrefix: "",
   });
 
   import { Circle2 } from "svelte-loading-spinners";
@@ -721,6 +726,7 @@
     justify-content: center;
     align-items: center;
     background: rgba(0, 0, 0, 0.5);
+    pointer-events: none;
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
@@ -877,7 +883,7 @@
   :global(.item blockquote .MathJax) {
     display: block;
   }
-  :global(.item .language-_log) {
+  :global(.item ._log) {
     display: block;
     border-radius: 0 4px 4px 0;
     border-left: 0;
@@ -886,6 +892,18 @@
     font-size: 80%;
     line-height: 150%;
   }
+  :global(.item code:empty) {
+    display: block;
+    border: 1px dashed #444;
+    color: #444;
+    padding: 0 4px;
+    border-radius: 4px;
+  }
+
+  :global(.item code:empty:before) {
+    content: "empty block (" attr(class) ")";
+  }
+
   :global(.item .log-running) {
     color: #9c9;
   }

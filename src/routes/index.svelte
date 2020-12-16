@@ -573,9 +573,11 @@
     }
   }
 
-  function appendBlock(text: string, type: string, block: string) {
-    block = "\n```" + type + "\n" + block + "\n```";
-    const regex = "\\n\\s*```" + type + "\\n.*?\\n\\s*```";
+  function appendBlock(text: string, type: string, block) {
+    if (typeof block != "string") block = "" + block;
+    if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
+    block = "\n```" + type + "\n" + block + "```";
+    const regex = "\\n\\s*```" + type + "\\n.*?\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -592,7 +594,7 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout) return text.replace(/\n\s*```js_output\n.*?\n\s*```/gs, ""); // no output
+    if (!jsout) return text.replace(/\n\s*```js_output\n.*?\s*```/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -668,8 +670,8 @@
         // // clear _output and execute javascript unless cancelled
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
-          item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
+          item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
+          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
@@ -701,8 +703,8 @@
     item.runnable = item.text.toLowerCase().match(/\s*```js_input\s/);
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
-    item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\n\s*```/gs, "\n```$1\n\n```");
-    item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\n\s*```/gs, "");
+    item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
+    item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
@@ -1053,6 +1055,7 @@
     let _writePendingItem = "";
     let _writePendingItemLog = "";
     window["_write"] = function (item: string, text: string, type: string = "_output") {
+      let indices = indicesForItem(item);
       // if writing _log to item pending another _write, attach to that write
       if (type == "_log" && item == _writePendingItem) {
         _writePendingItemLog = text;
@@ -1066,7 +1069,6 @@
           log = _writePendingItemLog;
           _writePendingItemLog = _writePendingItem = "";
         }
-        let indices = indicesForItem(item);
         // console.log("_write", indices, item);
         indices.map((index) => {
           let item = items[index];
@@ -1319,24 +1321,31 @@
         if (prevRunClosure) prevRunClosure();
         let start = Date.now();
         window["webppl"].running = true;
-        window["webppl"].run(
-          window["_read_deep"]("webppl", id, { replace_$id: true }),
-          function (s, x) {
-            let time = Date.now() - start;
-            if (x != undefined) window["_write"](id, JSON.stringify(x));
-            if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
-            console.log("webppl took", time, "ms");
-            window["_write_log"](id, start, 1);
-            window["webppl"].running = false;
-            let item = items[indexFromId.get(id)];
-            if (item) item.running = false;
-            if (window["webppl"].runClosure) {
-              window["webppl"].runClosure();
-              delete window["webppl"].runClosure;
-            }
-          },
-          options
-        );
+        try {
+          window["webppl"].run(
+            window["_read_deep"]("webppl", id, { replace_$id: true }),
+            function (s, x) {
+              let time = Date.now() - start;
+              if (x != undefined) window["_write"](id, JSON.stringify(x));
+              if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
+              console.log("webppl took", time, "ms");
+              window["_write_log"](id, start, 1);
+              window["webppl"].running = false;
+              let item = items[indexFromId.get(id)];
+              if (item) item.running = false;
+              if (window["webppl"].runClosure) {
+                window["webppl"].runClosure();
+                delete window["webppl"].runClosure;
+              }
+            },
+            options
+          );
+        } catch (e) {
+          window["webppl"].running = false;
+          let item = items[indexFromId.get(id)];
+          if (item) item.running = false;
+          throw e;
+        }
       };
       if (window["webppl"].running) {
         window["webppl"].runClosure = runClosure;

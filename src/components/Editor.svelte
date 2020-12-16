@@ -10,6 +10,7 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
+  // TODO: refactor this, identical in Item.svelte
   import "highlight.js/styles/sunburst.css";
   import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
   import plaintext from "highlight.js/lib/languages/plaintext.js";
@@ -25,8 +26,28 @@
   import xml from "highlight.js/lib/languages/xml.js";
   hljs.registerLanguage("xml", xml); // including html
   hljs.configure({
-    tabReplace: "    ",
+    tabReplace: "  ",
   });
+  function highlight(code, language) {
+    // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
+    //if (language=="") return hljs.highlightAuto(code).value;
+    if (language == "_log") {
+      return code
+        .split("\n")
+        .map((line) =>
+          line
+            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+            .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
+            .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
+            .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
+        )
+        .join("\n");
+    }
+    if (language == "js_input" || language == "webppl") language = "js";
+    if (language == "_html") language = "html";
+    language = hljs.getLanguage(language) ? language : "plaintext";
+    return hljs.highlight(language, code).value;
+  }
 
   const placeholder = " ";
   let editor: HTMLDivElement;
@@ -49,17 +70,13 @@
       if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
         insideBlock = true;
         language = line.match(/^\s*```(\w*)$/).pop();
-        if (language == "js_input") language = "js";
-        if (language == "webppl") language = "js";
-        if (language == "_html") language = "html";
-        language = hljs.getLanguage(language) ? language : "plaintext";
         code = "";
         html += '<span class="block-delimiter">';
         html += escapeHTML(line);
         html += "</span>\n";
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
-        html += hljs.highlight(language, code).value;
+        html += highlight(code, language);
         html += "</div>";
         insideBlock = false;
         html += '<span class="block-delimiter">';
