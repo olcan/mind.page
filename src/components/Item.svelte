@@ -76,7 +76,12 @@
   export let height = 0;
   const placeholder = " ";
   let error = false;
-  export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
+  export let onEditing = (
+    index: number,
+    editing: boolean,
+    cancelled: boolean = false,
+    run: boolean = false
+  ) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
@@ -153,18 +158,26 @@
   }
 
   let textHash: string; // text hash computed at render time (in toHTML)
-  function toHTML(text: string, matchingTerms: any, matchingTermsSecondary: any) {
+  function toHTML(
+    text: string,
+    matchingTerms: any,
+    matchingTermsSecondary: any
+  ) {
     textHash = hashCode(text).toString();
 
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
-    const termsSecondary = new Set<string>(matchingTermsSecondary.split(" ").filter((t) => t));
+    const termsSecondary = new Set<string>(
+      matchingTermsSecondary.split(" ").filter((t) => t)
+    );
 
     // parse header tags
     const headerTags = new Set(
       Array.from(
-        (text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(/(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)\s+/g),
+        (text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(
+          /(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)\s+/g
+        ),
         (m) => m[1]
       )
     );
@@ -195,7 +208,10 @@
       }
     });
 
-    let mathTermRegex = new RegExp(`\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`, "i");
+    let mathTermRegex = new RegExp(
+      `\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`,
+      "i"
+    );
 
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
@@ -226,7 +242,10 @@
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
-            str = str.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
+            str = str.replace(
+              /(\$\$?.+?\$\$?)/g,
+              '<span class="math">$1</span>'
+            );
           // style vertical separator bar │
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
@@ -244,7 +263,8 @@
         }
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
-        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = "\n" + str;
+        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/))
+          str = "\n" + str;
         lastLine = line;
         return str;
       })
@@ -269,7 +289,10 @@
     }
 
     // apply hidden divs
-    text = text.replace(/<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->/gs, '<div style="display:none">$1</div>');
+    text = text.replace(
+      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->/gs,
+      '<div style="display:none">$1</div>'
+    );
 
     // convert markdown to html
     text = marked(text);
@@ -278,30 +301,45 @@
     if (isMenu) text = '<div class="menu">' + text + "</div>";
 
     // wrap list items in span to control spacing from bullets
-    text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
+    text = text
+      .replace(/<li>/gs, '<li><span class="list-item">')
+      .replace(/<\/li>/gs, "</span></li>");
 
     // process images to transform src and add _cache_key attribute
     text = text.replace(/<img .*?src\s*=\s*"(.+?)".*?>/gi, function (m, src) {
       if (m.match(/_cache_key/i)) {
-        console.warn("img with self-assigned _cache_key in item at index", index + 1);
+        console.warn(
+          "img with self-assigned _cache_key in item at index",
+          index + 1
+        );
         return m;
       }
       // convert dropbox image src urls to direct download
-      src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      src = src
+        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
+        .replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // console.log("img src", src, m);
-      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}">`;
+      return (
+        m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}">`
+      );
     });
 
     // process divs with item-unique id to add _cache_key="<id>-$hash" automatically
     text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
-        console.warn("div with self-assigned _cache_key in item at index", index + 1);
+        console.warn(
+          "div with self-assigned _cache_key in item at index",
+          index + 1
+        );
         return m;
       }
       if (divid.indexOf(tmpid ? tmpid : id) < 0) {
-        console.warn('div without proper id (of the form "type-$id") in item at index', index + 1);
+        console.warn(
+          'div without proper id (of the form "type-$id") in item at index',
+          index + 1
+        );
         return m;
       }
       // m = m.replace(/ _cache_key=[^> ]*/, "");
@@ -326,6 +364,10 @@
         // console.log("reusing cached element", key, elem.tagName);
         // if (window["_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_cache"][key]);
+        // resize/refresh any c3 charts inside element
+        Array.from(elem.querySelectorAll(".c3")).map((div) => {
+          if (div["_chart"]) div["_chart"].resize();
+        });
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
@@ -343,7 +385,9 @@
       .then(() => {
         const itemdiv = elems[0].closest(".item");
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-        itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
+        itemdiv
+          .querySelectorAll(".MathJax")
+          .forEach((elem) => elem.setAttribute("tabindex", "-1"));
         if (done) done();
         onResized(itemdiv, "math rendered");
       })
@@ -358,7 +402,8 @@
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
-    if (!itemdiv.firstElementChild) itemdiv.appendChild(document.createElement("span"));
+    if (!itemdiv.firstElementChild)
+      itemdiv.appendChild(document.createElement("span"));
     if (
       textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
@@ -382,29 +427,36 @@
       });
       const terms = matchingTerms.split(" ").filter((t) => t);
       if (terms.length == 0) return;
-      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-        acceptNode: function (node) {
-          switch (node.nodeName.toLowerCase()) {
-            case "mark":
-              return (node as HTMLElement).className == "selected"
-                ? NodeFilter.FILTER_REJECT
-                : NodeFilter.FILTER_ACCEPT;
-            case "svg":
-            case "math":
-            case "script":
-              return NodeFilter.FILTER_REJECT;
-            default:
-              return NodeFilter.FILTER_ACCEPT;
-          }
-        },
-      });
+      let treeWalker = document.createTreeWalker(
+        itemdiv,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: function (node) {
+            switch (node.nodeName.toLowerCase()) {
+              case "mark":
+                return (node as HTMLElement).className == "selected"
+                  ? NodeFilter.FILTER_REJECT
+                  : NodeFilter.FILTER_ACCEPT;
+              case "svg":
+              case "math":
+              case "script":
+                return NodeFilter.FILTER_REJECT;
+              default:
+                return NodeFilter.FILTER_ACCEPT;
+            }
+          },
+        }
+      );
       while (treeWalker.nextNode()) {
         let node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
         let parent = node.parentNode;
         let text = node.nodeValue;
         let m;
-        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
+        let regex = new RegExp(
+          `^(.*?)(${terms.map(regexEscape).join("|")})`,
+          "si"
+        );
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
           parent.insertBefore(document.createTextNode(m[1]), node);
@@ -426,14 +478,16 @@
               word.style.marginLeft = "-" + tagStyle.paddingLeft;
               word.style.borderTopLeftRadius;
               word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomLeftRadius =
+                tagStyle.borderBottomLeftRadius;
             }
             if (text.length == 0) {
               // suffix match (rounded on right)
               word.style.paddingRight = tagStyle.paddingRight;
               word.style.marginRight = "-" + tagStyle.paddingRight;
               word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomRightRadius =
+                tagStyle.borderBottomLeftRadius;
             }
           }
         }
@@ -448,7 +502,8 @@
 
     // remove <code></code> wrapper block for math blocks
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$")) code.outerHTML = code.innerHTML;
+      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
+        code.outerHTML = code.innerHTML;
     });
 
     // replace <pre></pre> wrapper with <blockquote></blockquote> for math blocks
@@ -497,8 +552,13 @@
       Array.from(scripts).forEach((script) => {
         // console.log(script.parentElement);
         // console.log(Array.from(script.parentElement.getElementsByTagName("script")));
-        if (!script.hasAttribute("_uncached") && !script.parentElement.hasAttribute("_cache_key")) {
-          console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
+        if (
+          !script.hasAttribute("_uncached") &&
+          !script.parentElement.hasAttribute("_cache_key")
+        ) {
+          console.warn(
+            "script will execute at every render due to uncached parent (missing _cache_key)"
+          );
         }
         script.remove(); // remove script to indicate execution
         let clone = document.createElement("script");
@@ -530,18 +590,26 @@
               Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
                 dot["_dotrendered"] = function () {
                   // render "stack" clusters (subgraphs)
-                  Array.from(dot.querySelectorAll(".cluster.stack")).forEach((cluster) => {
-                    let path = cluster.children[1]; // first child is title
-                    (path as HTMLElement).setAttribute("fill", "#111");
-                    let path2 = path.cloneNode();
-                    (path2 as HTMLElement).setAttribute("transform", "translate(-3,3)");
-                    (path2 as HTMLElement).setAttribute("opacity", "0.75");
-                    cluster.insertBefore(path2, path);
-                    let path3 = path.cloneNode();
-                    (path3 as HTMLElement).setAttribute("transform", "translate(-6,6)");
-                    (path3 as HTMLElement).setAttribute("opacity", "0.5");
-                    cluster.insertBefore(path3, path2);
-                  });
+                  Array.from(dot.querySelectorAll(".cluster.stack")).forEach(
+                    (cluster) => {
+                      let path = cluster.children[1]; // first child is title
+                      (path as HTMLElement).setAttribute("fill", "#111");
+                      let path2 = path.cloneNode();
+                      (path2 as HTMLElement).setAttribute(
+                        "transform",
+                        "translate(-3,3)"
+                      );
+                      (path2 as HTMLElement).setAttribute("opacity", "0.75");
+                      cluster.insertBefore(path2, path);
+                      let path3 = path.cloneNode();
+                      (path3 as HTMLElement).setAttribute(
+                        "transform",
+                        "translate(-6,6)"
+                      );
+                      (path3 as HTMLElement).setAttribute("opacity", "0.5");
+                      cluster.insertBefore(path3, path2);
+                    }
+                  );
 
                   // render math in text nodes
                   let math = [];
@@ -552,28 +620,39 @@
                     }
                   });
                   renderMath(math, function () {
-                    dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
-                      let math = elem as SVGGraphicsElement;
-                      let dot = elem.parentNode.parentNode.parentNode.parentNode;
-                      // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
-                      let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
-                      let text = dot.children[dot.children.length - 1]; // text is last child
-                      let shaperect = shape.getBBox();
-                      let textrect = text["_bbox"]; // recover text bbox pre-mathjax
-                      let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
-                      elem.parentElement.parentElement.parentElement.remove(); // remove text node
-                      dot.appendChild(elem);
-                      let mathrect = math.getBBox();
-                      let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
-                      let xt0 = -mathrect.x;
-                      let yt0 = -mathrect.y;
-                      let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
-                      let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2;
-                      elem.setAttribute(
-                        "transform",
-                        `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
-                      );
-                    });
+                    dot
+                      .querySelectorAll(".node > text > .MathJax > svg > *")
+                      .forEach((elem) => {
+                        let math = elem as SVGGraphicsElement;
+                        let dot =
+                          elem.parentNode.parentNode.parentNode.parentNode;
+                        // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
+                        let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+                        let text = dot.children[dot.children.length - 1]; // text is last child
+                        let shaperect = shape.getBBox();
+                        let textrect = text["_bbox"]; // recover text bbox pre-mathjax
+                        let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
+                        elem.parentElement.parentElement.parentElement.remove(); // remove text node
+                        dot.appendChild(elem);
+                        let mathrect = math.getBBox();
+                        let scale =
+                          (0.6 * textscale * shaperect.height) /
+                          mathrect.height;
+                        let xt0 = -mathrect.x;
+                        let yt0 = -mathrect.y;
+                        let xt =
+                          shaperect.x +
+                          shaperect.width / 2 -
+                          (mathrect.width * scale) / 2;
+                        let yt =
+                          shaperect.y +
+                          shaperect.height / 2 +
+                          (mathrect.height * scale) / 2;
+                        elem.setAttribute(
+                          "transform",
+                          `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
+                        );
+                      });
                   });
                 };
               });
@@ -935,11 +1014,22 @@
   {#if { showDebugString }}
     <div class="debug">{debugString}</div>
   {/if}
-  <div class="container" class:editing class:saving class:running class:focused class:runnable class:timeOutOfOrder>
+  <div
+    class="container"
+    class:editing
+    class:saving
+    class:running
+    class:focused
+    class:runnable
+    class:timeOutOfOrder>
     <div class="menu">
-      <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
+      <span class="run" on:click={onRunClick}>run</span><span
+        class="save"
+        on:click={onSaveClick}>save</span><span
         class="cancel"
-        on:click={onCancelClick}>cancel</span><span class="delete" on:click={onDeleteClick}>delete</span><span
+        on:click={onCancelClick}>cancel</span><span
+        class="delete"
+        on:click={onDeleteClick}>delete</span><span
         class="index"
         class:matching={matchingTerms.length > 0}
         on:click={onIndexClick}>{index + 1}</span>

@@ -1,7 +1,5 @@
 {
   "editor.fontSize": 14,
-  "refreshBrowser.browser": "Safari",
-  "refreshBrowser.runBuildTask": true,
   "editor.wrappingIndent": "indent",
   "editor.wordWrap": "on",
   "git.enableSmartCommit": true,

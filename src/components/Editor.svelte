@@ -5,7 +5,11 @@
   export let cancelOnDelete = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
-  export let onDone = (text: string, cancelled: boolean = false, run: boolean = false) => {};
+  export let onDone = (
+    text: string,
+    cancelled: boolean = false,
+    run: boolean = false
+  ) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -56,9 +60,12 @@
   let textarea: HTMLTextAreaElement;
   // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
   let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
-  let highlightTags = (t) => t.replace(/(^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
-  let highlightCode = (t) => t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
-  let highlightMath = (t) => t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
+  let highlightTags = (t) =>
+    t.replace(/(^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
+  let highlightCode = (t) =>
+    t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
+  let highlightMath = (t) =>
+    t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
@@ -86,11 +93,15 @@
         code += line + "\n";
       } else {
         if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
-        else html += highlightMath(highlightCode(highlightTags(escapeHTML(line)))) + "\n";
+        else
+          html +=
+            highlightMath(highlightCode(highlightTags(escapeHTML(line)))) +
+            "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock) html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
+    if (insideBlock)
+      html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
 
     // wrap hidden sections
     html = html.replace(
@@ -110,7 +121,8 @@
 
     // indent/comment selection or current line
     if (
-      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
+      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
+        (e.metaKey || e.ctrlKey)) ||
       (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey))
     ) {
@@ -120,17 +132,27 @@
       let oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
       // move selection to line start
-      let lineStart = textarea.value.substring(0, textarea.selectionStart).replace(/[^\n]*$/, "").length;
-      if (textarea.selectionStart == textarea.selectionEnd && e.code == "BracketRight") {
+      let lineStart = textarea.value
+        .substring(0, textarea.selectionStart)
+        .replace(/[^\n]*$/, "").length;
+      if (
+        textarea.selectionStart == textarea.selectionEnd &&
+        e.code == "BracketRight"
+      ) {
         textarea.selectionStart = textarea.selectionEnd = lineStart;
       } else {
         textarea.selectionStart = lineStart;
       }
       // expand selection to end of last line
       // if selection ends right after a new line, exclude the last line
-      if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == "\n")
+      if (
+        textarea.selectionEnd > textarea.selectionStart &&
+        textarea.value[textarea.selectionEnd - 1] == "\n"
+      )
         textarea.selectionEnd--;
-      let lastLineStart = textarea.value.substring(0, textarea.selectionEnd).replace(/[^\n]*$/, "").length;
+      let lastLineStart = textarea.value
+        .substring(0, textarea.selectionEnd)
+        .replace(/[^\n]*$/, "").length;
       let lineEnd =
         lastLineStart +
         textarea.value
@@ -140,7 +162,10 @@
       textarea.selectionEnd = lineEnd;
 
       // NOTE: execCommand maintains undo/redo history
-      let selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
+      let selectedText = textarea.value.substring(
+        textarea.selectionStart,
+        textarea.selectionEnd
+      );
       document.execCommand(
         "insertText",
         false,
@@ -172,23 +197,35 @@
 
     // create line on Enter, maintain indentation
     // NOTE: to prevent delay on caret update, we do the actual indentation in onKeyUp
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+    if (
+      e.code == "Enter" &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
+    ) {
       if (enterStart < 0) {
         enterStart = textarea.selectionStart;
-        enterIndentation = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/)[1] || "";
+        enterIndentation =
+          textarea.value
+            .substring(0, textarea.selectionStart)
+            .match(/(?:^|\n)( *).*?$/)[1] || "";
       }
       return;
     }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      if ((e.code == "ArrowUp" || e.code == "ArrowLeft") && textarea.selectionStart == 0) {
+      if (
+        (e.code == "ArrowUp" || e.code == "ArrowLeft") &&
+        textarea.selectionStart == 0
+      ) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
-      if ((e.code == "ArrowDown" || e.code == "ArrowRight") && textarea.selectionStart == textarea.value.length) {
+      if (
+        (e.code == "ArrowDown" || e.code == "ArrowRight") &&
+        textarea.selectionStart == textarea.value.length
+      ) {
         e.stopPropagation();
         e.preventDefault();
         onNext();
@@ -202,7 +239,9 @@
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
       textarea.selectionStart >= 3 &&
-      textarea.value.substring(textarea.selectionStart - 3, textarea.selectionStart).match(/\s  /)
+      textarea.value
+        .substring(textarea.selectionStart - 3, textarea.selectionStart)
+        .match(/\s  /)
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
@@ -212,7 +251,11 @@
     }
 
     // delete empty item with backspace
-    if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
+    if (
+      e.code == "Backspace" &&
+      textarea.value.trim() == "" &&
+      textarea.selectionStart == 0
+    ) {
       onDone((text = ""), cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
@@ -250,7 +293,10 @@
         document.execCommand("insertText", false, "  ");
       } else if (
         textarea.selectionStart >= 2 &&
-        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
+        textarea.value.substring(
+          textarea.selectionStart - 2,
+          textarea.selectionStart
+        ) == "  "
       ) {
         textarea.selectionStart = textarea.selectionStart - 2;
         document.execCommand("delete", false);
@@ -262,10 +308,16 @@
 
   function onKeyUp(e: KeyboardEvent) {
     // indent lines created by Enter (based on state recorded in onKeyDown above)
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+    if (
+      e.code == "Enter" &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
+    ) {
       if (enterStart >= 0) {
         if (enterIndentation) {
-          let newlines = textarea.value.substring(enterStart, textarea.selectionEnd);
+          let newlines = textarea.value.substring(
+            enterStart,
+            textarea.selectionEnd
+          );
           newlines = newlines.replace(/\n/g, "\n" + enterIndentation);
           textarea.selectionStart = enterStart;
           document.execCommand("insertText", false, newlines);
@@ -286,14 +338,21 @@
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value.trim()), false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
+      onDone(
+        (text = textarea.value.trim()),
+        false,
+        e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/
+      );
       return;
     }
     // run item with Alt/Option+Enter
     if (e.code == "Enter" && e.altKey) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      let selection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+      let selection = {
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
+      };
       onRun();
       setTimeout(() => {
         textarea.selectionStart = selection.start;
@@ -307,7 +366,8 @@
     // force replace tabs with spaces
     if (textarea.value.indexOf("\t") >= 0) {
       // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      if (textarea.value.match(/^[-*]\s/)) textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
+      if (textarea.value.match(/^[-*]\s/))
+        textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
       textarea.value = textarea.value.replace(/\t/g, "  ");
     }
     text = textarea.value; // no trimming until onDone

@@ -1,5 +1,11 @@
 <script context="module" lang="ts">
-  import { isClient, firebase, firestore, firebaseConfig, firebaseAdmin } from "../../firebase.js";
+  import {
+    isClient,
+    firebase,
+    firestore,
+    firebaseConfig,
+    firebaseAdmin,
+  } from "../../firebase.js";
   const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"]; // user.uid for olcans@gmail.com
 
   // NOTE: Preload function can be called on either client or server
@@ -7,9 +13,16 @@
   export async function preload(page, session) {
     // console.log("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-    const user: any = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
+    const user: any = await firebaseAdmin()
+      .auth()
+      .verifyIdToken(session.cookie)
+      .catch(console.error);
     if (user && allowedUsers.includes(user.uid)) {
-      let items = await firebaseAdmin().firestore().collection("items").orderBy("time", "desc").get();
+      let items = await firebaseAdmin()
+        .firestore()
+        .collection("items")
+        .orderBy("time", "desc")
+        .get();
       // return {}
       return {
         items: items.docs.map((doc) =>
@@ -78,7 +91,10 @@
       if (item.dotted) dotCount++;
       if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.label) {
-        indicesFromLabel.set(item.label, [...(indicesFromLabel.get(item.label) || []), index]);
+        indicesFromLabel.set(item.label, [
+          ...(indicesFromLabel.get(item.label) || []),
+          index,
+        ]);
       }
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
@@ -92,7 +108,10 @@
       if (!item.pinned && (index == 0 || timeString != lastTimeString)) {
         item.timeString = timeString;
         item.timeOutOfOrder =
-          index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString;
+          index > 0 &&
+          !lastItem.pinned &&
+          item.time > lastItem.time &&
+          timeString != lastTimeString;
       }
       lastTimeString = timeString;
 
@@ -107,7 +126,8 @@
         const minColumnHeight = Math.min(...columnHeights);
         if (
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
-          columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight
+          columnHeights[lastColumn] + item.outerHeight + 40 <=
+            minColumnHeight + 0.9 * outerHeight
         )
           item.column = lastColumn;
         else item.column = columnHeights.indexOf(minColumnHeight);
@@ -144,7 +164,10 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g), (m) => m[1].replace(/^#_/, "#"));
+    return Array.from(
+      lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
+      (m) => m[1].replace(/^#_/, "#")
+    );
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -155,7 +178,10 @@
   let editorChangePending = false;
   function onEditorChange(text: string) {
     // if editor has focus and it is too soon since last change/return, debounce
-    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
+    if (
+      document.activeElement == textArea(-1) &&
+      Date.now() - lastEditorChangeTime < editorDebounceTime
+    ) {
       lastEditorChangeTime = Date.now(); // reset timer at each postponed change
       if (!editorChangePending) {
         editorChangePending = true;
@@ -184,7 +210,8 @@
       if (term[0] != "#") return;
       let pos;
       let tag = term;
-      while ((pos = tag.lastIndexOf("/")) >= 0) termsSecondary.push((tag = tag.slice(0, pos)));
+      while ((pos = tag.lastIndexOf("/")) >= 0)
+        termsSecondary.push((tag = tag.slice(0, pos)));
     });
 
     matchingItemCount = 0;
@@ -201,12 +228,15 @@
       const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
       item.pinned = pintags.length > 0;
       item.pinTerm = pintags[0] || "";
-      item.dotted = pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
-      item.dotTerm = pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
+      item.dotted =
+        pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
+      item.dotTerm =
+        pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
       item.prefixMatch = lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
-        item.prefixMatchTerm = terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
+        item.prefixMatchTerm =
+          terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
       // use first exact-match (=label-match) item as "listing" item
       // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
@@ -220,12 +250,17 @@
       item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
       // match regex:* terms
       item.matchingTerms = item.matchingTerms.concat(
-        terms.filter((t) => t.match(/^regex:\S+/) && lctext.match(new RegExp(t.substring(6))))
+        terms.filter(
+          (t) =>
+            t.match(/^regex:\S+/) && lctext.match(new RegExp(t.substring(6)))
+        )
       );
 
       if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = [];
-      item.matchingTermsSecondary = termsSecondary.filter((t) => lctext.indexOf(t) >= 0);
+      item.matchingTermsSecondary = termsSecondary.filter(
+        (t) => lctext.indexOf(t) >= 0
+      );
 
       item.runnable = lctext.match(/\s*```js_input\s/);
     });
@@ -233,7 +268,8 @@
     // Update times for editing items to maintain their ordering when one is saved
     let now = Date.now();
     items.forEach((item) => {
-      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = now;
+      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/))
+        item.time = now;
     });
 
     // NOTE: undefined values produce NaN, which is treated as 0
@@ -247,7 +283,8 @@
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
         // position in item with exact match on first term
-        listing.indexOf(b.prefixMatchTerm) - listing.indexOf(a.prefixMatchTerm) ||
+        listing.indexOf(b.prefixMatchTerm) -
+          listing.indexOf(a.prefixMatchTerm) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // alphanumeric ordering on prefix-matching term
@@ -276,7 +313,8 @@
     if (range) {
       let tagNode = e.target as Node;
       // if target is not the tag node, it must be a highlight, so we move to the parent
-      if ((tagNode as HTMLElement).tagName != "MARK") tagNode = tagNode.parentNode;
+      if ((tagNode as HTMLElement).tagName != "MARK")
+        tagNode = tagNode.parentNode;
       // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
       // if tag node contains highlight, we have to adjust click position
       let pos = range.startOffset;
@@ -309,7 +347,11 @@
   }
 
   let editorText = "";
-  function onEditorDone(text: string, cancelled: boolean = false, run: boolean = false) {
+  function onEditorDone(
+    text: string,
+    cancelled: boolean = false,
+    run: boolean = false
+  ) {
     if (cancelled) {
       // just clear and return
       lastEditorChangeTime = 0; // disable debounce even if editor focused
@@ -335,7 +377,9 @@
           return;
         }
         let item = items[editingItems[0]];
-        text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
+        text = `${new Date(item.time)}\n${new Date(
+          item.updateTime
+        )}\n${new Date(item.createTime)}`;
         break;
       }
       case "/tweet": {
@@ -348,7 +392,8 @@
           return;
         }
         let item = items[editingItems[0]];
-        location.href = "twitter://post?message=" + encodeURIComponent(item.text);
+        location.href =
+          "twitter://post?message=" + encodeURIComponent(item.text);
         return;
       }
       case "/duplicate": {
@@ -379,7 +424,8 @@
       }
       default: {
         if (text.match(/\/js(\s|$)/)) {
-          text = "```js_input\n" + text.replace(/\/js(\s|$)/s, "").trim() + "\n```";
+          text =
+            "```js_input\n" + text.replace(/\/js(\s|$)/s, "").trim() + "\n```";
         } else if (text.match(/^\/\w+/)) {
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
@@ -404,13 +450,22 @@
 
     let tmpid = Date.now().toString();
     let itemToSave = { time: time, text: text };
-    let item = { ...itemToSave, id: tmpid, tmpid: tmpid, saving: true, editing: editing };
+    let item = {
+      ...itemToSave,
+      id: tmpid,
+      tmpid: tmpid,
+      saving: true,
+      editing: editing,
+    };
     items = [item, ...items];
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange((editorText = "")); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
     if (!editing) {
-      itemToSave.text = item.text = appendJSOutput(text, indexFromId.get(tmpid));
+      itemToSave.text = item.text = appendJSOutput(
+        text,
+        indexFromId.get(tmpid)
+      );
       if (item.text != text) {
         // invoke onEditorChange again due to text change
         lastEditorChangeTime = 0; // disable debounce even if editor focused
@@ -524,7 +579,11 @@
     const lctext = items[index].text.toLowerCase();
     const tags = itemTags(lctext);
     const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-    console.debug(`[${index + 1}] ${label ? label + ": " : ""} height changed ${prevHeight} → ${height} (${trigger})`);
+    console.debug(
+      `[${index + 1}] ${
+        label ? label + ": " : ""
+      } height changed ${prevHeight} → ${height} (${trigger})`
+    );
     items[index].height = height;
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
@@ -558,7 +617,11 @@
 
   let evalIndex = -1;
   let evalTime = 0;
-  function evalJSInput(text: string, label: string = "", index: number = -1): string {
+  function evalJSInput(
+    text: string,
+    label: string = "",
+    index: number = -1
+  ): string {
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
     if (index >= 0) jsin = jsin.replace(/\$id/g, items[index].id);
@@ -635,13 +698,25 @@
   // https://stackoverflow.com/a/9039885
   function iOS() {
     return (
-      ["iPad Simulator", "iPhone Simulator", "iPod Simulator", "iPad", "iPhone", "iPod"].includes(navigator.platform) ||
+      [
+        "iPad Simulator",
+        "iPhone Simulator",
+        "iPod Simulator",
+        "iPad",
+        "iPhone",
+        "iPod",
+      ].includes(navigator.platform) ||
       // iPad on iOS 13 detection
       (navigator.userAgent.includes("Mac") && "ontouchend" in document)
     );
   }
 
-  function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
+  function onItemEditing(
+    index: number,
+    editing: boolean,
+    cancelled: boolean = false,
+    run: boolean = false
+  ) {
     let item = items[index];
 
     // if cancelled, restore savedTime and savedText (unless empty, which indicates deletion)
@@ -679,17 +754,28 @@
           time: item.savedTime,
           text: item.savedText,
         }); // for /undelete
-        firestore().collection("items").doc(item.id).delete().catch(console.error);
+        firestore()
+          .collection("items")
+          .doc(item.id)
+          .delete()
+          .catch(console.error);
       } else {
         // // clear _output and execute javascript unless cancelled
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
-          item.text = item.text.replace(/\n *?```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
-          item.text = item.text.replace(/\n *?```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
+          item.text = item.text.replace(
+            /\n *?```(\w*?_output)\n.*?\s*```/gs,
+            "\n```$1\n```"
+          );
+          item.text = item.text.replace(
+            /\n *?```(\w*?_log)\n.*?\s*```/gs,
+            "\n```$1\n```"
+          );
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
-        if (item.time != item.savedTime || item.text != item.savedText) saveItem(index);
+        if (item.time != item.savedTime || item.text != item.savedText)
+          saveItem(index);
         onEditorChange(editorText); // item time and/or text has changed
       }
 
@@ -717,8 +803,14 @@
     item.runnable = item.text.toLowerCase().match(/\s*```js_input\s/);
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
-    item.text = item.text.replace(/\n *?```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
-    item.text = item.text.replace(/\n *?```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
+    item.text = item.text.replace(
+      /\n *?```(\w*?_output)\n.*?\s*```/gs,
+      "\n```$1\n```"
+    );
+    item.text = item.text.replace(
+      /\n *?```(\w*?_log)\n.*?\s*```/gs,
+      "\n```$1\n```"
+    );
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
@@ -737,7 +829,9 @@
   }
 
   function textArea(index: number): HTMLTextAreaElement {
-    return document.getElementById("textarea-" + (index < 0 ? "editor" : items[index].id)) as HTMLTextAreaElement;
+    return document.getElementById(
+      "textarea-" + (index < 0 ? "editor" : items[index].id)
+    ) as HTMLTextAreaElement;
   }
 
   function onPrevItem(inc = -1) {
@@ -778,7 +872,9 @@
     // force show dotted items when any of them are editing
     if (editingItems.findIndex((i) => items[i].dotted) >= 0) showDotted = true;
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
-    (document.querySelector("span.dots") as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
+    (document.querySelector(
+      "span.dots"
+    ) as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
     Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
@@ -793,14 +889,20 @@
     lastScrollTime = Date.now();
     if (window.scrollY > 0) lastScrolledDownTime = lastScrollTime;
     if (window.scrollY == 0) lastScrolledDownTime = 0;
-    if (window.scrollY <= -100 && !scrollToggleLocked && Date.now() - lastScrolledDownTime > 1000) {
+    if (
+      window.scrollY <= -100 &&
+      !scrollToggleLocked &&
+      Date.now() - lastScrolledDownTime > 1000
+    ) {
       scrollToggleLocked = true;
       showDotted = !showDotted;
       // NOTE: display:none on any elements (even spans) while bouncing breaks the bounce animation on iOS
       // (playing around with visibility/height/position/etc did not work either)
       showDottedPending = true;
-      (document.querySelector("span.dots") as HTMLElement).style.visibility = "visible";
-      (document.querySelector("span.dots") as HTMLElement).style.opacity = "0.5";
+      (document.querySelector("span.dots") as HTMLElement).style.visibility =
+        "visible";
+      (document.querySelector("span.dots") as HTMLElement).style.opacity =
+        "0.5";
     } else if (window.scrollY >= -25) {
       scrollToggleLocked = false;
       if (window.scrollY >= 0) {
@@ -867,7 +969,15 @@
             // NOTE: some errors do not go through console.error but are reported via window.onerror
             console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
             console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-            const levels = ["debug", "info", "log", "warn", "error", "_window_error", "_eval_error"];
+            const levels = [
+              "debug",
+              "info",
+              "log",
+              "warn",
+              "error",
+              "_window_error",
+              "_eval_error",
+            ];
             levels.forEach(function (verb) {
               console[verb] = (function (method, verb, div) {
                 return function (...args) {
@@ -876,7 +986,10 @@
                   if (verb.endsWith("error")) verb = "error";
                   elem.classList.add("console-" + verb);
                   let item; // if the source is an item (and the logging is done _synchronously_)
-                  if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
+                  if (
+                    window["_script_item_id"] &&
+                    indexFromId.has(window["_script_item_id"])
+                  ) {
                     item = items[indexFromId.get(window["_script_item_id"])];
                   } else if (evalIndex) {
                     item = items[evalIndex];
@@ -894,14 +1007,17 @@
                   elem.setAttribute("_time", Date.now().toString());
                   elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
-                  document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
+                  document.getElementById(
+                    "console-summary"
+                  ).style.visibility = showDotted ? "hidden" : "visible";
                   const summaryDiv = document.getElementById("console-summary");
                   const summaryElem = document.createElement("span");
                   summaryElem.innerText = "·";
                   summaryElem.classList.add("console-" + verb);
                   summaryDiv.appendChild(summaryElem);
                   // if console is hidden, make sure summary is visible
-                  if (div.style.display == "none") summaryDiv.style.visibility = "visible";
+                  if (div.style.display == "none")
+                    summaryDiv.style.visibility = "visible";
 
                   // auto-remove after 10 seconds ...
                   setTimeout(() => {
@@ -967,10 +1083,14 @@
       textArea(-1).focus();
     };
     window["_append"] = function (text: string) {
-      onEditorChange((editorText = (editorText.trim() + " " + text).trimStart()));
+      onEditorChange(
+        (editorText = (editorText.trim() + " " + text).trimStart())
+      );
     };
     window["_append_edit"] = function (text: string) {
-      onEditorChange((editorText = (editorText.trim() + " " + text).trim() + " "));
+      onEditorChange(
+        (editorText = (editorText.trim() + " " + text).trim() + " ")
+      );
       textArea(-1).focus();
     };
     window["_enter"] = function (text: string) {
@@ -993,7 +1113,9 @@
         .then((urlstr) => {
           try {
             let url = new URL(urlstr);
-            window["_append_edit"](`${prefix}[${title || url.host}](${urlstr})${suffix}`);
+            window["_append_edit"](
+              `${prefix}[${title || url.host}](${urlstr})${suffix}`
+            );
             if (enter) window["_enter"]();
           } catch (_) {
             alert("clipboard content is not a URL");
@@ -1020,14 +1142,20 @@
     };
     window["_eval"] = function (tag: string) {
       const indices = indicesFromLabel.get(tag) || [];
-      const jsout = indices.map((index) => evalJSInput(items[index].text, items[index].label));
+      const jsout = indices.map((index) =>
+        evalJSInput(items[index].text, items[index].label)
+      );
       return jsout.length == 1 ? jsout[0] : jsout;
     };
 
     function indicesForItem(item: string) {
       if (item == "" && evalIndex >= 0) {
         return [evalIndex];
-      } else if (item == "" && window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
+      } else if (
+        item == "" &&
+        window["_script_item_id"] &&
+        indexFromId.has(window["_script_item_id"])
+      ) {
         return [indexFromId.get(window["_script_item_id"])];
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
@@ -1045,7 +1173,20 @@
       return ids.length == 1 ? ids[0] : ids;
     };
 
-    window["_read"] = function (type: string = "", item: string = "", options: object = {}) {
+    window["_tags"] = function (item: string = "") {
+      let tags = [];
+      let indices = indicesForItem(item);
+      indices.map((index) => {
+        tags = tags.concat(itemTags(items[index].text.toLowerCase()));
+      });
+      return tags;
+    };
+
+    window["_read"] = function (
+      type: string = "",
+      item: string = "",
+      options: object = {}
+    ) {
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
@@ -1055,19 +1196,36 @@
           const label = lctext.startsWith(tags[0]) ? tags[0] : "";
           options["exclude_tags"] = [...(options["exclude_tags"] || []), label];
           const exclusions = new Set(options["exclude_tags"]);
-          tags.filter((t) => !exclusions.has(t)).forEach((tag) => content.push(window["_read"](type, tag, options)));
+          tags
+            .filter((t) => !exclusions.has(t))
+            .forEach((tag) =>
+              content.push(window["_read"](type, tag, options))
+            );
         }
         let text = items[index].text;
         if (type) text = extractBlock(items[index].text, type);
-        if (options["replace_$id"]) text = text.replace(/\$id/g, items[index].id);
+        if (options["replace_$id"])
+          text = text.replace(/\$id/g, items[index].id);
         content.push(text);
       });
       return content.join("\n");
     };
-    window["_read_deep"] = function (type: string = "", item: string = "", options: object = {}) {
-      return window["_read"](type, item, Object.assign({ include_tagrefs: true }, options));
+    window["_read_deep"] = function (
+      type: string = "",
+      item: string = "",
+      options: object = {}
+    ) {
+      return window["_read"](
+        type,
+        item,
+        Object.assign({ include_tagrefs: true }, options)
+      );
     };
-    window["_eval"] = function (code: string = "", item: string = "", options: object = {}) {
+    window["_eval"] = function (
+      code: string = "",
+      item: string = "",
+      options: object = {}
+    ) {
       let prefix = window["_read_deep"](
         "js",
         item,
@@ -1078,7 +1236,11 @@
 
     let _writePendingItem = "";
     let _writePendingItemLog = "";
-    window["_write"] = function (item: string, text: string, type: string = "_output") {
+    window["_write"] = function (
+      item: string,
+      text: string,
+      type: string = "_output"
+    ) {
       let ids = indicesForItem(item).map((index) => items[index].id);
 
       // if writing _log to item pending another _write, attach to that write
@@ -1133,7 +1295,11 @@
     };
 
     // default level (1) excludes debug messages, and default since (-1) is last evalTime
-    window["_write_log"] = function (item: string, since: number = -1, level: number = 1) {
+    window["_write_log"] = function (
+      item: string,
+      since: number = -1,
+      level: number = 1
+    ) {
       let log = [];
       if (since < 0) since = evalTime;
       consolediv.childNodes.forEach((elem) => {
@@ -1152,7 +1318,11 @@
       }
     };
 
-    window["_task"] = function (interval: number, task: Function, item: string = "") {
+    window["_task"] = function (
+      interval: number,
+      task: Function,
+      item: string = ""
+    ) {
       let indices = indicesForItem(item);
       if (!window["_tasks"]) window["_tasks"] = {};
       indices.map((index) => {
@@ -1195,7 +1365,10 @@
           y: {
             show: !labeled,
             tick: { outer: false, multiline: false },
-            padding: { bottom: 5, top: rotated && labeled ? 70 : labeled ? 40 : 5 },
+            padding: {
+              bottom: 5,
+              top: rotated && labeled ? 70 : labeled ? 40 : 5,
+            },
           },
         },
         grid: { focus: { show: !barchart } },
@@ -1213,7 +1386,8 @@
       });
       const chart = window["c3"].generate(spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
-        if (spec["size"] && spec["size"]["height"]) (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
+        if (spec["size"] && spec["size"]["height"])
+          (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
         elem["_chart"] = chart;
       });
       return chart;
@@ -1224,7 +1398,8 @@
       // NOTE: best way to define defaults seems to be by inserting attributes into the dot, which are turned into SVG attributes by d3 graphviz, which take lowest priority (as opposed to inline styles which would take highest, see https://stackoverflow.com/a/24294284) and can be easily modified either in the dot code or using CSS
       const nodedefs =
         'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",fontsize=20,shape=circle,fixedsize=true';
-      const edgedefs = 'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
+      const edgedefs =
+        'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
       const graphdefs = `bgcolor=invis; color="#666666"; fontcolor="#666666"; fontname="Avenir Next, Helvetica"; fontsize=20; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
       const subgraphdefs = `labeljust="r"; labelloc="b"; edge[minlen=2]`;
       dot = dot.replace(/(subgraph.*?{)/g, `$1\n${subgraphdefs};\n`);
@@ -1275,12 +1450,16 @@
       const counts = new Array(bins).fill(0);
       numbers.forEach((num, index) => {
         if (num < min || num > max) return;
-        counts[num == max ? bins - 1 : Math.floor((num - min) / size)] += weights[index];
+        counts[num == max ? bins - 1 : Math.floor((num - min) / size)] +=
+          weights[index];
       });
       let histogram = {};
       counts.forEach((count, index) => {
         let key = `[${(min + index * size).toFixed(digits)}, `;
-        key += index == bins - 1 ? `${max.toFixed(digits)}]` : `${(min + (index + 1) * size).toFixed(digits)})`;
+        key +=
+          index == bins - 1
+            ? `${max.toFixed(digits)}]`
+            : `${(min + (index + 1) * size).toFixed(digits)})`;
         histogram[key] = count > 0 ? count.toFixed(2) : null; // replace 0 -> null
       });
       return histogram;
@@ -1310,7 +1489,12 @@
       return out;
     };
 
-    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2, keydigits: number = 2) {
+    window["_pmf"] = function (
+      dist,
+      limit: number = 10,
+      digits: number = 2,
+      keydigits: number = 2
+    ) {
       dist = dist.getDist();
       let keys = Object.keys(dist).map((k) => k.toString());
       let probs = Object.values(dist).map((v) => v["prob"]);
@@ -1353,7 +1537,8 @@
             function (s, x) {
               let time = Date.now() - start;
               if (x != undefined) window["_write"](id, JSON.stringify(x));
-              if (Object.keys(s).length > 0) console.log("webppl state:", JSON.stringify(s));
+              if (Object.keys(s).length > 0)
+                console.log("webppl state:", JSON.stringify(s));
               console.log("webppl took", time, "ms");
               window["_write_log"](id, start, 1);
               window["webppl"].running = false;
@@ -1390,7 +1575,9 @@
       if (Date.now() - lastScrollTime > 250) {
         const documentWidth = document.documentElement.clientWidth;
         if (documentWidth != lastDocumentWidth) {
-          console.log(`document width changed from ${lastDocumentWidth} to ${documentWidth}`);
+          console.log(
+            `document width changed from ${lastDocumentWidth} to ${documentWidth}`
+          );
           updateItemLayout();
           // also trigger resize of all charts on the page ...
           Array.from(document.querySelectorAll(".c3")).map((div) => {
@@ -1430,9 +1617,11 @@
     // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
+      (e.code == "Enter" &&
+        (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      ((e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) ||
+      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
+        (e.metaKey || e.ctrlKey)) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
       e.code == "Tab" ||
       e.code == "Escape"
@@ -1624,7 +1813,10 @@
     {#each { length: columnCount } as _, column}
       <div class="column">
         {#if column == 0}
-          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+          <div
+            id="header"
+            bind:this={headerdiv}
+            on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused>
               <div id="editor">
                 <Editor
@@ -1638,7 +1830,13 @@
                   onNext={onNextItem} />
               </div>
               <div class="spacer" />
-              {#if loggedIn}<img id="user" src={user.photoURL} alt={user.email} on:click={signOut} />{/if}
+              {#if loggedIn}
+                <img
+                  id="user"
+                  src={user.photoURL}
+                  alt={user.email}
+                  on:click={signOut} />
+              {/if}
             </div>
             <div id="status" on:click={onStatusClick}>
               <span id="console-summary" on:click={onConsoleSummaryClick} />
@@ -1647,9 +1845,14 @@
               </span>
               <div class="counts">
                 {items.length}
-                {#if matchingItemCount > 0}<span class="matching">{matchingItemCount}</span>{/if}
+                {#if matchingItemCount > 0}
+                  <span class="matching">{matchingItemCount}</span>
+                {/if}
               </div>
-              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
+              <div
+                id="console"
+                bind:this={consolediv}
+                on:click={onConsoleClick} />
             </div>
           </div>
           <!-- auto-focus on the editor unless on iPhone -->
@@ -1657,7 +1860,8 @@
             <script>
               // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
               //       autofocus except in certain unexpected situations (like coming back to app)
-              if (!navigator.platform.startsWith("iPhone")) document.getElementById("textarea-editor").focus();
+              if (!navigator.platform.startsWith("iPhone"))
+                document.getElementById("textarea-editor").focus();
             </script>
           {/if}
         {/if}
@@ -1696,12 +1900,18 @@
                 {item.index + 2}
                 <span class="arrows">
                   {#if item.nextColumn < item.column}
-                    ↖{#each { length: item.column - item.nextColumn - 1 } as _}←{/each}
+                    ↖{#each { length: item.column - item.nextColumn - 1 } as _}
+                      ←
+                    {/each}
                   {:else}
-                    {#each { length: item.nextColumn - item.column - 1 } as _}→{/each}↗
+                    {#each { length: item.nextColumn - item.column - 1 } as _}
+                      →
+                    {/each}↗
                   {/if}
                 </span>
-                {#if item.nextItemInColumn >= 0}{item.nextItemInColumn + 1}<span class="arrows">↓</span>{/if}
+                {#if item.nextItemInColumn >= 0}
+                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+                {/if}
               </div>
             {/if}
           {/if}
@@ -1728,4 +1938,8 @@
   ?
 {/if}
 
-<svelte:window on:keypress={onKeyPress} on:error={onError} on:unhandledrejection={onError} on:scroll={onScroll} />
+<svelte:window
+  on:keypress={onKeyPress}
+  on:error={onError}
+  on:unhandledrejection={onError}
+  on:scroll={onScroll} />
