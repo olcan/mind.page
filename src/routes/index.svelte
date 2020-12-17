@@ -1048,7 +1048,9 @@
           const lctext = items[index].text.toLowerCase();
           const tags = itemTags(lctext);
           const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-          tags.filter((t) => t != label).forEach((tag) => content.push(window["_read"](type, tag, options)));
+          options["exclude_tags"] = [...(options["exclude_tags"] || []), label];
+          const exclusions = new Set(options["exclude_tags"]);
+          tags.filter((t) => !exclusions.has(t)).forEach((tag) => content.push(window["_read"](type, tag, options)));
         }
         let text = items[index].text;
         if (type) text = extractBlock(items[index].text, type);
