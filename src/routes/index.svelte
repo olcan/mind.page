@@ -579,7 +579,7 @@
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
     block = "\n```" + type + "\n" + block + "```";
-    const regex = "\\n\\s*```" + type + "\\n.*?\\s*```";
+    const regex = "\\n *?```" + type + "\\n.*?\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -596,7 +596,7 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout) return text.replace(/\n\s*```js_output\n.*?\s*```/gs, ""); // no output
+    if (!jsout) return text.replace(/\n *?```js_output\n.*?\s*```/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -672,8 +672,8 @@
         // // clear _output and execute javascript unless cancelled
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
-          item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
-          item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
+          item.text = item.text.replace(/\n *?```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
+          item.text = item.text.replace(/\n *?```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
@@ -705,8 +705,8 @@
     item.runnable = item.text.toLowerCase().match(/\s*```js_input\s/);
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
-    item.text = item.text.replace(/\n\s*```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
-    item.text = item.text.replace(/\n\s*```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
+    item.text = item.text.replace(/\n *?```(\w*?_output)\n.*?\s*```/gs, "\n```$1\n```");
+    item.text = item.text.replace(/\n *?```(\w*?_log)\n.*?\s*```/gs, "\n```$1\n```");
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
@@ -1065,7 +1065,8 @@
     let _writePendingItem = "";
     let _writePendingItemLog = "";
     window["_write"] = function (item: string, text: string, type: string = "_output") {
-      let indices = indicesForItem(item);
+      let ids = indicesForItem(item).map((index) => items[index].id);
+
       // if writing _log to item pending another _write, attach to that write
       if (type == "_log" && item == _writePendingItem) {
         _writePendingItemLog = text;
@@ -1079,8 +1080,9 @@
           log = _writePendingItemLog;
           _writePendingItemLog = _writePendingItem = "";
         }
-        // console.log("_write", indices, item);
+        let indices = ids.map((id) => indexFromId.get(id));
         indices.map((index) => {
+          if (index == undefined) return; // deleted
           let item = items[index];
           // if item is editing, then write immediately without saving
           if (item.editing) {
@@ -1187,7 +1189,7 @@
       };
       if (labeled) {
         if (rotated) defaults.padding["bottom"] = 15;
-        else defaults.padding["left"] = 5;
+        else defaults.padding["left"] = 10;
       }
       spec = recursiveAssign(defaults, spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
