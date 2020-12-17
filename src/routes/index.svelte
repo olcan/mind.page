@@ -384,7 +384,12 @@
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
           if (indicesFromLabel.has("#command" + cmd)) {
-            window["_eval"](`run('${args}')`, "#command" + cmd);
+            try {
+              window["_eval"](`run('${args}')`, "#command" + cmd);
+            } catch (e) {
+              alert("#command" + cmd + ": " + e);
+              throw e;
+            }
             return;
           } else {
             alert(`unknown command ${cmd}`);
