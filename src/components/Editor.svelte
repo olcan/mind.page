@@ -102,6 +102,8 @@
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
 
+  let enterStart = -1;
+  let enterIndentation = "";
   function onKeyDown(e: KeyboardEvent) {
     // console.log(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
@@ -169,11 +171,13 @@
     if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
 
     // create line on Enter, maintain indentation
-    // NOTE: there can be slight delay on caret update, but seems to be a Mac-only problem
+    // NOTE: to prevent delay on caret update, we do the actual indentation in onKeyUp
     if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
-      let spaces = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/);
-      document.execCommand("insertText", false, "\n" + spaces[1] || "");
-      e.preventDefault();
+      if (enterStart < 0) {
+        enterStart = textarea.selectionStart;
+        enterIndentation = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/)[1] || "";
+      }
+      return;
     }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
@@ -203,6 +207,8 @@
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
       e.preventDefault();
+      onInput();
+      return;
     }
 
     // delete empty item with backspace
@@ -224,6 +230,7 @@
       textarea.selectionStart = 0;
       document.execCommand("delete", false);
       e.preventDefault();
+      onInput();
       return;
     }
 
@@ -249,18 +256,25 @@
         document.execCommand("delete", false);
       }
       onInput();
+      return;
     }
   }
 
   function onKeyUp(e: KeyboardEvent) {
-    // // maintain indentation of previous line on enter (without modifiers)
-    // if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-    //   let spaces = textarea.value
-    //     .substring(0, textarea.selectionStart)
-    //     .match(/(?:^|\n)( *).*?\n$/);
-    //   if (spaces && spaces[1].length > 0)
-    //     document.execCommand("insertText", false, spaces[1]);
-    // }
+    // indent lines created by Enter (based on state recorded in onKeyDown above)
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+      if (enterStart >= 0) {
+        if (enterIndentation) {
+          let newlines = textarea.value.substring(enterStart, textarea.selectionEnd);
+          newlines = newlines.replace(/\n/g, "\n" + enterIndentation);
+          textarea.selectionStart = enterStart;
+          document.execCommand("insertText", false, newlines);
+          onInput();
+        }
+        enterStart = -1;
+        enterIndentation = "";
+      }
+    }
   }
 
   function onKeyPress(e: KeyboardEvent) {

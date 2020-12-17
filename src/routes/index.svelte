@@ -381,8 +381,15 @@
         if (text.match(/\/js(\s|$)/)) {
           text = "```js_input\n" + text.replace(/\/js(\s|$)/s, "").trim() + "\n```";
         } else if (text.match(/^\/\w+/)) {
-          alert(`unknown command ${text.match(/^\/\w+/)[0]}`);
-          return;
+          let cmd = text.match(/^\/\w+/)[0];
+          let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
+          if (indicesFromLabel.has("#command" + cmd)) {
+            window["_eval"](`run('${args}')`, "#command" + cmd);
+            return;
+          } else {
+            alert(`unknown command ${cmd}`);
+            return;
+          }
         } else if (text.match(/^\/\s+/s)) {
           text = text.replace(/^\/\s+/s, "");
         }
