@@ -172,16 +172,16 @@
       matchingTermsSecondary.split(" ").filter((t) => t)
     );
 
-    // parse header tags
+    // parse header tags (tags on first line only)
     const headerTags = new Set(
       Array.from(
-        (text.replace(/(\s+)[^#].*/s, "$1") as any).matchAll(
-          /(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)\s+/g
+        (text.split("\n")[0].toLowerCase() as any).matchAll(
+          /(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g
         ),
-        (m) => m[1]
+        (m) => m[1].replace(/^#_/, "#")
       )
     );
-    const isMenu = headerTags.has("#menu") || headerTags.has("#_menu");
+    const isMenu = headerTags.has("#menu");
 
     // remove hidden tags and trim
     text = text.replace(/(?:^|\s)(#_[\/\w]+)/g, "").trim();
@@ -231,7 +231,7 @@
         // (we exclude |^> to break inside blockquotes for now)
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>/)) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
-            return pfx + space.replace(/  /g, " &nbsp;");
+            return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
           });
           str = str + "<br>\n";
         }
@@ -250,7 +250,7 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
-            /(^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g,
+            /(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g,
             (match, pfx, tag) =>
               `${pfx}<mark ${
                 terms.has(tag.toLowerCase())
@@ -688,21 +688,34 @@
     border-radius: 4px;
     background: #111;
   }
-  .menu {
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 1;
-    color: #666;
+  .item-menu {
+    float: right;
+    margin-top: -10px;
+    margin-right: -10px;
+    /* background: #333; */
+    background: #666;
+    opacity: 0.5;
+    border-radius: 0 4px 0 4px;
+    color: black;
+    line-height: 20px; /* same as menu item heights */
+    font-size: 12px;
     font-family: monospace;
     text-align: right;
-    opacity: 0.5;
+    overflow: hidden;
   }
-  .editing .menu {
+
+  .edit-menu {
+    position: absolute;
+    top: -14px;
+    right: 0;
+    z-index: 1;
     background: #666;
     border-radius: 4px 4px 0 4px;
     opacity: 1;
-    top: -14px;
+    color: black;
+    font-family: monospace;
+    text-align: right;
+    overflow: hidden;
   }
 
   .index,
@@ -710,40 +723,32 @@
   .delete,
   .cancel,
   .save {
-    display: none;
+    display: inline-flex;
     cursor: pointer;
     align-items: center;
+    border-right: 1px solid #111;
     height: 20px;
     padding: 0 8px;
   }
   .index {
-    display: inline-flex;
-    padding-right: 4px;
+    padding: 0 4px;
+    border: 0;
   }
   .index.matching {
     color: #9f9;
   }
   .delete {
-    color: red;
-    padding-left: 15px;
+    /* color: #900; */
+    background: #b66;
+    /* padding-left: 15px; */
+  }
+  .run {
+    /* color: #0b0; */
+    background: #6a6;
+    display: none;
   }
   .runnable:not(.saving):not(.running) .run {
     display: inline-flex;
-    padding-left: 12px;
-    color: #0b0;
-  }
-  .editing .save,
-  .editing .delete,
-  .editing .cancel,
-  .editing .index {
-    display: inline-flex;
-    color: black;
-  }
-  .editing .delete {
-    color: #900;
-  }
-  .editing:not(.runnable) .save {
-    padding-left: 12px;
   }
 
   .time {
@@ -1007,7 +1012,11 @@
   }
 </style>
 
-<div class="super-container" class:dotted on:click={onClick}>
+<div
+  class="super-container"
+  class:dotted
+  class:timed={timeString.length > 0}
+  on:click={onClick}>
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -1022,20 +1031,20 @@
     class:focused
     class:runnable
     class:timeOutOfOrder>
-    <div class="menu">
-      <span class="run" on:click={onRunClick}>run</span><span
-        class="save"
-        on:click={onSaveClick}>save</span><span
-        class="cancel"
-        on:click={onCancelClick}>cancel</span><span
-        class="delete"
-        on:click={onDeleteClick}>delete</span><span
-        class="index"
-        class:matching={matchingTerms.length > 0}
-        on:click={onIndexClick}>{index + 1}</span>
-      <!-- <br /> {height} -->
-    </div>
     {#if editing}
+      <div class="edit-menu">
+        <span class="run" on:click={onRunClick}>run</span><span
+          class="save"
+          on:click={onSaveClick}>save</span><span
+          class="cancel"
+          on:click={onCancelClick}>cancel</span><span
+          class="delete"
+          on:click={onDeleteClick}>delete</span><span
+          class="index"
+          class:matching={matchingTerms.length > 0}
+          on:click={onIndexClick}>{index + 1}</span>
+      </div>
+
       <Editor
         {id}
         bind:text
@@ -1047,6 +1056,13 @@
         {onDone} />
     {:else}
       <div class="item" {id} bind:this={itemdiv} class:error>
+        <div class="item-menu">
+          <span class="run" on:click={onRunClick}>run</span><span
+            class="index"
+            class:matching={matchingTerms.length > 0}
+            on:click={onIndexClick}>{index + 1}</span>
+        </div>
+
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}

@@ -60,8 +60,9 @@
   let textarea: HTMLTextAreaElement;
   // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
   let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
+  // TODO: refactor regex for tag matching (contains [^#...])
   let highlightTags = (t) =>
-    t.replace(/(^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
+    t.replace(/(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
   let highlightCode = (t) =>
     t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
   let highlightMath = (t) =>

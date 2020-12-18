@@ -81,7 +81,7 @@
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
-    let columnItems = new Array(columnCount).fill(0);
+    let columnItems = new Array(columnCount).fill(-1);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
     let lastTimeString = "";
 
@@ -133,6 +133,10 @@
         else item.column = columnHeights.indexOf(minColumnHeight);
         if (item.column != lastColumn) {
           lastItem.nextColumn = item.column;
+          lastItem.arrows = item.column < lastItem.column ? "↖" : "";
+          for (let i = 0; i < Math.abs(item.column - lastItem.column) - 1; ++i)
+            lastItem.arrows += item.column < lastItem.column ? "←" : "→";
+          lastItem.arrows += item.column < lastItem.column ? "" : "↗";
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
@@ -141,8 +145,14 @@
         item.timeString = timeString;
         item.outerHeight += 24;
       }
+
       columnHeights[item.column] += item.outerHeight;
-      items[columnItems[item.column]].nextItemInColumn = index;
+      if (columnItems[item.column] >= 0) {
+        items[columnItems[item.column]].nextItemInColumn = index;
+        // if item is below section-separator and has timeString, discount -24px negative margin
+        if (columnItems[item.column] != index - 1 && item.timeString)
+          columnHeights[item.column] -= 24;
+      }
       columnItems[item.column] = item.index;
     });
 
@@ -165,7 +175,7 @@
 
   function itemTags(lctext): Array<string> {
     return Array.from(
-      lctext.matchAll(/(?:^|\s)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
+      lctext.matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
       (m) => m[1].replace(/^#_/, "#")
     );
   }
@@ -1788,10 +1798,13 @@
     font-family: Avenir Next, Helvetica;
     text-align: center;
   }
-
   .section-separator .arrows {
     font-family: monospace;
     font-size: 20px;
+  }
+  /* allow time strings to overlap preceding section separators */
+  :global(.section-separator + .super-container.timed) {
+    margin-top: -24px;
   }
 
   /* override italic comment style of sunburst */
@@ -1897,18 +1910,8 @@
               runnable={item.runnable} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
-                {item.index + 2}
-                <span class="arrows">
-                  {#if item.nextColumn < item.column}
-                    ↖{#each { length: item.column - item.nextColumn - 1 } as _}
-                      ←
-                    {/each}
-                  {:else}
-                    {#each { length: item.nextColumn - item.column - 1 } as _}
-                      →
-                    {/each}↗
-                  {/if}
-                </span>
+                {item.index + 2}<span class="arrows"> {item.arrows} </span>
+                &nbsp;
                 {#if item.nextItemInColumn >= 0}
                   {item.nextItemInColumn + 1}<span class="arrows">↓</span>
                 {/if}
