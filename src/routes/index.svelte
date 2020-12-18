@@ -779,7 +779,8 @@
           );
           item.text = item.text.replace(
             /\n *?```(\w*?_log)\n.*?\s*```/gs,
-            "\n```$1\n```"
+            // "\n```$1\n```"
+            "" // remove so errors do not leave empty blocks
           );
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
@@ -819,7 +820,8 @@
     );
     item.text = item.text.replace(
       /\n *?```(\w*?_log)\n.*?\s*```/gs,
-      "\n```$1\n```"
+      //"\n```$1\n```"
+      "" // remove so errors do not leave empty blocks
     );
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
@@ -1159,10 +1161,10 @@
     };
 
     function indicesForItem(item: string) {
-      if (item == "" && evalIndex >= 0) {
+      if (!item && evalIndex >= 0) {
         return [evalIndex];
       } else if (
-        item == "" &&
+        !item &&
         window["_script_item_id"] &&
         indexFromId.has(window["_script_item_id"])
       ) {
@@ -1180,6 +1182,10 @@
       indices.map((index) => {
         ids.push(items[index].id);
       });
+      if (!item && ids.length == 0) {
+        console.error("_id() invoked from async javascript");
+        return null;
+      }
       return ids.length == 1 ? ids[0] : ids;
     };
 
@@ -1529,7 +1535,10 @@
 
     window["_run_webppl"] = function (id: string = "", options: object = {}) {
       if (!id) {
-        if (evalIndex < 0) return; // must be invoked from synchronous js_input
+        if (evalIndex < 0) {
+          console.error("_run_webppl() invoked from async javascript");
+          return;
+        }
         id = items[evalIndex].id;
       }
       let item = items[indexFromId.get(id)];
@@ -1573,6 +1582,22 @@
       } else {
         runClosure();
       }
+    };
+
+    window["_running"] = function (id: string = "", running: boolean = true) {
+      if (!id) {
+        if (evalIndex < 0) {
+          console.error("_running() invoked from async javascript");
+          return;
+        }
+        id = items[evalIndex].id;
+      }
+      let item = items[indexFromId.get(id)];
+      if (item) item.running = running;
+    };
+
+    window["_done"] = function (id: string) {
+      window["_running"](id, false);
     };
 
     // Visual viewport resize/scroll handlers ...
