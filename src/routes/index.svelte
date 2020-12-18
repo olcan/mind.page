@@ -133,10 +133,10 @@
         else item.column = columnHeights.indexOf(minColumnHeight);
         if (item.column != lastColumn) {
           lastItem.nextColumn = item.column;
-          lastItem.arrows = item.column < lastItem.column ? "↖" : "";
-          for (let i = 0; i < Math.abs(item.column - lastItem.column) - 1; ++i)
-            lastItem.arrows += item.column < lastItem.column ? "←" : "→";
-          lastItem.arrows += item.column < lastItem.column ? "" : "↗";
+          lastItem.arrows = item.column < lastColumn ? "↖" : "";
+          for (let i = 0; i < Math.abs(item.column - lastColumn) - 1; ++i)
+            lastItem.arrows += item.column < lastColumn ? "←" : "→";
+          lastItem.arrows += item.column < lastColumn ? "" : "↗";
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
@@ -153,7 +153,7 @@
         if (columnItems[item.column] != index - 1 && item.timeString)
           columnHeights[item.column] -= 24;
       }
-      columnItems[item.column] = item.index;
+      columnItems[item.column] = index;
     });
 
     if (focusedItem >= 0) {

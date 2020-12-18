@@ -361,9 +361,10 @@
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
       if (window["_cache"].hasOwnProperty(key)) {
-        // console.log("reusing cached element", key, elem.tagName);
+        // console.log("reusing cached element", key, elem.tagName, elem.id);
         // if (window["_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_cache"][key]);
+        elem = window["_cache"][key];
         // resize/refresh any c3 charts inside element
         Array.from(elem.querySelectorAll(".c3")).map((div) => {
           if (div["_chart"]) div["_chart"].resize();
@@ -371,10 +372,10 @@
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
-        elem.setAttribute("_item", id); // for invalidating cached elems on errors
         // console.log("caching element", key, elem.tagName);
         window["_cache"][key] = elem; //.cloneNode(true);
       }
+      elem.setAttribute("_item", id); // for invalidating cached elems on errors
     });
   }
 
@@ -415,6 +416,20 @@
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();
+
+    // TODO: cached element check
+    // Object.values(window["_cache"]).filter((elem: HTMLElement) => {
+    //   let itemid = elem.getAttribute("_item");
+    //   //     if (!document.getElementById(itemid).contains(elem)) {
+    //   if (elem.closest(".item")?.id != itemid) {
+    //     console.warn(
+    //       "cached element not contained by its _item",
+    //       itemid,
+    //       elem.id,
+    //       elem.closest(".item")?.id
+    //     );
+    //   }
+    // });
 
     // highlight matching terms in item text
     // NOTE: this can be slow so we do it async
@@ -548,7 +563,9 @@
       if (scripts.length == 0) return;
       let pendingScripts = scripts.length;
       let scriptErrors = [];
-      // console.log(`executing ${pendingScripts} scripts in item ${index + 1} ...`);
+      // console.log(
+      //   `executing ${pendingScripts} scripts in item ${index + 1} ...`
+      // );
       Array.from(scripts).forEach((script) => {
         // console.log(script.parentElement);
         // console.log(Array.from(script.parentElement.getElementsByTagName("script")));
