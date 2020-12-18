@@ -403,8 +403,21 @@
     // NOTE: invoked on every sort, e.g. during search-as-you-type
     // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
-    if (!itemdiv.firstElementChild)
-      itemdiv.appendChild(document.createElement("span"));
+
+    // insert right-floating div same size as .item-menu, which will also serve as first element of itemdiv
+    // NOTE: this is a workout for a null-parent exception if .item-menu is placed inside .item by Svelte
+    if (!editing && itemdiv.firstElementChild?.id != "menu-" + id) {
+      let menu = itemdiv.parentElement.querySelector(".item-menu");
+      let div = document.createElement("div");
+      div.style.width = menu.clientWidth + "px";
+      div.style.height = menu.clientHeight + "px";
+      div.style.marginTop = div.style.marginRight = "-10px";
+      div.style.float = "right";
+      // div.style.background = "red";
+      div.id = "menu-" + id;
+      itemdiv.insertBefore(div, itemdiv.firstElementChild);
+    }
+
     if (
       textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
@@ -416,20 +429,6 @@
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();
-
-    // TODO: cached element check
-    // Object.values(window["_cache"]).filter((elem: HTMLElement) => {
-    //   let itemid = elem.getAttribute("_item");
-    //   //     if (!document.getElementById(itemid).contains(elem)) {
-    //   if (elem.closest(".item")?.id != itemid) {
-    //     console.warn(
-    //       "cached element not contained by its _item",
-    //       itemid,
-    //       elem.id,
-    //       elem.closest(".item")?.id
-    //     );
-    //   }
-    // });
 
     // highlight matching terms in item text
     // NOTE: this can be slow so we do it async
@@ -706,9 +705,9 @@
     background: #111;
   }
   .item-menu {
-    float: right;
-    margin-top: -10px;
-    margin-right: -10px;
+    position: absolute;
+    top: 0;
+    right: 0;
     /* background: #333; */
     background: #666;
     opacity: 0.5;
@@ -1072,14 +1071,13 @@
         onFocused={(focused) => onFocused(index, focused)}
         {onDone} />
     {:else}
+      <div class="item-menu">
+        <span class="run" on:click={onRunClick}>run</span><span
+          class="index"
+          class:matching={matchingTerms.length > 0}
+          on:click={onIndexClick}>{index + 1}</span>
+      </div>
       <div class="item" {id} bind:this={itemdiv} class:error>
-        <div class="item-menu">
-          <span class="run" on:click={onRunClick}>run</span><span
-            class="index"
-            class:matching={matchingTerms.length > 0}
-            on:click={onIndexClick}>{index + 1}</span>
-        </div>
-
         {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
