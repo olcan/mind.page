@@ -1189,7 +1189,7 @@
       let ids = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
-        ids.push(items[index].id);
+        ids.push(items[index].tmpid || items[index].id);
       });
       if (!item && ids.length == 0) {
         console.error("_id() invoked from async javascript");

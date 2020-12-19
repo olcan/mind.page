@@ -297,7 +297,7 @@
         /(^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
         (m, pfx, _html) =>
           (pfx + _html)
-            .replace(/\$id/g, tmpid ? tmpid : id)
+            .replace(/\$id/g, tmpid || id)
             .replace(/\$hash/g, textHash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
       ) /*unwrap _html_ blocks*/;
@@ -357,7 +357,7 @@
         );
         return m;
       }
-      if (divid.indexOf(tmpid ? tmpid : id) < 0) {
+      if (divid.indexOf(tmpid || id) < 0) {
         console.warn(
           'div without proper id (of the form "type-$id") in item at index',
           index + 1
