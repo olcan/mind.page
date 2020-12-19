@@ -729,6 +729,9 @@
     font-family: monospace;
     text-align: right;
     overflow: hidden;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   .edit-menu {
@@ -743,6 +746,9 @@
     font-family: monospace;
     text-align: right;
     overflow: hidden;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   .index,
