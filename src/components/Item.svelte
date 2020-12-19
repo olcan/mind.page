@@ -807,7 +807,9 @@
     font-size: 18px;
     line-height: 26px;
     /* cursor: pointer; */
-    overflow: hidden; /* prevent overflow which causes stuck zoom-out on iOS Safari */
+    /* prevent overflow which causes stuck zoom-out on iOS Safari */
+    /* NOTE: this cuts off c3 tooltips vertically, and overflow-x alone did not work */
+    /* overflow: hidden; */
   }
 
   /* .running {
