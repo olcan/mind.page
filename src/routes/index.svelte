@@ -1624,6 +1624,12 @@
       window["_running"](id, false);
     };
 
+    window["_array"] = function (length: number, func) {
+      let array = new Array(length);
+      for (let i = 0; i < length; ++i) array[i] = func(i);
+      return array;
+    };
+
     // Visual viewport resize/scroll handlers ...
     // NOTE: we use document width because it is invariant to zoom scale
     //       window.outerWidth is also invariant but can be stale after device rotation in iOS Safari
