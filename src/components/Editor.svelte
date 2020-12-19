@@ -340,7 +340,7 @@
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       onDone(
-        (text = textarea.value.trim()),
+        (text = textarea.value),
         false,
         e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/
       );

@@ -372,8 +372,8 @@
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
     let origText = text;
-    // NOTE: text is already trimmed for onDone
-    switch (text) {
+
+    switch (text.trim()) {
       case "/signout": {
         signOut();
         return;
@@ -455,7 +455,7 @@
         } else if (text.match(/^\/\s+/s)) {
           text = text.replace(/^\/\s+/s, "");
         }
-        // editing = text.length == 0; // if text is empty, continue editing
+        // editing = text.trim().length == 0; // if text is empty, continue editing
       }
     }
 
@@ -764,7 +764,7 @@
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
       if (focusedItem == index) focusedItem = -1;
-      if (item.text.length == 0) {
+      if (item.text.trim().length == 0) {
         // delete
         items.splice(index, 1);
         updateItemLayout();
