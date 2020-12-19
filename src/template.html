@@ -17,12 +17,6 @@
     <!-- NOTE: this element includes default-rendered content before client javascript is executed below -->
     <div id="sapper">%sapper.html%</div>
 
-    <!-- Load client-side firebase (see references in rollup.config.js) -->
-    <!-- NOTE: if deferred, will be loaded after rest of page, available for responding to user events -->
-    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-firestore.js"></script>
-
     <script>
       MathJax = {
         tex: {
@@ -38,21 +32,22 @@
         options: { menuOptions: { settings: { inTabOrder: false, assistiveMml: false } } },
       };
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@latest/es5/tex-svg.js"></script>
 
-    <!-- https://c3js.org/gettingstarted.html -->
-    <script src="https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/c3@latest/c3.min.js"></script>
-    <!-- NOTE: the following script from jsdelivr fails for some reason, even though version number is correct -->
-    <!-- <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script> -->
-    <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/d3-graphviz@latest/build/d3-graphviz.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/underscore@latest/underscore.min.js"></script>
+    <!-- lodash (window._) is included in client.js -->
+    <!-- sync libraries available at client init and render time (e.g. in afterUpdate in Item.svelte) -->
+    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-firestore.js"></script>
 
-    <!-- async libraries that should not be used at render time (but ok to use at unedit/save time) -->
+    <!-- async libraries available at edit/save time -->
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@latest/es5/tex-svg.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/c3@latest/c3.min.js"></script>
+    <script async src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/d3-graphviz@latest/build/d3-graphviz.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/mathjs@latest/lib/browser/math.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
-    <!-- <script async src="https://cdn.jsdelivr.net/npm/webppl@latest/src/main.min.js"></script> -->
+
     <!-- CDN URLs found from https://probmods.github.io/webppl-editor/ and https://www.problang.org/chapters/app-06-intro-to-webppl.html -->
     <script async src="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-v0.9.9.js"></script>
     <!-- <script async src="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-viz-0.7.11.js"></script> -->

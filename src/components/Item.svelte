@@ -1,4 +1,6 @@
 <script lang="ts">
+  // import _ from "lodash"
+
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
@@ -527,14 +529,18 @@
     });
 
     // trigger typesetting of any math elements
-    let math = [];
-    Array.from(itemdiv.getElementsByClassName("math")).forEach((elem) => {
-      if (elem.hasAttribute("_rendered")) return;
-      // console.log("rendering math", math.innerHTML);
-      elem.setAttribute("_rendered", Date.now().toString());
-      math.push(elem);
+    // NOTE: we do this async so that mathjax can be loaded async on client side
+    setTimeout(() => {
+      if (!itemdiv) return;
+      let math = [];
+      Array.from(itemdiv.getElementsByClassName("math")).forEach((elem) => {
+        if (elem.hasAttribute("_rendered")) return;
+        // console.log("rendering math", math.innerHTML);
+        elem.setAttribute("_rendered", Date.now().toString());
+        math.push(elem);
+      });
+      renderMath(math);
     });
-    renderMath(math);
 
     // set up img tags to enable caching and invoke onResized onload
     Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {

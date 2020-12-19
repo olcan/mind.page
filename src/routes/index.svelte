@@ -1,9 +1,10 @@
 <script context="module" lang="ts">
+  // import _ from "lodash"
+
   import {
     isClient,
     firebase,
     firestore,
-    firebaseConfig,
     firebaseAdmin,
   } from "../../firebase.js";
   const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"]; // user.uid for olcans@gmail.com
