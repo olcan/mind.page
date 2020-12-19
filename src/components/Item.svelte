@@ -709,6 +709,10 @@
   .super-container {
     position: relative;
     padding: 4px 0;
+    /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
+    /* NOTE: this cuts off c3 tooltips vertically, and overflow-x alone did not work */
+    /*       so we now do this for internal parent divs .math, .c3, etc, along with max-width:100% */
+    /* overflow: hidden; */
   }
   .container {
     position: relative;
@@ -821,9 +825,6 @@
     font-size: 18px;
     line-height: 26px;
     /* cursor: pointer; */
-    /* prevent overflow which causes stuck zoom-out on iOS Safari */
-    /* NOTE: this cuts off c3 tooltips vertically, and overflow-x alone did not work */
-    /* overflow: hidden; */
   }
 
   /* .running {
@@ -975,6 +976,8 @@
     /* background: #222; */
     /* padding: 2px 4px; */
     border-radius: 4px;
+    max-width: 100%;
+    overflow: hidden;
   }
   :global(.item hr) {
     background: transparent;

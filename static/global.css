@@ -79,6 +79,7 @@ path.domain {
   height: 100%;
   width: auto;
   max-width: 100%;
+  overflow: hidden;
   margin: auto;
 }
 .dot {
