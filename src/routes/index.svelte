@@ -1384,7 +1384,7 @@
         axis: {
           x: {
             show: true,
-            tick: { outer: false },
+            tick: { outer: false, multiline: false },
             padding: 0,
           },
           y: {
