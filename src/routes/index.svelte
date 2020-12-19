@@ -1471,12 +1471,22 @@
           weights[index];
       });
       let histogram = {};
+      const sample_max = Math.max(...numbers);
       counts.forEach((count, index) => {
-        let key = `[${(min + index * size).toFixed(digits)}, `;
-        key +=
+        const lower = (min + index * size).toFixed(digits);
+        const upper =
           index == bins - 1
-            ? `${max.toFixed(digits)}]`
-            : `${(min + (index + 1) * size).toFixed(digits)})`;
+            ? max.toFixed(digits)
+            : (min + (index + 1) * size).toFixed(digits);
+        let key =
+          `[${lower}, ${upper}` +
+          (index == bins - 1 && sample_max == max ? "]" : ")");
+        if (
+          key[key.length - 1] == ")" &&
+          Number.isInteger(parseFloat(lower)) &&
+          parseFloat(upper) == parseInt(lower) + 1
+        )
+          key = parseInt(lower);
         histogram[key] = count > 0 ? count.toFixed(2) : null; // replace 0 -> null
       });
       return histogram;
