@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-  // import _ from "lodash"
+  import _ from "lodash";
 
   import {
     isClient,
@@ -1380,7 +1380,7 @@
       let defaults = {
         bindto: selector,
         point: { r: 5 },
-        padding: { top: 10, right: 10 },
+        padding: { top: 10, right: 15 },
         axis: {
           x: {
             show: true,
@@ -1401,9 +1401,9 @@
       };
       if (labeled) {
         if (rotated) defaults.padding["bottom"] = 15;
-        else defaults.padding["left"] = 10;
+        else defaults.padding["left"] = 15;
       }
-      spec = recursiveAssign(defaults, spec);
+      spec = _.merge(defaults, spec);
       Array.from(document.querySelectorAll(selector)).forEach((elem) => {
         if (labeled) elem.classList.add("c3-labeled");
         if (rotated) elem.classList.add("c3-rotated");

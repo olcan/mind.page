@@ -16,7 +16,7 @@ path.domain {
   stroke: gray !important;
 }
 .tick line,
-text {
+.tick text {
   stroke: gray !important;
 }
 .c3-legend-item text {
@@ -26,7 +26,7 @@ text {
   background-color: #111 !important;
 }
 .c3-tooltip th,
-td {
+.c3-tooltip td {
   background-color: #222 !important;
 }
 .c3-grid {
@@ -39,7 +39,7 @@ td {
 .c3 text {
   fill: gray;
   stroke: none !important;
-  font-size: 15px;
+  font-size: 14px;
   font-family: Avenir Next, Helvetica;
 }
 .c3-line {
@@ -57,13 +57,9 @@ td {
   transform: translate(0, -5px);
 }
 
-.c3-rotated .c3-text {
-  transform: translate(0, 0);
-}
-
 /* rotated chart text adjustments for pixel-perfect alignment with Avenir Next fonts */
 .c3-rotated .c3-axis-x {
-  transform: translate(0, 2px);
+  transform: translate(0, 1px);
 }
 .c3-rotated .c3-texts .c3-text {
   transform: translate(0, -1px);
