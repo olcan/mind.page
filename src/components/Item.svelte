@@ -117,7 +117,8 @@
     if (run && !cancelled) invalidateCache();
     onEditing(index, (editing = false), cancelled, run);
   }
-  function onClick() {
+  function onClick(e) {
+    if ((e.target as HTMLElement).closest(".c3")) return; // ignore click inside c3 chart
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
     onEditing(index, (editing = true));
@@ -785,6 +786,9 @@
     margin-bottom: 4px;
     font-family: Avenir Next, Helvetica;
     font-size: 15px;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .time.timeOutOfOrder {
     color: #aaa;
