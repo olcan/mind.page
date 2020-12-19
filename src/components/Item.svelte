@@ -548,7 +548,7 @@
     });
 
     // trigger typesetting of any math elements
-    // NOTE: we do this async so that mathjax can be loaded async on client side
+    // NOTE: we do this async to see if we can load MathJax async in template.html
     setTimeout(() => {
       if (!itemdiv) return;
       let math = [];
