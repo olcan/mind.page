@@ -665,7 +665,7 @@
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
     block = "\n```" + type + "\n" + block + "```";
-    const regex = "\\n *?```" + type + "\\n.*?\\s*```";
+    const regex = "(?:^|\\n) *?```" + type + "\\n.*?\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -682,7 +682,7 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout) return text.replace(/\n *?```js_output\n.*?\s*```/gs, ""); // no output
+    if (!jsout) return text.replace(/(?:^|\n) *?```js_output\n.*?\s*```/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -690,7 +690,12 @@
     let item = items[index];
     // save new text
     item.saving = true;
-    const itemToSave = { time: item.time, text: item.text };
+    let itemToSave = { time: item.time, text: item.text };
+    // remove any _tmp blocks from saved item
+    itemToSave.text = item.text.replace(
+      /(?:^|\n) *?```(\w*?_tmp)\n.*?\s*```/gs,
+      ""
+    );
     firestore()
       .collection("items")
       .doc(item.id)
@@ -739,6 +744,9 @@
       if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
     }
 
+    // remove _tmp blocks whenever editing state changes
+    item.text = item.text.replace(/(?:^|\n) *?```(\w*?_tmp)\n.*?\s*```/gs, "");
+
     if (editing) {
       // started editing
       editingItems.push(index);
@@ -775,11 +783,11 @@
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
-            /\n *?```(\w*?_output)\n.*?\s*```/gs,
+            /(?:^|\n) *?```(\w*?_output)\n.*?\s*```/gs,
             "\n```$1\n```"
           );
           item.text = item.text.replace(
-            /\n *?```(\w*?_log)\n.*?\s*```/gs,
+            /(?:^|\n) *?```(\w*?_log)\n.*?\s*```/gs,
             // "\n```$1\n```"
             "" // remove so errors do not leave empty blocks
           );
@@ -816,11 +824,11 @@
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
-      /\n *?```(\w*?_output)\n.*?\s*```/gs,
+      /(?:^|\n) *?```(\w*?_output)\n.*?\s*```/gs,
       "\n```$1\n```"
     );
     item.text = item.text.replace(
-      /\n *?```(\w*?_log)\n.*?\s*```/gs,
+      /(?:^|\n) *?```(\w*?_log)\n.*?\s*```/gs,
       //"\n```$1\n```"
       "" // remove so errors do not leave empty blocks
     );

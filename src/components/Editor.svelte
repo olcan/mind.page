@@ -48,7 +48,7 @@
         .join("\n");
     }
     if (language == "js_input" || language == "webppl") language = "js";
-    if (language == "_html") language = "html";
+    if (language.startsWith("_html")) language = "html";
     language = hljs.getLanguage(language) ? language : "plaintext";
     return hljs.highlight(language, code).value;
   }
