@@ -1485,11 +1485,16 @@
           key[key.length - 1] == ")" &&
           Number.isInteger(parseFloat(lower)) &&
           parseFloat(upper) == parseInt(lower) + 1
-        )
-          key = parseInt(lower);
+        ) {
+          key = parseInt(lower).toString();
+        }
         histogram[key] = count > 0 ? count.toFixed(2) : null; // replace 0 -> null
       });
       return histogram;
+    };
+
+    window["_samples"] = function (dist: any) {
+      return dist.samples.map((s) => s["value"]);
     };
 
     // NOTE: this sorts by decreasing counts unless keys are integers or specified as array
