@@ -1833,6 +1833,9 @@
   .items {
     width: 100%;
     display: flex;
+    /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
+    /* (note that overflow-x did not work but this is fine too) */
+    overflow: hidden;
   }
   .column {
     flex: 1;

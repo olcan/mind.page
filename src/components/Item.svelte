@@ -709,10 +709,6 @@
   .super-container {
     position: relative;
     padding: 4px 0;
-    /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
-    /* NOTE: this cuts off c3 tooltips vertically, and overflow-x alone did not work */
-    /*       so we now do this for internal parent divs .math, .c3, etc, along with max-width:100% */
-    /* overflow: hidden; */
   }
   .container {
     position: relative;
@@ -976,8 +972,6 @@
     /* background: #222; */
     /* padding: 2px 4px; */
     border-radius: 4px;
-    max-width: 100%;
-    overflow: hidden;
   }
   :global(.item hr) {
     background: transparent;
@@ -1002,12 +996,7 @@
   :global(.item :last-child) {
     margin-bottom: 0;
   }
-  :global(.item .MathJax) {
-    margin-bottom: 0;
-  }
-  :global(.item blockquote .MathJax) {
-    display: block;
-  }
+
   :global(.item ._log) {
     display: block;
     border-radius: 0 4px 4px 0;
@@ -1031,6 +1020,97 @@
 
   :global(.item .log-running) {
     color: #9c9;
+  }
+
+  :global(.item .MathJax) {
+    margin-bottom: 0;
+  }
+  :global(.item blockquote .MathJax) {
+    display: block;
+  }
+  :global(.item .c3) {
+    border-radius: 4px;
+    /* background: #0a0a0a; */
+    background: #171717;
+  }
+  :global(.item > .c3:not(:first-child)) {
+    margin-top: 4px;
+  }
+  :global(.item > .c3:not(:last-child)) {
+    margin-bottom: 4px;
+  }
+
+  /* NOTE: c3 styles are modifications to https://github.com/c3js/c3/blob/master/c3.css */
+  :global(path.domain) {
+    stroke: gray;
+  }
+  :global(.tick line),
+  :global(.tick text) {
+    stroke: gray;
+  }
+  :global(.c3-legend-item text) {
+    stroke: gray;
+  }
+  :global(.c3-tooltip th),
+  :global(.c3-tooltip tr),
+  :global(.c3-tooltip td) {
+    background-color: #222;
+    border: 1px solid #111;
+  }
+  :global(.c3-grid) {
+    opacity: 0.5;
+  }
+  :global(.c3 text) {
+    fill: gray;
+    stroke: none;
+    font-size: 14px;
+    font-family: Avenir Next, Helvetica;
+  }
+  :global(.c3-line) {
+    stroke-width: 3px;
+  }
+
+  /* fix an annoying alignment issue where x axis line does not align with bottom tick of y axis */
+  :global(.c3-axis-x .domain),
+  :global(.c3-axis-x .tick line) {
+    transform: translate(0, 0.5pt);
+  }
+
+  /* move data labels up on un-rotated charts to accommodate larger point radius */
+  :global(.c3:not(.c3-rotated) .c3-text) {
+    transform: translate(0, -5px);
+  }
+
+  /* rotated chart text adjustments for pixel-perfect alignment with Avenir Next fonts */
+  :global(.c3-rotated .c3-axis-x) {
+    transform: translate(0, 1px);
+  }
+  :global(.c3-rotated .c3-texts .c3-text) {
+    transform: translate(0, -1px);
+  }
+
+  :global(.c3-barchart .c3-axis-x .tick line) {
+    display: none;
+  }
+
+  :global(.c3-barchart .c3-axis-x .domain) {
+    display: none;
+  }
+
+  /* NOTE: global CSS for graphviz are not defaults but forced values due to low priority of dot/svg attributes */
+  :global(.dot > svg) {
+    display: block;
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    margin: auto;
+  }
+  :global(.dot) {
+    padding: 5px 0;
+    width: fit-content; /* left-aligns graph assuming it has width:auto */
+  }
+  :global(.dot .graph text) {
+    stroke: none !important;
   }
 
   /* adapt to smaller windows/devices */
