@@ -973,7 +973,7 @@
     background: #9c9;
   }
   :global(.item mark.label) {
-    background: #eee;
+    background: #ddd;
   }
   :global(.item span.highlight) {
     color: black;
