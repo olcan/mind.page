@@ -1391,8 +1391,8 @@
             show: !labeled,
             tick: { outer: false, multiline: false },
             padding: {
-              bottom: 5,
-              top: rotated && labeled ? 70 : labeled ? 40 : 5,
+              bottom: 10,
+              top: rotated && labeled ? 70 : labeled ? 40 : 10,
             },
           },
         },

@@ -1062,7 +1062,10 @@
     background-color: #999;
     border: 1px solid #444;
     color: black;
-    font-weight: 500;
+    font-weight: 600;
+  }
+  :global(.c3-tooltip th) {
+    font-weight: 700;
   }
   :global(.c3-grid) {
     opacity: 0.5;
