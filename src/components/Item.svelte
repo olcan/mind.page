@@ -780,7 +780,7 @@
     border: 0;
   }
   .index.matching {
-    color: #9f9;
+    background: #9f9;
   }
   .delete {
     /* color: #900; */
