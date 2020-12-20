@@ -122,10 +122,9 @@
 
     // indent/comment selection or current line
     if (
-      ((e.code == "BracketLeft" || e.code == "BracketRight") &&
-        (e.metaKey || e.ctrlKey)) ||
+      ((e.code == "BracketLeft" || e.code == "BracketRight") && e.ctrlKey) ||
       (e.code == "Tab" && textarea.selectionEnd > textarea.selectionStart) ||
-      (e.code == "Slash" && (e.metaKey || e.ctrlKey))
+      (e.code == "Slash" && e.ctrlKey)
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
