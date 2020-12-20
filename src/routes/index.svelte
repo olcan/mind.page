@@ -1496,7 +1496,7 @@
         ) {
           key = parseInt(lower).toString();
         }
-        histogram[key] = count > 0 ? count.toFixed(2) : null; // replace 0 -> null
+        histogram[key] = count > 0 ? count.toFixed(2) : 0;
       });
       return histogram;
     };
@@ -1522,7 +1522,6 @@
       let indices = Array.from(Array(values.length).keys());
       indices = stableSort(indices, (i, j) => values[j] - values[i]);
       indices = indices.filter((i) => values[i] > 0);
-      console.log(indices);
       indices.length = Math.min(indices.length, range);
       let out = {};
       indices.forEach((i) => (out[keys[i]] = values[i]));
