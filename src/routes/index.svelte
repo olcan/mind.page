@@ -205,6 +205,14 @@
     }
     lastEditorChangeTime = Infinity; // force minimum wait for next change
 
+    // update history, replace unless current state is final
+    if (history.state.editorText != text) {
+      // need to update history
+      if (history.state.final)
+        history.pushState({ editorText: editorText }, editorText);
+      else history.replaceState({ editorText: editorText }, editorText);
+    }
+
     text = text.toLowerCase().trim();
     let terms = [
       ...new Set(
@@ -341,14 +349,13 @@
       console.warn("got null range for tag click: ", tag, e);
     }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
+    // push new state with "final" flag so it is not modified by onEditorChange
+    history.pushState({ editorText: editorText, final: true }, editorText);
     onEditorChange(editorText);
-    history.pushState({ editorText: editorText }, editorText);
-    // console.log("pushState", e);
     window.top.scrollTo(0, 0);
   }
 
   function onPopState(e) {
-    // console.log("onPopState", e);
     editorText = e.state.editorText || "";
     onEditorChange(editorText);
   }
