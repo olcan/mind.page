@@ -723,6 +723,9 @@
     position: relative;
     padding: 4px 0;
   }
+  .super-container.editing:not(.timed) {
+    padding-top: 24px; /* extra space for .edit-menu */
+  }
   .container {
     position: relative;
     border-radius: 4px;
@@ -736,7 +739,7 @@
     /* opacity: 0.5; */
     border-radius: 0 4px 0 4px;
     color: black;
-    line-height: 20px; /* same as menu item heights */
+    line-height: 25px; /* same as menu item heights */
     font-size: 12px;
     font-family: monospace;
     text-align: right;
@@ -748,7 +751,7 @@
 
   .edit-menu {
     position: absolute;
-    top: -14px;
+    top: -20px;
     right: 0;
     z-index: 1;
     border-radius: 4px 4px 0 4px;
@@ -772,7 +775,7 @@
     cursor: pointer;
     align-items: center;
     border-right: 1px solid #111;
-    height: 20px;
+    height: 25px;
     padding: 0 8px;
   }
   .index {
@@ -1168,6 +1171,7 @@
 <div
   class="super-container"
   class:dotted
+  class:editing
   class:timed={timeString.length > 0}
   on:click={onClick}>
   {#if timeString}
