@@ -983,6 +983,9 @@
     padding-left: 0;
     padding-right: 0;
   }
+  :global(.item mark.label span.highlight) {
+    background: #9f9;
+  }
   :global(.item .vertical-bar) {
     color: #444;
   }
