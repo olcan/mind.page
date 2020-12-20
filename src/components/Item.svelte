@@ -206,15 +206,15 @@
     );
 
     // parse header tags (tags on first line only)
-    const headerTags = new Set(
-      Array.from(
-        (text.split("\n")[0].toLowerCase() as any).matchAll(
-          /(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g
-        ),
-        (m) => m[1].replace(/^#_/, "#")
-      )
+    const lctext = text.toLowerCase().trim();
+    const headerTags = Array.from(
+      (text.split("\n")[0].toLowerCase() as any).matchAll(
+        /(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g
+      ),
+      (m) => m[1].replace(/^#_/, "#")
     );
-    const isMenu = headerTags.has("#menu");
+    const isMenu = headerTags.indexOf("#menu") >= 0;
+    const label = lctext.startsWith(headerTags[0]) ? headerTags[0] : "";
 
     // remove hidden tags and trim
     text = text.replace(/(?:^|\s)(#_[\/\w]+)/g, "").trim();
@@ -290,6 +290,8 @@
                   ? 'class="selected"'
                   : termsSecondary.has(tag.toLowerCase())
                   ? 'class="secondary-selected"'
+                  : tag.toLowerCase() == label
+                  ? 'class="label"'
                   : ""
               } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
           );
@@ -731,7 +733,7 @@
     top: 0;
     right: 0;
     /* background: #333; */
-    opacity: 0.5;
+    /* opacity: 0.5; */
     border-radius: 0 4px 0 4px;
     color: black;
     line-height: 20px; /* same as menu item heights */
@@ -787,7 +789,7 @@
   }
   .run {
     /* color: #0b0; */
-    background: #6a6;
+    background: #39e;
   }
   .container:not(.runnable) .run {
     display: none;
@@ -965,6 +967,9 @@
     background: #9f9;
   }
   :global(.item mark.secondary-selected) {
+    background: #9c9;
+  }
+  :global(.item mark.label) {
     background: #eee;
   }
   :global(.item span.highlight) {
