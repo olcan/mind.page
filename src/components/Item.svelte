@@ -136,6 +136,7 @@
 
   function onRunClick(e) {
     if (!runnable) return;
+    if (saving || running) return;
     e.stopPropagation();
     e.preventDefault();
     invalidateCache();
@@ -730,7 +731,6 @@
     top: 0;
     right: 0;
     /* background: #333; */
-    background: #666;
     opacity: 0.5;
     border-radius: 0 4px 0 4px;
     color: black;
@@ -749,7 +749,6 @@
     top: -14px;
     right: 0;
     z-index: 1;
-    background: #666;
     border-radius: 4px 4px 0 4px;
     opacity: 1;
     color: black;
@@ -766,6 +765,7 @@
   .delete,
   .cancel,
   .save {
+    background: #666;
     display: inline-flex;
     cursor: pointer;
     align-items: center;
@@ -788,10 +788,14 @@
   .run {
     /* color: #0b0; */
     background: #6a6;
+  }
+  .container:not(.runnable) .run {
     display: none;
   }
-  .runnable:not(.saving):not(.running) .run {
-    display: inline-flex;
+  .runnable.running .run,
+  .runnable.saving .run {
+    /* visibility: false; */
+    background: #333;
   }
 
   .time {
