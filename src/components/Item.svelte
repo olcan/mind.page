@@ -118,7 +118,17 @@
     onEditing(index, (editing = false), cancelled, run);
   }
   function onClick(e) {
-    if ((e.target as HTMLElement).closest(".c3")) return; // ignore click inside c3 chart
+    // console.log(e.target);
+    // ignore (most) clicks inside c3 charts
+    if (
+      (e.target as HTMLElement).closest(
+        ".c3-legend-item-event,.c3-event-rect" // bars can be too small
+      ) ||
+      ((e.target as HTMLElement).closest(".c3") &&
+        (e.target as HTMLElement).style.cursor == "pointer") // click on bars/etc
+    ) {
+      return;
+    }
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
     onEditing(index, (editing = true));
@@ -1029,9 +1039,9 @@
     display: block;
   }
   :global(.item .c3) {
-    border-radius: 4px;
     /* background: #0a0a0a; */
-    background: #171717;
+    /* background: #171717; */
+    border-radius: 4px;
   }
   :global(.item > .c3:not(:first-child)) {
     margin-top: 4px;
