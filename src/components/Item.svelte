@@ -1051,11 +1051,18 @@
   :global(.c3-legend-item text) {
     stroke: gray;
   }
+  :global(.c3-tooltip) {
+    -webkit-box-shadow: none;
+    -moz-box-shadow: none;
+    box-shadow: none;
+  }
   :global(.c3-tooltip th),
   :global(.c3-tooltip tr),
   :global(.c3-tooltip td) {
-    background-color: #222;
-    border: 1px solid #111;
+    background-color: #999;
+    border: 1px solid #444;
+    color: black;
+    font-weight: 500;
   }
   :global(.c3-grid) {
     opacity: 0.5;
