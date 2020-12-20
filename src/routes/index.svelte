@@ -590,11 +590,11 @@
     const lctext = items[index].text.toLowerCase();
     const tags = itemTags(lctext);
     const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-    console.debug(
-      `[${index + 1}] ${
-        label ? label + ": " : ""
-      } height changed ${prevHeight} → ${height} (${trigger})`
-    );
+    // console.debug(
+    //   `[${index + 1}] ${
+    //     label ? label + ": " : ""
+    //   } height changed ${prevHeight} → ${height} (${trigger})`
+    // );
     items[index].height = height;
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
@@ -1592,7 +1592,7 @@
                 delete window["webppl"].runClosure;
               }
             },
-            options
+            _.merge({ verbose: false, debug: false }, options)
           );
         } catch (e) {
           window["webppl"].running = false;
