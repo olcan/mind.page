@@ -342,7 +342,15 @@
     }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     onEditorChange(editorText);
+    history.pushState({ editorText: editorText }, editorText);
+    // console.log("pushState", e);
     window.top.scrollTo(0, 0);
+  }
+
+  function onPopState(e) {
+    // console.log("onPopState", e);
+    editorText = e.state.editorText || "";
+    onEditorChange(editorText);
   }
 
   function signOut() {
@@ -2002,4 +2010,5 @@
   on:keypress={onKeyPress}
   on:error={onError}
   on:unhandledrejection={onError}
+  on:popstate={onPopState}
   on:scroll={onScroll} />
