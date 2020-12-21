@@ -66,7 +66,6 @@
   }
 
   let indexFromId;
-  let indicesFromLabel;
   let headerdiv;
   let consolediv;
   let dotCount = 0;
@@ -75,7 +74,6 @@
     editingItems = [];
     focusedItem = -1;
     indexFromId = new Map();
-    indicesFromLabel = new Map();
     dotCount = 0;
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     const documentWidth = document.documentElement.clientWidth;
@@ -91,12 +89,6 @@
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
       if (item.tmpid) indexFromId.set(item.tmpid, index);
-      if (item.label) {
-        indicesFromLabel.set(item.label, [
-          ...(indicesFromLabel.get(item.label) || []),
-          index,
-        ]);
-      }
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
       // if (document.activeElement == textArea(index)) focusedItem = index;
@@ -156,6 +148,8 @@
       }
       columnItems[item.column] = index;
     });
+
+    // calculate dependencies
 
     if (focusedItem >= 0) {
       // maintain focus on item
@@ -237,11 +231,6 @@
     // let matchingTermCounts = new Map<string, number>();
     let listing = [];
     items.forEach((item) => {
-      const lctext = item.text.toLowerCase();
-      item.tags = itemTags(lctext);
-      // first tag is taken as "label" if it is the first text in the item
-      item.label = lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
-
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
       const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
@@ -251,11 +240,12 @@
         pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
       item.dotTerm =
         pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
-      item.prefixMatch = lctext.startsWith(terms[0]);
+      item.prefixMatch = item.lctext.startsWith(terms[0]);
       item.prefixMatchTerm = "";
       if (item.prefixMatch) {
         item.prefixMatchTerm =
-          terms[0] + lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
+          terms[0] +
+          item.lctext.substring(terms[0].length).match(/^[\/\w]*/)[0];
       }
       // use first exact-match (=label-match) item as "listing" item
       // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
@@ -266,22 +256,23 @@
           .concat([item.label]);
 
       // match terms
-      item.matchingTerms = terms.filter((t) => lctext.indexOf(t) >= 0);
+      item.matchingTerms = terms.filter((t) => item.lctext.indexOf(t) >= 0);
       // match regex:* terms
       item.matchingTerms = item.matchingTerms.concat(
         terms.filter(
           (t) =>
-            t.match(/^regex:\S+/) && lctext.match(new RegExp(t.substring(6)))
+            t.match(/^regex:\S+/) &&
+            item.lctext.match(new RegExp(t.substring(6)))
         )
       );
 
       if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter(
-        (t) => lctext.indexOf(t) >= 0
+        (t) => item.lctext.indexOf(t) >= 0
       );
 
-      item.runnable = lctext.match(/\s*```js_input\s/);
+      item.runnable = item.lctext.match(/\s*```js_input\s/);
     });
 
     // Update times for editing items to maintain their ordering when one is saved
@@ -372,6 +363,59 @@
     location.reload();
   }
 
+  let idsFromLabel = new Map<string, string[]>();
+  function itemDeps(index, deps = []) {
+    let item = items[index];
+    if (deps.indexOf(item.id) >= 0) return deps;
+    deps = [item.id, ...deps];
+    item.tags.forEach((tag) => {
+      if (tag == item.label) return;
+      if (!idsFromLabel.has(tag)) return;
+      idsFromLabel.get(tag).forEach((id) => {
+        const dep = indexFromId.get(id);
+        if (dep == undefined) return; // deleted
+        deps = itemDeps(dep, deps);
+      });
+    });
+    return deps;
+  }
+  function itemTextChanged(index: number, text: string, update_deps = true) {
+    let item = items[index];
+    item.hash = hashCode(text);
+    item.lctext = text.toLowerCase();
+    item.tags = itemTags(item.lctext);
+    // first tag is taken as "label" if it is the first text in the item
+    const prevLabel = item.label;
+    item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
+    if (prevLabel) {
+      const ids = idsFromLabel.get(prevLabel).filter((id) => id != item.id);
+      idsFromLabel.set(prevLabel, ids);
+    }
+    if (item.label) {
+      const ids = (idsFromLabel.get(item.label) || []).concat([item.id]);
+      idsFromLabel.set(item.label, ids);
+    }
+    if (update_deps) {
+      item.deps = itemDeps(index).sort(); // id order
+      const prevDeepHash = item.deephash;
+      item.deephash = hashCode(
+        item.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
+      );
+      // we have to update deps/deephash for all dependent items
+      // NOTE: changes to deephash trigger re-rendering and cache invalidation
+      items.forEach((depitem, depindex) => {
+        if (depindex == index) return; // skip self
+        // NOTE: we only need to update dependencies if item label has changed
+        if (prevLabel != item.label) depitem.deps = itemDeps(depindex).sort(); // id order
+        if (depitem.deps.indexOf(item.id) >= 0) {
+          depitem.deephash = hashCode(
+            depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
+          );
+        }
+      });
+    }
+  }
+
   let editorText = "";
   function onEditorDone(
     text: string,
@@ -455,7 +499,7 @@
         } else if (text.match(/^\/\w+/)) {
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
-          if (indicesFromLabel.has("#command" + cmd)) {
+          if (idsFromLabel.has("#command" + cmd)) {
             try {
               window["_eval"](`run('${args}')`, "#command" + cmd);
             } catch (e) {
@@ -484,6 +528,8 @@
       editing: editing,
     };
     items = [item, ...items];
+    indexFromId.set(tmpid, 0); // needed by itemTextChanged
+    itemTextChanged(0, text);
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange((editorText = "")); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
@@ -525,11 +571,17 @@
         let textarea = textArea(index);
         let selectionStart = textarea ? textarea.selectionStart : 0;
         let selectionEnd = textarea ? textarea.selectionEnd : 0;
-        items[index].id = doc.id;
+        let item = items[index];
+        item.id = doc.id;
         indexFromId.set(doc.id, index);
         // NOTE: we maintain mapping from tmpid in case there is async JS with $id plugged in
         //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
         indexFromId.set(tmpid, index);
+        // also need to update idsFromLabel if item is labeled
+        if (item.label) {
+          const ids = idsFromLabel.get(item.label).filter((id) => id != tmpid);
+          idsFromLabel.set(item.label, ids.concat([item.id]));
+        }
         onItemSaved(doc.id);
 
         if (focusedItem == index)
@@ -586,31 +638,29 @@
     const id = itemdiv.id;
     const index = indexFromId.get(id);
     if (index == undefined) return;
+    let item = items[index];
     // const height = parseInt(window.getComputedStyle(itemdiv).height);
     // const height = Math.min(itemdiv.clientHeight, itemdiv.offsetHeight);
     // const height = itemdiv.getBoundingClientRect().height;
     const height = itemdiv.offsetHeight;
-    const prevHeight = items[index].height;
+    const prevHeight = item.height;
     if (height == prevHeight) return; // nothing has changed
     // NOTE: on iOS, editing items can trigger zero height to be reported, which we ignore
     //       (seems to make sense generally since items should not have zero height)
     if (height == 0 && prevHeight > 0) {
       // console.warn(
       //   `zero height (last known height ${prevHeight}) for item ${id} at index ${index+1}`,
-      //   items[index].text.substring(0, Math.min(items[index].text.length, 80))
+      //   item.text.substring(0, Math.min(item.text.length, 80))
       // );
       return;
     }
 
-    const lctext = items[index].text.toLowerCase();
-    const tags = itemTags(lctext);
-    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
     // console.debug(
     //   `[${index + 1}] ${
-    //     label ? label + ": " : ""
+    //     item.label ? item.label + ": " : ""
     //   } height changed ${prevHeight} → ${height} (${trigger})`
     // );
-    items[index].height = height;
+    item.height = height;
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
     if (height == 0 || prevHeight == 0 || height != prevHeight) {
@@ -703,14 +753,14 @@
 
   function saveItem(index: number) {
     let item = items[index];
-    // save new text
     item.saving = true;
-    let itemToSave = { time: item.time, text: item.text };
-    // remove any _tmp blocks from saved item
+    const itemToSave = { time: item.time, text: item.text };
+    // do not save any _tmp blocks
     itemToSave.text = item.text.replace(
       /(?:^|\n) *?```(\w*?_tmp)\n.*?\s*```/gs,
       ""
     );
+    itemTextChanged(index, itemToSave.text);
     firestore()
       .collection("items")
       .doc(item.id)
@@ -939,6 +989,8 @@
         "visible";
       (document.querySelector("span.dots") as HTMLElement).style.opacity =
         "0.5";
+      // attempt focus on editor (may not work on iOS)
+      // document.getElementById("textarea-editor").focus();
     } else if (window.scrollY >= -25) {
       scrollToggleLocked = false;
       if (window.scrollY >= 0) {
@@ -980,13 +1032,21 @@
   }
 
   import { onMount } from "svelte";
+  import { hashCode } from "../util.js";
 
   if (isClient) {
-    // initialize indices and savedText/Time
-    onEditorChange(""); // initial sort, index assignment, etc
-    items.forEach((item) => {
+    // initialize item state
+    items.forEach((item, index) => {
+      itemTextChanged(index, item.text, false); // deps handled below after index assignment
       item.savedText = item.text;
       item.savedTime = item.time;
+    });
+    onEditorChange(""); // initial sort, index assignment, etc
+    items.forEach((item, index) => {
+      item.deps = itemDeps(index).sort(); // id order
+      item.deephash = hashCode(
+        item.deps.map((id) => items[indexFromId.get(id)].hash).join()
+      );
     });
 
     // Sign in user as needed ...
@@ -1177,7 +1237,9 @@
       }
     };
     window["_eval"] = function (tag: string) {
-      const indices = indicesFromLabel.get(tag) || [];
+      const indices = (idsFromLabel.get(tag) || []).map((id) =>
+        indexFromId.get(id)
+      );
       const jsout = indices.map((index) =>
         evalJSInput(items[index].text, items[index].label)
       );
@@ -1196,7 +1258,7 @@
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
       } else {
-        return indicesFromLabel.get(item) || [];
+        return (idsFromLabel.get(item) || []).map((id) => indexFromId.get(id));
       }
     }
 
@@ -1231,12 +1293,13 @@
       let indices = indicesForItem(item);
       indices.map((index) => {
         if (options["include_tagrefs"]) {
-          const lctext = items[index].text.toLowerCase();
-          const tags = itemTags(lctext);
-          const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-          options["exclude_tags"] = [...(options["exclude_tags"] || []), label];
+          let item = items[index];
+          options["exclude_tags"] = [
+            ...(options["exclude_tags"] || []),
+            item.label,
+          ];
           const exclusions = new Set(options["exclude_tags"]);
-          tags
+          item.tags
             .filter((t) => !exclusions.has(t))
             .forEach((tag) =>
               content.push(window["_read"](type, tag, options))
@@ -1971,6 +2034,8 @@
               id={item.id}
               tmpid={item.tmpid}
               index={item.index}
+              hash={item.hash}
+              deephash={item.deephash}
               matchingTerms={item.matchingTerms.join(' ')}
               matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
               timeString={item.timeString}

@@ -75,6 +75,8 @@
   export let runnable: boolean;
 
   export let text: string;
+  export let hash: string;
+  export let deephash: string;
   export let height = 0;
   const placeholder = " ";
   let error = false;
@@ -96,8 +98,7 @@
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
-  // cache invalidation function triggered whenever item is run below
-  // NOTE: this is important since runnable items can have dependencies not included in their cache key
+  // cache invalidation function triggered whenever item is run below; this is important since runnable items can have dependencies not included in their cache key (even with deephash)
   function invalidateCache() {
     Object.values(window["_cache"]).filter((elem: HTMLElement) => {
       if (elem.getAttribute("_item") == id) {
@@ -177,27 +178,14 @@
     return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
   }
 
-  /* from https://github.com/darkskyapp/string-hash/blob/master/index.js */
-  function hashCode(str): number {
-    var hash = 5381,
-      i = str.length;
-    while (i) {
-      hash = (hash * 33) ^ str.charCodeAt(--i);
-    }
-    /* JavaScript does bitwise operations (like XOR, above) on 32-bit signed
-     * integers. Since we want the results to be always positive, convert the
-     * signed int to an unsigned by doing an unsigned bitshift. */
-    return hash >>> 0;
-  }
+  import { hashCode } from "../util.js";
 
-  let textHash: string; // text hash computed at render time (in toHTML)
   function toHTML(
     text: string,
+    deephash: string,
     matchingTerms: any,
     matchingTermsSecondary: any
   ) {
-    textHash = hashCode(text).toString();
-
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
@@ -311,7 +299,8 @@
         (m, pfx, _html) =>
           (pfx + _html)
             .replace(/\$id/g, tmpid || id)
-            .replace(/\$hash/g, textHash)
+            .replace(/\$hash/g, hash)
+            .replace(/\$deephash/g, deephash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
       ) /*unwrap _html_ blocks*/;
 
@@ -361,7 +350,7 @@
       );
     });
 
-    // process divs with item-unique id to add _cache_key="<id>-$hash" automatically
+    // process divs with item-unique id to add _cache_key="<id>-$deephash" automatically
     text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
         console.warn(
@@ -379,7 +368,7 @@
       }
       // m = m.replace(/ _cache_key=[^> ]*/, "");
       // console.log("img src", src, m);
-      const key = divid + "-" + textHash;
+      const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
     });
     return text;
@@ -454,12 +443,12 @@
     }
 
     if (
-      textHash == itemdiv.firstElementChild.getAttribute("_textHash") &&
+      hash == itemdiv.firstElementChild.getAttribute("_hash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       return;
     }
-    itemdiv.firstElementChild.setAttribute("_textHash", textHash);
+    itemdiv.firstElementChild.setAttribute("_hash", hash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
@@ -601,7 +590,7 @@
       if (scripts.length == 0) return;
 
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
-      // since dependencies are not captured in the cache key
+      // since dependencies are not always fully captured in the cache key (even with deephash)
       invalidateCache();
 
       let pendingScripts = scripts.length;
@@ -1219,7 +1208,8 @@
           on:click={onIndexClick}>{index + 1}</span>
       </div>
       <div class="item" {id} bind:this={itemdiv} class:error>
-        {@html toHTML(text || placeholder, matchingTerms, matchingTermsSecondary)}
+        <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
+        {@html toHTML(text || placeholder, deephash, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
     {#if running}
