@@ -407,7 +407,7 @@
         if (depindex == index) return; // skip self
         // NOTE: we only need to update dependencies if item label has changed
         if (prevLabel != item.label) depitem.deps = itemDeps(depindex).sort(); // id order
-        if (depitem.deps.indexOf(item.id) >= 0) {
+        if (depitem.deps.length > 1 && depitem.deps.indexOf(item.id) >= 0) {
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
