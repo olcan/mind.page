@@ -64,6 +64,8 @@
   export let index: number;
   export let id: string;
   export let tmpid: string; // temporary id for items created in current session
+  export let label: string;
+  export let labelUnique: boolean;
   export let matchingTerms: any;
   export let matchingTermsSecondary: any;
   export let time: number;
@@ -202,7 +204,6 @@
       (m) => m[1].replace(/^#_/, "#")
     );
     const isMenu = headerTags.indexOf("#menu") >= 0;
-    const label = lctext.startsWith(headerTags[0]) ? headerTags[0] : "";
 
     // remove hidden tags and trim
     text = text.replace(/(?:^|\s)(#_[\/\w]+)/g, "").trim();
@@ -279,7 +280,9 @@
                   : termsSecondary.has(tag.toLowerCase())
                   ? 'class="secondary-selected"'
                   : tag.toLowerCase() == label
-                  ? 'class="label"'
+                  ? labelUnique
+                    ? 'class="unique-label"'
+                    : 'class="label"'
                   : ""
               } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
           );
@@ -781,7 +784,7 @@
   }
   .run {
     /* color: #0b0; */
-    background: #39e;
+    background: #4ae;
   }
   .container:not(.runnable) .run {
     display: none;
@@ -964,6 +967,13 @@
   :global(.item mark.label) {
     background: #ddd;
   }
+  :global(.item mark.unique-label) {
+    background: #adf;
+    /* font-weight: 500; */
+    /* background: #ffb; */
+    /* background: #333; */
+    /* color: #eee; */
+  }
   :global(.item span.highlight) {
     color: black;
     background: #9f9;
@@ -975,7 +985,8 @@
     padding-left: 0;
     padding-right: 0;
   }
-  :global(.item mark.label span.highlight) {
+  :global(.item mark.label span.highlight),
+  :global(.item mark.unique-label span.highlight) {
     background: #9f9;
   }
   :global(.item .vertical-bar) {

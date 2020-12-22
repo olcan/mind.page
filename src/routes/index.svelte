@@ -73,7 +73,7 @@
   function updateItemLayout() {
     editingItems = [];
     focusedItem = -1;
-    indexFromId = new Map();
+    indexFromId = new Map<string, number>();
     dotCount = 0;
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     const documentWidth = document.documentElement.clientWidth;
@@ -371,7 +371,9 @@
     item.tags.forEach((tag) => {
       if (tag == item.label) return;
       if (!idsFromLabel.has(tag)) return;
-      idsFromLabel.get(tag).forEach((id) => {
+      const ids = idsFromLabel.get(tag);
+      if (ids.length > 1) return; // only unique labels can have dependents
+      ids.forEach((id) => {
         const dep = indexFromId.get(id);
         if (dep == undefined) return; // deleted
         deps = itemDeps(dep, deps);
@@ -387,13 +389,17 @@
     // first tag is taken as "label" if it is the first text in the item
     const prevLabel = item.label;
     item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
+    item.labelUnique = false;
     if (prevLabel) {
       const ids = idsFromLabel.get(prevLabel).filter((id) => id != item.id);
       idsFromLabel.set(prevLabel, ids);
+      if (ids.length == 1) items[indexFromId.get(ids[0])].labelUnique = true;
     }
     if (item.label) {
       const ids = (idsFromLabel.get(item.label) || []).concat([item.id]);
       idsFromLabel.set(item.label, ids);
+      item.labelUnique = ids.length == 1;
+      if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
     }
     if (update_deps) {
       item.deps = itemDeps(index).sort(); // id order
@@ -529,7 +535,7 @@
     };
     items = [item, ...items];
     indexFromId.set(tmpid, 0); // needed by itemTextChanged
-    itemTextChanged(0, text);
+    itemTextChanged(0, text, false); // dependencies updated with permanent id below
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange((editorText = "")); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
@@ -577,11 +583,13 @@
         // NOTE: we maintain mapping from tmpid in case there is async JS with $id plugged in
         //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
         indexFromId.set(tmpid, index);
-        // also need to update idsFromLabel if item is labeled
+        // we also need itemTextChanged to update deps/etc with permanent id
+        // (need to also remove old id from idsFromLabel)
         if (item.label) {
           const ids = idsFromLabel.get(item.label).filter((id) => id != tmpid);
           idsFromLabel.set(item.label, ids.concat([item.id]));
         }
+        itemTextChanged(0, text);
         onItemSaved(doc.id);
 
         if (focusedItem == index)
@@ -831,6 +839,7 @@
       if (focusedItem == index) focusedItem = -1;
       if (item.text.trim().length == 0) {
         // delete
+        itemTextChanged(index, ""); // clears label, deps, etc
         items.splice(index, 1);
         updateItemLayout();
         items = items; // trigger dom update
@@ -1036,12 +1045,14 @@
 
   if (isClient) {
     // initialize item state
+    indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
+    items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
       item.savedText = item.text;
       item.savedTime = item.time;
     });
-    onEditorChange(""); // initial sort, index assignment, etc
+    onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
       item.deps = itemDeps(index).sort(); // id order
       item.deephash = hashCode(
@@ -2031,9 +2042,11 @@
               bind:running={item.running}
               bind:height={item.height}
               bind:time={item.time}
+              index={item.index}
               id={item.id}
               tmpid={item.tmpid}
-              index={item.index}
+              label={item.label}
+              labelUnique={item.labelUnique}
               hash={item.hash}
               deephash={item.deephash}
               matchingTerms={item.matchingTerms.join(' ')}
