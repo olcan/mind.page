@@ -277,7 +277,7 @@
             (match, pfx, tag) => {
               let lctag = tag.toLowerCase();
               let classNames = "";
-              if (termsSecondary.has(lctag)) classNames += " selected";
+              if (terms.has(lctag)) classNames += " selected";
               else if (termsSecondary.has(lctag))
                 classNames += " secondary-selected";
               if (lctag == label) {
