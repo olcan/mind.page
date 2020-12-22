@@ -968,11 +968,13 @@
     background: #ddd;
   }
   :global(.item mark.unique-label) {
+    background: #ddd;
+    font-weight: 500;
     /* background: #adf; */
-    /* font-weight: 400; */
-    /* background: #ffb; */
-    background: #333;
-    color: #eee;
+    /* background: #eea; */
+    /* background: #fb8; */
+    /* background: #333; */
+    /* color: #eee; */
   }
   :global(.item span.highlight) {
     color: black;
@@ -989,8 +991,9 @@
     background: #9f9;
   }
   :global(.item mark.unique-label span.highlight) {
-    background: #474;
-    color: #eee;
+    background: #9f9;
+    /* background: #474; */
+    /* color: #eee; */
   }
 
   :global(.item .vertical-bar) {
