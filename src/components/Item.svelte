@@ -968,11 +968,11 @@
     background: #ddd;
   }
   :global(.item mark.unique-label) {
-    background: #adf;
-    /* font-weight: 500; */
+    /* background: #adf; */
+    /* font-weight: 400; */
     /* background: #ffb; */
-    /* background: #333; */
-    /* color: #eee; */
+    background: #333;
+    color: #eee;
   }
   :global(.item span.highlight) {
     color: black;
@@ -985,10 +985,14 @@
     padding-left: 0;
     padding-right: 0;
   }
-  :global(.item mark.label span.highlight),
-  :global(.item mark.unique-label span.highlight) {
+  :global(.item mark.label span.highlight) {
     background: #9f9;
   }
+  :global(.item mark.unique-label span.highlight) {
+    background: #474;
+    color: #eee;
+  }
+
   :global(.item .vertical-bar) {
     color: #444;
   }
