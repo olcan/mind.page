@@ -83,8 +83,10 @@
     let columnItems = new Array(columnCount).fill(-1);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
     let lastTimeString = "";
+    let topMovedIndex = items.length;
 
     items.forEach((item, index) => {
+      if (index < item.index && index < topMovedIndex) topMovedIndex = index;
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
@@ -149,15 +151,23 @@
       columnItems[item.column] = index;
     });
 
-    // calculate dependencies
-
     if (focusedItem >= 0) {
       // maintain focus on item
       const textarea = textArea(focusedItem);
       if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
-    } else {
+    } else if (Date.now() - editorBlurTime < 250) {
       // refocus on editor if it was unfocused within last .25 seconds
-      if (Date.now() - editorBlurTime < 250) textArea(-1).focus();
+      textArea(-1).focus();
+    }
+    // scroll up to top moved item if necessary
+    if (topMovedIndex < items.length) {
+      setTimeout(() => {
+        // allow dom update before calculating new position
+        const itemdiv = document.getElementById(items[topMovedIndex].id);
+        const itemTop = (itemdiv.closest(".super-container") as HTMLElement)
+          .offsetTop;
+        if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop);
+      });
     }
   }
 
@@ -589,7 +599,7 @@
           const ids = idsFromLabel.get(item.label).filter((id) => id != tmpid);
           idsFromLabel.set(item.label, ids.concat([item.id]));
         }
-        itemTextChanged(0, text);
+        itemTextChanged(index, text);
         onItemSaved(doc.id);
 
         if (focusedItem == index)

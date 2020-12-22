@@ -185,6 +185,7 @@
   function toHTML(
     text: string,
     deephash: string,
+    labelUnique: boolean,
     matchingTerms: any,
     matchingTermsSecondary: any
   ) {
@@ -273,18 +274,20 @@
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
             /(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g,
-            (match, pfx, tag) =>
-              `${pfx}<mark ${
-                terms.has(tag.toLowerCase())
-                  ? 'class="selected"'
-                  : termsSecondary.has(tag.toLowerCase())
-                  ? 'class="secondary-selected"'
-                  : tag.toLowerCase() == label
-                  ? labelUnique
-                    ? 'class="unique-label"'
-                    : 'class="label"'
-                  : ""
-              } onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`
+            (match, pfx, tag) => {
+              let lctag = tag.toLowerCase();
+              let classNames = "";
+              if (termsSecondary.has(lctag)) classNames += " selected";
+              else if (termsSecondary.has(lctag))
+                classNames += " secondary-selected";
+              if (lctag == label) {
+                classNames += " label";
+                if (labelUnique) classNames += " unique";
+              }
+              classNames = classNames.trim();
+              if (classNames) classNames = ` class="${classNames}"`;
+              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`;
+            }
           );
         }
         // close blockquotes with an extra \n before next line
@@ -732,8 +735,9 @@
     border-radius: 0 4px 0 4px;
     color: black;
     line-height: 25px; /* same as menu item heights */
-    font-size: 12px;
-    font-family: monospace;
+    font-size: 14px;
+    font-family: Avenir Next, Helvetica;
+    font-weight: 500;
     text-align: right;
     overflow: hidden;
     -webkit-touch-callout: none;
@@ -749,7 +753,9 @@
     border-radius: 4px 4px 0 4px;
     opacity: 1;
     color: black;
-    font-family: monospace;
+    font-family: Avenir Next, Helvetica;
+    font-size: 14px;
+    font-weight: 500;
     text-align: right;
     overflow: hidden;
     -webkit-touch-callout: none;
@@ -930,6 +936,7 @@
   :global(.item mark) {
     color: black;
     background: #999;
+    font-weight: 500;
     /* remove negative margins used to align with textarea text */
     padding: 0 4px;
     margin: 0;
@@ -967,14 +974,8 @@
   :global(.item mark.label) {
     background: #ddd;
   }
-  :global(.item mark.unique-label) {
-    background: #ddd;
-    font-weight: 500;
-    /* background: #adf; */
-    /* background: #eea; */
-    /* background: #fb8; */
-    /* background: #333; */
-    /* color: #eee; */
+  :global(.item mark.label.unique) {
+    font-weight: 700;
   }
   :global(.item span.highlight) {
     color: black;
@@ -989,11 +990,6 @@
   }
   :global(.item mark.label span.highlight) {
     background: #9f9;
-  }
-  :global(.item mark.unique-label span.highlight) {
-    background: #9f9;
-    /* background: #474; */
-    /* color: #eee; */
   }
 
   :global(.item .vertical-bar) {
@@ -1227,7 +1223,7 @@
       </div>
       <div class="item" {id} bind:this={itemdiv} class:error>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(text || placeholder, deephash, matchingTerms, matchingTermsSecondary)}
+        {@html toHTML(text || placeholder, deephash, labelUnique, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
     {#if running}
