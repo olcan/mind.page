@@ -163,9 +163,10 @@
     if (topMovedIndex < items.length) {
       setTimeout(() => {
         // allow dom update before calculating new position
-        const itemdiv = document.getElementById(items[topMovedIndex].id);
-        const itemTop = (itemdiv.closest(".super-container") as HTMLElement)
-          .offsetTop;
+        const div = document.querySelector(
+          "#super-container-" + items[topMovedIndex].id
+        );
+        const itemTop = (div as HTMLElement).offsetTop;
         if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop);
       });
     }
@@ -400,6 +401,7 @@
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
     item.tags = itemTags(item.lctext);
+    item.log = item.tags.indexOf("#log") >= 0;
     // first tag is taken as "label" if it is the first text in the item
     const prevLabel = item.label;
     item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
@@ -421,6 +423,7 @@
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
       );
+      if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
       // we have to update deps/deephash for all dependent items
       // NOTE: changes to deephash trigger re-rendering and cache invalidation
       items.forEach((depitem, depindex) => {
@@ -428,9 +431,12 @@
         // NOTE: we only need to update dependencies if item label has changed
         if (prevLabel != item.label) depitem.deps = itemDeps(depindex).sort(); // id order
         if (depitem.deps.length > 1 && depitem.deps.indexOf(item.id) >= 0) {
+          const prevDeepHash = depitem.deephash;
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
+          if (depitem.deephash != prevDeepHash && !depitem.log)
+            depitem.time = Date.now();
         }
       });
     }
@@ -826,9 +832,9 @@
     if (cancelled) {
       item.time = item.savedTime;
       if (item.text) item.text = item.savedText;
-    } else {
-      // for non-log items, update time whenever the item is "touched"
-      if (!item.text.match(/(?:^|\s)#log(?:\s|$)/)) item.time = Date.now();
+    } else if (!item.log) {
+      // update time for non-log item
+      item.time = Date.now();
     }
 
     // remove _tmp blocks whenever editing state changes

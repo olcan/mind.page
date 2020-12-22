@@ -1173,6 +1173,7 @@
 
 <div
   class="super-container"
+  id={'super-container-' + id}
   class:dotted
   class:editing
   class:timed={timeString.length > 0}
