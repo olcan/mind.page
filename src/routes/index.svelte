@@ -472,7 +472,7 @@
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
           if (depitem.deephash != prevDeepHash && !depitem.log)
-            depitem.time = Date.now();
+            depitem.time = item.time - 1; // 1s offset to ensure dependency is considered more recent
         }
       });
     }
@@ -770,9 +770,12 @@
       evalIndex = index;
       evalTime = Date.now();
       let out = eval("(function(){\n" + jsin + "\n})()");
-      if (out && out.length > 1024) {
-        alert(`js output too large (${out.length})`);
-        out = "";
+      const maxOutputLength = 4 * 1024;
+      if (out && out.length > maxOutputLength) {
+        alert(
+          `js output too large (${out.length}>${maxOutputLength}), dropped`
+        );
+        out = undefined;
       }
       evalIndex = -1;
       // automatically _write_log into item
@@ -1441,14 +1444,17 @@
           }
           const prevSaveClosure = item.saveClosure;
           const saveClosure = (index) => {
-            if (text && text.length > 1024) {
-              alert(`_write too large (${text.length})`);
-              text = "";
+            if (prevSaveClosure) prevSaveClosure(index); // chain closures
+            const maxWriteLength = 4 * 1024;
+            if (text && text.length > maxWriteLength) {
+              alert(
+                `_write too large (${text.length}>${maxWriteLength}), cancelled`
+              );
+              return; // cancel write
             }
             if (type == "") item.text = text;
             else item.text = appendBlock(item.text, type, text);
             if (log) item.text = appendBlock(item.text, "_log", log);
-            if (prevSaveClosure) prevSaveClosure(index); // chain closures
             item.time = Date.now();
             // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
             if (!type.endsWith("_tmp")) saveItem(index);
