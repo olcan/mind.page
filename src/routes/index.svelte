@@ -479,7 +479,7 @@
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
           if (depitem.deephash != prevDeepHash && !depitem.log) {
-            depitem.time = item.time - 1; // 1s offset to ensure dependency is considered more recent
+            depitem.time = item.time - 1 - depindex; // offset to ensure dependency is considered more recent
             saveItem(depindex);
           }
         }
@@ -769,26 +769,31 @@
   function evalJSInput(
     text: string,
     label: string = "",
-    index: number = -1
+    index: number
   ): string {
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
-    if (index >= 0) jsin = jsin.replace(/\$id/g, items[index].id);
+    let item = items[index];
+    jsin = jsin.replace(/\$id/g, item.id);
     let start = Date.now();
     try {
       evalIndex = index;
       evalTime = Date.now();
       let out = eval("(function(){\n" + jsin + "\n})()");
-      const maxOutputLength = 4 * 1024;
-      if (out && out.length > maxOutputLength) {
-        alert(
-          `js output too large (${out.length}>${maxOutputLength}), dropped`
-        );
-        out = undefined;
+      const outputConfirmLength = 16 * 1024;
+      if (out && out.length >= outputConfirmLength) {
+        if (
+          !confirm(
+            `Write ${out.length} bytes (js_output) into ${
+              item.label || `item ${item.index + 1}`
+            }?`
+          )
+        )
+          out = undefined;
       }
       evalIndex = -1;
       // automatically _write_log into item
-      if (index >= 0) window["_write_log"](items[index].id, start);
+      window["_write_log"](item.id, start);
       return out;
     } catch (e) {
       evalIndex = -1;
@@ -797,7 +802,7 @@
       if (console["_eval_error"]) console["_eval_error"](msg);
       else alert(msg);
       // automatically _write_log into item
-      if (index >= 0) window["_write_log"](items[index].id, start);
+      window["_write_log"](item.id, start);
       return undefined;
     }
   }
@@ -1336,7 +1341,7 @@
         indexFromId.get(id)
       );
       const jsout = indices.map((index) =>
-        evalJSInput(items[index].text, items[index].label)
+        evalJSInput(items[index].text, items[index].label, index)
       );
       return jsout.length == 1 ? jsout[0] : jsout;
     };
@@ -1483,12 +1488,16 @@
           const prevSaveClosure = item.saveClosure;
           const saveClosure = (index) => {
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
-            const maxWriteLength = 4 * 1024;
-            if (text && text.length > maxWriteLength) {
-              alert(
-                `_write too large (${text.length}>${maxWriteLength}), cancelled`
-              );
-              return; // cancel write
+            const writeConfirmLength = 16 * 1024;
+            if (text && text.length >= writeConfirmLength) {
+              if (
+                !confirm(
+                  `Write ${text.length} bytes (${type}) into ${
+                    item.label || `item ${item.index + 1}`
+                  }?`
+                )
+              )
+                return; // cancel write
             }
             if (type == "") item.text = text;
             else item.text = appendBlock(item.text, type, text);
