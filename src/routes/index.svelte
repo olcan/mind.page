@@ -285,11 +285,18 @@
         (t) => item.lctext.indexOf(t) >= 0
       );
 
-      // calculate missing tags
+      // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       item.missingTags = item.tags.filter(
-        (t) => t != item.label && (tagCounts.get(t) || 0) <= 1
+        (t) =>
+          t != item.label &&
+          t != "#log" &&
+          t != "#menu" &&
+          !t.match(/^#pin(?:\/|$)/) &&
+          (tagCounts.get(t) || 0) <= 1
       );
+      // if (item.missingTags.length > 0)
+      //   console.log(item.missingTags, item.tags);
     });
 
     // Update (but not save yet) times for editing items to maintain their ordering when one is saved
@@ -421,9 +428,8 @@
       pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
 
     const prevTagsExpanded = item.tagsExpanded || [];
-    item.tagsExpanded = item.tags;
-    item.tags.forEach((fulltag) => {
-      let tag = fulltag;
+    item.tagsExpanded = item.tags.slice();
+    item.tags.forEach((tag) => {
       let pos;
       while ((pos = tag.lastIndexOf("/")) >= 0)
         item.tagsExpanded.push((tag = tag.slice(0, pos)));
