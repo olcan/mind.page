@@ -316,8 +316,8 @@
           listing.indexOf(a.prefixMatchTerm) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
-        // alphanumeric ordering on prefix-matching term
-        a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
+        // // alphanumeric ordering on prefix-matching term
+        // a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // # of matching words
