@@ -471,8 +471,10 @@
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
-          if (depitem.deephash != prevDeepHash && !depitem.log)
+          if (depitem.deephash != prevDeepHash && !depitem.log) {
             depitem.time = item.time - 1; // 1s offset to ensure dependency is considered more recent
+            saveItem(depindex);
+          }
         }
       });
     }
