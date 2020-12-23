@@ -103,9 +103,9 @@
 
   // cache invalidation function triggered whenever item is run below; this is important since runnable items can have dependencies not included in their cache key (even with deephash)
   function invalidateCache() {
-    Object.values(window["_cache"]).filter((elem: HTMLElement) => {
+    Object.values(window["_elem_cache"]).filter((elem: HTMLElement) => {
       if (elem.getAttribute("_item") == id) {
-        delete window["_cache"][elem.getAttribute("_cache_key")];
+        delete window["_elem_cache"][elem.getAttribute("_cache_key")];
         // destroy any c3 charts inside element
         Array.from(elem.querySelectorAll(".c3")).map((div) => {
           if (div["_chart"]) {
@@ -182,15 +182,25 @@
   }
 
   import { hashCode } from "../util.js";
+  if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
+  if (window["_html_cache"] == undefined) window["_html_cache"] = {};
 
   function toHTML(
     text: string,
     deephash: string,
     labelUnique: boolean,
-    missingTags: any,
-    matchingTerms: any,
-    matchingTermsSecondary: any
+    missingTags: string,
+    matchingTerms: string,
+    matchingTermsSecondary: string
   ) {
+    const cache_key =
+      "html-" + hashCode(Array.from(arguments).slice(1).toString());
+    if (window["_html_cache"].hasOwnProperty(cache_key)) {
+      // console.log("toHTML skipped");
+      return window["_html_cache"][cache_key];
+    }
+    // console.log("toHTML");
+
     // NOTE: passing matchingTerms as an Array leads to an infinite render loop
     // console.log(matchingTerms);
     const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
@@ -386,7 +396,8 @@
       const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
     });
-    return text;
+
+    return (window["_html_cache"][cache_key] = text);
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
@@ -395,15 +406,14 @@
 
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
-    if (window["_cache"] == undefined) window["_cache"] = {};
     Array.from(itemdiv.querySelectorAll("[_cache_key]")).forEach((elem) => {
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
-      if (window["_cache"].hasOwnProperty(key)) {
+      if (window["_elem_cache"].hasOwnProperty(key)) {
         // console.log("reusing cached element", key, elem.tagName, elem.id);
-        // if (window["_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
-        elem.replaceWith(window["_cache"][key]);
-        elem = window["_cache"][key];
+        // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
+        elem.replaceWith(window["_elem_cache"][key]);
+        elem = window["_elem_cache"][key];
         // resize/refresh any c3 charts inside element
         Array.from(elem.querySelectorAll(".c3")).map((div) => {
           if (div["_chart"]) div["_chart"].resize();
@@ -412,7 +422,7 @@
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
         // console.log("caching element", key, elem.tagName);
-        window["_cache"][key] = elem; //.cloneNode(true);
+        window["_elem_cache"][key] = elem; //.cloneNode(true);
       }
       elem.setAttribute("_item", id); // for invalidating cached elems on errors
     });
@@ -461,10 +471,12 @@
       hash == itemdiv.firstElementChild.getAttribute("_hash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
+      // console.log("afterUpdate skipped");
       return;
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
+    // console.log("afterUpdate");
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();

@@ -71,6 +71,7 @@
   let dotCount = 0;
   let columnCount = 0;
   function updateItemLayout() {
+    // console.log("updateItemLayout");
     editingItems = [];
     focusedItem = -1;
     indexFromId = new Map<string, number>();
@@ -93,11 +94,10 @@
       if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
-      // if (document.activeElement == textArea(index)) focusedItem = index;
 
-      let timeString = itemTimeString((Date.now() - item.time) / 1000);
-      // let timeString = Math.round((Date.now() - item.time) / 1000).toString();
       let lastItem = items[index - 1];
+      let timeString = itemTimeString((Date.now() - item.time) / 1000);
+
       item.timeString = "";
       item.timeOutOfOrder = false;
       if (!item.pinned && (index == 0 || timeString != lastTimeString)) {
@@ -216,6 +216,7 @@
       return;
     }
     lastEditorChangeTime = Infinity; // force minimum wait for next change
+    // console.log("onEditorChange");
 
     // update history, replace unless current state is final
     if (history.state.editorText != text) {
@@ -246,20 +247,11 @@
     });
 
     matchingItemCount = 0;
-    // let matchingTermCounts = new Map<string, number>();
     let listing = [];
     items.forEach((item) => {
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-      const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
-      item.pinned = pintags.length > 0;
-      item.pinTerm = pintags[0] || "";
-      item.dotted =
-        pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
-      item.dotTerm =
-        pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
       item.prefixMatch = item.lctext.startsWith(terms[0]);
-      item.prefixMatchTerm = "";
       if (item.prefixMatch) {
         item.prefixMatchTerm =
           terms[0] +
@@ -267,6 +259,7 @@
             .substring(terms[0].length)
             .match(/^[^#\s<>,.;:"'`\(\)\[\]\{\}]*/)[0];
       }
+
       // use first exact-match (=label-match) item as "listing" item
       // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
       if (item.label == terms[0] && listing.length == 0) {
@@ -287,14 +280,10 @@
             item.lctext.match(new RegExp(t.substring(6)))
         )
       );
-
       if (item.matchingTerms.length > 0) matchingItemCount++;
-      item.matchingTermsSecondary = [];
       item.matchingTermsSecondary = termsSecondary.filter(
         (t) => item.lctext.indexOf(t) >= 0
       );
-
-      item.runnable = item.lctext.match(/\s*```js_input\s/);
 
       // calculate missing tags
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
@@ -303,13 +292,15 @@
       );
     });
 
-    // Update times for editing items to maintain their ordering when one is saved
+    // Update (but not save yet) times for editing items to maintain their ordering when one is saved
     let now = Date.now();
     items.forEach((item) => {
-      if (item.editing && !item.text.match(/(?:^|\s)#log(?:\s|$)/))
-        item.time = now;
+      if (item.editing && !item.log) item.time = now;
     });
 
+    // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
+    //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
+    //       (afterUpdate is also triggered by the various assignments above)
     // NOTE: undefined values produce NaN, which is treated as 0
     items = stableSort(items, (a, b) => {
       // pinned (contains #pin)
@@ -397,7 +388,8 @@
   function itemDeps(index, deps = []) {
     let item = items[index];
     if (deps.indexOf(item.id) >= 0) return deps;
-    deps = [item.id, ...deps];
+    // NOTE: dependency order matters for hashing and potentially for code import
+    deps = [...deps, item.id];
     item.tags.forEach((tag) => {
       if (tag == item.label) return;
       if (!idsFromLabel.has(tag)) return;
@@ -417,12 +409,21 @@
     let item = items[index];
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
+    item.runnable = item.lctext.match(/\s*```js_input\s/);
+
     item.tags = itemTags(item.lctext);
     item.log = item.tags.indexOf("#log") >= 0;
+    const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
+    item.pinned = pintags.length > 0;
+    item.pinTerm = pintags[0] || "";
+    item.dotted = pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
+    item.dotTerm =
+      pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
 
     const prevTagsExpanded = item.tagsExpanded || [];
-    item.tagsExpanded = item.tags.slice();
-    item.tags.forEach((tag) => {
+    item.tagsExpanded = item.tags;
+    item.tags.forEach((fulltag) => {
+      let tag = fulltag;
       let pos;
       while ((pos = tag.lastIndexOf("/")) >= 0)
         item.tagsExpanded.push((tag = tag.slice(0, pos)));
@@ -454,7 +455,7 @@
       }
     }
     if (update_deps) {
-      item.deps = itemDeps(index).sort(); // id order
+      item.deps = itemDeps(index);
       const prevDeepHash = item.deephash;
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
@@ -465,7 +466,7 @@
       items.forEach((depitem, depindex) => {
         if (depindex == index) return; // skip self
         // NOTE: we only need to update dependencies if item label has changed
-        if (prevLabel != item.label) depitem.deps = itemDeps(depindex).sort(); // id order
+        if (prevLabel != item.label) depitem.deps = itemDeps(depindex);
         if (depitem.deps.length > 1 && depitem.deps.indexOf(item.id) >= 0) {
           const prevDeepHash = depitem.deephash;
           depitem.deephash = hashCode(
@@ -1111,11 +1112,27 @@
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
       item.savedText = item.text;
       item.savedTime = item.time;
+      // NOTE: we also initialized other state here to have a central listing
+      // state used in onEditorChange
+      item.prefixMatch = false;
+      item.prefixMatchTerm = "";
+      item.matchingTerms = [];
+      item.matchingTermsSecondary = [];
+      item.missingTags = [];
+      // state from updateItemLayout
+      item.index = index;
+      item.timeString = "";
+      item.timeOutOfOrder = false;
+      item.height = 0;
+      item.column = 0;
+      item.nextColumn = -1;
+      item.nextItemInColumn = -1;
+      item.outerHeight = 0;
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
       // initialize deps, deephash, missing tags/labels
-      item.deps = itemDeps(index).sort(); // id order
+      item.deps = itemDeps(index);
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
@@ -1337,14 +1354,27 @@
     window["_id"] = function (item: string = "") {
       let ids = [];
       let indices = indicesForItem(item);
-      indices.map((index) => {
-        ids.push(items[index].tmpid || items[index].id);
-      });
-      if (!item && ids.length == 0) {
+      if (!item && indices.length == 0) {
         console.error("_id() invoked from async javascript");
         return null;
       }
+      indices.map((index) => {
+        ids.push(items[index].tmpid || items[index].id);
+      });
       return ids.length == 1 ? ids[0] : ids;
+    };
+
+    window["_label"] = function (item: string = "") {
+      let labels = [];
+      let indices = indicesForItem(item);
+      if (!item && indices.length == 0) {
+        console.error("_label() invoked from async javascript");
+        return null;
+      }
+      indices.map((index) => {
+        labels.push(items[index].label);
+      });
+      return labels.length == 1 ? labels[0] : labels;
     };
 
     window["_tags"] = function (item: string = "") {
@@ -2113,7 +2143,7 @@
               labelUnique={item.labelUnique}
               hash={item.hash}
               deephash={item.deephash}
-              missingTags={item.missingTags}
+              missingTags={item.missingTags.join(' ')}
               matchingTerms={item.matchingTerms.join(' ')}
               matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
               timeString={item.timeString}
