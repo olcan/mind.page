@@ -66,6 +66,7 @@
   export let tmpid: string; // temporary id for items created in current session
   export let label: string;
   export let labelUnique: boolean;
+  export let missingTags: any;
   export let matchingTerms: any;
   export let matchingTermsSecondary: any;
   export let time: number;
@@ -186,6 +187,7 @@
     text: string,
     deephash: string,
     labelUnique: boolean,
+    missingTags: any,
     matchingTerms: any,
     matchingTermsSecondary: any
   ) {
@@ -206,8 +208,13 @@
     );
     const isMenu = headerTags.indexOf("#menu") >= 0;
 
-    // remove hidden tags and trim
-    text = text.replace(/(?:^|\s)(#_[\/\w]+)/g, "").trim();
+    // remove hidden tags (unless missing) and trim
+    text = text
+      .replace(/(^|\s|;)(#_[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, (m, pfx, tag) => {
+        const lctag = tag.toLowerCase().replace(/^#_/, "#");
+        return missingTags.indexOf(lctag) >= 0 ? pfx + tag : "";
+      })
+      .trim();
 
     // replace naked URLs with markdown links (or images) named after host name
     text = text.replace(/(^|\s|>)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
@@ -252,6 +259,7 @@
 
         // preserve inline whitespace and line breaks by inserting &nbsp; and <br> outside of code blocks
         // (we exclude |^> to break inside blockquotes for now)
+        // (we miss indented blocks that start with bullets -/* for now since it requires prior-line context)
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>/)) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
             return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
@@ -269,17 +277,18 @@
               /(\$\$?.+?\$\$?)/g,
               '<span class="math">$1</span>'
             );
-          // style vertical separator bar │
+          // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
             /(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g,
             (match, pfx, tag) => {
-              let lctag = tag.toLowerCase();
+              const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (terms.has(lctag)) classNames += " selected";
               else if (termsSecondary.has(lctag))
                 classNames += " secondary-selected";
+              if (missingTags.indexOf(lctag) >= 0) classNames += " missing";
               if (lctag == label) {
                 classNames += " label";
                 if (labelUnique) classNames += " unique";
@@ -977,6 +986,9 @@
   :global(.item mark.label.unique) {
     font-weight: 700;
   }
+  :global(.item mark.missing) {
+    background: #f88;
+  }
   :global(.item span.highlight) {
     color: black;
     background: #9f9;
@@ -1224,7 +1236,7 @@
       </div>
       <div class="item" {id} bind:this={itemdiv} class:error>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(text || placeholder, deephash, labelUnique, matchingTerms, matchingTermsSecondary)}
+        {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
     {#if running}

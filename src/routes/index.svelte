@@ -180,9 +180,16 @@
   }
 
   function itemTags(lctext): Array<string> {
-    return Array.from(
-      lctext.matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
-      (m) => m[1].replace(/^#_/, "#")
+    return _.uniq(
+      Array.from(
+        lctext
+          .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
+          // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
+          .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
+          .replace(/`.*?`/g, "") // remove inline code spans
+          .matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
+        (m) => m[1].replace(/^#_/, "#")
+      )
     );
   }
 
@@ -288,6 +295,12 @@
       );
 
       item.runnable = item.lctext.match(/\s*```js_input\s/);
+
+      // calculate missing tags
+      // NOTE: doing this here is easier than keeping these updated in itemTextChanged
+      item.missingTags = item.tags.filter(
+        (t) => t != item.label && (tagCounts.get(t) || 0) <= 1
+      );
     });
 
     // Update times for editing items to maintain their ordering when one is saved
@@ -314,12 +327,14 @@
         b.prefixMatch - a.prefixMatch ||
         // alphanumeric ordering on prefix-matching term
         a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
-        // // editing mode
-        // b.editing - a.editing ||
+        // editing mode (except log items)
+        (!b.log && b.editing) - (!a.log && a.editing) ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
         // # of matching secondary words
         b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
+        // missing tag prefixes
+        b.missingTags.length - a.missingTags.length ||
         // time (most recent first)
         b.time - a.time
       );
@@ -396,26 +411,47 @@
     });
     return deps;
   }
+
+  let tagCounts = new Map<string, number>();
   function itemTextChanged(index: number, text: string, update_deps = true) {
     let item = items[index];
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
     item.tags = itemTags(item.lctext);
     item.log = item.tags.indexOf("#log") >= 0;
+
+    const prevTagsExpanded = item.tagsExpanded || [];
+    item.tagsExpanded = item.tags.slice();
+    item.tags.forEach((tag) => {
+      let pos;
+      while ((pos = tag.lastIndexOf("/")) >= 0)
+        item.tagsExpanded.push((tag = tag.slice(0, pos)));
+    });
+    if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
+      prevTagsExpanded.forEach((tag) =>
+        tagCounts.set(tag, tagCounts.get(tag) - 1)
+      );
+      item.tagsExpanded.forEach((tag) =>
+        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1)
+      );
+    }
+
     // first tag is taken as "label" if it is the first text in the item
     const prevLabel = item.label;
     item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
-    item.labelUnique = false;
-    if (prevLabel) {
-      const ids = idsFromLabel.get(prevLabel).filter((id) => id != item.id);
-      idsFromLabel.set(prevLabel, ids);
-      if (ids.length == 1) items[indexFromId.get(ids[0])].labelUnique = true;
-    }
-    if (item.label) {
-      const ids = (idsFromLabel.get(item.label) || []).concat([item.id]);
-      idsFromLabel.set(item.label, ids);
-      item.labelUnique = ids.length == 1;
-      if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
+    if (item.label != prevLabel) {
+      item.labelUnique = false;
+      if (prevLabel) {
+        const ids = idsFromLabel.get(prevLabel).filter((id) => id != item.id);
+        idsFromLabel.set(prevLabel, ids);
+        if (ids.length == 1) items[indexFromId.get(ids[0])].labelUnique = true;
+      }
+      if (item.label) {
+        const ids = (idsFromLabel.get(item.label) || []).concat([item.id]);
+        idsFromLabel.set(item.label, ids);
+        item.labelUnique = ids.length == 1;
+        if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
+      }
     }
     if (update_deps) {
       item.deps = itemDeps(index).sort(); // id order
@@ -758,7 +794,7 @@
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
     block = "\n```" + type + "\n" + block + "```";
-    const regex = "(?:^|\\n) *?```" + type + "\\n.*?\\s*```";
+    const regex = "(?:^|\\n) *```" + type + "\\n.*?\\s*```";
     if (text.match(RegExp(regex, "s"))) {
       text = text.replace(RegExp(regex, "gs"), block);
     } else {
@@ -775,7 +811,7 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout) return text.replace(/(?:^|\n) *?```js_output\n.*?\s*```/gs, ""); // no output
+    if (!jsout) return text.replace(/(?:^|\n) *```js_output\n.*?\s*```/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -785,7 +821,7 @@
     const itemToSave = { time: item.time, text: item.text };
     // do not save any _tmp blocks
     itemToSave.text = item.text.replace(
-      /(?:^|\n) *?```(\w*?_tmp)\n.*?\s*```/gs,
+      /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
       ""
     );
     itemTextChanged(index, itemToSave.text);
@@ -838,7 +874,7 @@
     }
 
     // remove _tmp blocks whenever editing state changes
-    item.text = item.text.replace(/(?:^|\n) *?```(\w*?_tmp)\n.*?\s*```/gs, "");
+    item.text = item.text.replace(/(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs, "");
 
     if (editing) {
       // started editing
@@ -861,8 +897,8 @@
         // delete
         itemTextChanged(index, ""); // clears label, deps, etc
         items.splice(index, 1);
-        updateItemLayout();
-        items = items; // trigger dom update
+        // updateItemLayout();
+        onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
         deletedItems.unshift({
           time: item.savedTime,
           text: item.savedText,
@@ -877,12 +913,11 @@
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
-            /(?:^|\n) *?```(\w*?_output)\n.*?\s*```/gs,
-            "\n```$1\n```"
+            /(^|\n) *```(\w*?_output)(?:\n.*?)?\n *```/gs,
+            "$1```$2\n```"
           );
           item.text = item.text.replace(
-            /(?:^|\n) *?```(\w*?_log)\n.*?\s*```/gs,
-            // "\n```$1\n```"
+            /(?:^|\n) *```(\w*?_log)(?:\n.*?)?\n *```/gs,
             "" // remove so errors do not leave empty blocks
           );
           // NOTE: these appends may trigger async _write
@@ -918,12 +953,12 @@
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
-      /(?:^|\n) *?```(\w*?_output)\n.*?\s*```/gs,
-      "\n```$1\n```"
+      /(^|\n) *```(\w*?_output)(?:\n.*?)?\n *```/gs,
+      "$1```$2\n```"
     );
     item.text = item.text.replace(
-      /(?:^|\n) *?```(\w*?_log)\n.*?\s*```/gs,
-      //"\n```$1\n```"
+      /(?:^|\n) *```(\w*?_log)(?:\n.*?)?\n *```/gs,
+      // "\n```$1\n```"
       "" // remove so errors do not leave empty blocks
     );
     item.text = appendJSOutput(item.text, index);
@@ -1074,6 +1109,7 @@
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
+      // initialize deps, deephash, missing tags/labels
       item.deps = itemDeps(index).sort(); // id order
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
@@ -2069,6 +2105,7 @@
               labelUnique={item.labelUnique}
               hash={item.hash}
               deephash={item.deephash}
+              missingTags={item.missingTags}
               matchingTerms={item.matchingTerms.join(' ')}
               matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
               timeString={item.timeString}
