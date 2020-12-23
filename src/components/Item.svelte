@@ -189,9 +189,10 @@
     text: string,
     deephash: string,
     labelUnique: boolean,
-    missingTags: string,
-    matchingTerms: string,
-    matchingTermsSecondary: string
+    // NOTE: passing in arrays has proven problematic (e.g. infinite render loops)
+    missingTags: any, // space-separated string converted to Set
+    matchingTerms: any, // space-separated string converted to Set
+    matchingTermsSecondary: any // space-separated string converted to Set
   ) {
     const cache_key =
       "html-" + hashCode(Array.from(arguments).slice(1).toString());
@@ -201,12 +202,9 @@
     }
     // console.log("toHTML");
 
-    // NOTE: passing matchingTerms as an Array leads to an infinite render loop
-    // console.log(matchingTerms);
-    const terms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
-    const termsSecondary = new Set<string>(
-      matchingTermsSecondary.split(" ").filter((t) => t)
-    );
+    matchingTerms = new Set<string>(matchingTerms.split(" "));
+    matchingTermsSecondary = new Set<string>(matchingTermsSecondary.split(" "));
+    missingTags = new Set<string>(missingTags.split(" "));
 
     // parse header tags (tags on first line only)
     const lctext = text.toLowerCase().trim();
@@ -222,7 +220,7 @@
     text = text
       .replace(/(^|\s|;)(#_[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, (m, pfx, tag) => {
         const lctag = tag.toLowerCase().replace(/^#_/, "#");
-        return missingTags.indexOf(lctag) >= 0 ? pfx + tag : "";
+        return missingTags.has(lctag) ? pfx + tag : "";
       })
       .trim();
 
@@ -249,7 +247,7 @@
     });
 
     let mathTermRegex = new RegExp(
-      `\\$.*(?:${Array.from(terms).map(regexEscape).join("|")}).*\\$`,
+      `\\$.*(?:${Array.from(matchingTerms).map(regexEscape).join("|")}).*\\$`,
       "i"
     );
 
@@ -282,7 +280,10 @@
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
           // wrap math inside span.math (unless text matches search terms)
-          if (terms.size == 0 || (!str.match(mathTermRegex) && !terms.has("$")))
+          if (
+            matchingTerms.size == 0 ||
+            (!str.match(mathTermRegex) && !matchingTerms.has("$"))
+          )
             str = str.replace(
               /(\$\$?.+?\$\$?)/g,
               '<span class="math">$1</span>'
@@ -295,10 +296,10 @@
             (match, pfx, tag) => {
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
-              if (terms.has(lctag)) classNames += " selected";
-              else if (termsSecondary.has(lctag))
+              if (matchingTerms.has(lctag)) classNames += " selected";
+              else if (matchingTermsSecondary.has(lctag))
                 classNames += " secondary-selected";
-              if (missingTags.indexOf(lctag) >= 0) classNames += " missing";
+              if (missingTags.has(lctag)) classNames += " missing";
               if (lctag == label) {
                 classNames += " label";
                 if (labelUnique) classNames += " unique";

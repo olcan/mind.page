@@ -295,8 +295,7 @@
           !t.match(/^#pin(?:\/|$)/) &&
           (tagCounts.get(t) || 0) <= 1
       );
-      // if (item.missingTags.length > 0)
-      //   console.log(item.missingTags, item.tags);
+      // if (item.missingTags.length > 0) console.log(item.missingTags, item.tags);
     });
 
     // Update (but not save yet) times for editing items to maintain their ordering when one is saved
@@ -362,8 +361,8 @@
       }
       // we only take partial tag if the current tag is "selected" (i.e. full exact match)
       // (makes it easier to click on tags without accidentally getting a partial tag)
-      if ((tagNode as HTMLElement).classList.contains("selected"))
-        tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
+      // if ((tagNode as HTMLElement).classList.contains("selected"))
+      tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
     } else {
       console.warn("got null range for tag click: ", tag, e);
     }
@@ -1409,6 +1408,7 @@
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
+        // NOTE: by convention, tag inclusions come _before_ item itself
         if (options["include_tagrefs"]) {
           let item = items[index];
           options["exclude_tags"] = [
