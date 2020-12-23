@@ -823,7 +823,8 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout) return text.replace(/(?:^|\n) *```js_output\n.*?\s*```/gs, ""); // no output
+    if (!jsout)
+      return text.replace(/(?:^|\n) *```js_output\n( *```|.*?\n *```)/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -925,11 +926,11 @@
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
-            /(^|\n) *```(\w*?_output)(?:\n.*?)?\n *```/gs,
+            /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```)/gs,
             "$1```$2\n```"
           );
           item.text = item.text.replace(
-            /(?:^|\n) *```(\w*?_log)(?:\n.*?)?\n *```/gs,
+            /(?:^|\n) *```(\w*?_log)\n( *```|.*?\n *```)/gs,
             "" // remove so errors do not leave empty blocks
           );
           // NOTE: these appends may trigger async _write
@@ -965,12 +966,11 @@
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
-      /(^|\n) *```(\w*?_output)(?:\n.*?)?\n *```/gs,
+      /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```)/gs,
       "$1```$2\n```"
     );
     item.text = item.text.replace(
-      /(?:^|\n) *```(\w*?_log)(?:\n.*?)?\n *```/gs,
-      // "\n```$1\n```"
+      /(?:^|\n) *```(\w*?_log)\n( *```|.*?\n *```)/gs,
       "" // remove so errors do not leave empty blocks
     );
     item.text = appendJSOutput(item.text, index);
@@ -1780,7 +1780,21 @@
                 delete window["webppl"].runClosure;
               }
             },
-            _.merge({ verbose: false, debug: false }, options)
+            _.merge(
+              {
+                verbose: false,
+                debug: false,
+                errorHandlers: [
+                  function (e) {
+                    console.error("webppl error:", e);
+                    window["webppl"].running = false;
+                    let item = items[indexFromId.get(id)];
+                    if (item) item.running = false;
+                  },
+                ],
+              },
+              options
+            )
           );
         } catch (e) {
           window["webppl"].running = false;
