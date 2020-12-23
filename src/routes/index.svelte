@@ -1790,6 +1790,7 @@
                     window["webppl"].running = false;
                     let item = items[indexFromId.get(id)];
                     if (item) item.running = false;
+                    window["_write_log"](id, start, 1);
                   },
                 ],
               },
