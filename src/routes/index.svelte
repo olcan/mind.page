@@ -1358,7 +1358,11 @@
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
       } else {
-        return (idsFromLabel.get(item) || []).map((id) => indexFromId.get(id));
+        // NOTE: for multiple items, ordering is by label, empty labels come first, and ordering is arbitrary within labels
+        return _.sortBy(
+          (idsFromLabel.get(item) || []).map((id) => indexFromId.get(id)),
+          (index) => items[index].label
+        );
       }
     }
 
