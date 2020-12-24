@@ -782,15 +782,12 @@
   }
 
   let layoutPending = false;
-  function onItemResized(itemdiv, trigger: string) {
-    const id = itemdiv.id;
+  function onItemResized(id, container, trigger: string) {
+    if (!container) return;
     const index = indexFromId.get(id);
     if (index == undefined) return;
     let item = items[index];
-    // const height = parseInt(window.getComputedStyle(itemdiv).height);
-    // const height = Math.min(itemdiv.clientHeight, itemdiv.offsetHeight);
-    // const height = itemdiv.getBoundingClientRect().height;
-    const height = itemdiv.offsetHeight;
+    const height = container.offsetHeight;
     const prevHeight = item.height;
     if (height == prevHeight) return; // nothing has changed
     // NOTE: on iOS, editing items can trigger zero height to be reported, which we ignore

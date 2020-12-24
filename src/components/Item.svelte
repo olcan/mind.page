@@ -93,7 +93,7 @@
   export let onFocused = (index: number, focused: boolean) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
-  export let onResized = (itemdiv, trigger: string) => {};
+  export let onResized = (id, container, trigger: string) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -420,6 +420,7 @@
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
+  let container: HTMLDivElement;
   let itemdiv: HTMLDivElement;
   import { afterUpdate } from "svelte";
 
@@ -458,12 +459,15 @@
           .querySelectorAll(".MathJax")
           .forEach((elem) => elem.setAttribute("tabindex", "-1"));
         if (done) done();
-        onResized(itemdiv, "math rendered");
+        onResized(id, container, "math rendered");
       })
       .catch(console.error);
   }
 
   afterUpdate(() => {
+    // always report container height for potential changes
+    setTimeout(() => onResized(id, container, "afterUpdate"), 0);
+
     if (!itemdiv) return; // itemdiv is null if editing
 
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
@@ -641,11 +645,6 @@
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
 
-    // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
-    setTimeout(() => {
-      if (itemdiv) onResized(itemdiv, "afterUpdate");
-    }, 0);
-
     // remove <code></code> wrapper block for math blocks
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
       if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
@@ -684,7 +683,7 @@
         return;
       }
       img.onload = () => {
-        if (itemdiv) onResized(itemdiv, "img.onload");
+        onResized(id, container, "img.onload");
         img.setAttribute("_loaded", Date.now().toString());
       };
     });
@@ -735,9 +734,7 @@
         if (pendingScripts > 0) return;
         // console.log(`all scripts done in item ${index + 1}`);
         // if (itemdiv.querySelector("script")) console.warn("item still contains script(s)!");
-        setTimeout(() => {
-          if (itemdiv) onResized(itemdiv, "scripts done");
-        }, 0);
+        setTimeout(() => onResized(id, container, "scripts done"), 0);
 
         // if no errors, cache elems with _cache_key that had scripts in them
         if (scriptErrors.length > 0) return;
@@ -1169,7 +1166,7 @@
   }
   :global(.item .c3) {
     /* background: #0a0a0a; */
-    /* background: #171717; */
+    background: #171717;
     border-radius: 4px;
   }
   :global(.item > .c3:not(:first-child)) {
@@ -1293,6 +1290,7 @@
     <div class="debug">{debugString}</div>
   {/if}
   <div
+    bind:this={container}
     class="container"
     class:editing
     class:focused
@@ -1332,7 +1330,7 @@
           class:matching={matchingTerms.length > 0}
           on:click={onIndexClick}>{index + 1}</span>
       </div>
-      <div class="item" {id} bind:this={itemdiv} class:saving>
+      <div class="item" bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
