@@ -209,6 +209,12 @@
     );
     missingTags = new Set<string>(missingTags.split(" ").filter((t) => t));
 
+    // remove removed sections
+    text = text.replace(
+      /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*\n/gs,
+      ""
+    );
+
     // parse header tags (tags on first line only)
     const lctext = text.toLowerCase().trim();
     const headerTags = Array.from(
@@ -350,9 +356,9 @@
       }
     }
 
-    // apply hidden divs
+    // hide hidden sections
     text = text.replace(
-      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->/gs,
+      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*\n/gs,
       '<div style="display:none">$1</div>'
     );
 

@@ -2227,7 +2227,7 @@
                 {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
                 {items.length}
                 {#if matchingItemCount > 0}
-                  <span class="matching">{matchingItemCount}</span>
+                  &nbsp;<span class="matching">{matchingItemCount}</span>
                 {/if}
               </div>
               <div

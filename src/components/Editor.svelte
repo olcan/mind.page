@@ -104,10 +104,19 @@
     if (insideBlock)
       html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
 
-    // wrap hidden sections
+    // wrap hidden/removed sections
     html = html.replace(
       /(^|\n\s*?)(&lt!--\s*?hidden\s*?--&gt.+?&lt!--\s*?\/hidden\s*?--&gt\s*?\n)/gs,
-      '$1<div class="hidden">$2</div>'
+      '$1<div class="section hidden">$2</div>'
+    );
+    html = html.replace(
+      /(^|\n\s*?)(&lt!--\s*?removed\s*?--&gt.+?&lt!--\s*?\/removed\s*?--&gt\s*?\n)/gs,
+      '$1<div class="section removed">$2</div>'
+    );
+    // indicate section delimiters
+    html = html.replace(
+      /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)\s*\n/g,
+      '<div class="section-delimiter">$1</div>'
     );
 
     highlights.innerHTML = html;
@@ -454,11 +463,13 @@
     margin: -2px -4px;
     border-radius: 4px;
   }
-  :global(.hidden) {
-    opacity: 0.5;
-    border-top: 1px dashed gray;
-    border-bottom: 1px dashed gray;
-    margin: -1px 0;
+  :global(.section) {
+    border: 1px dashed #444;
+    margin: -1px -5px;
+    padding: 0 4px;
+  }
+  :global(.section-delimiter) {
+    color: #666;
   }
 
   /* adapt to smaller windows/devices */
