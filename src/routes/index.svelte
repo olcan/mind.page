@@ -152,6 +152,7 @@
     });
 
     if (focusedItem >= 0) {
+      // console.log("updateItemLayout focusedItem", focusedItem);
       // maintain focus on item
       const textarea = textArea(focusedItem);
       if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
@@ -167,7 +168,10 @@
           "#super-container-" + items[topMovedIndex].id
         );
         const itemTop = (div as HTMLElement).offsetTop;
-        if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop);
+        if (itemTop < window.scrollY) {
+          // console.log("scrolling up", itemTop, window.scrollY);
+          window.top.scrollTo(0, itemTop);
+        }
       });
     }
   }
@@ -280,6 +284,13 @@
             item.lctext.match(new RegExp(t.substring(6)))
         )
       );
+      // match id:* terms
+      item.matchingTerms = item.matchingTerms.concat(
+        terms.filter(
+          (t) => t.match(/^id:\S+/) && item.id.toLowerCase() == t.substring(3)
+        )
+      );
+
       if (item.matchingTerms.length > 0) matchingItemCount++;
       item.matchingTermsSecondary = termsSecondary.filter(
         (t) => item.lctext.indexOf(t) >= 0
@@ -412,6 +423,7 @@
 
   let tagCounts = new Map<string, number>();
   function itemTextChanged(index: number, text: string, update_deps = true) {
+    // console.log("itemTextChanged", index);
     let item = items[index];
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
@@ -445,6 +457,7 @@
     // first tag is taken as "label" if it is the first text in the item
     const prevLabel = item.label;
     item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
+    if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.label != prevLabel) {
       item.labelUnique = false;
       if (prevLabel) {
@@ -479,6 +492,7 @@
           );
           if (depitem.deephash != prevDeepHash && !depitem.log) {
             depitem.time = item.time - 1 - depindex; // offset to ensure dependency is considered more recent
+            // console.log("saving dependent", depindex);
             saveItem(depindex);
           }
         }
@@ -494,8 +508,10 @@
   ) {
     if (cancelled) {
       // just clear and return
-      lastEditorChangeTime = 0; // disable debounce even if editor focused
-      onEditorChange((editorText = ""));
+      if (text != "") {
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = ""));
+      }
       return;
     }
     let editing = true; // created item can be editing or not
@@ -520,6 +536,47 @@
         text = `${new Date(item.time)}\n${new Date(
           item.updateTime
         )}\n${new Date(item.createTime)}`;
+        break;
+      }
+      case "/dependencies": {
+        if (editingItems.length == 0) {
+          alert("/dependencies: no item selected");
+          return;
+        }
+        if (editingItems.length > 1) {
+          alert("/dependencies: too many items selected");
+          return;
+        }
+        let item = items[editingItems[0]];
+
+        let deps = [];
+        item.deps.map((id) => {
+          const dep = items[indexFromId.get(id)];
+          deps.push(dep.label || dep.id);
+        });
+
+        text = deps.join(" ");
+        break;
+      }
+      case "/dependents": {
+        if (editingItems.length == 0) {
+          alert("/dependents: no item selected");
+          return;
+        }
+        if (editingItems.length > 1) {
+          alert("/dependents: too many items selected");
+          return;
+        }
+        let item = items[editingItems[0]];
+        let deps = [];
+        items.forEach((dep) => {
+          if (dep.index == item.index) return; // skip self
+          if (dep.deps.length > 1 && dep.deps.indexOf(item.id) >= 0) {
+            if (dep.label && dep.labelUnique) deps.push(dep.label);
+            else deps.push("id:" + dep.id);
+          }
+        });
+        text = deps.join(" ");
         break;
       }
       case "/tweet": {
@@ -594,8 +651,11 @@
       ...itemToSave,
       id: tmpid,
       tmpid: tmpid,
-      saving: true,
       editing: editing,
+      // saving: true,
+      saving: !editing,
+      savedTime: time,
+      savedText: "", // so cancel = delete
     };
     items = [item, ...items];
     indexFromId.set(tmpid, 0); // needed by itemTextChanged
@@ -654,7 +714,9 @@
           idsFromLabel.set(item.label, ids.concat([item.id]));
         }
         itemTextChanged(index, text);
-        onItemSaved(doc.id);
+        // if editing, we do not call onItemSaved so save is postponed to post-edit
+        if (!item.editing) onItemSaved(doc.id);
+        else items[index] = item; // trigger dom update
 
         if (focusedItem == index)
           // maintain focus (and caret placement) through id/element change
@@ -681,28 +743,32 @@
   }
 
   function focusOnNearestEditingItem(index: number) {
-    // console.log("focusOnNearestEditingItem, editingItems",editingItems)
+    // console.log("focusOnNearestEditingItem", index, editingItems);
     let near = Math.min(...editingItems.filter((i) => i > index));
     if (near == Infinity) near = Math.max(...[-1, ...editingItems]);
     focusedItem = near;
-    textArea(near).focus();
-    // NOTE: a second dispatched focus() call can sometimes be necessary
-    //       (e.g. if you unpin/save a pinned item and refocus on some item below)
-    setTimeout(() => textArea(near).focus(), 0);
-    // console.log("focusing on ",near,"from",index)
+    setTimeout(() => {
+      textArea(near).focus();
+      // console.log("focused on item", near);
+    }, 0);
   }
 
   function onItemSaved(id: string) {
-    // console.log("saved item", id);
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
-    items[index].savedText = items[index].text;
-    items[index].savedTime = items[index].time;
-    items[index].saving = false;
-    if (items[index].saveClosure) {
-      items[index].saveClosure(index);
-      items[index].saveClosure = null;
+    let item = items[index];
+    // do not save any _tmp blocks
+    item.savedText = item.text.replace(
+      /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
+      ""
+    );
+    item.savedTime = item.time;
+    item.saving = false;
+    if (item.saveClosure) {
+      item.saveClosure(index);
+      item.saveClosure = null;
     }
+    items[index] = item; // trigger dom update
   }
 
   let layoutPending = false;
@@ -833,20 +899,24 @@
   }
 
   function saveItem(index: number) {
+    // console.log("saving item", index);
     let item = items[index];
     item.saving = true;
-    const itemToSave = { time: item.time, text: item.text };
+    let itemToSave = { time: item.time, text: item.text };
     // do not save any _tmp blocks
     itemToSave.text = item.text.replace(
       /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
       ""
     );
-    itemTextChanged(index, itemToSave.text);
+    // trigger itemTextChanged only if savedText is different (not just for time change)
+    if (itemToSave.text != item.savedText)
+      itemTextChanged(index, itemToSave.text);
     firestore()
       .collection("items")
       .doc(item.id)
       .update(itemToSave)
       .then(() => {
+        // console.log("saved item", index);
         onItemSaved(item.id);
       })
       .catch(console.error);
@@ -881,7 +951,7 @@
   ) {
     let item = items[index];
 
-    // if cancelled, restore savedTime and savedText (unless empty, which indicates deletion)
+    // if cancelled, restore savedTime and savedText (unless empty)
     if (cancelled) {
       item.time = item.savedTime;
       if (item.text) item.text = item.savedText;
@@ -909,7 +979,11 @@
     } else {
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
-      if (focusedItem == index) focusedItem = -1;
+      // NOTE: onItemFocused may not get invoked (and item.focused may remain true) on destroyed editors
+      if (focusedItem == index) {
+        focusedItem = -1;
+        item.focused = false;
+      }
       if (item.text.trim().length == 0) {
         // delete
         itemTextChanged(index, ""); // clears label, deps, etc
@@ -956,10 +1030,13 @@
     // console.log(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
   }
 
+  // WARNING: onItemFocused may NOT be invoked when editor is destroyed
   function onItemFocused(index: number, focused: boolean) {
     if (focused) focusedItem = index;
     else focusedItem = -1;
-    // console.log(`item ${index} focused: ${focused}, focusedItem:${focusedItem}`);
+    // console.log(
+    //   `item ${index} focused: ${focused}, focusedItem:${focusedItem}`
+    // );
   }
 
   function onItemRun(index: number = -1) {
