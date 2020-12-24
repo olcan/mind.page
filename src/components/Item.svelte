@@ -491,6 +491,9 @@
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
         span.outerHTML = span.innerHTML;
       });
+      Array.from(itemdiv.querySelectorAll("mark div")).forEach((spacer) => {
+        spacer.remove();
+      });
       const terms = matchingTerms.split(" ").filter((t) => t);
       if (terms.length == 0) return;
       let treeWalker = document.createTreeWalker(
@@ -526,7 +529,7 @@
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
           parent.insertBefore(document.createTextNode(m[1]), node);
-          var word = parent.insertBefore(document.createElement("span"), node);
+          let word = parent.insertBefore(document.createElement("span"), node);
           word.appendChild(document.createTextNode(m[2]));
           word.className = "highlight";
           if (node.parentElement.tagName == "MARK") {
@@ -535,9 +538,12 @@
             // adjust margin/padding and border radius for in-tag (in-mark) matches
             const tagStyle = window.getComputedStyle(node.parentElement);
             word.style.borderRadius = "0";
-            // NOTE: marks (i.e. tags) can have more vertical padding (e.g. under .menu class)
-            // word.style.paddingTop = tagStyle.paddingTop;
-            // word.style.paddingBottom = tagStyle.paddingBottom;
+
+            // NOTE: marks (i.e. tags) can have varying vertical padding (e.g. under .menu class)
+            word.style.paddingTop = tagStyle.paddingTop;
+            word.style.marginTop = "-" + word.style.paddingTop;
+            word.style.paddingBottom = tagStyle.paddingBottom;
+            word.style.marginBottom = "-" + word.style.paddingBottom;
             if (m[2][0] == "#") {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
@@ -546,6 +552,30 @@
               word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
               word.style.borderBottomLeftRadius =
                 tagStyle.borderBottomLeftRadius;
+
+              // insert spacer divs under .menu class where mark becomes flexible
+              if (node.parentElement.closest(".menu")) {
+                let spacer = node.parentElement.insertBefore(
+                  document.createElement("div"),
+                  node.parentElement.firstChild
+                );
+                spacer.style.background = "#9c9"; // .item mark span.highlight background
+                spacer.style.height = "100%";
+                spacer.style.flexGrow = "1";
+                spacer.style.paddingLeft = tagStyle.paddingLeft;
+                spacer.style.paddingTop = tagStyle.paddingTop;
+                spacer.style.paddingBottom = tagStyle.paddingTop;
+                spacer.style.marginLeft = "-" + tagStyle.paddingLeft;
+                spacer.style.marginTop = "-" + tagStyle.paddingTop;
+                spacer.style.marginBottom = "-" + tagStyle.paddingTop;
+                spacer.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
+                spacer.style.borderBottomLeftRadius =
+                  tagStyle.borderBottomLeftRadius;
+                let rightSpacer = node.parentElement.appendChild(
+                  document.createElement("div")
+                );
+                rightSpacer.style.flexGrow = "1";
+              }
             }
             if (text.length == 0) {
               // suffix match (rounded on right)
@@ -554,6 +584,31 @@
               word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
               word.style.borderBottomRightRadius =
                 tagStyle.borderBottomLeftRadius;
+
+              // insert spacer divs under .menu class where mark becomes flexible
+              if (node.parentElement.closest(".menu")) {
+                let spacer = node.parentElement.appendChild(
+                  document.createElement("div")
+                );
+                spacer.style.background = "#9c9"; // .item mark span.highlight background
+                spacer.style.height = "100%";
+                spacer.style.flexGrow = "1";
+                spacer.style.paddingRight = tagStyle.paddingRight;
+                spacer.style.paddingTop = tagStyle.paddingTop;
+                spacer.style.paddingBottom = tagStyle.paddingTop;
+                spacer.style.marginRight = "-" + tagStyle.paddingRight;
+                spacer.style.marginTop = "-" + tagStyle.paddingTop;
+                spacer.style.marginBottom = "-" + tagStyle.paddingTop;
+                spacer.style.borderTopRightRadius =
+                  tagStyle.borderTopRightRadius;
+                spacer.style.borderBottomRightRadius =
+                  tagStyle.borderBottomRightRadius;
+                let leftSpacer = node.parentElement.insertBefore(
+                  document.createElement("div"),
+                  node.parentElement.firstChild
+                );
+                leftSpacer.style.flexGrow = "1";
+              }
             }
           }
         }
@@ -971,7 +1026,7 @@
   }
   :global(.item .menu a),
   :global(.item .menu mark) {
-    padding: 8px;
+    padding: 4px;
   }
   :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
@@ -1178,9 +1233,6 @@
 
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
-    :global(.item .menu a, .item .menu mark) {
-      padding: 8px 4px;
-    }
     .item {
       font-size: 16px;
       line-height: 23px;
