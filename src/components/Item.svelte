@@ -616,8 +616,9 @@
         node.nodeValue = text;
       }
     };
-    // setTimeout(highlightClosure, 0);
-    highlightClosure();
+    // highlight menu items immediately, otherwise dispatch
+    if (itemdiv.querySelector(".menu")) highlightClosure();
+    else setTimeout(highlightClosure, 0);
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
