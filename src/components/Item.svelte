@@ -202,9 +202,11 @@
     }
     // console.log("toHTML");
 
-    matchingTerms = new Set<string>(matchingTerms.split(" "));
-    matchingTermsSecondary = new Set<string>(matchingTermsSecondary.split(" "));
-    missingTags = new Set<string>(missingTags.split(" "));
+    matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
+    matchingTermsSecondary = new Set<string>(
+      matchingTermsSecondary.split(" ").filter((t) => t)
+    );
+    missingTags = new Set<string>(missingTags.split(" ").filter((t) => t));
 
     // parse header tags (tags on first line only)
     const lctext = text.toLowerCase().trim();
@@ -483,9 +485,8 @@
     cacheElems();
 
     // highlight matching terms in item text
-    // NOTE: this can be slow so we do it async
     const matchingTermsAtDispatch = matchingTerms;
-    setTimeout(() => {
+    let highlightClosure = () => {
       if (!itemdiv) return;
       if (matchingTerms != matchingTermsAtDispatch) return;
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
@@ -614,7 +615,8 @@
         }
         node.nodeValue = text;
       }
-    });
+    };
+    setTimeout(highlightClosure, 0);
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
