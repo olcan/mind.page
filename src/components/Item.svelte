@@ -490,7 +490,7 @@
       if (!itemdiv) return;
       if (matchingTerms != matchingTermsAtDispatch) return;
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
-        span.outerHTML = span.innerHTML;
+        span.replaceWith(span.firstChild);
       });
       Array.from(itemdiv.querySelectorAll("mark div")).forEach((spacer) => {
         spacer.remove();
