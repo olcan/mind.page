@@ -83,6 +83,7 @@
   export let height = 0;
   const placeholder = " ";
   let error = false;
+  let warning = false;
   export let onEditing = (
     index: number,
     editing: boolean,
@@ -266,6 +267,15 @@
         else if (insideBlock && str.match(/^\s*```\s*$/s))
           // do not allow extra chars (consistent w/ marked)
           insideBlock = false;
+
+        // highlights errors/warnings using console styling even if outside blocks
+        // (to be consistent with detection/ordering logic in index.svelte onEditorChange)
+        if (!insideBlock && str.match(/^(?:ERROR|WARNING):/)) {
+          str = str
+            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+            .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>');
+          console.log(str);
+        }
 
         // preserve inline whitespace and line breaks by inserting &nbsp; and <br> outside of code blocks
         // (we exclude |^> to break inside blockquotes for now)
@@ -623,6 +633,7 @@
 
     // indicate errors in item
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
+    warning = itemdiv.querySelector(".console-warn") != null;
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
@@ -933,6 +944,9 @@
   }
   .error {
     border: 1px solid red;
+  }
+  .warning {
+    border: 1px solid yellow;
   }
   .running {
     border: 1px solid #4ae;
@@ -1278,6 +1292,7 @@
     class:focused
     class:saving
     class:error
+    class:warning
     class:runnable
     class:running
     class:timeOutOfOrder>

@@ -307,6 +307,8 @@
           (tagCounts.get(t) || 0) <= 1
       );
       // if (item.missingTags.length > 0) console.log(item.missingTags, item.tags);
+
+      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null;
     });
 
     // Update (but not save yet) times for editing items to maintain their ordering when one is saved
@@ -343,6 +345,8 @@
         b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
         // missing tag prefixes
         b.missingTags.length - a.missingTags.length ||
+        // errors
+        b.hasError - a.hasError ||
         // time (most recent first)
         b.time - a.time
       );
@@ -1202,6 +1206,7 @@
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
+      item.hasError = false;
       // state from updateItemLayout
       item.index = index;
       item.timeString = "";
