@@ -925,6 +925,7 @@
     font-size: 18px;
     line-height: 26px;
     /* cursor: pointer; */
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
   .item.saving {
@@ -1027,6 +1028,7 @@
     padding: 0 4px;
     margin: 0;
   }
+
   /* .menu styling: paragraphs become flex boxes */
   :global(.item .menu p) {
     display: flex;
