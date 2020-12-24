@@ -449,6 +449,7 @@
 
   afterUpdate(() => {
     if (!itemdiv) return; // itemdiv is null if editing
+
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
     // NOTE: always invoked twice for new items due to id change after first save
@@ -619,6 +620,9 @@
     // highlight menu items immediately, otherwise dispatch
     if (itemdiv.querySelector(".menu")) highlightClosure();
     else setTimeout(highlightClosure, 0);
+
+    // indicate errors in item
+    error = itemdiv.querySelector(".console-error") != null;
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
@@ -806,13 +810,15 @@
     position: relative;
     border-radius: 4px;
     background: #111;
+    border: 1px solid transparent;
+    box-sizing: border-box;
   }
   .item-menu {
     position: absolute;
     top: 0;
     right: 0;
     /* background: #333; */
-    /* opacity: 0.5; */
+    opacity: 0.5;
     border-radius: 0 4px 0 4px;
     color: black;
     line-height: 25px; /* same as menu item heights */
@@ -921,16 +927,14 @@
     /* cursor: pointer; */
   }
 
-  /* .running {
-    border: 1px solid #0b0;
-    margin: -1px;
-  } */
-  .saving {
+  .item.saving {
     opacity: 0.5;
   }
   .error {
     border: 1px solid red;
-    margin: -1px;
+  }
+  .running {
+    border: 1px solid #4ae;
   }
 
   .loading {
@@ -942,6 +946,7 @@
     height: 100%;
     justify-content: center;
     align-items: center;
+    border-radius: 4px;
     background: rgba(0, 0, 0, 0.5);
     pointer-events: none;
   }
@@ -1268,10 +1273,11 @@
   <div
     class="container"
     class:editing
-    class:saving
-    class:running
     class:focused
+    class:saving
+    class:error
     class:runnable
+    class:running
     class:timeOutOfOrder>
     {#if editing}
       <div class="edit-menu">
@@ -1303,7 +1309,7 @@
           class:matching={matchingTerms.length > 0}
           on:click={onIndexClick}>{index + 1}</span>
       </div>
-      <div class="item" {id} bind:this={itemdiv} class:error>
+      <div class="item" {id} bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>

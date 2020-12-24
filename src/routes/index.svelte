@@ -735,11 +735,7 @@
           .add({ item: doc.id, ...itemToSave })
           .catch(console.error);
       })
-      .catch((error) => {
-        let index = indexFromId.get(tmpid); // since index can change
-        console.error(error);
-        items[index].error = true;
-      });
+      .catch(console.error);
   }
 
   function focusOnNearestEditingItem(index: number) {

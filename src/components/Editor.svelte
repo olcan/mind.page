@@ -384,6 +384,7 @@
     position: relative;
     width: 100%;
     cursor: text;
+    padding-bottom: 2px; /* covers extra 2px of backdrop (see below), aligns correctly if item has outer border */
   }
   .backdrop,
   textarea {
@@ -395,7 +396,7 @@
     /* color: transparent; */
     color: #ddd;
     position: absolute;
-    /* top: -1px; */ /* NOTE: backdrop is 2px taller (presumably due to border) but aligns correctly */
+    /* top: -1px; */ /* NOTE: backdrop is 2px taller (perhaps due to border) but aligns correctly */
     overflow: hidden;
     width: 100%;
     background: #111;
@@ -403,7 +404,7 @@
     padding: 10px;
     border-radius: 4px;
     border: 1px dashed #444;
-    box-sizing: border-box; /* essential for proper sizing of textarea */
+    box-sizing: border-box;
     white-space: pre-wrap;
     word-wrap: break-word;
   }
@@ -423,7 +424,7 @@
     border-radius: 0;
     border: 1px solid transparent;
     overflow: hidden;
-    box-sizing: border-box; /* essential for proper sizing of textarea */
+    box-sizing: border-box;
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }
