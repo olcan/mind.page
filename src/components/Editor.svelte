@@ -115,8 +115,8 @@
     );
     // indicate section delimiters
     html = html.replace(
-      /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)\s*\n/g,
-      '<div class="section-delimiter">$1</div>'
+      /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)/g,
+      '<span class="section-delimiter">$1</span>'
     );
 
     highlights.innerHTML = html;
