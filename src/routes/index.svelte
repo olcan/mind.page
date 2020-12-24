@@ -70,6 +70,8 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
+  let oldestTime = Infinity;
+  let oldestTimeString = "";
   function updateItemLayout() {
     // console.log("updateItemLayout");
     editingItems = [];
@@ -97,6 +99,10 @@
 
       let lastItem = items[index - 1];
       let timeString = itemTimeString((Date.now() - item.time) / 1000);
+      if (item.time < oldestTime) {
+        oldestTime = item.time;
+        oldestTimeString = timeString;
+      }
 
       item.timeString = "";
       item.timeOutOfOrder = false;
@@ -202,6 +208,7 @@
   const editorDebounceTime = 500;
   let lastEditorChangeTime = 0;
   let matchingItemCount = 0;
+  let textLength = 0;
   let editorChangePending = false;
   function onEditorChange(text: string) {
     // if editor has focus and it is too soon since last change/return, debounce
@@ -251,8 +258,11 @@
     });
 
     matchingItemCount = 0;
+    textLength = 0;
     let listing = [];
     items.forEach((item) => {
+      textLength += item.text.length;
+
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
       item.prefixMatch = item.lctext.startsWith(terms[0]);
@@ -1189,7 +1199,7 @@
   }
 
   import { onMount } from "svelte";
-  import { hashCode } from "../util.js";
+  import { hashCode, numberWithCommas } from "../util.js";
 
   if (isClient) {
     // initialize item state
@@ -2113,13 +2123,18 @@
     padding-left: 4px;
   }
   #status .counts {
+    font-family: Avenir Next, Helvetica;
     position: absolute;
     right: 0;
     top: 0;
     padding-right: 4px; /* matches .corner inset on first item */
     padding-top: 4px;
   }
-  #status .matching {
+  :global(#status .counts .unit, #status .counts .comma) {
+    color: #666;
+    font-size: 80%;
+  }
+  #status .counts .matching {
     color: #9f9;
   }
 
@@ -2208,6 +2223,8 @@
                 {#each { length: dotCount } as _}•{/each}
               </span>
               <div class="counts">
+                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
+                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
                 {items.length}
                 {#if matchingItemCount > 0}
                   <span class="matching">{matchingItemCount}</span>
