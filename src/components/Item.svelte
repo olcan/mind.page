@@ -622,7 +622,7 @@
     else setTimeout(highlightClosure, 0);
 
     // indicate errors in item
-    error = itemdiv.querySelector(".console-error") != null;
+    error = itemdiv.querySelector(".console-error,mark.missing") != null;
 
     // NOTE: we only report inner item height, NOT the time string height, since otherwise item heights would appear to change frequently based on ordering of items. Instead time string height must be added separately.
     setTimeout(() => {
