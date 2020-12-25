@@ -1011,12 +1011,12 @@
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
-            /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```)/gs,
-            "$1```$2\n```"
+            /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```) *\n/gs,
+            "$1```$2\n```\n"
           );
           item.text = item.text.replace(
-            /(?:^|\n) *```(\w*?_log)\n( *```|.*?\n *```)/gs,
-            "" // remove so errors do not leave empty blocks
+            /(^|\n) *```(\w*?_log)\n( *```|.*?\n *```) *\n/gs,
+            "$1" // remove so errors do not leave empty blocks
           );
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
@@ -1054,12 +1054,12 @@
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
-      /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```)/gs,
-      "$1```$2\n```"
+      /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```) *\n/gs,
+      "$1```$2\n```\n"
     );
     item.text = item.text.replace(
-      /(?:^|\n) *```(\w*?_log)\n( *```|.*?\n *```)/gs,
-      "" // remove so errors do not leave empty blocks
+      /(^|\n) *```(\w*?_log)\n( *```|.*?\n *```) *\n/gs,
+      "$1" // remove so errors do not leave empty blocks
     );
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
