@@ -243,14 +243,18 @@
     }
 
     // remove spaced tabs with backspace
-    // (for backspace, unlike shift-tab, we require/allow an _extra_ space)
+    // (for backspace, unlike shift-tab, we require/allow an _extra_ space and we require even number of spaces)
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
       textarea.selectionStart >= 3 &&
       textarea.value
         .substring(textarea.selectionStart - 3, textarea.selectionStart)
-        .match(/\s  /)
+        .match(/\s  /) &&
+      !(
+        textarea.value.substring(0, textarea.selectionStart).match(/ +$/)[0]
+          .length % 2
+      )
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);

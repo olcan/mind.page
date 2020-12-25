@@ -1783,6 +1783,36 @@
       return histogram;
     };
 
+    window["_compare_histograms"] = function (
+      numbers: any,
+      baseline: any,
+      bins: number = 10,
+      min: number = Infinity,
+      max: number = -Infinity,
+      digits: number = 2
+    ) {
+      if (min > max) {
+        numbers.concat(baseline).forEach((num) => {
+          if (num < min) min = num;
+          else if (num > max) max = num;
+        });
+      }
+      const hist1 = window["_histogram"](numbers, bins, min, max, digits);
+      const hist2 = window["_histogram"](baseline, bins, min, max, digits);
+      return {
+        keys: _.keys(hist1),
+        values: window["_normalize"](_.values(hist1)),
+        baseline: window["_normalize"](_.values(hist2)),
+      };
+    };
+
+    window["_normalize"] = function (numbers: any, digits: number = 3) {
+      const sum = _.sum(numbers.map(parseFloat));
+      return numbers.map((x) =>
+        typeof x == "number" ? x / sum : (parseFloat(x) / sum).toFixed(digits)
+      );
+    };
+
     window["_samples"] = function (dist: any) {
       return dist.samples.map((s) => s["value"]);
     };
