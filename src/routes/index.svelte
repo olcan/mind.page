@@ -1137,6 +1137,7 @@
   let showDottedPending = false;
   function onScroll() {
     lastScrollTime = Date.now();
+    return; // pull menu disabled for now, not as useful due to forced wait until end of bounce animation, and triggered accidentally many times on iPhone and iPad
     if (window.scrollY > 0) lastScrolledDownTime = lastScrollTime;
     if (window.scrollY == 0) lastScrolledDownTime = 0;
     if (
