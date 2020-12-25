@@ -211,7 +211,7 @@
 
     // remove removed sections
     text = text.replace(
-      /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?\n/gs,
+      /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs,
       ""
     );
 
@@ -358,7 +358,7 @@
 
     // hide hidden sections
     text = text.replace(
-      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?\n/gs,
+      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
       '<div style="display:none">$1</div>'
     );
 

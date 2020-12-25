@@ -343,12 +343,12 @@
         // position in item with exact match on first term
         listing.indexOf(b.prefixMatchTerm) -
           listing.indexOf(a.prefixMatchTerm) ||
+        // editing mode (except log items)
+        (!b.log && b.editing) - (!a.log && a.editing) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // // alphanumeric ordering on prefix-matching term
         // a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
-        // editing mode (except log items)
-        (!b.log && b.editing) - (!a.log && a.editing) ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
         // # of matching secondary words
@@ -901,7 +901,7 @@
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
     if (!jsout)
-      return text.replace(/(?:^|\n) *```js_output\n( *```|.*?\n *```)/gs, ""); // no output
+      return text.replace(/(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs, ""); // no output
     return appendBlock(text, "js_output", jsout);
   }
 
@@ -1011,12 +1011,12 @@
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
-            /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```) *\n/gs,
-            "$1```$2\n```\n"
+            /(^|\n) *```(\w*?_output)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+            "$1```$2\n```$3"
           );
           item.text = item.text.replace(
-            /(^|\n) *```(\w*?_log)\n( *```|.*?\n *```) *\n/gs,
-            "$1" // remove so errors do not leave empty blocks
+            /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+            "$3" // remove so errors do not leave empty blocks
           );
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
@@ -1054,12 +1054,12 @@
     if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
-      /(^|\n) *```(\w*?_output)\n( *```|.*?\n *```) *\n/gs,
-      "$1```$2\n```\n"
+      /(^|\n) *```(\w*?_output)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+      "$1```$2\n```$3"
     );
     item.text = item.text.replace(
-      /(^|\n) *```(\w*?_log)\n( *```|.*?\n *```) *\n/gs,
-      "$1" // remove so errors do not leave empty blocks
+      /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+      "$3" // remove so errors do not leave empty blocks
     );
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
@@ -1432,6 +1432,7 @@
     };
 
     function indicesForItem(item: string) {
+      if (item == "auto" || item == "self" || item == "this") item = "";
       if (!item && evalIndex >= 0) {
         return [evalIndex];
       } else if (
@@ -1451,7 +1452,7 @@
       }
     }
 
-    window["_id"] = function (item: string = "") {
+    window["_id"] = function (item: string = "", multiple: boolean = false) {
       let ids = [];
       let indices = indicesForItem(item);
       if (!item && indices.length == 0) {
@@ -1461,10 +1462,16 @@
       indices.map((index) => {
         ids.push(items[index].tmpid || items[index].id);
       });
-      return ids.length == 1 ? ids[0] : ids;
+      if (multiple) return ids; // return as array
+      if (ids.length > 1)
+        console.warn(`multiple items matched _id(${item}), returning first`);
+      return ids[0];
+    };
+    window["_ids"] = function (item: string = "") {
+      return window["_id"](item, true /* multiple */);
     };
 
-    window["_label"] = function (item: string = "") {
+    window["_label"] = function (item: string = "", multiple: boolean = false) {
       let labels = [];
       let indices = indicesForItem(item);
       if (!item && indices.length == 0) {
@@ -1474,7 +1481,13 @@
       indices.map((index) => {
         labels.push(items[index].label);
       });
-      return labels.length == 1 ? labels[0] : labels;
+      if (multiple) return labels; // return as array
+      if (labels.length > 1)
+        console.warn(`multiple items matched _label(${item}), returning first`);
+      return labels[0];
+    };
+    window["_labels"] = function (item: string = "") {
+      return window["_label"](item, true /* multiple */);
     };
 
     window["_tags"] = function (item: string = "") {
@@ -1541,6 +1554,7 @@
     };
 
     let _writePendingItem = "";
+    let _writePendingType = "";
     let _writePendingItemLog = "";
     window["_write"] = function (
       item: string,
@@ -1548,7 +1562,10 @@
       type: string = "_output"
     ) {
       let ids = indicesForItem(item).map((index) => items[index].id);
-
+      if (ids.length == 0) {
+        console.error(`could not determine item(s) for _write to '${item}'`);
+        return;
+      }
       // if writing _log to item pending another _write, attach to that write
       if (type == "_log" && item == _writePendingItem) {
         _writePendingItemLog = text;
@@ -1556,11 +1573,12 @@
       }
       // NOTE: write is always async in case triggered by eval during onItemEditing
       _writePendingItem = item;
+      _writePendingType = type;
       setTimeout(() => {
         let log = "";
-        if (_writePendingItem == item) {
+        if (_writePendingItem == item && _writePendingType == type) {
           log = _writePendingItemLog;
-          _writePendingItemLog = _writePendingItem = "";
+          _writePendingItemLog = _writePendingItem = _writePendingType = "";
         }
         let indices = ids.map((id) => indexFromId.get(id));
         indices.map((index) => {
@@ -1568,6 +1586,13 @@
           let item = items[index];
           // if item is editing, then write immediately without saving
           if (item.editing) {
+            // clear existing _log if any
+            if (log || type == "_log") {
+              item.text = item.text.replace(
+                /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+                "$3"
+              );
+            }
             if (type == "") item.text = text;
             else item.text = appendBlock(item.text, type, text);
             if (log) item.text = appendBlock(item.text, "_log", log);
@@ -1588,6 +1613,13 @@
                 )
               )
                 return; // cancel write
+            }
+            // clear existing _log if any
+            if (log || type == "_log") {
+              item.text = item.text.replace(
+                /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+                "$3"
+              );
             }
             if (type == "") item.text = text;
             else item.text = appendBlock(item.text, type, text);
@@ -1867,70 +1899,90 @@
       return pmf;
     };
 
+    // NOTE: all errors are logged, so rejection handling is unnecessary for logging purposes
+    // NOTE: resolve/reject handlers are async, e.g. must do their own _write_log if needed
     window["_run_webppl"] = function (id: string = "", options: object = {}) {
-      if (!id) {
-        if (evalIndex < 0) {
-          console.error("_run_webppl() invoked from async javascript");
+      return new Promise((resolve, reject) => {
+        if (!id) {
+          if (evalIndex < 0) {
+            const err = new Error(
+              "_run_webppl() invoked from async javascript"
+            );
+            console.error(err); // synchronous error that should get written into item
+            reject(err);
+            return;
+          }
+          id = items[evalIndex].id;
+        }
+        let item = items[indexFromId.get(id)];
+        if (!item) {
+          const err = new Error(`item id:${id} not found`);
+          console.error(err); // synchronous error that should get written into item
+          reject(err);
           return;
         }
-        id = items[evalIndex].id;
-      }
-      let item = items[indexFromId.get(id)];
-      if (!item) return; // item not found
-      item.running = true;
-
-      let prevRunClosure = window["webppl"].runClosure;
-      let runClosure = function () {
-        if (prevRunClosure) prevRunClosure();
-        let start = Date.now();
-        window["webppl"].running = true;
-        try {
-          window["webppl"].run(
-            window["_read_deep"]("webppl", id, { replace_$id: true }),
-            function (s, x) {
-              let time = Date.now() - start;
-              if (x != undefined) window["_write"](id, JSON.stringify(x));
-              if (Object.keys(s).length > 0)
-                console.log("webppl state:", JSON.stringify(s));
-              console.log("webppl took", time, "ms");
-              window["_write_log"](id, start, 1);
-              window["webppl"].running = false;
-              let item = items[indexFromId.get(id)];
-              if (item) item.running = false;
-              if (window["webppl"].runClosure) {
-                window["webppl"].runClosure();
-                delete window["webppl"].runClosure;
-              }
-            },
-            _.merge(
-              {
-                verbose: false,
-                debug: false,
-                errorHandlers: [
-                  function (e) {
-                    console.error("webppl error:", e);
-                    window["webppl"].running = false;
-                    let item = items[indexFromId.get(id)];
-                    if (item) item.running = false;
-                    window["_write_log"](id, start, 1);
-                  },
-                ],
+        item.running = true;
+        let prevRunClosure = window["webppl"].runClosure;
+        let runClosure = function () {
+          if (prevRunClosure) prevRunClosure();
+          let start = Date.now();
+          window["webppl"].running = true;
+          try {
+            window["webppl"].run(
+              window["_read_deep"]("webppl", id, { replace_$id: true }),
+              function (s, x) {
+                let time = Date.now() - start;
+                if (x != undefined) window["_write"](id, JSON.stringify(x));
+                if (Object.keys(s).length > 0)
+                  console.log("webppl state:", JSON.stringify(s));
+                console.log("webppl took", time, "ms");
+                window["webppl"].running = false;
+                window["_write_log"](id, start, 1);
+                let item = items[indexFromId.get(id)];
+                if (item) item.running = false;
+                if (window["webppl"].runClosure) {
+                  window["webppl"].runClosure();
+                  delete window["webppl"].runClosure;
+                }
+                resolve(x);
               },
-              options
-            )
-          );
-        } catch (e) {
-          window["webppl"].running = false;
-          let item = items[indexFromId.get(id)];
-          if (item) item.running = false;
-          throw e;
+              _.merge(
+                {
+                  verbose: false,
+                  debug: false,
+                  errorHandlers: [
+                    function (e) {
+                      window["webppl"].running = false;
+                      console.error(`webppl error: ${e}`); // so error included in _write_log
+                      window["_write_log"](id, start, 1);
+                      let item = items[indexFromId.get(id)];
+                      if (item) item.running = false;
+                      if (window["webppl"].runClosure) {
+                        window["webppl"].runClosure();
+                        delete window["webppl"].runClosure;
+                      }
+                      reject(new Error(`webppl error: ${e}`));
+                    },
+                  ],
+                },
+                options
+              )
+            );
+          } catch (e) {
+            console.error(`webppl exception: ${e}`);
+            window["webppl"].running = false;
+            let item = items[indexFromId.get(id)];
+            if (item) item.running = false;
+            reject(e);
+            throw e;
+          }
+        };
+        if (window["webppl"].running) {
+          window["webppl"].runClosure = runClosure;
+        } else {
+          runClosure();
         }
-      };
-      if (window["webppl"].running) {
-        window["webppl"].runClosure = runClosure;
-      } else {
-        runClosure();
-      }
+      });
     };
 
     window["_running"] = function (id: string = "", running: boolean = true) {
@@ -2026,7 +2078,7 @@
     if (!consolediv) return; // can happen during login process
     // NOTE: if this is from onunhandledrejection, then we need to use e.reason
     let msg = e.reason
-      ? `${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
+      ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
       : `${e.message} (line:${e.lineno}, col:${e.colno})`;
     if (console["_window_error"]) console["_window_error"](msg);
     else alert(msg);
