@@ -1808,9 +1808,7 @@
 
     window["_normalize"] = function (numbers: any, digits: number = 3) {
       const sum = _.sum(numbers.map(parseFloat));
-      return numbers.map((x) =>
-        typeof x == "number" ? x / sum : (parseFloat(x) / sum).toFixed(digits)
-      );
+      return numbers.map((x) => (parseFloat(x) / sum).toFixed(digits));
     };
 
     window["_samples"] = function (dist: any) {
