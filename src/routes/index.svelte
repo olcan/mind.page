@@ -321,10 +321,11 @@
       item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null;
     });
 
-    // Update (but not save yet) times for editing items to maintain their ordering when one is saved
+    // Update (but not save yet) times for editing and running items to maintain ordering
+    // among running/editing items within their sort level (see ordering logic below)
     let now = Date.now();
     items.forEach((item) => {
-      if (item.editing && !item.log) item.time = now;
+      if ((item.editing || item.running) && !item.log) item.time = now;
     });
 
     // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
@@ -343,6 +344,8 @@
         // position in item with exact match on first term
         listing.indexOf(b.prefixMatchTerm) -
           listing.indexOf(a.prefixMatchTerm) ||
+        // running mode
+        b.running - a.running ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // prefix match on first term
@@ -837,7 +840,6 @@
   }
 
   let evalIndex = -1;
-  let evalTime = 0;
   function evalJSInput(
     text: string,
     label: string = "",
@@ -850,7 +852,6 @@
     let start = Date.now();
     try {
       evalIndex = index;
-      evalTime = Date.now();
       let out = eval("(function(){\n" + jsin + "\n})()");
       const outputConfirmLength = 16 * 1024;
       if (out && out.length >= outputConfirmLength) {
@@ -892,8 +893,10 @@
     return text;
   }
 
+  let lastRunTime = 0;
   function appendJSOutput(text: string, index: number): string {
     if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
+    lastRunTime = Date.now();
     // execute JS code, including any 'js' blocks from this and any tag-referenced items
     // NOTE: js_input blocks are assumed "local", i.e. not intended for export
     let item = items[index];
@@ -1018,6 +1021,7 @@
             /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
             "$3" // remove so errors do not leave empty blocks
           );
+          itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
@@ -1507,28 +1511,21 @@
       let content = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
-        // NOTE: by convention, tag inclusions come _before_ item itself
-        if (options["include_tagrefs"]) {
-          let item = items[index];
-          options["exclude_tags"] = [
-            ...(options["exclude_tags"] || []),
-            item.label,
-          ];
-          const exclusions = new Set(options["exclude_tags"]);
-          item.tags
-            .filter((t) => !exclusions.has(t))
-            .forEach((tag) =>
-              content.push(window["_read"](type, tag, options))
-            );
+        let item = items[index];
+        // NOTE: by convention, dependencies are included _before_ item itself
+        if (options["include_deps"]) {
+          options["include_deps"] = false; // deps are recursive already
+          item.deps
+            .filter((id) => id != item.id)
+            .forEach((id) => content.push(window["_read"](type, id, options)));
         }
-        let text = items[index].text;
-        if (type) text = extractBlock(items[index].text, type);
-        if (options["replace_$id"])
-          text = text.replace(/\$id/g, items[index].id);
+        let text = type ? extractBlock(item.text, type) : item.text;
+        if (options["replace_$id"]) text = text.replace(/\$id/g, item.id);
         content.push(text);
       });
       return content.join("\n");
     };
+
     window["_read_deep"] = function (
       type: string = "",
       item: string = "",
@@ -1537,7 +1534,7 @@
       return window["_read"](
         type,
         item,
-        Object.assign({ include_tagrefs: true }, options)
+        Object.assign({ include_deps: true }, options)
       );
     };
     window["_eval"] = function (
@@ -1548,7 +1545,7 @@
       let prefix = window["_read_deep"](
         "js",
         item,
-        Object.assign({ include_tagrefs: true, replace_$id: true }, options)
+        Object.assign({ include_deps: true, replace_$id: true }, options)
       );
       return eval(prefix + "\n" + code);
     };
@@ -1639,14 +1636,14 @@
       }, 0);
     };
 
-    // default level (1) excludes debug messages, and default since (-1) is last evalTime
+    // default level (1) excludes debug messages, and default since (-1) is lastRunTime
     window["_write_log"] = function (
       item: string,
       since: number = -1,
       level: number = 1
     ) {
       let log = [];
-      if (since < 0) since = evalTime;
+      if (since < 0) since = lastRunTime;
       consolediv.childNodes.forEach((elem) => {
         if (elem.getAttribute("_time") < since) return;
         if (elem.getAttribute("_level") < level) return;
