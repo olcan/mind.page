@@ -4,7 +4,7 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import { highlight } from "../util.js";
+  import { highlight, extractBlock, hashCode } from "../util.js";
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
@@ -137,15 +137,24 @@
   }
 
   export let onTagClick = (tag: string, e: MouseEvent) => {};
-  window["handleTagClick"] = (tag: string, e: MouseEvent) => {
-    onTagClick(tag, e);
-  };
+  if (!window["handleTagClick"])
+    window["handleTagClick"] = (tag: string, e: MouseEvent) => {
+      e.stopPropagation();
+      onTagClick(tag, e);
+    };
+
+  if (!window["handleLogSummaryClick"])
+    window["handleLogSummaryClick"] = (e: MouseEvent) => {
+      e.stopPropagation();
+      (e.target as HTMLElement)
+        .closest(".super-container")
+        .classList.toggle("show-logs");
+    };
 
   function regexEscape(str) {
     return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
   }
 
-  import { hashCode } from "../util.js";
   if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
   if (window["_html_cache"] == undefined) window["_html_cache"] = {};
 
@@ -177,6 +186,9 @@
       /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs,
       ""
     );
+
+    // extract _log blocks (processed for summary at bottom)
+    const log = extractBlock(text, "_log");
 
     // parse header tags (tags on first line only)
     const lctext = text.toLowerCase().trim();
@@ -287,7 +299,7 @@
               }
               classNames = classNames.trim();
               if (classNames) classNames = ` class="${classNames}"`;
-              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event);event.stopPropagation()">${tag}</mark>`;
+              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event)">${tag}</mark>`;
             }
           );
         }
@@ -378,6 +390,25 @@
       const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
     });
+
+    // append log summary div
+    if (log) {
+      const lines = log.split("\n");
+      let summary = "";
+      lines.forEach((line) => {
+        const type = line.match(/^ERROR:/)
+          ? "error"
+          : line.match(/^WARNING:/)
+          ? "warn"
+          : line.match(/^INFO:/)
+          ? "info"
+          : line.match(/^DEBUG:/)
+          ? "debug"
+          : "log";
+        summary += `<span class="console-${type}">·</span>`;
+      });
+      text += `\n<div class="log-summary" onclick="handleLogSummaryClick(event)">${summary}</div>`;
+    }
 
     return (window["_html_cache"][cache_key] = text);
   }
@@ -917,17 +948,17 @@
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
-  .item.saving {
-    opacity: 0.5;
+  .warning {
+    border: 1px solid yellow;
   }
   .error {
     border: 1px solid red;
   }
-  .warning {
-    border: 1px solid yellow;
-  }
   .running {
     border: 1px solid #4ae;
+  }
+  .item.saving {
+    opacity: 0.5;
   }
 
   .loading {
@@ -1109,13 +1140,16 @@
   }
 
   :global(.item ._log) {
-    display: block;
+    display: none; /* toggled via .show-logs class */
     border-radius: 0 4px 4px 0;
     border-left: 0;
     padding: 4px 0;
     opacity: 0.75;
     font-size: 80%;
     line-height: 150%;
+  }
+  :global(.super-container.show-logs .item ._log) {
+    display: block;
   }
   :global(.item code:empty) {
     display: block;
@@ -1129,8 +1163,27 @@
     content: "empty " attr(class);
   }
 
-  :global(.item .log-running) {
-    color: #9c9;
+  :global(.item .log-summary) {
+    display: flex;
+    font-size: 12px;
+    font-family: monospace;
+    align-items: bottom;
+    justify-content: center;
+    /* background: red; */
+    min-width: 100px;
+    height: 25px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -5px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0 8px;
+    width: fit-content;
+    cursor: pointer;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   :global(.item .MathJax) {

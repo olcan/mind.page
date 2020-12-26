@@ -16,6 +16,23 @@ export function numberWithCommas(x) {
   return parts.join(".");
 }
 
+export function extractBlock(text, type) {
+  // NOTE: this logic is consistent with onInput() in Editor.svelte
+  let insideBlock = false;
+  let regex = RegExp("^\\s*```" + type + "(\\s|$)");
+  return text
+    .split("\n")
+    .map((line) => {
+      if (!insideBlock && line.match(regex)) insideBlock = true;
+      else if (insideBlock && line.match(/^\s*```/)) insideBlock = false;
+      if (line.match(/^\s*```/)) return "";
+      return insideBlock ? line : "";
+    })
+    .filter((t) => t)
+    .join("\n")
+    .trim();
+}
+
 import "highlight.js/styles/sunburst.css";
 import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
 import plaintext from "highlight.js/lib/languages/plaintext.js";

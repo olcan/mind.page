@@ -821,23 +821,6 @@
     }
   }
 
-  function extractBlock(text: string, type: string) {
-    // NOTE: this logic is consistent with onInput() in Editor.svelte
-    let insideBlock = false;
-    let regex = RegExp("^\\s*```" + type + "(\\s|$)");
-    return text
-      .split("\n")
-      .map((line) => {
-        if (!insideBlock && line.match(regex)) insideBlock = true;
-        else if (insideBlock && line.match(/^\s*```/)) insideBlock = false;
-        if (line.match(/^\s*```/)) return "";
-        return insideBlock ? line : "";
-      })
-      .filter((t) => t)
-      .join("\n")
-      .trim();
-  }
-
   let evalIndex = -1;
   function evalJSInput(
     text: string,
@@ -1200,7 +1183,11 @@
   }
 
   import { onMount } from "svelte";
-  import { hashCode, numberWithCommas } from "../util.js";
+  import { hashCode, numberWithCommas, extractBlock } from "../util.js";
+
+  let consoleLog = [];
+  const consoleLogMaxSize = 10000;
+  const statusLogExpiration = 15000;
 
   if (isClient) {
     // initialize item state
@@ -1291,6 +1278,15 @@
                   elem.setAttribute("_time", Date.now().toString());
                   elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
+                  consoleLog.push({
+                    type: verb,
+                    text: args.join(" "),
+                    time: Date.now(),
+                    level: levels.indexOf(verb),
+                  });
+                  if (consoleLog.length > consoleLogMaxSize)
+                    consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
+
                   document.getElementById(
                     "console-summary"
                   ).style.visibility = showDotted ? "hidden" : "visible";
@@ -1299,11 +1295,12 @@
                   summaryElem.innerText = "·";
                   summaryElem.classList.add("console-" + verb);
                   summaryDiv.appendChild(summaryElem);
+
                   // if console is hidden, make sure summary is visible
                   if (div.style.display == "none")
                     summaryDiv.style.visibility = "visible";
 
-                  // auto-remove after 10 seconds ...
+                  // auto-remove after 15 seconds ...
                   setTimeout(() => {
                     elem.remove();
                     summaryElem.remove();
@@ -1311,7 +1308,7 @@
                       div.style.display = "none";
                       summaryDiv.style.visibility = "visible";
                     }
-                  }, 15000);
+                  }, statusLogExpiration);
                 };
               })(console[verb].bind(console), verb, consolediv);
             });
@@ -1649,17 +1646,19 @@
     ) {
       let log = [];
       if (since < 0) since = lastRunTime;
-      consolediv.childNodes.forEach((elem) => {
-        if (parseInt(elem.getAttribute("_time")) < since) return;
-        if (parseInt(elem.getAttribute("_level")) < level) return;
-        const type = elem.className.substring(elem.className.indexOf("-") + 1);
-        let prefix = type == "log" ? "" : type.toUpperCase() + ": ";
+      for (let i = consoleLog.length - 1; i >= 0; --i) {
+        const entry = consoleLog[i];
+        if (entry.time < since) break;
+        if (entry.level < level) continue;
+        let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
-        let text = elem.innerText.trim();
         // remove item index/label prefix since redundant (assuming writing to item itself)
-        text = text.replace(/^\[\d+?\]\s*/, "").replace(/^#.+?:\s*/, "");
+        const text = entry.text
+          .replace(/^\[\d+?\]\s*/, "")
+          .replace(/^#.+?:\s*/, "");
         log.push(prefix + text);
-      });
+      }
+      log = log.reverse();
       if (log.length > 0) {
         window["_write"](item, log.join("\n"), "_log");
       }
