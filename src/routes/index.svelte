@@ -895,7 +895,7 @@
   let lastRunTime = 0;
   function appendJSOutput(text: string, index: number): string {
     if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
-    lastRunTime = Date.now();
+    lastRunTime = Date.now(); // used in _write_log, see below
     // execute JS code, including any 'js' blocks from this and any tag-referenced items
     // NOTE: js_input blocks are assumed "local", i.e. not intended for export
     let item = items[index];
@@ -1601,6 +1601,7 @@
             return;
           }
           const prevSaveClosure = item.saveClosure;
+          item.saveClosure = null; // chained into this one
           const saveClosure = (index) => {
             if (prevSaveClosure) prevSaveClosure(index); // chain closures
             const writeConfirmLength = 16 * 1024;
@@ -1640,6 +1641,7 @@
     };
 
     // default level (1) excludes debug messages, and default since (-1) is lastRunTime
+    // NOTE: default lastRunTime is only accurate if _write_log is invoked synchronously
     window["_write_log"] = function (
       item: string,
       since: number = -1,
@@ -1902,6 +1904,20 @@
     // NOTE: all errors are logged, so rejection handling is unnecessary for logging purposes
     // NOTE: resolve/reject handlers are async, e.g. must do their own _write_log if needed
     window["_run_webppl"] = function (id: string = "", options: object = {}) {
+      let prevRunClosure = window["webppl"].runClosure;
+      window["webppl"].runClosure = null; // chained into this one
+      let webppl_done = () => {
+        // dispatch closure to allow synchronous part of resolution chain to run first
+        // (this is useful e.g. to write a final expanded _log in callbacks)
+        setTimeout(() => {
+          window["webppl"].running = false;
+          if (prevRunClosure) prevRunClosure();
+          else if (window["webppl"].runClosure) {
+            window["webppl"].runClosure();
+            window["webppl"].runClosure = null;
+          }
+        }, 0);
+      };
       return new Promise((resolve, reject) => {
         if (!id) {
           if (evalIndex < 0) {
@@ -1933,9 +1949,10 @@
         });
 
         item.running = true;
-        let prevRunClosure = window["webppl"].runClosure;
+
         let runClosure = function () {
-          if (prevRunClosure) prevRunClosure();
+          // NOTE: prevRunClosure must be run in webppl_done() call to ensure single-threading
+          // if (prevRunClosure) prevRunClosure();
           let start = Date.now();
           window["webppl"].running = true;
           try {
@@ -1947,15 +1964,10 @@
                 if (Object.keys(s).length > 0)
                   console.log("webppl state:", JSON.stringify(s));
                 console.log("webppl took", time, "ms");
-                window["webppl"].running = false;
                 window["_write_log"](id, start, 1);
                 let item = items[indexFromId.get(id)];
                 if (item) item.running = false;
-                if (window["webppl"].runClosure) {
-                  window["webppl"].runClosure();
-                  delete window["webppl"].runClosure;
-                }
-                resolve(x);
+                resolve({ output: x, start_time: start });
               },
               _.merge(
                 {
@@ -1963,15 +1975,10 @@
                   debug: false,
                   errorHandlers: [
                     function (e) {
-                      window["webppl"].running = false;
                       console.error(`webppl error: ${e}`); // so error included in _write_log
                       window["_write_log"](id, start, 1);
                       let item = items[indexFromId.get(id)];
                       if (item) item.running = false;
-                      if (window["webppl"].runClosure) {
-                        window["webppl"].runClosure();
-                        delete window["webppl"].runClosure;
-                      }
                       reject(new Error(`webppl error: ${e}`));
                     },
                   ],
@@ -1981,7 +1988,7 @@
             );
           } catch (e) {
             console.error(`webppl exception: ${e}`);
-            window["webppl"].running = false;
+            window["_write_log"](id, start, 1);
             let item = items[indexFromId.get(id)];
             if (item) item.running = false;
             reject(e);
@@ -1993,7 +2000,7 @@
         } else {
           runClosure();
         }
-      });
+      }).finally(webppl_done);
     };
 
     window["_running"] = function (id: string = "", running: boolean = true) {
@@ -2243,7 +2250,7 @@
     margin-top: 2px;
     margin-bottom: 5px;
     padding-top: 7px;
-    color: #333;
+    color: #444; /* same as time indicators */
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
     text-align: center;
@@ -2252,6 +2259,18 @@
     font-family: monospace;
     font-size: 20px;
   }
+  .section-separator hr {
+    display: inline-block;
+    vertical-align: middle;
+    background: transparent;
+    border: 0;
+    border-top: 2px solid #444;
+    height: 1px; /* disappears if both height and border are 0 */
+    width: 25%;
+    margin-right: 15px;
+    margin-left: 11px;
+  }
+
   /* allow time strings to overlap preceding section separators */
   :global(.section-separator + .super-container.timed) {
     margin-top: -24px;
@@ -2367,11 +2386,13 @@
               runnable={item.runnable} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
+                <hr />
                 {item.index + 2}<span class="arrows"> {item.arrows} </span>
                 &nbsp;
                 {#if item.nextItemInColumn >= 0}
                   {item.nextItemInColumn + 1}<span class="arrows">↓</span>
                 {/if}
+                <hr />
               </div>
             {/if}
           {/if}
