@@ -120,6 +120,7 @@
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
       item.outerHeight = (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
+      if (item.dotted) item.outerHeight = 0; // ignore height of dotted items
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
@@ -141,8 +142,8 @@
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
-      // if item is first in column and missing time string, add it now
-      if (columnHeights[item.column] == 0 && !item.timeString) {
+      // if item is first in column and missing time string, add it now (unless dotted)
+      if (columnHeights[item.column] == 0 && !item.timeString && !item.dotted) {
         item.timeString = timeString;
         item.outerHeight += 24;
       }
