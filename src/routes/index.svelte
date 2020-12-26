@@ -267,22 +267,24 @@
       // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
       item.prefixMatch = item.lctext.startsWith(terms[0]);
-      if (item.prefixMatch) {
-        item.prefixMatchTerm =
-          terms[0] +
-          item.lctext
-            .substring(terms[0].length)
-            .match(/^[^#\s<>,.;:"'`\(\)\[\]\{\}]*/)[0];
-      }
+      // if (item.prefixMatch) {
+      //   item.prefixMatchTerm =
+      //     terms[0] +
+      //     item.lctext
+      //       .substring(terms[0].length)
+      //       .match(/^[^#\s<>,.;:"'`\(\)\[\]\{\}]*/)[0];
+      //   console.log(item.prefixMatchTerm);
+      // }
 
-      // use first exact-match (=label-match) item as "listing" item
+      // use item w/ unique label matching first term as "listing" item
       // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
-      if (item.label == terms[0] && listing.length == 0) {
+      if (item.labelUnique && item.label == terms[0]) {
         listing = item.tags
           .slice()
           .reverse()
           .filter((t) => t != terms[0])
           .concat([item.label]);
+        console.log(listing);
       }
 
       // match terms
@@ -342,9 +344,8 @@
         b.pinned - a.pinned ||
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
-        // position in item with exact match on first term
-        listing.indexOf(b.prefixMatchTerm) -
-          listing.indexOf(a.prefixMatchTerm) ||
+        // position of label in listing item (item w/ unique label = first term)
+        listing.indexOf(b.label) - listing.indexOf(a.label) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // prefix match on first term
@@ -1200,7 +1201,7 @@
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
       item.prefixMatch = false;
-      item.prefixMatchTerm = "";
+      // item.prefixMatchTerm = "";
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
