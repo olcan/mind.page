@@ -273,7 +273,6 @@
       //     item.lctext
       //       .substring(terms[0].length)
       //       .match(/^[^#\s<>,.;:"'`\(\)\[\]\{\}]*/)[0];
-      //   console.log(item.prefixMatchTerm);
       // }
 
       // use item w/ unique label matching first term as "listing" item
@@ -284,7 +283,6 @@
           .reverse()
           .filter((t) => t != terms[0])
           .concat([item.label]);
-        console.log(listing);
       }
 
       // match terms
