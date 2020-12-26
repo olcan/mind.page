@@ -1650,8 +1650,8 @@
       let log = [];
       if (since < 0) since = lastRunTime;
       consolediv.childNodes.forEach((elem) => {
-        if (elem.getAttribute("_time") < since) return;
-        if (elem.getAttribute("_level") < level) return;
+        if (parseInt(elem.getAttribute("_time")) < since) return;
+        if (parseInt(elem.getAttribute("_level")) < level) return;
         const type = elem.className.substring(elem.className.indexOf("-") + 1);
         let prefix = type == "log" ? "" : type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
