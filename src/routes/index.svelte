@@ -344,8 +344,6 @@
         // position in item with exact match on first term
         listing.indexOf(b.prefixMatchTerm) -
           listing.indexOf(a.prefixMatchTerm) ||
-        // running mode
-        b.running - a.running ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // prefix match on first term
@@ -423,7 +421,7 @@
     let item = items[index];
     if (deps.indexOf(item.id) >= 0) return deps;
     // NOTE: dependency order matters for hashing and potentially for code import
-    deps = [...deps, item.id];
+    deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
     item.tags.forEach((tag) => {
       if (tag == item.label) return;
       if (!idsFromLabel.has(tag)) return;
@@ -435,7 +433,7 @@
         deps = itemDeps(dep, deps);
       });
     });
-    return deps;
+    return deps.slice(1).concat(item.id);
   }
 
   let tagCounts = new Map<string, number>();
@@ -1517,7 +1515,11 @@
           options["include_deps"] = false; // deps are recursive already
           item.deps
             .filter((id) => id != item.id)
-            .forEach((id) => content.push(window["_read"](type, id, options)));
+            .forEach((id) =>
+              content.push(
+                window["_read"](options["dep_type"] || type, id, options)
+              )
+            );
         }
         let text = type ? extractBlock(item.text, type) : item.text;
         if (options["replace_$id"]) text = text.replace(/\$id/g, item.id);
@@ -1902,9 +1904,7 @@
       return new Promise((resolve, reject) => {
         if (!id) {
           if (evalIndex < 0) {
-            const err = new Error(
-              "_run_webppl() invoked from async javascript"
-            );
+            const err = new Error("_run_webppl: invoked from async javascript");
             console.error(err); // synchronous error that should get written into item
             reject(err);
             return;
@@ -1913,11 +1913,24 @@
         }
         let item = items[indexFromId.get(id)];
         if (!item) {
-          const err = new Error(`item id:${id} not found`);
+          const err = new Error(`_run_webppl: item id:${id} not found`);
           console.error(err); // synchronous error that should get written into item
           reject(err);
           return;
         }
+
+        // NOTE: similar to js_input (vs js), webppl_input blocks are treated as local execution blocks whereas webppl blocks are imported to construct possible prefix
+        let webppl = window["_read"]("webppl_input", id);
+        if (!webppl) {
+          const err = new Error(`_run_webppl: missing webppl_input`);
+          console.error(err); // synchronous error that should get written into item
+          reject(err);
+          return;
+        }
+        let webppl_prefix = window["_read_deep"]("webppl", id, {
+          replace_$id: true,
+        });
+
         item.running = true;
         let prevRunClosure = window["webppl"].runClosure;
         let runClosure = function () {
@@ -1926,7 +1939,7 @@
           window["webppl"].running = true;
           try {
             window["webppl"].run(
-              window["_read_deep"]("webppl", id, { replace_$id: true }),
+              webppl_prefix + "\n" + webppl,
               function (s, x) {
                 let time = Date.now() - start;
                 if (x != undefined) window["_write"](id, JSON.stringify(x));

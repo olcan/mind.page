@@ -4,44 +4,7 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-
-  import "highlight.js/styles/sunburst.css";
-  import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
-  import plaintext from "highlight.js/lib/languages/plaintext.js";
-  hljs.registerLanguage("plaintext", plaintext);
-  import javascript from "highlight.js/lib/languages/javascript.js";
-  hljs.registerLanguage("javascript", javascript);
-  import typescript from "highlight.js/lib/languages/typescript.js";
-  hljs.registerLanguage("typescript", typescript);
-  import css from "highlight.js/lib/languages/css.js";
-  hljs.registerLanguage("css", css);
-  import json from "highlight.js/lib/languages/json.js";
-  hljs.registerLanguage("json", json);
-  import xml from "highlight.js/lib/languages/xml.js";
-  hljs.registerLanguage("xml", xml); // including html
-  hljs.configure({
-    tabReplace: "  ",
-  });
-  function highlight(code, language) {
-    // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
-    //if (language=="") return hljs.highlightAuto(code).value;
-    if (language == "_log") {
-      return code
-        .split("\n")
-        .map((line) =>
-          line
-            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
-            .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
-            .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
-            .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
-        )
-        .join("\n");
-    }
-    if (language == "js_input" || language == "webppl") language = "js";
-    if (language.startsWith("_html")) language = "html";
-    language = hljs.getLanguage(language) ? language : "plaintext";
-    return hljs.highlight(language, code).value;
-  }
+  import { highlight } from "../util.js";
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
@@ -434,6 +397,12 @@
         // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_elem_cache"][key]);
         elem = window["_elem_cache"][key];
+        // fix any zero-width c3 charts inside element
+        // (can be reset to zero when removed from dom)
+        Array.from(itemdiv.querySelectorAll(".c3 > svg")).map((svg) => {
+          if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
+            svg.parentElement["_chart"].resize();
+        });
         // resize/refresh any c3 charts inside element
         Array.from(elem.querySelectorAll(".c3")).map((div) => {
           if (div["_chart"]) div["_chart"].resize();
@@ -496,6 +465,12 @@
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       // console.log("afterUpdate skipped");
+      // fix any zero-width c3 charts inside element
+      // (can be reset to zero during editing if main window loses focus)
+      Array.from(itemdiv.querySelectorAll(".c3 > svg")).map((svg) => {
+        if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
+          svg.parentElement["_chart"].resize();
+      });
       return;
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);

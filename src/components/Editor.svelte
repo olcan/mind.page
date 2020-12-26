@@ -14,45 +14,6 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
-  // TODO: refactor this, identical in Item.svelte
-  import "highlight.js/styles/sunburst.css";
-  import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
-  import plaintext from "highlight.js/lib/languages/plaintext.js";
-  hljs.registerLanguage("plaintext", plaintext);
-  import javascript from "highlight.js/lib/languages/javascript.js";
-  hljs.registerLanguage("javascript", javascript);
-  import typescript from "highlight.js/lib/languages/typescript.js";
-  hljs.registerLanguage("typescript", typescript);
-  import css from "highlight.js/lib/languages/css.js";
-  hljs.registerLanguage("css", css);
-  import json from "highlight.js/lib/languages/json.js";
-  hljs.registerLanguage("json", json);
-  import xml from "highlight.js/lib/languages/xml.js";
-  hljs.registerLanguage("xml", xml); // including html
-  hljs.configure({
-    tabReplace: "  ",
-  });
-  function highlight(code, language) {
-    // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
-    //if (language=="") return hljs.highlightAuto(code).value;
-    if (language == "_log") {
-      return code
-        .split("\n")
-        .map((line) =>
-          line
-            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
-            .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
-            .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
-            .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
-        )
-        .join("\n");
-    }
-    if (language == "js_input" || language == "webppl") language = "js";
-    if (language.startsWith("_html")) language = "html";
-    language = hljs.getLanguage(language) ? language : "plaintext";
-    return hljs.highlight(language, code).value;
-  }
-
   const placeholder = " ";
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
@@ -67,6 +28,8 @@
     t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
   let highlightMath = (t) =>
     t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
+
+  import { highlight } from "../util.js";
 
   function updateTextDivs() {
     const text = textarea.value || placeholder;
