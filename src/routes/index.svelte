@@ -276,13 +276,13 @@
       // }
 
       // use item w/ unique label matching first term as "listing" item
-      // (in reverse order so that last is best and default (-1) is worst, and excludes listing item itself)
+      // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
         listing = item.tags
+          .filter((t) => t != item.label)
           .slice()
           .reverse()
-          .filter((t) => t != terms[0])
-          .concat([item.label]);
+          .concat(item.label);
       }
 
       // match terms
@@ -329,6 +329,14 @@
       if ((item.editing || item.running) && !item.log) item.time = now;
     });
 
+    // returns position of minimum non-negative number, or -1 if none found
+    function min_pos(xJ) {
+      let jmin = -1;
+      for (let j = 0; j < xJ.length; ++j)
+        if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j;
+      return jmin;
+    }
+
     // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
     //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
     //       (afterUpdate is also triggered by the various assignments above)
@@ -343,9 +351,13 @@
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
         // position of label in listing item (item w/ unique label = first term)
+        // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.label) - listing.indexOf(a.label) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
+        // position of longest matching label prefix in listing item
+        min_pos(listing.map((pfx) => b.labelPrefixes.indexOf(pfx))) -
+          min_pos(listing.map((pfx) => a.labelPrefixes.indexOf(pfx))) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // // alphanumeric ordering on prefix-matching term
@@ -473,6 +485,7 @@
     const prevLabel = item.label;
     item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
+    if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label != prevLabel) {
       item.labelUnique = false;
       if (prevLabel) {
@@ -486,6 +499,11 @@
         item.labelUnique = ids.length == 1;
         if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
       }
+      item.labelPrefixes = [];
+      let label = item.label;
+      let pos;
+      while ((pos = label.lastIndexOf("/")) >= 0)
+        item.labelPrefixes.push((label = label.slice(0, pos)));
     }
     if (update_deps) {
       item.deps = itemDeps(index);

@@ -279,7 +279,7 @@
           )
             str = str.replace(
               /(\$\$?.+?\$\$?)/g,
-              '<span class="math">$1</span>'
+              '<span class="math" _cache_key="$1">$1</span>'
             );
           // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
