@@ -146,12 +146,11 @@
       onTagClick(tag, reltag, e);
     };
 
+  export let onLogSummaryClick = (id: string) => {};
   if (!window["handleLogSummaryClick"])
-    window["handleLogSummaryClick"] = (e: MouseEvent) => {
+    window["handleLogSummaryClick"] = (id: string, e: MouseEvent) => {
       e.stopPropagation();
-      (e.target as HTMLElement)
-        .closest(".container")
-        .classList.toggle("showLogs");
+      onLogSummaryClick(id);
     };
 
   function regexEscape(str) {
@@ -437,7 +436,9 @@
           : "log";
         summary += `<span class="console-${type}">·</span>`;
       });
-      text += `\n<div class="log-summary" onclick="handleLogSummaryClick(event)">${summary}</div>`;
+      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${
+        tmpid || id
+      }',event)">${summary}</div>`;
     }
 
     return (window["_html_cache"][cache_key] = text);

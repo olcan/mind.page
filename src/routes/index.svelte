@@ -410,6 +410,13 @@
     window.top.scrollTo(0, 0);
   }
 
+  function onLogSummaryClick(id: string) {
+    let index = indexFromId.get(id);
+    if (index == undefined) return;
+    items[index].showLogs = !items[index].showLogs;
+    items[index].showLogsTime = Date.now(); // invalidates auto-hide
+  }
+
   function onPopState(e) {
     editorText = e.state.editorText || "";
     onEditorChange(editorText);
@@ -2388,6 +2395,7 @@
               onTouch={onItemTouch}
               onResized={onItemResized}
               {onTagClick}
+              {onLogSummaryClick}
               onPrev={onPrevItem}
               onNext={onNextItem}
               bind:text={item.text}
