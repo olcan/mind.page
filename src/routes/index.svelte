@@ -265,16 +265,8 @@
     items.forEach((item) => {
       textLength += item.text.length;
 
-      // NOTE: alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
+      // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-      item.prefixMatch = item.lctext.startsWith(terms[0]);
-      // if (item.prefixMatch) {
-      //   item.prefixMatchTerm =
-      //     terms[0] +
-      //     item.lctext
-      //       .substring(terms[0].length)
-      //       .match(/^[^#\s<>,.;:"'`\(\)\[\]\{\}]*/)[0];
-      // }
 
       // use item w/ unique label matching first term as "listing" item
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
@@ -363,10 +355,6 @@
         // position of longest matching label prefix in listing item
         min_pos(listing.map((pfx) => b.labelPrefixes.indexOf(pfx))) -
           min_pos(listing.map((pfx) => a.labelPrefixes.indexOf(pfx))) ||
-        // prefix match on first term
-        b.prefixMatch - a.prefixMatch ||
-        // // alphanumeric ordering on prefix-matching term
-        // a.prefixMatchTerm.localeCompare(b.prefixMatchTerm) ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
         // # of matching secondary words
@@ -384,7 +372,7 @@
     if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
-  function onTagClick(tag: string, reltag:string, e: MouseEvent) {
+  function onTagClick(tag: string, reltag: string, e: MouseEvent) {
     if (tag == reltag) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
@@ -1223,8 +1211,6 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
-      item.prefixMatch = false;
-      // item.prefixMatchTerm = "";
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
