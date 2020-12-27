@@ -384,15 +384,15 @@
     if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
-  function onTagClick(tag: string, e: MouseEvent) {
-    let tagNode = e.target as Node;
-    if (tag == tagNode.textContent) {
+  function onTagClick(tag: string, reltag:string, e: MouseEvent) {
+    if (tag == reltag) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
         e.pageX - document.documentElement.scrollLeft,
         e.pageY - document.documentElement.scrollTop
       );
       if (range) {
+        let tagNode = e.target as Node;
         // if target is not the tag node, it must be a highlight, so we move to the parent
         if ((tagNode as HTMLElement).tagName != "MARK")
           tagNode = tagNode.parentNode;

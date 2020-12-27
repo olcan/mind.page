@@ -361,6 +361,7 @@
     width: 100%;
     cursor: text;
     padding-bottom: 2px; /* covers extra 2px of backdrop (see below), aligns correctly if item has outer border */
+    caret-color: red;
   }
   .backdrop,
   textarea {
@@ -391,7 +392,6 @@
   textarea {
     position: absolute;
     background: transparent;
-    caret-color: red;
     color: transparent;
     width: 100%;
     margin: 0;

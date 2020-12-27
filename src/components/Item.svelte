@@ -47,6 +47,8 @@
   const placeholder = " ";
   let error = false;
   let warning = false;
+  let target = false;
+  let context = false;
   export let onEditing = (
     index: number,
     editing: boolean,
@@ -136,11 +138,11 @@
     onEditing(index, (editing = false), true /* cancelled */);
   }
 
-  export let onTagClick = (tag: string, e: MouseEvent) => {};
+  export let onTagClick = (tag: string, reltag: string, e: MouseEvent) => {};
   if (!window["handleTagClick"])
-    window["handleTagClick"] = (tag: string, e: MouseEvent) => {
+    window["handleTagClick"] = (tag: string, reltag: string, e: MouseEvent) => {
       e.stopPropagation();
-      onTagClick(tag, e);
+      onTagClick(tag, reltag, e);
     };
 
   if (!window["handleLogSummaryClick"])
@@ -326,7 +328,7 @@
                 tag.substring(0, label.length) == label
                   ? "#" + tag.substring(label.length)
                   : tag;
-              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event)">${reltag}</mark>`;
+              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
             }
           );
         }
@@ -690,6 +692,8 @@
     // indicate errors in item
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
+    context = itemdiv.querySelector("mark.secondary-selected.label") != null;
+    target = itemdiv.querySelector("mark.selected.label") != null;
 
     // remove <code></code> wrapper block for math blocks
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
@@ -868,18 +872,18 @@
   }
   .container {
     position: relative;
-    border-radius: 4px;
+    border-radius: 5px; /* aligns with editor radius (4px) 1px inside */
     background: #111;
-    border: 1px solid transparent;
+    border: 1px solid #111;
     box-sizing: border-box;
   }
   .item-menu {
     position: absolute;
-    top: 0;
-    right: 0;
+    top: -1px; /*cover border*/
+    right: -1px;
     /* background: #333; */
-    opacity: 0.5;
-    border-radius: 0 4px 0 4px;
+    /* opacity: 0.5; */
+    border-radius: 0 5px 0 4px;
     color: black;
     line-height: 25px; /* same as menu item heights */
     font-size: 14px;
@@ -895,9 +899,9 @@
   .edit-menu {
     position: absolute;
     top: -20px;
-    right: 0;
+    right: -1px;
     z-index: 1;
-    border-radius: 4px 4px 0 4px;
+    border-radius: 4px 6px 4px 4px;
     opacity: 1;
     color: black;
     font-family: Avenir Next, Helvetica;
@@ -988,6 +992,12 @@
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
+  .context {
+    border: 1px solid #242;
+  }
+  .target {
+    border: 1px solid #484;
+  }
   .warning {
     border: 1px solid yellow;
   }
@@ -1010,7 +1020,7 @@
     height: 100%;
     justify-content: center;
     align-items: center;
-    border-radius: 4px;
+    border-radius: 6px;
     background: rgba(0, 0, 0, 0.5);
     pointer-events: none;
   }
@@ -1365,6 +1375,8 @@
     class:saving
     class:error
     class:warning
+    class:context
+    class:target
     class:runnable
     class:running
     class:timeOutOfOrder>
