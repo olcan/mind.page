@@ -692,8 +692,9 @@
     // indicate errors in item
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
-    context = itemdiv.querySelector("mark.secondary-selected.label") != null;
-    target = itemdiv.querySelector("mark.selected.label") != null;
+    context =
+      itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
+    target = itemdiv.querySelector("mark.selected.label.unique") != null;
 
     // remove <code></code> wrapper block for math blocks
     Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
