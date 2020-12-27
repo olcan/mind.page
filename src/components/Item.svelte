@@ -180,6 +180,26 @@
       matchingTermsSecondary.split(" ").filter((t) => t)
     );
     missingTags = new Set<string>(missingTags.split(" ").filter((t) => t));
+    if (label) {
+      Array.from(matchingTerms).forEach((term: string) => {
+        if (
+          term[0] == "#" &&
+          term.length > label.length &&
+          term[label.length] == "/" &&
+          term.substring(0, label.length) == label
+        )
+          matchingTerms.add("#" + term.substring(label.length));
+      });
+      Array.from(matchingTermsSecondary).forEach((term: string) => {
+        if (
+          term[0] == "#" &&
+          term.length > label.length &&
+          term[label.length] == "/" &&
+          term.substring(0, label.length) == label
+        )
+          matchingTermsSecondary.add("#" + term.substring(label.length));
+      });
+    }
 
     // remove removed sections
     text = text.replace(
@@ -299,7 +319,14 @@
               }
               classNames = classNames.trim();
               if (classNames) classNames = ` class="${classNames}"`;
-              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event)">${tag}</mark>`;
+              let reltag =
+                label &&
+                tag.length > label.length &&
+                tag[label.length] == "/" &&
+                tag.substring(0, label.length) == label
+                  ? "#" + tag.substring(label.length)
+                  : tag;
+              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}',event)">${reltag}</mark>`;
             }
           );
         }
@@ -517,12 +544,25 @@
       if (!itemdiv) return;
       if (matchingTerms != matchingTermsAtDispatch) return;
       Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
-        span.replaceWith(span.firstChild);
+        // span.replaceWith(span.firstChild);
+        span.outerHTML = span.innerHTML;
       });
       Array.from(itemdiv.querySelectorAll("mark div")).forEach((spacer) => {
         spacer.remove();
       });
-      const terms = matchingTerms.split(" ").filter((t) => t);
+      let terms = matchingTerms.split(" ").filter((t) => t);
+      if (label) {
+        terms.slice().forEach((term: string) => {
+          if (
+            term[0] == "#" &&
+            term.length > label.length &&
+            term[label.length] == "/" &&
+            term.substring(0, label.length) == label
+          )
+            terms.push("#" + term.substring(label.length));
+        });
+      }
+
       if (terms.length == 0) return;
       let treeWalker = document.createTreeWalker(
         itemdiv,

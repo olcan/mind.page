@@ -380,29 +380,31 @@
   }
 
   function onTagClick(tag: string, e: MouseEvent) {
-    // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
-    let range = document.caretRangeFromPoint(
-      e.pageX - document.documentElement.scrollLeft,
-      e.pageY - document.documentElement.scrollTop
-    );
-    if (range) {
-      let tagNode = e.target as Node;
-      // if target is not the tag node, it must be a highlight, so we move to the parent
-      if ((tagNode as HTMLElement).tagName != "MARK")
-        tagNode = tagNode.parentNode;
-      // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
-      // if tag node contains highlight, we have to adjust click position
-      let pos = range.startOffset;
-      for (const child of Array.from(tagNode.childNodes)) {
-        if (child.contains(range.startContainer)) break;
-        pos += child.textContent.length;
+    let tagNode = e.target as Node;
+    if (tag == tagNode.textContent) {
+      // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
+      let range = document.caretRangeFromPoint(
+        e.pageX - document.documentElement.scrollLeft,
+        e.pageY - document.documentElement.scrollTop
+      );
+      if (range) {
+        // if target is not the tag node, it must be a highlight, so we move to the parent
+        if ((tagNode as HTMLElement).tagName != "MARK")
+          tagNode = tagNode.parentNode;
+        // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
+        // if tag node contains highlight, we have to adjust click position
+        let pos = range.startOffset;
+        for (const child of Array.from(tagNode.childNodes)) {
+          if (child.contains(range.startContainer)) break;
+          pos += child.textContent.length;
+        }
+        // we only take partial tag if the current tag is "selected" (i.e. full exact match)
+        // (makes it easier to click on tags without accidentally getting a partial tag)
+        // if ((tagNode as HTMLElement).classList.contains("selected"))
+        tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
+      } else {
+        console.warn("got null range for tag click: ", tag, e);
       }
-      // we only take partial tag if the current tag is "selected" (i.e. full exact match)
-      // (makes it easier to click on tags without accidentally getting a partial tag)
-      // if ((tagNode as HTMLElement).classList.contains("selected"))
-      tag = tag.substring(0, pos) + tag.substring(pos).match(/^[^\/]*/)[0];
-    } else {
-      console.warn("got null range for tag click: ", tag, e);
     }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     // push new state with "final" flag so it is not modified by onEditorChange
