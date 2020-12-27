@@ -1116,17 +1116,17 @@
     vertical-align: middle;
   }
 
-  :global(.item mark.selected) {
-    background: #9f9;
-  }
-  :global(.item mark.secondary-selected) {
-    background: #9c9;
-  }
   :global(.item mark.label) {
     background: #ddd;
   }
   :global(.item mark.label.unique) {
     font-weight: 700;
+  }
+  :global(.item mark.selected) {
+    background: #9f9;
+  }
+  :global(.item mark.secondary-selected) {
+    background: #9c9;
   }
   :global(.item mark.missing) {
     background: #f88;
