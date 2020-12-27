@@ -190,8 +190,8 @@
       .map(({ item }) => item);
   }
 
-  function itemTags(lctext): Array<string> {
-    return _.uniq(
+  function itemTags(lctext): any {
+    let tags = _.uniq(
       Array.from(
         lctext
           .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
@@ -199,9 +199,13 @@
           .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
           .replace(/`.*?`/g, "") // remove inline code spans
           .matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
-        (m) => m[1].replace(/^#_/, "#")
+        (m) => m[1]
       )
     );
+    return {
+      all: _.uniq(tags.map((t) => t.replace(/^#_/, "#"))),
+      visible: tags.filter((t) => !t.startsWith("#_")),
+    };
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -244,10 +248,10 @@
         text
           .split(/\s+/)
           // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
-          .concat(itemTags(text))
+          .concat(itemTags(text).all)
       ),
     ].filter((t) => t);
-    // let terms = [...new Set([text].concat(itemTags(text)))].filter((t) => t);
+    // let terms = [...new Set([text].concat(itemTags(text).all))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
     let termsSecondary = [];
     terms.forEach((term) => {
@@ -272,7 +276,7 @@
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
         listingLabelPrefixes = item.labelPrefixes;
-        listing = item.tags
+        listing = item.tagsVisible
           .filter((t) => t != item.label)
           .slice()
           .reverse()
@@ -451,7 +455,9 @@
     item.lctext = text.toLowerCase();
     item.runnable = item.lctext.match(/\s*```js_input\s/);
 
-    item.tags = itemTags(item.lctext);
+    const tags = itemTags(item.lctext);
+    item.tags = tags.all;
+    item.tagsVisible = tags.visible;
     item.log = item.tags.indexOf("#log") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
@@ -833,6 +839,25 @@
     }
   }
 
+  const itemShowLogsTime = 5000;
+  function itemUpdateRunning(id: string, running: boolean) {
+    let index = indexFromId.get(id);
+    if (index == undefined) return;
+    if (items[index].running == running) return;
+    items[index].running = running;
+    if (!running) {
+      // show logs temporarily
+      items[index].showLogs = true;
+      const dispatchTime = (items[index].showLogsTime = Date.now());
+      setTimeout(() => {
+        let index = indexFromId.get(id);
+        if (index == undefined) return;
+        if (dispatchTime == items[index].showLogsTime)
+          items[index].showLogs = false;
+      }, itemShowLogsTime);
+    }
+  }
+
   let evalIndex = -1;
   function evalJSInput(
     text: string,
@@ -846,6 +871,7 @@
     let start = Date.now();
     try {
       evalIndex = index;
+      itemUpdateRunning(item.id, true);
       let out = eval("(function(){\n" + jsin + "\n})()");
       const outputConfirmLength = 16 * 1024;
       if (out && out.length >= outputConfirmLength) {
@@ -861,6 +887,7 @@
       evalIndex = -1;
       // automatically _write_log into item
       window["_write_log"](item.id, start);
+      itemUpdateRunning(item.id, false);
       return out;
     } catch (e) {
       evalIndex = -1;
@@ -870,6 +897,7 @@
       else alert(msg);
       // automatically _write_log into item
       window["_write_log"](item.id, start);
+      itemUpdateRunning(item.id, false);
       return undefined;
     }
   }
@@ -1277,11 +1305,7 @@
                   }
                   if (item) {
                     // prepent item index, label (if any)
-                    // NOTE: item.label can be outdated at this point due to pending save
-                    const lctext = item.text.toLowerCase();
-                    const tags = itemTags(lctext);
-                    const label = lctext.startsWith(tags[0]) ? tags[0] : "";
-                    if (label) args.unshift(label + ":");
+                    if (item.label) args.unshift(item.label + ":");
                     args.unshift(`[${item.index + 1}]`);
                   }
                   elem.textContent = args.join(" ") + "\n";
@@ -1504,7 +1528,7 @@
       let tags = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
-        tags = tags.concat(itemTags(items[index].text.toLowerCase()));
+        tags = tags.concat(itemTags(items[index].text.toLowerCase()).all);
       });
       return tags;
     };
@@ -1957,7 +1981,7 @@
           replace_$id: true,
         });
 
-        item.running = true;
+        itemUpdateRunning(id, true);
 
         let runClosure = function () {
           // NOTE: prevRunClosure must be run in webppl_done() call to ensure single-threading
@@ -1974,8 +1998,7 @@
                   console.log("webppl state:", JSON.stringify(s));
                 console.log("webppl took", time, "ms");
                 window["_write_log"](id, start, 1);
-                let item = items[indexFromId.get(id)];
-                if (item) item.running = false;
+                itemUpdateRunning(id, false);
                 resolve({ output: x, start_time: start });
               },
               _.merge(
@@ -1986,8 +2009,7 @@
                     function (e) {
                       console.error(`webppl error: ${e}`); // so error included in _write_log
                       window["_write_log"](id, start, 1);
-                      let item = items[indexFromId.get(id)];
-                      if (item) item.running = false;
+                      itemUpdateRunning(id, false);
                       reject(new Error(`webppl error: ${e}`));
                     },
                   ],
@@ -1998,8 +2020,7 @@
           } catch (e) {
             console.error(`webppl exception: ${e}`);
             window["_write_log"](id, start, 1);
-            let item = items[indexFromId.get(id)];
-            if (item) item.running = false;
+            itemUpdateRunning(id, false);
             reject(e);
             throw e;
           }
@@ -2020,8 +2041,7 @@
         }
         id = items[evalIndex].id;
       }
-      let item = items[indexFromId.get(id)];
-      if (item) item.running = running;
+      itemUpdateRunning(id, running);
     };
 
     window["_done"] = function (id: string) {
@@ -2375,6 +2395,7 @@
               bind:focused={item.focused}
               bind:saving={item.saving}
               bind:running={item.running}
+              bind:showLogs={item.showLogs}
               bind:height={item.height}
               bind:time={item.time}
               index={item.index}

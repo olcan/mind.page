@@ -23,6 +23,7 @@
   export let focused = false;
   export let saving = false;
   export let running = false;
+  export let showLogs = false;
   // NOTE: required props should not have default values
   export let index: number;
   export let id: string;
@@ -149,8 +150,8 @@
     window["handleLogSummaryClick"] = (e: MouseEvent) => {
       e.stopPropagation();
       (e.target as HTMLElement)
-        .closest(".super-container")
-        .classList.toggle("show-logs");
+        .closest(".container")
+        .classList.toggle("showLogs");
     };
 
   function regexEscape(str) {
@@ -507,13 +508,14 @@
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
 
     // insert right-floating div same size as .item-menu, which will also serve as first element of itemdiv
-    // NOTE: this is a workout for a null-parent exception if .item-menu is placed inside .item by Svelte
+    // NOTE: this is a workaround for a null-parent exception if .item-menu is placed inside .item by Svelte
     if (!editing && itemdiv.firstElementChild?.id != "menu-" + id) {
       let menu = itemdiv.parentElement.querySelector(".item-menu");
       let div = document.createElement("div");
       div.style.width = menu.clientWidth + "px";
       div.style.height = menu.clientHeight + "px";
-      div.style.marginTop = div.style.marginRight = "-10px";
+      /* -10px to remove .item padding, +1px for inset (when .bordered), +1px extra clearing space */
+      div.style.marginTop = div.style.marginRight = "-8px";
       div.style.float = "right";
       // div.style.background = "red";
       div.id = "menu-" + id;
@@ -880,7 +882,7 @@
   }
   .item-menu {
     position: absolute;
-    top: -1px; /*cover border*/
+    top: -1px;
     right: -1px;
     /* background: #333; */
     /* opacity: 0.5; */
@@ -895,6 +897,12 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  .bordered .item-menu {
+    top: 1px;
+    right: 1px;
+    border-radius: 0 3px 0 4px;
   }
 
   .edit-menu {
@@ -994,7 +1002,7 @@
   }
 
   .context {
-    border: 1px solid #242;
+    border: 1px solid #131;
   }
   .target {
     border: 1px solid #484;
@@ -1069,7 +1077,7 @@
   /* NOTE: these font sizes should match those in Editor */
   :global(.item pre) {
     /* padding-left: 5px; */
-    margin-top: 5px;
+    /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
     font-size: 15px;
     line-height: 24px;
@@ -1083,6 +1091,7 @@
     border-radius: 4px;
   }
   :global(.item pre code) {
+    margin-top: 5px;
     background: none;
     padding: 0;
     border-radius: 0;
@@ -1191,7 +1200,7 @@
   }
 
   :global(.item ._log) {
-    display: none; /* toggled via .show-logs class */
+    display: none; /* toggled via .showLogs class */
     border-radius: 0 4px 4px 0;
     border-left: 0;
     padding: 4px 0;
@@ -1199,7 +1208,7 @@
     font-size: 80%;
     line-height: 150%;
   }
-  :global(.super-container.show-logs .item ._log) {
+  :global(.container.showLogs .item ._log) {
     display: block;
   }
   :global(.item code:empty) {
@@ -1226,7 +1235,7 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: -5px;
+    bottom: -6px;
     margin-left: auto;
     margin-right: auto;
     padding: 0 8px;
@@ -1378,8 +1387,10 @@
     class:warning
     class:context
     class:target
-    class:runnable
     class:running
+    class:showLogs
+    class:bordered={error || warning || context || target || running}
+    class:runnable
     class:timeOutOfOrder>
     {#if editing}
       <div class="edit-menu">
