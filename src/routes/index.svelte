@@ -261,6 +261,7 @@
     matchingItemCount = 0;
     textLength = 0;
     let listing = [];
+    let listingLabelPrefixes = [];
     items.forEach((item) => {
       textLength += item.text.length;
 
@@ -278,6 +279,7 @@
       // use item w/ unique label matching first term as "listing" item
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
+        listingLabelPrefixes = item.labelPrefixes;
         listing = item.tags
           .filter((t) => t != item.label)
           .slice()
@@ -350,6 +352,9 @@
         b.pinned - a.pinned ||
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
+        // listing item label prefix match length (for context for listing item)
+        listingLabelPrefixes.indexOf(b.label) -
+          listingLabelPrefixes.indexOf(a.label) ||
         // position of label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.label) - listing.indexOf(a.label) ||
