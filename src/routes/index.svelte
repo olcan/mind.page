@@ -873,7 +873,7 @@
     }
   }
 
-  const itemShowLogsTime = 5000;
+  const itemShowLogsTime = 15000;
   function itemShowLogs(id: string) {
     let index = indexFromId.get(id);
     if (index == undefined) return;
@@ -2370,6 +2370,7 @@
                   bind:text={editorText}
                   bind:focused
                   cancelOnDelete={true}
+                  allowCommandBracket={true}
                   onFocused={onEditorFocused}
                   onChange={onEditorChange}
                   onDone={onEditorDone}

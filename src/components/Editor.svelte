@@ -3,6 +3,7 @@
   export let text = "";
   export let focused = false;
   export let cancelOnDelete = false;
+  export let allowCommandBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
   export let onDone = (
@@ -91,6 +92,16 @@
   function onKeyDown(e: KeyboardEvent) {
     // console.log(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
+
+    if (
+      !allowCommandBracket &&
+      (e.code == "BracketLeft" || e.code == "BracketRight") &&
+      e.metaKey
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     // indent/comment selection or current line
     if (
