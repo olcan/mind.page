@@ -939,6 +939,11 @@
     padding: 0 4px;
     border: 0;
   }
+  .runnable .index,
+  .scripted .index {
+    background: #468;
+  }
+
   .index.matching {
     background: #9f9;
   }
@@ -1000,10 +1005,10 @@
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
-  .runnable,
+  /* .runnable,
   .scripted {
     border: 1px solid #224;
-  }
+  } */
   .context {
     border: 1px solid #242;
   }

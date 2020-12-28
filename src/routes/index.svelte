@@ -874,22 +874,25 @@
   }
 
   const itemShowLogsTime = 5000;
+  function itemShowLogs(id: string) {
+    let index = indexFromId.get(id);
+    if (index == undefined) return;
+    items[index].showLogs = true;
+    const dispatchTime = (items[index].showLogsTime = Date.now());
+    setTimeout(() => {
+      let index = indexFromId.get(id);
+      if (index == undefined) return;
+      if (dispatchTime == items[index].showLogsTime)
+        items[index].showLogs = false;
+    }, itemShowLogsTime);
+  }
+
   function itemUpdateRunning(id: string, running: boolean) {
     let index = indexFromId.get(id);
     if (index == undefined) return;
     if (items[index].running == running) return;
     items[index].running = running;
-    if (!running) {
-      // show logs temporarily
-      items[index].showLogs = true;
-      const dispatchTime = (items[index].showLogsTime = Date.now());
-      setTimeout(() => {
-        let index = indexFromId.get(id);
-        if (index == undefined) return;
-        if (dispatchTime == items[index].showLogsTime)
-          items[index].showLogs = false;
-      }, itemShowLogsTime);
-    }
+    if (!running) itemShowLogs(id);
   }
 
   let evalIndex = -1;
@@ -905,7 +908,7 @@
     let start = Date.now();
     try {
       evalIndex = index;
-      itemUpdateRunning(item.id, true);
+      // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
       let out = eval("(function(){\n" + jsin + "\n})()");
       const outputConfirmLength = 16 * 1024;
       if (out && out.length >= outputConfirmLength) {
@@ -921,7 +924,7 @@
       evalIndex = -1;
       // automatically _write_log into item
       window["_write_log"](item.id, start);
-      itemUpdateRunning(item.id, false);
+      itemShowLogs(item.id);
       return out;
     } catch (e) {
       evalIndex = -1;
@@ -931,7 +934,7 @@
       else alert(msg);
       // automatically _write_log into item
       window["_write_log"](item.id, start);
-      itemUpdateRunning(item.id, false);
+      itemShowLogs(item.id);
       return undefined;
     }
   }
