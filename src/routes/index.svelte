@@ -272,7 +272,12 @@
       // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
 
-      // use item w/ unique label matching first term as "listing" item
+      // prefix-match only non-labels or unique labels
+      item.prefixMatch =
+        item.lctext.startsWith(terms[0]) &&
+        (idsFromLabel.get(terms[0]) || 0) <= 1;
+
+      // use item w/ unique-label matching first term as "listing" item
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
         listingLabelPrefixes = item.labelPrefixes;
@@ -359,6 +364,8 @@
         // position of longest matching label prefix in listing item
         min_pos(listing.map((pfx) => b.labelPrefixes.indexOf(pfx))) -
           min_pos(listing.map((pfx) => a.labelPrefixes.indexOf(pfx))) ||
+        // prefix match on first term (if non-label or unique label)
+        b.prefixMatch - a.prefixMatch ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
         // # of matching secondary words
@@ -1251,6 +1258,7 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
+      item.prefixMatch = false;
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
