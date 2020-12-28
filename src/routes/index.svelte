@@ -461,6 +461,7 @@
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
     item.runnable = item.lctext.match(/\s*```js_input\s/);
+    item.scripted = item.lctext.match(/<script.*?>/);
 
     const tags = itemTags(item.lctext);
     item.tags = tags.all;
@@ -531,9 +532,10 @@
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
-          if (depitem.deephash != prevDeepHash && !depitem.log) {
-            depitem.time = item.time - 1 - depindex; // offset to ensure dependency is considered more recent
-            // console.log("saving dependent", depindex);
+          // update/save scripted dependents
+          if (depitem.deephash != prevDeepHash && depitem.scripted) {
+            if (!depitem.log) depitem.time = item.time - 1 - depindex; // offset to ensure dependency is considered more recent
+            // console.log("saving scripted dependent", depindex);
             saveItem(depindex);
           }
         }
@@ -814,7 +816,12 @@
     const index = indexFromId.get(id);
     if (index == undefined) return;
     let item = items[index];
-    const height = container.offsetHeight;
+    // exclude any ._log elements since they are usually collapsed
+    let logHeight = 0;
+    container
+      .querySelectorAll("._log")
+      .forEach((log) => (logHeight += log.offsetHeight));
+    const height = container.offsetHeight - logHeight;
     const prevHeight = item.height;
     if (height == prevHeight) return; // nothing has changed
     // NOTE: on iOS, editing items can trigger zero height to be reported, which we ignore
@@ -1082,9 +1089,6 @@
   function onItemRun(index: number = -1) {
     if (index < 0) index = focusedItem;
     let item = items[index];
-    // update runnable flag in case item text has changed since last onEditorChange
-    item.runnable = item.text.toLowerCase().match(/\s*```js_input\s/);
-    if (!item.runnable) return;
     // empty out any *_output|*_log blocks as they should be re-generated
     item.text = item.text.replace(
       /(^|\n) *```(\w*?_output)\n(?: *```|.*?\n *```) *(\n|$)/gs,
@@ -1094,6 +1098,7 @@
       /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
       "$3" // remove so errors do not leave empty blocks
     );
+    itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
@@ -1158,7 +1163,7 @@
     (document.querySelector(
       "span.dots"
     ) as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
-    Array.from(document.querySelectorAll(".dotted")).forEach((dotted) => {
+    document.querySelectorAll(".dotted").forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
   }
@@ -1761,13 +1766,13 @@
         legend: { show: false },
       };
       spec = _.merge(defaults, spec);
-      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+      document.querySelectorAll(selector).forEach((elem) => {
         if (labeled) elem.classList.add("c3-labeled");
         if (rotated) elem.classList.add("c3-rotated");
         if (barchart) elem.classList.add("c3-barchart");
       });
       const chart = window["c3"].generate(spec);
-      Array.from(document.querySelectorAll(selector)).forEach((elem) => {
+      document.querySelectorAll(selector).forEach((elem) => {
         if (spec["size"] && spec["size"]["height"])
           (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
         elem["_chart"] = chart;
@@ -1904,7 +1909,7 @@
       }
       let keys = Object.keys(counts);
       let values = Object.values(counts) as Array<number>;
-      let indices = Array.from(Array(values.length).keys());
+      let indices = _.range(values.length);
       indices = stableSort(indices, (i, j) => values[j] - values[i]);
       indices = indices.filter((i) => values[i] > 0);
       indices.length = Math.min(indices.length, range);
@@ -1922,7 +1927,7 @@
       dist = dist.getDist();
       let keys = Object.keys(dist).map((k) => k.toString());
       let probs = Object.values(dist).map((v) => v["prob"]);
-      let indices = Array.from(Array(probs.length).keys());
+      let indices = _.range(probs.length);
       indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
       if (keydigits >= 0 && keys.length > 0 && parseFloat(keys[0])) {
         keys = keys.map((k) => parseFloat(k).toFixed(keydigits));
@@ -1930,7 +1935,7 @@
         indices.forEach((i) => (pmf[keys[i]] = (pmf[keys[i]] || 0) + probs[i]));
         keys = Object.keys(pmf);
         probs = Object.values(pmf);
-        indices = Array.from(Array(probs.length).keys());
+        indices = _.range(probs.length);
         indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
       }
       if (digits >= 0) probs = probs.map((v) => v.toFixed(digits));
@@ -2076,7 +2081,7 @@
           );
           updateItemLayout();
           // also trigger resize of all charts on the page ...
-          Array.from(document.querySelectorAll(".c3")).map((div) => {
+          document.querySelectorAll(".c3").forEach((div) => {
             if (div["_chart"]) div["_chart"].resize();
           });
           lastDocumentWidth = documentWidth;
@@ -2421,7 +2426,8 @@
               updateTime={item.updateTime}
               createTime={item.createTime}
               dotted={item.dotted}
-              runnable={item.runnable} />
+              runnable={item.runnable}
+              scripted={item.scripted} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
                 <hr />

@@ -40,6 +40,7 @@
   export let createTime: number;
   export let dotted: boolean;
   export let runnable: boolean;
+  export let scripted: boolean;
 
   export let text: string;
   export let hash: string;
@@ -74,7 +75,7 @@
       if (elem.getAttribute("_item") == id) {
         delete window["_elem_cache"][elem.getAttribute("_cache_key")];
         // destroy any c3 charts inside element
-        Array.from(elem.querySelectorAll(".c3")).map((div) => {
+        elem.querySelectorAll(".c3").forEach((div) => {
           if (div["_chart"]) {
             div["_chart"].destroy();
             delete div["_chart"];
@@ -451,7 +452,7 @@
 
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
-    Array.from(itemdiv.querySelectorAll("[_cache_key]")).forEach((elem) => {
+    itemdiv.querySelectorAll("[_cache_key]").forEach((elem) => {
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
       if (window["_elem_cache"].hasOwnProperty(key)) {
@@ -461,12 +462,12 @@
         elem = window["_elem_cache"][key];
         // fix any zero-width c3 charts inside element
         // (can be reset to zero when removed from dom)
-        Array.from(itemdiv.querySelectorAll(".c3 > svg")).map((svg) => {
+        itemdiv.querySelectorAll(".c3 > svg").forEach((svg) => {
           if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
             svg.parentElement["_chart"].resize();
         });
         // resize/refresh any c3 charts inside element
-        Array.from(elem.querySelectorAll(".c3")).map((div) => {
+        elem.querySelectorAll(".c3").forEach((div) => {
           if (div["_chart"]) div["_chart"].resize();
         });
       } else {
@@ -530,7 +531,7 @@
       // console.log("afterUpdate skipped");
       // fix any zero-width c3 charts inside element
       // (can be reset to zero during editing if main window loses focus)
-      Array.from(itemdiv.querySelectorAll(".c3 > svg")).map((svg) => {
+      itemdiv.querySelectorAll(".c3 > svg").forEach((svg) => {
         if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
           svg.parentElement["_chart"].resize();
       });
@@ -548,11 +549,11 @@
     let highlightClosure = () => {
       if (!itemdiv) return;
       if (matchingTerms != matchingTermsAtDispatch) return;
-      Array.from(itemdiv.querySelectorAll("span.highlight")).forEach((span) => {
+      itemdiv.querySelectorAll("span.highlight").forEach((span) => {
         // span.replaceWith(span.firstChild);
         span.outerHTML = span.innerHTML;
       });
-      Array.from(itemdiv.querySelectorAll("mark div")).forEach((spacer) => {
+      itemdiv.querySelectorAll("mark div").forEach((spacer) => {
         spacer.remove();
       });
       let terms = matchingTerms.split(" ").filter((t) => t);
@@ -700,13 +701,13 @@
     target = itemdiv.querySelector("mark.selected.label.unique") != null;
 
     // remove <code></code> wrapper block for math blocks
-    Array.from(itemdiv.getElementsByTagName("code")).forEach((code) => {
+    itemdiv.querySelectorAll("code").forEach((code) => {
       if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
         code.outerHTML = code.innerHTML;
     });
 
     // replace <pre></pre> wrapper with <blockquote></blockquote> for math blocks
-    Array.from(itemdiv.getElementsByTagName("pre")).forEach((pre) => {
+    itemdiv.querySelectorAll("pre").forEach((pre) => {
       if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
         pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
     });
@@ -716,7 +717,7 @@
     setTimeout(() => {
       if (!itemdiv) return;
       let math = [];
-      Array.from(itemdiv.getElementsByClassName("math")).forEach((elem) => {
+      itemdiv.querySelectorAll(".math").forEach((elem) => {
         if (elem.hasAttribute("_rendered")) return;
         // console.log("rendering math", math.innerHTML);
         elem.setAttribute("_rendered", Date.now().toString());
@@ -726,7 +727,7 @@
     });
 
     // set up img tags to enable caching and invoke onResized onload
-    Array.from(itemdiv.querySelectorAll("img")).forEach((img) => {
+    itemdiv.querySelectorAll("img").forEach((img) => {
       if (img.hasAttribute("_loaded")) return; // already loaded (and presumably restored from cache)
       if (!img.hasAttribute("src")) {
         console.warn("img missing src");
@@ -746,7 +747,7 @@
     // NOTE: this is slow, so we do it asyc, and we warn if the parent element is not cached
     setTimeout(() => {
       if (!itemdiv) return;
-      const scripts = itemdiv.getElementsByTagName("script");
+      const scripts = itemdiv.querySelectorAll("script");
       // wait for all scripts to be done, then update height in case it changes
       if (scripts.length == 0) return;
 
@@ -759,9 +760,8 @@
       // console.log(
       //   `executing ${pendingScripts} scripts in item ${index + 1} ...`
       // );
-      Array.from(scripts).forEach((script) => {
+      scripts.forEach((script) => {
         // console.log(script.parentElement);
-        // console.log(Array.from(script.parentElement.getElementsByTagName("script")));
         if (
           !script.hasAttribute("_uncached") &&
           !script.parentElement.hasAttribute("_cache_key")
@@ -794,33 +794,31 @@
         if (scriptErrors.length > 0) return;
         cacheElems();
         // render new math inside dot graph nodes that may have been rendered by the script
-        Array.from(itemdiv.querySelectorAll(".dot")).forEach((dot) => {
+        itemdiv.querySelectorAll(".dot").forEach((dot) => {
           dot["_dotrendered"] = function () {
             // render "stack" clusters (subgraphs)
-            Array.from(dot.querySelectorAll(".cluster.stack")).forEach(
-              (cluster) => {
-                let path = cluster.children[1]; // first child is title
-                (path as HTMLElement).setAttribute("fill", "#111");
-                let path2 = path.cloneNode();
-                (path2 as HTMLElement).setAttribute(
-                  "transform",
-                  "translate(-3,3)"
-                );
-                (path2 as HTMLElement).setAttribute("opacity", "0.75");
-                cluster.insertBefore(path2, path);
-                let path3 = path.cloneNode();
-                (path3 as HTMLElement).setAttribute(
-                  "transform",
-                  "translate(-6,6)"
-                );
-                (path3 as HTMLElement).setAttribute("opacity", "0.5");
-                cluster.insertBefore(path3, path2);
-              }
-            );
+            dot.querySelectorAll(".cluster.stack").forEach((cluster) => {
+              let path = cluster.children[1]; // first child is title
+              (path as HTMLElement).setAttribute("fill", "#111");
+              let path2 = path.cloneNode();
+              (path2 as HTMLElement).setAttribute(
+                "transform",
+                "translate(-3,3)"
+              );
+              (path2 as HTMLElement).setAttribute("opacity", "0.75");
+              cluster.insertBefore(path2, path);
+              let path3 = path.cloneNode();
+              (path3 as HTMLElement).setAttribute(
+                "transform",
+                "translate(-6,6)"
+              );
+              (path3 as HTMLElement).setAttribute("opacity", "0.5");
+              cluster.insertBefore(path3, path2);
+            });
 
             // render math in text nodes
             let math = [];
-            Array.from(dot.querySelectorAll("text")).forEach((text) => {
+            dot.querySelectorAll("text").forEach((text) => {
               if (text.textContent.match(/^\$.+\$$/)) {
                 text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
                 math.push(text);
@@ -1002,8 +1000,12 @@
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
+  .runnable,
+  .scripted {
+    border: 1px solid #224;
+  }
   .context {
-    border: 1px solid #131;
+    border: 1px solid #242;
   }
   .target {
     border: 1px solid #484;
@@ -1392,6 +1394,7 @@
     class:showLogs
     class:bordered={error || warning || context || target || running}
     class:runnable
+    class:scripted
     class:timeOutOfOrder>
     {#if editing}
       <div class="edit-menu">
