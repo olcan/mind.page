@@ -253,6 +253,8 @@
     ].filter((t) => t);
     // let terms = [...new Set([text].concat(itemTags(text).all))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
+
+    // expand tag prefixes into termsSecondary
     let termsSecondary = [];
     terms.forEach((term) => {
       if (term[0] != "#") return;
@@ -288,8 +290,14 @@
           .concat(item.label);
       }
 
-      // match terms
-      item.matchingTerms = terms.filter((t) => item.lctext.indexOf(t) >= 0);
+      // match non-tag terms loosely
+      item.matchingTerms = terms.filter(
+        (t) => t[0] != "#" && item.lctext.indexOf(t) >= 0
+      );
+      // match tags against expanded set (including prefixes) (we do not require visibility for now but could do so using tagsVisibleExpanded as including full tags in secondary terms which would still match against tagsExpanded)
+      item.matchingTerms = item.matchingTerms.concat(
+        terms.filter((t) => t[0] == "#" && item.tagsExpanded.indexOf(t) >= 0)
+      );
       // match regex:* terms
       item.matchingTerms = item.matchingTerms.concat(
         terms.filter(
@@ -305,10 +313,15 @@
         )
       );
 
-      if (item.matchingTerms.length > 0) matchingItemCount++;
+      // match secondary terms (tag prefixes)
       item.matchingTermsSecondary = termsSecondary.filter(
-        (t) => item.lctext.indexOf(t) >= 0
+        (t) => item.tagsExpanded.indexOf(t) >= 0
       );
+
+      // item is considered matching if primary terms match
+      // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
+      // (this is consistent with .index.matching in Item.svelte)
+      if (item.matchingTerms.length > 0) matchingItemCount++;
 
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
