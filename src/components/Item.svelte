@@ -1010,10 +1010,18 @@
     border: 1px solid #224;
   } */
   .context {
-    border: 1px solid #242;
+    border-left: 1px solid #242;
   }
   .target {
-    border: 1px solid #484;
+    border-left: 1px solid #484;
+  }
+  .context,
+  .target {
+    border-radius: 0 5px 5px 0;
+  }
+  .context.editing,
+  .target.editing {
+    border-radius: 5px;
   }
   .warning {
     border: 1px solid yellow;
@@ -1397,7 +1405,7 @@
     class:target
     class:running
     class:showLogs
-    class:bordered={error || warning || context || target || running}
+    class:bordered={error || warning || running}
     class:runnable
     class:scripted
     class:timeOutOfOrder>
