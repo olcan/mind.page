@@ -742,7 +742,9 @@
     if (editing) {
       let selectionStart = textarea.selectionStart;
       let selectionEnd = textarea.selectionEnd;
-      if (text != origText) selectionStart = selectionEnd = text.length;
+      // for generated (vs typed) items, focus at the start for better context and no scrolling up
+      // if (text != origText) selectionStart = selectionEnd = text.length;
+      if (text != origText) selectionStart = selectionEnd = 0;
       setTimeout(() => {
         let textarea = textArea(indexFromId.get(tmpid));
         textarea.selectionStart = selectionStart;
