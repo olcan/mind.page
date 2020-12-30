@@ -884,9 +884,10 @@
   .item-menu {
     position: absolute;
     top: -1px;
-    right: -1pt; /*1pt seems to overlap edge completely while 1px leaves it half uncovered*/
+    right: -1px;
     /* background: #333; */
     opacity: 0.75;
+    /* TODO: border-radius causes pixel alignment issues, is there anothery way? */
     border-radius: 0 5px 0 4px;
     color: black;
     line-height: 25px; /* same as menu item heights */
@@ -900,11 +901,11 @@
     user-select: none;
   }
 
-  /* .bordered .item-menu {
-    top: 0.5px;
+  .bordered .item-menu {
+    top: 0;
     right: 0;
     border-radius: 0 3px 0 4px;
-  } */
+  }
 
   .edit-menu {
     position: absolute;
