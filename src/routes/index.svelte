@@ -1359,7 +1359,21 @@
                     if (item.label) args.unshift(item.label + ":");
                     args.unshift(`[${item.index + 1}]`);
                   }
-                  elem.textContent = args.join(" ") + "\n";
+                  // log url for "error" Events that do not have message/reason
+                  // see https://www.w3schools.com/jsref/event_onerror.asp
+                  if (
+                    args.length == 1 &&
+                    args[0] instanceof Event &&
+                    args[0].type == "error"
+                  ) {
+                    let url =
+                      args[0].target && args[0]["target"]["url"]
+                        ? args[0]["target"]["url"]
+                        : "(unknown url)";
+                    elem.textContent = `error loading ${url}\n`;
+                  } else {
+                    elem.textContent = args.join(" ") + "\n";
+                  }
                   elem.setAttribute("_time", Date.now().toString());
                   elem.setAttribute("_level", levels.indexOf(verb).toString());
                   div.appendChild(elem);
