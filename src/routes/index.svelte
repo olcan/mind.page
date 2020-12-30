@@ -2516,7 +2516,7 @@
             {/if}
           {:else if item.column == column && item.index == maxIndexToShow}
             <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
-              Show all
+              show all
               {items.length}
               items
             </div>

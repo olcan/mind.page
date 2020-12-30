@@ -886,25 +886,34 @@
     top: -1px;
     right: -1px;
     /* background: #333; */
-    opacity: 0.75;
-    /* TODO: border-radius causes pixel alignment issues, is there anothery way? */
-    border-radius: 0 5px 0 4px;
+    /* opacity: 0.75; */
+    /* NOTE: border-radius causes pixel alignment issues on right edge, so we add rounding to menu items */
+    /* border-radius: 0 5px 0 4px; */
+    /* overflow: hidden; */
     color: black;
-    line-height: 25px; /* same as menu item heights */
     font-size: 14px;
     font-family: Avenir Next, Helvetica;
     font-weight: 500;
-    text-align: right;
-    overflow: hidden;
+    box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-
+  .container.runnable .item-menu > .run {
+    border-bottom-left-radius: 5px;
+  }
+  .container:not(.runnable) .item-menu > .index {
+    border-bottom-left-radius: 5px;
+  }
+  .item-menu > span:last-child {
+    border-top-right-radius: 5px;
+  }
   .bordered .item-menu {
     top: 0;
     right: 0;
-    border-radius: 0 3px 0 4px;
+  }
+  .bordered .item-menu > span:last-child {
+    border-top-right-radius: 4px;
   }
 
   .edit-menu {
@@ -912,17 +921,29 @@
     top: -20px;
     right: -1px;
     z-index: 1;
-    border-radius: 4px 6px 4px 4px;
+    /* see comment above about issues with border-radius */
+    /* border-radius: 4px 6px 4px 4px; */
+    /* overflow: hidden; */
     opacity: 1;
     color: black;
     font-family: Avenir Next, Helvetica;
     font-size: 14px;
     font-weight: 500;
-    text-align: right;
-    overflow: hidden;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+  .container.runnable .edit-menu > .run {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+  }
+  .container:not(.runnable) .edit-menu > .save {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+  }
+  .edit-menu > span:last-child {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
   }
 
   .index,
@@ -1043,13 +1064,14 @@
     display: flex;
     visibility: hidden;
     position: absolute;
-    top: 0;
-    left: 0;
+    top: -1px;
+    left: -1px;
     width: 100%;
     height: 100%;
     justify-content: center;
     align-items: center;
-    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    border-radius: 5px;
     background: rgba(0, 0, 0, 0.5);
     /* pointer-events: none; */
   }
