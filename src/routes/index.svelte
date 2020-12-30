@@ -551,15 +551,17 @@
         if (prevLabel != item.label) depitem.deps = itemDeps(depindex);
         if (depitem.deps.length > 1 && depitem.deps.indexOf(item.id) >= 0) {
           const prevDeepHash = depitem.deephash;
+          // NOTE: updating deephash automatically triggers rendering of dependents
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
-          // update/save scripted dependents
-          if (depitem.deephash != prevDeepHash && depitem.scripted) {
-            if (!depitem.log) depitem.time = item.time - 1 - depindex; // offset to ensure dependency is considered more recent
-            // console.log("saving scripted dependent", depindex);
-            saveItem(depindex);
-          }
+          // // update/save scripted dependents
+          // if (depitem.deephash != prevDeepHash && depitem.scripted) {
+          //   // update times, offset to maintain existing ordering, with dependency most recent
+          //   if (!depitem.log) depitem.time = item.time - 1 - depindex;
+          //   // console.log("saving scripted dependent", depindex);
+          //   saveItem(depindex);
+          // }
         }
       });
     }
@@ -1176,10 +1178,14 @@
     const index = focusedItem;
     const textarea = textArea(index);
     if (!items[index + inc].editing) {
-      if (items[index + inc].pinned) {
+      if (
+        items[index + inc].pinned ||
+        items[index + inc].saving ||
+        items[index + inc].running
+      ) {
         onNextItem(inc + 1);
         return;
-      } // skip if pinned
+      } // skip if pinned, saving, or running
       editItem(index + inc);
     }
     setTimeout(() => textArea(index + inc).focus(), 0);
@@ -2417,9 +2423,12 @@
           <!-- auto-focus on the editor unless on iPhone -->
           {#if loggedIn}
             <script>
-              // NOTE: we do not focus on the editor on the iPhone, which generally does not allow
-              //       autofocus except in certain unexpected situations (like coming back to app)
-              if (!navigator.platform.startsWith("iPhone"))
+              // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+              //       programmatic focus except in click handlers, when returning to app, etc
+              if (
+                document.activeElement.tagName.toLowerCase() != "textarea" &&
+                !navigator.platform.startsWith("iPhone")
+              )
                 document.getElementById("textarea-editor").focus();
             </script>
           {/if}

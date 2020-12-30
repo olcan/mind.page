@@ -90,6 +90,8 @@
     onEditing(index, (editing = false), cancelled, run);
   }
   function onClick(e) {
+    // ignore clicks on loading div
+    if ((e.target as HTMLElement).closest(".loading")) return;
     // console.log(e.target);
     // ignore (most) clicks inside c3 charts
     if (
@@ -882,9 +884,9 @@
   .item-menu {
     position: absolute;
     top: -1px;
-    right: -1px;
+    right: -1pt; /*1pt seems to overlap edge completely while 1px leaves it half uncovered*/
     /* background: #333; */
-    /* opacity: 0.5; */
+    opacity: 0.75;
     border-radius: 0 5px 0 4px;
     color: black;
     line-height: 25px; /* same as menu item heights */
@@ -898,11 +900,11 @@
     user-select: none;
   }
 
-  .bordered .item-menu {
-    top: 1px;
-    right: 1px;
+  /* .bordered .item-menu {
+    top: 0.5px;
+    right: 0;
     border-radius: 0 3px 0 4px;
-  }
+  } */
 
   .edit-menu {
     position: absolute;
@@ -1024,30 +1026,35 @@
     border-radius: 5px;
   }
   .warning {
-    border: 1px solid yellow;
+    border: 1px solid #663;
   }
   .error {
-    border: 1px solid red;
+    border: 1px solid #633;
   }
   .running {
-    border: 1px solid #4ae;
+    border: 1px solid #246;
   }
-  .item.saving {
+  /* .item.saving {
     opacity: 0.5;
-  }
+  } */
 
   .loading {
+    display: flex;
+    visibility: hidden;
     position: absolute;
     top: 0;
     left: 0;
-    display: flex;
     width: 100%;
     height: 100%;
     justify-content: center;
     align-items: center;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.5);
-    pointer-events: none;
+    /* pointer-events: none; */
+  }
+  .running .loading,
+  .saving .loading {
+    visibility: visible;
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
@@ -1385,8 +1392,7 @@
   id={'super-container-' + id}
   class:dotted
   class:editing
-  class:timed={timeString.length > 0}
-  on:click={onClick}>
+  class:timed={timeString.length > 0}>
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
@@ -1395,6 +1401,7 @@
   {/if}
   <div
     bind:this={container}
+    on:click={onClick}
     class="container"
     class:editing
     class:focused
@@ -1444,10 +1451,8 @@
         {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
-    {#if running}
-      <div class="loading">
-        <Circle2 size="60" unit="px" />
-      </div>
-    {/if}
+    <div class="loading">
+      <Circle2 size="60" unit="px" />
+    </div>
   </div>
 </div>
