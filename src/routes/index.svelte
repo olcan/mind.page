@@ -510,9 +510,11 @@
       );
     }
 
-    // first tag is taken as "label" if it is the first text in the item
+    // if item stats with a visible tag, it is taken as a "label" for the item
     const prevLabel = item.label;
-    item.label = item.lctext.startsWith(item.tags[0]) ? item.tags[0] : "";
+    item.label = item.lctext.startsWith(item.tagsVisible[0])
+      ? item.tagsVisible[0]
+      : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label != prevLabel) {
@@ -523,7 +525,7 @@
         if (ids.length == 1) items[indexFromId.get(ids[0])].labelUnique = true;
       }
       if (item.label) {
-        const ids = (idsFromLabel.get(item.label) || []).concat([item.id]);
+        const ids = (idsFromLabel.get(item.label) || []).concat(item.id);
         idsFromLabel.set(item.label, ids);
         item.labelUnique = ids.length == 1;
         if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
@@ -721,10 +723,15 @@
       savedText: "", // so cancel = delete
     };
     items = [item, ...items];
-    indexFromId.set(tmpid, 0); // needed by itemTextChanged
+    // update indices as needed by itemTextChanged
+    items.forEach((item, index) => indexFromId.set(item.id, index));
     itemTextChanged(0, text, false); // dependencies updated with permanent id below
     lastEditorChangeTime = 0; // disable debounce even if editor focused
-    onEditorChange((editorText = "")); // integrate new item at index 0
+    // NOTE: we keep the starting tag if it is a non-unique label
+    //       (useful for adding items, e.g. todo items, without losing context)
+    editorText =
+      items[0].label && !items[0].labelUnique ? items[0].label + " " : "";
+    onEditorChange(editorText); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
     if (!editing) {
       itemToSave.text = item.text = appendJSOutput(
@@ -734,7 +741,7 @@
       if (item.text != text) {
         // invoke onEditorChange again due to text change
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
+        onEditorChange(editorText);
       }
     }
     let textarea = textArea(-1);
@@ -776,7 +783,7 @@
         // (need to also remove old id from idsFromLabel)
         if (item.label) {
           const ids = idsFromLabel.get(item.label).filter((id) => id != tmpid);
-          idsFromLabel.set(item.label, ids.concat([item.id]));
+          idsFromLabel.set(item.label, ids.concat(item.id));
         }
         itemTextChanged(index, text);
         // if editing, we do not call onItemSaved so save is postponed to post-edit
