@@ -72,12 +72,15 @@
   let columnCount = 0;
   let oldestTime = Infinity;
   let oldestTimeString = "";
+  let maxIndexToShowDefault = 50;
+  let maxIndexToShow = maxIndexToShowDefault;
   function updateItemLayout() {
     // console.log("updateItemLayout");
     editingItems = [];
     focusedItem = -1;
     indexFromId = new Map<string, number>();
     dotCount = 0;
+
     // NOTE: we use document width as it scales with font size consistently on iOS and Mac
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
@@ -233,6 +236,7 @@
     }
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     // console.log("onEditorChange");
+    maxIndexToShow = maxIndexToShowDefault; // reset item truncation
 
     // update history, replace unless current state is final
     if (history.state.editorText != text) {
@@ -2370,6 +2374,20 @@
     margin-top: -24px;
   }
 
+  .show-all {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #999;
+    height: 40px;
+    font-size: 16px;
+    font-family: Avenir Next, Helvetica;
+    background: #222;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 4px 0;
+  }
+
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
@@ -2449,7 +2467,7 @@
         {/if}
 
         {#each items as item (item.id)}
-          {#if item.column == column}
+          {#if item.column == column && item.index < maxIndexToShow}
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
@@ -2496,6 +2514,12 @@
                 <hr />
               </div>
             {/if}
+          {:else if item.column == column && item.index == maxIndexToShow}
+            <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
+              Show all
+              {items.length}
+              items
+            </div>
           {/if}
         {/each}
       </div>
