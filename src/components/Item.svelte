@@ -232,9 +232,9 @@
         return missingTags.has(lctag) ? pfx + tag : "";
       })
       .trim();
-
     // replace naked URLs with markdown links (or images) named after host name
-    text = text.replace(/(^|\s|>)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+    text = text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+      if (pfx.match(/\]\(|[="']$/)) return pfx + url; // maintain markdown link url
       let sfx = "";
       if (url[url.length - 1].match(/[\.,;:]/)) {
         // move certain last characters out of the url
@@ -1054,7 +1054,8 @@
     border: 1px solid #633;
   }
   .running {
-    border: 1px solid #246;
+    /* border: 1px solid #246; */
+    border: 1px solid #4af; /* dimmed by .loading */
   }
   /* .item.saving {
     opacity: 0.5;
