@@ -1074,6 +1074,9 @@
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-radius: 5px;
     background: rgba(0, 0, 0, 0.5);
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
     /* pointer-events: none; */
   }
   .running .loading,

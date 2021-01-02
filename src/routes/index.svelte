@@ -490,6 +490,7 @@
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
     item.log = item.tags.indexOf("#log") >= 0;
+    item.debug = item.tags.indexOf("#debug") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -570,8 +571,16 @@
     }
   }
 
-  const evalHistoryMaxLength = 10;
-  let evalHistory = [];
+  let lastEvalText; // filled in _eval()
+  let lastRunText; // filled in appendJSOutput() and _webppl_run
+  function addLineNumbers(code) {
+    let lineno = 1;
+    return code
+      .split("\n")
+      .map((line) => `/*${lineno++}*/ ${line}`)
+      .join("\n");
+  }
+
   let editorText = "";
   function onEditorDone(
     text: string,
@@ -651,6 +660,24 @@
         text = deps.join(" ");
         break;
       }
+      case "/debug": {
+        if (!lastRunText) {
+          alert(`/debug: no runs (in this session)`);
+          return;
+        }
+        text = "#debug " + lastRunText;
+        editing = true;
+        break;
+      }
+      case "/debug_eval": {
+        if (!lastEvalText) {
+          alert(`/debug: no _eval calls (in this session)`);
+          return;
+        }
+        text = "#debug " + lastEvalText;
+        editing = true;
+        break;
+      }
       case "/tweet": {
         if (editingItems.length == 0) {
           alert("/tweet: no item selected");
@@ -698,27 +725,7 @@
         } else if (text.match(/^\/\w+/)) {
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
-          if (cmd == "/debug") {
-            let m = args.match(/(?<lang>\S*)\s*(?<index>\d*)/)?.groups;
-            let evals = evalHistory;
-            if (m.lang)
-              evals = evals.filter((e) => e.language.startsWith(m.lang));
-            const index = parseInt(m.index) || 0;
-            if (index < 0 || index >= evals.length) {
-              alert(`/debug: could not find eval '${args}'`);
-              return;
-            }
-            // add line numbers to code
-            let code = evals[index].code;
-            let lineno = 1;
-            code = code
-              .split("\n")
-              .map((line) => `/*${lineno++}*/ ${line}`)
-              .join("\n");
-            text = "```" + evals[index].language + "\n" + code + "\n```";
-            editing = true;
-            break;
-          } else if (idsFromLabel.has("#command" + cmd)) {
+          if (idsFromLabel.has("#command" + cmd)) {
             try {
               window["_eval"](`run('${args}')`, "#command" + cmd);
             } catch (e) {
@@ -948,8 +955,12 @@
     jsin = jsin.replace(/\$id/g, item.id);
     //const evaljs = "(function(){\n" + jsin + "\n})()";
     const evaljs = jsin;
-    evalHistory.unshift({ code: evaljs, language: "js_input" });
-    if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
+    if (lastRunText)
+      lastRunText = appendBlock(
+        lastRunText,
+        "js_input",
+        addLineNumbers(evaljs)
+      );
     const start = Date.now();
     try {
       evalIndex = index;
@@ -990,9 +1001,13 @@
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
     block = "\n```" + type + "\n" + block + "```";
+    const empty = "\n```" + type + "\n```";
     const regex = "(?:^|\\n) *```" + type + "\\n.*?\\s*```";
     if (text.match(RegExp(regex, "s"))) {
-      text = text.replace(RegExp(regex, "gs"), block);
+      let count = 0;
+      text = text.replace(RegExp(regex, "gs"), () =>
+        count++ == 0 ? block : empty
+      );
     } else {
       text += block;
     }
@@ -1003,11 +1018,13 @@
   function appendJSOutput(text: string, index: number): string {
     if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
     lastRunTime = Date.now(); // used in _write_log, see below
+    lastRunText = text;
     // execute JS code, including any 'js' blocks from this and any tag-referenced items
     // NOTE: js_input blocks are assumed "local", i.e. not intended for export
     let item = items[index];
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
+    if (item.debug) prefix = ""; // debug items are self-contained
     let jsout = evalJSInput(prefix + text, item.label, index) || "";
     if (!jsout)
       return text.replace(/(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs, ""); // no output
@@ -1664,6 +1681,10 @@
       let indices = indicesForItem(item);
       indices.map((index) => {
         let item = items[index];
+        if (type == "js" || type == "webppl")
+          content.push(`/* ${type} @ ${item.label || "id:" + item.id} */`);
+        else if (type == "html")
+          content.push(`<!-- ${type} @ ${item.label || "id:" + item.id} -->`);
         // NOTE: by convention, dependencies are included _before_ item itself
         if (options["include_deps"]) {
           options["include_deps"] = false; // deps are recursive already
@@ -1679,10 +1700,7 @@
         if (options["replace_$id"]) text = text.replace(/\$id/g, item.id);
         content.push(text);
       });
-      return content
-        .filter((s) => s)
-        .join("\n")
-        .trim();
+      return content.filter((s) => s).join("\n");
     };
 
     window["_read_deep"] = function (
@@ -1707,8 +1725,16 @@
         Object.assign({ include_deps: true, replace_$id: true }, options)
       );
       const evaljs = prefix + "\n" + code;
-      evalHistory.unshift({ code: evaljs, language: "js_input" });
-      if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
+      const index = indicesForItem("")[0]; // same as _id(), may be undefined
+      lastEvalText = appendBlock(
+        index != undefined
+          ? `\`_eval\` invoked from ${
+              items[index].label || "id:" + items[index].label
+            }`
+          : "",
+        "js_input",
+        addLineNumbers(evaljs)
+      );
       return eval(evaljs);
     };
 
@@ -2117,8 +2143,12 @@
           let start = Date.now();
           window["webppl"].running = true;
           webppl = webppl_prefix + "\n" + webppl;
-          evalHistory.unshift({ code: webppl, language: "webppl_input" });
-          if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
+          if (lastRunText)
+            lastRunText = appendBlock(
+              lastRunText,
+              "webppl_input",
+              addLineNumbers(webppl)
+            );
           try {
             window["webppl"].run(
               webppl,
