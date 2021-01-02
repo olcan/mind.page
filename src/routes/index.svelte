@@ -241,9 +241,8 @@
     // update history, replace unless current state is final
     if (history.state.editorText != text) {
       // need to update history
-      if (history.state.final)
-        history.pushState({ editorText: editorText }, editorText);
-      else history.replaceState({ editorText: editorText }, editorText);
+      if (history.state.final) history.pushState({ editorText: text }, text);
+      else history.replaceState({ editorText: text }, text);
     }
 
     text = text.toLowerCase().trim();
@@ -571,6 +570,8 @@
     }
   }
 
+  const evalHistoryMaxLength = 10;
+  let evalHistory = [];
   let editorText = "";
   function onEditorDone(
     text: string,
@@ -697,7 +698,27 @@
         } else if (text.match(/^\/\w+/)) {
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
-          if (idsFromLabel.has("#command" + cmd)) {
+          if (cmd == "/debug") {
+            let m = args.match(/(?<lang>\S*)\s*(?<index>\d*)/)?.groups;
+            let evals = evalHistory;
+            if (m.lang)
+              evals = evals.filter((e) => e.language.startsWith(m.lang));
+            const index = parseInt(m.index) || 0;
+            if (index < 0 || index >= evals.length) {
+              alert(`/debug: could not find eval '${args}'`);
+              return;
+            }
+            // add line numbers to code
+            let code = evals[index].code;
+            let lineno = 1;
+            code = code
+              .split("\n")
+              .map((line) => `/*${lineno++}*/ ${line}`)
+              .join("\n");
+            text = "```" + evals[index].language + "\n" + code + "\n```";
+            editing = true;
+            break;
+          } else if (idsFromLabel.has("#command" + cmd)) {
             try {
               window["_eval"](`run('${args}')`, "#command" + cmd);
             } catch (e) {
@@ -818,8 +839,13 @@
 
   function focusOnNearestEditingItem(index: number) {
     // console.log("focusOnNearestEditingItem", index, editingItems);
-    let near = Math.min(...editingItems.filter((i) => i > index));
-    if (near == Infinity) near = Math.max(...[-1, ...editingItems]);
+    let near = Math.min(
+      ...editingItems.filter((i) => i > index && i < maxIndexToShow)
+    );
+    if (near == Infinity)
+      near = Math.max(
+        ...[-1, ...editingItems.filter((i) => i < maxIndexToShow)]
+      );
     focusedItem = near;
     setTimeout(() => {
       textArea(near).focus();
@@ -920,11 +946,17 @@
     if (jsin.length == 0) return "";
     let item = items[index];
     jsin = jsin.replace(/\$id/g, item.id);
-    let start = Date.now();
+    //const evaljs = "(function(){\n" + jsin + "\n})()";
+    const evaljs = jsin;
+    evalHistory.unshift({ code: evaljs, language: "js_input" });
+    if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
+    const start = Date.now();
     try {
       evalIndex = index;
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
-      let out = eval("(function(){\n" + jsin + "\n})()");
+      let out = eval(evaljs);
+      // ignore output if Promise
+      if (out instanceof Promise) out = undefined;
       const outputConfirmLength = 16 * 1024;
       if (out && out.length >= outputConfirmLength) {
         if (
@@ -1099,6 +1131,12 @@
           // NOTE: these appends may trigger async _write
           item.text = appendJSOutput(item.text, index);
         }
+        // save edit state for resuming edit
+        if (!cancelled) {
+          let textarea = textArea(item.index);
+          lastEditItem = item.id;
+          lastEditPosition = textarea.selectionStart;
+        }
         if (item.time != item.savedTime || item.text != item.savedText)
           saveItem(index);
         onEditorChange(editorText); // item time and/or text has changed
@@ -1154,6 +1192,21 @@
     editingItems.push(index);
   }
 
+  let lastEditItem;
+  let lastEditPosition;
+  function resumeLastEdit() {
+    if (!lastEditItem) return;
+    let index = indexFromId.get(lastEditItem);
+    if (index == undefined) return;
+    if (index >= maxIndexToShow) return;
+    if (items[index].editing) return;
+    editItem(index);
+    setTimeout(() => {
+      textArea(index).focus();
+      textArea(index).selectionStart = lastEditPosition;
+    });
+  }
+
   function textArea(index: number): HTMLTextAreaElement {
     return document.getElementById(
       "textarea-" + (index < 0 ? "editor" : items[index].id)
@@ -1178,7 +1231,7 @@
   }
 
   function onNextItem(inc = 1) {
-    if (focusedItem + inc >= items.length) return;
+    if (focusedItem + inc >= Math.min(maxIndexToShow, items.length)) return;
     const index = focusedItem;
     const textarea = textArea(index);
     if (!items[index + inc].editing) {
@@ -1626,7 +1679,10 @@
         if (options["replace_$id"]) text = text.replace(/\$id/g, item.id);
         content.push(text);
       });
-      return content.join("\n");
+      return content
+        .filter((s) => s)
+        .join("\n")
+        .trim();
     };
 
     window["_read_deep"] = function (
@@ -1650,7 +1706,10 @@
         item,
         Object.assign({ include_deps: true, replace_$id: true }, options)
       );
-      return eval(prefix + "\n" + code);
+      const evaljs = prefix + "\n" + code;
+      evalHistory.unshift({ code: evaljs, language: "js_input" });
+      if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
+      return eval(evaljs);
     };
 
     let _writePendingItem = "";
@@ -2057,9 +2116,12 @@
           // if (prevRunClosure) prevRunClosure();
           let start = Date.now();
           window["webppl"].running = true;
+          webppl = webppl_prefix + "\n" + webppl;
+          evalHistory.unshift({ code: webppl, language: "webppl_input" });
+          if (evalHistory.length > evalHistoryMaxLength) evalHistory.pop();
           try {
             window["webppl"].run(
-              webppl_prefix + "\n" + webppl,
+              webppl,
               function (s, x) {
                 let time = Date.now() - start;
                 if (x != undefined) window["_write"](id, JSON.stringify(x));
@@ -2172,6 +2234,12 @@
 
   // disable editor shortcuts
   function onKeyPress(e: KeyboardEvent) {
+    // console.log(e);
+    if (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+      e.preventDefault();
+      resumeLastEdit();
+      return;
+    }
     // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (

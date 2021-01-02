@@ -321,7 +321,7 @@
     // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
     if (
       (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey))
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
