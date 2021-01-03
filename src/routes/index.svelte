@@ -1456,7 +1456,7 @@
                   div.appendChild(elem);
                   consoleLog.push({
                     type: verb,
-                    text: args.join(" "),
+                    text: elem.textContent.trim(),
                     time: Date.now(),
                     level: levels.indexOf(verb),
                   });
