@@ -891,7 +891,7 @@
     /* border-radius: 0 5px 0 4px; */
     /* overflow: hidden; */
     color: black;
-    font-size: 14px;
+    font-size: 15px;
     font-family: Avenir Next, Helvetica;
     font-weight: 500;
     box-sizing: border-box;
@@ -927,7 +927,7 @@
     opacity: 1;
     color: black;
     font-family: Avenir Next, Helvetica;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1065,14 +1065,13 @@
     display: flex;
     visibility: hidden;
     position: absolute;
+    padding: 1px;
     top: -1px;
     left: -1px;
     width: 100%;
     height: 100%;
     justify-content: center;
     align-items: center;
-    border: 1px solid rgba(0, 0, 0, 0.5);
-    border-radius: 5px;
     background: rgba(0, 0, 0, 0.5);
     -webkit-touch-callout: none;
     -webkit-user-select: none;

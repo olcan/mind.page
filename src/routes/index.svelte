@@ -177,6 +177,7 @@
         const div = document.querySelector(
           "#super-container-" + items[topMovedIndex].id
         );
+        if (!div) return; // item hidden
         const itemTop = (div as HTMLElement).offsetTop;
         if (itemTop < window.scrollY) {
           // console.log("scrolling up", itemTop, window.scrollY);
@@ -2265,7 +2266,10 @@
   // disable editor shortcuts
   function onKeyPress(e: KeyboardEvent) {
     // console.log(e);
-    if (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+    if (
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
+      (e.code == "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey)
+    ) {
       e.preventDefault();
       resumeLastEdit();
       return;
