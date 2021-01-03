@@ -1196,12 +1196,14 @@
     item.text = appendJSOutput(item.text, index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
+    editorBlurTime = 0; // prevent re-focus on editor
     onEditorChange(editorText); // item time/text has changed
   }
 
   function onItemTouch(index: number) {
     items[index].time = Date.now();
     saveItem(index);
+    editorBlurTime = 0; // prevent re-focus on editor
     onEditorChange(editorText); // item time has changed
   }
 
