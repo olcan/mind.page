@@ -353,8 +353,8 @@
   function onInput() {
     // force replace tabs with spaces
     if (textarea.value.indexOf("\t") >= 0) {
-      // if textarea starts with a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      if (textarea.value.match(/^[-*]\s/))
+      // if tabbed line is preceded by a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
+      if (textarea.value.match(/(?:^|\n)\s*[-*].*\n?.*\t/))
         textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
       textarea.value = textarea.value.replace(/\t/g, "  ");
     }

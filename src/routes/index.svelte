@@ -1229,6 +1229,8 @@
     if (index >= maxIndexToShow) return;
     if (items[index].editing) return;
     editItem(index);
+    lastEditorChangeTime = 0; // force immediate update
+    onEditorChange(editorText); // since edit state changed
     setTimeout(() => {
       textArea(index).focus();
       textArea(index).selectionStart = lastEditPosition;
