@@ -769,11 +769,9 @@
     onEditorChange(editorText); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
     if (!editing) {
-      itemToSave.text = item.text = appendJSOutput(
-        text,
-        indexFromId.get(tmpid)
-      );
+      appendJSOutput(indexFromId.get(tmpid));
       if (item.text != text) {
+        itemToSave.text = item.text;
         // invoke onEditorChange again due to text change
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(editorText);
@@ -872,10 +870,6 @@
     );
     item.savedTime = item.time;
     item.saving = false;
-    if (item.saveClosure) {
-      item.saveClosure(index);
-      item.saveClosure = null;
-    }
     items[index] = item; // trigger dom update
   }
 
@@ -1016,20 +1010,23 @@
   }
 
   let lastRunTime = 0;
-  function appendJSOutput(text: string, index: number): string {
-    if (!text.match(/\s*```js_input\s/)) return text; // no js code in text
+  function appendJSOutput(index: number): string {
+    let item = items[index];
+    if (!item.text.match(/\s*```js_input\s/)) return; // no js code in text
     lastRunTime = Date.now(); // used in _write_log, see below
-    lastRunText = text;
+    lastRunText = item.text;
     // execute JS code, including any 'js' blocks from this and any tag-referenced items
     // NOTE: js_input blocks are assumed "local", i.e. not intended for export
-    let item = items[index];
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     if (item.debug) prefix = ""; // debug items are self-contained
-    let jsout = evalJSInput(prefix + text, item.label, index) || "";
-    if (!jsout)
-      return text.replace(/(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs, ""); // no output
-    return appendBlock(text, "js_output", jsout);
+    let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
+    item.text = item.text.replace(
+      /(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs,
+      ""
+    );
+    if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
+    return item.text;
   }
 
   function saveItem(index: number) {
@@ -1146,8 +1143,7 @@
             "$3" // remove so errors do not leave empty blocks
           );
           itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
-          // NOTE: these appends may trigger async _write
-          item.text = appendJSOutput(item.text, index);
+          appendJSOutput(index);
         }
         // save edit state for resuming edit
         if (!cancelled) {
@@ -1193,7 +1189,7 @@
       "$3" // remove so errors do not leave empty blocks
     );
     itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
-    item.text = appendJSOutput(item.text, index);
+    appendJSOutput(index);
     item.time = Date.now();
     if (!item.editing) saveItem(index);
     editorBlurTime = 0; // prevent re-focus on editor
@@ -1741,9 +1737,6 @@
       return eval(evaljs);
     };
 
-    let _writePendingItem = "";
-    let _writePendingType = "";
-    let _writePendingItemLog = "";
     window["_write"] = function (
       item: string,
       text: string,
@@ -1754,86 +1747,46 @@
         console.error(`could not determine item(s) for _write to '${item}'`);
         return;
       }
-      // if writing _log to item pending another _write, attach to that write
-      if (type == "_log" && item == _writePendingItem) {
-        _writePendingItemLog = text;
-        return;
-      }
-      // NOTE: write is always async in case triggered by eval during onItemEditing
-      _writePendingItem = item;
-      _writePendingType = type;
-      setTimeout(() => {
-        let log = "";
-        if (_writePendingItem == item && _writePendingType == type) {
-          log = _writePendingItemLog;
-          _writePendingItemLog = _writePendingItem = _writePendingType = "";
+      let indices = ids.map((id) => indexFromId.get(id));
+      indices.map((index) => {
+        if (index == undefined) return; // deleted
+        let item = items[index];
+        // confirm if write is too big
+        const writeConfirmLength = 16 * 1024;
+        if (text && text.length >= writeConfirmLength) {
+          if (
+            !confirm(
+              `Write ${text.length} bytes (${type}) into ${
+                item.label || `item ${item.index + 1}`
+              }?`
+            )
+          )
+            return; // cancel write
         }
-        let indices = ids.map((id) => indexFromId.get(id));
-        indices.map((index) => {
-          if (index == undefined) return; // deleted
-          let item = items[index];
-          // if item is editing, then write immediately without saving
-          if (item.editing) {
-            // clear existing _log if any
-            if (log || type == "_log") {
-              item.text = item.text.replace(
-                /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
-                "$3"
-              );
-            }
-            if (type == "") item.text = text;
-            else item.text = appendBlock(item.text, type, text);
-            if (log) item.text = appendBlock(item.text, "_log", log);
-            item.time = Date.now();
-            onEditorChange(editorText); // item time/text has changed
-            return;
-          }
-          const prevSaveClosure = item.saveClosure;
-          item.saveClosure = null; // chained into this one
-          const saveClosure = (index) => {
-            if (prevSaveClosure) prevSaveClosure(index); // chain closures
-            const writeConfirmLength = 16 * 1024;
-            if (text && text.length >= writeConfirmLength) {
-              if (
-                !confirm(
-                  `Write ${text.length} bytes (${type}) into ${
-                    item.label || `item ${item.index + 1}`
-                  }?`
-                )
-              )
-                return; // cancel write
-            }
-            // clear existing _log if any
-            if (log || type == "_log") {
-              item.text = item.text.replace(
-                /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
-                "$3"
-              );
-            }
-            if (type == "") item.text = text;
-            else item.text = appendBlock(item.text, type, text);
-            if (log) item.text = appendBlock(item.text, "_log", log);
-            item.time = Date.now();
-            // NOTE: if write block type ends with _tmp, then we do NOT save changes to item
-            if (!type.endsWith("_tmp")) saveItem(index);
-            onEditorChange(editorText); // item time/text has changed
-          };
-          if (item.saving) {
-            item.saveClosure = saveClosure;
-            // console.log("_write is postponed until saving is complete");
-          } else {
-            saveClosure(index); // write and save immediately
-          }
-        });
-      }, 0);
+        // if writing *_log, clear any existing *_log blocks
+        if (type.endsWith("_log")) {
+          item.text = item.text.replace(
+            /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
+            "$3"
+          );
+        }
+        if (type == "") item.text = text;
+        else item.text = appendBlock(item.text, type, text);
+        item.time = Date.now();
+        onEditorChange(editorText); // item time/text has changed
+        if (type.endsWith("_tmp")) return; // do not save _tmp blocks
+        saveItem(index);
+      });
     };
 
     // default level (1) excludes debug messages, and default since (-1) is lastRunTime
     // NOTE: default lastRunTime is only accurate if _write_log is invoked synchronously
+    // NOTE: type can be changed but only _log type is attached to another pending write
     window["_write_log"] = function (
       item: string,
       since: number = -1,
-      level: number = 1
+      level: number = 1,
+      type: string = "_log"
     ) {
       let log = [];
       if (since < 0) since = lastRunTime;
@@ -1851,7 +1804,7 @@
       }
       log = log.reverse();
       if (log.length > 0) {
-        window["_write"](item, log.join("\n"), "_log");
+        window["_write"](item, log.join("\n"), type);
       }
     };
 
