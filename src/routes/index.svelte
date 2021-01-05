@@ -2178,8 +2178,14 @@
       return itemUpdateRunning(id, running);
     };
 
-    window["_done"] = function (id: string) {
-      return window["_running"](id, false);
+    window["_done"] = function (
+      id: string,
+      log_type: string = "_log",
+      log_level: number = 1
+    ) {
+      const runStartTime = window["_running"](id, false);
+      if (log_type) window["_write_log"](id, runStartTime, log_level, log_type);
+      return runStartTime;
     };
 
     window["_array"] = function (length: number, func) {
