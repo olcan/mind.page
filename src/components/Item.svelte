@@ -17,7 +17,7 @@
     langPrefix: "",
   });
 
-  import { Circle2 } from "svelte-loading-spinners";
+  import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
   export let editing = false;
   export let focused = false;
@@ -92,7 +92,7 @@
   function onClick(e) {
     // ignore clicks on loading div
     if ((e.target as HTMLElement).closest(".loading")) return;
-    // console.log(e.target);
+    // console.debug(e.target);
     // ignore (most) clicks inside c3 charts
     if (
       (e.target as HTMLElement).closest(
@@ -175,10 +175,10 @@
     const cache_key =
       "html-" + hashCode(Array.from(arguments).slice(1).toString());
     if (window["_html_cache"].hasOwnProperty(cache_key)) {
-      // console.log("toHTML skipped");
+      // console.debug("toHTML skipped");
       return window["_html_cache"][cache_key];
     }
-    // console.log("toHTML");
+    // console.debug("toHTML");
 
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
     matchingTermsSecondary = new Set<string>(
@@ -395,7 +395,7 @@
         .replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
-      // console.log("img src", src, m);
+      // console.debug("img src", src, m);
       return (
         m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}">`
       );
@@ -418,7 +418,7 @@
         return m;
       }
       // m = m.replace(/ _cache_key=[^> ]*/, "");
-      // console.log("img src", src, m);
+      // console.debug("img src", src, m);
       const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
     });
@@ -458,7 +458,7 @@
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
       if (window["_elem_cache"].hasOwnProperty(key)) {
-        // console.log("reusing cached element", key, elem.tagName, elem.id);
+        // console.debug("reusing cached element", key, elem.tagName, elem.id);
         // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_elem_cache"][key]);
         elem = window["_elem_cache"][key];
@@ -475,7 +475,7 @@
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
-        // console.log("caching element", key, elem.tagName);
+        // console.debug("caching element", key, elem.tagName);
         window["_elem_cache"][key] = elem; //.cloneNode(true);
       }
       elem.setAttribute("_item", id); // for invalidating cached elems on errors
@@ -530,7 +530,7 @@
       hash == itemdiv.firstElementChild.getAttribute("_hash") &&
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
-      // console.log("afterUpdate skipped");
+      // console.debug("afterUpdate skipped");
       // fix any zero-width c3 charts inside element
       // (can be reset to zero during editing if main window loses focus)
       itemdiv.querySelectorAll(".c3 > svg").forEach((svg) => {
@@ -541,7 +541,7 @@
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
-    // console.log("afterUpdate");
+    // console.debug("afterUpdate");
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();
@@ -721,7 +721,7 @@
       let math = [];
       itemdiv.querySelectorAll(".math").forEach((elem) => {
         if (elem.hasAttribute("_rendered")) return;
-        // console.log("rendering math", math.innerHTML);
+        // console.debug("rendering math", math.innerHTML);
         elem.setAttribute("_rendered", Date.now().toString());
         math.push(elem);
       });
@@ -759,11 +759,11 @@
 
       let pendingScripts = scripts.length;
       let scriptErrors = [];
-      // console.log(
+      // console.debug(
       //   `executing ${pendingScripts} scripts in item ${index + 1} ...`
       // );
       scripts.forEach((script) => {
-        // console.log(script.parentElement);
+        // console.debug(script.parentElement);
         if (
           !script.hasAttribute("_uncached") &&
           !script.parentElement.hasAttribute("_cache_key")
@@ -788,7 +788,7 @@
 
         pendingScripts--;
         if (pendingScripts > 0) return;
-        // console.log(`all scripts done in item ${index + 1}`);
+        // console.debug(`all scripts done in item ${index + 1}`);
         // if (itemdiv.querySelector("script")) console.warn("item still contains script(s)!");
         setTimeout(() => onResized(id, container, "scripts done"), 0);
 
@@ -1477,8 +1477,14 @@
         {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
-    <div class="loading">
-      <Circle2 size="60" unit="px" />
-    </div>
+    {#if running}
+      <div class="loading">
+        <Circle2 size="40" unit="px" />
+      </div>
+    {:else if saving}
+      <div class="loading">
+        <Circle size="25" unit="px" />
+      </div>
+    {/if}
   </div>
 </div>

@@ -90,7 +90,7 @@
   let enterStart = -1;
   let enterIndentation = "";
   function onKeyDown(e: KeyboardEvent) {
-    // console.log(e);
+    // console.debug(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
     if (
@@ -317,7 +317,7 @@
   }
 
   function onKeyPress(e: KeyboardEvent) {
-    // console.log(e);
+    // console.debug(e);
     // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
     if (
       (e.code == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||

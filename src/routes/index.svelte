@@ -12,7 +12,7 @@
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
   export async function preload(page, session) {
-    // console.log("preloading, client?", isClient);
+    // console.debug("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
     const user: any = await firebaseAdmin()
       .auth()
@@ -75,7 +75,7 @@
   let maxIndexToShowDefault = 50;
   let maxIndexToShow = maxIndexToShowDefault;
   function updateItemLayout() {
-    // console.log("updateItemLayout");
+    // console.debug("updateItemLayout");
     editingItems = [];
     focusedItem = -1;
     indexFromId = new Map<string, number>();
@@ -162,7 +162,7 @@
     });
 
     if (focusedItem >= 0) {
-      // console.log("updateItemLayout focusedItem", focusedItem);
+      // console.debug("updateItemLayout focusedItem", focusedItem);
       // maintain focus on item
       const textarea = textArea(focusedItem);
       if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
@@ -180,7 +180,7 @@
         if (!div) return; // item hidden
         const itemTop = (div as HTMLElement).offsetTop;
         if (itemTop < window.scrollY) {
-          // console.log("scrolling up", itemTop, window.scrollY);
+          // console.debug("scrolling up", itemTop, window.scrollY);
           window.top.scrollTo(0, itemTop);
         }
       });
@@ -236,7 +236,7 @@
       return;
     }
     lastEditorChangeTime = Infinity; // force minimum wait for next change
-    // console.log("onEditorChange");
+    // console.debug("onEditorChange");
     maxIndexToShow = maxIndexToShowDefault; // reset item truncation
 
     // update history, replace unless current state is final
@@ -412,7 +412,7 @@
         // if target is not the tag node, it must be a highlight, so we move to the parent
         if ((tagNode as HTMLElement).tagName != "MARK")
           tagNode = tagNode.parentNode;
-        // console.log("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
+        // console.debug("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
         // if tag node contains highlight, we have to adjust click position
         let pos = range.startOffset;
         for (const child of Array.from(tagNode.childNodes)) {
@@ -480,7 +480,7 @@
 
   let tagCounts = new Map<string, number>();
   function itemTextChanged(index: number, text: string, update_deps = true) {
-    // console.log("itemTextChanged", index);
+    // console.debug("itemTextChanged", index);
     let item = items[index];
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
@@ -564,8 +564,8 @@
           // if (depitem.deephash != prevDeepHash && depitem.scripted) {
           //   // update times, offset to maintain existing ordering, with dependency most recent
           //   if (!depitem.log) depitem.time = item.time - 1 - depindex;
-          //   // console.log("saving scripted dependent", depindex);
-          //   saveItem(depindex);
+          //   // console.debug("saving scripted dependent", depindex);
+          //   saveItem(depitem.id);
           // }
         }
       });
@@ -820,7 +820,7 @@
         }
         itemTextChanged(index, text);
         // if editing, we do not call onItemSaved so save is postponed to post-edit
-        if (!item.editing) onItemSaved(doc.id);
+        if (!item.editing) onItemSaved(doc.id, itemToSave);
         else items[index] = item; // trigger dom update
 
         if (focusedItem == index)
@@ -844,7 +844,7 @@
   }
 
   function focusOnNearestEditingItem(index: number) {
-    // console.log("focusOnNearestEditingItem", index, editingItems);
+    // console.debug("focusOnNearestEditingItem", index, editingItems);
     let near = Math.min(
       ...editingItems.filter((i) => i > index && i < maxIndexToShow)
     );
@@ -855,22 +855,23 @@
     focusedItem = near;
     setTimeout(() => {
       textArea(near).focus();
-      // console.log("focused on item", near);
+      // console.debug("focused on item", near);
     }, 0);
   }
 
-  function onItemSaved(id: string) {
+  function onItemSaved(id: string, savedItem) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // item was deleted
+    // console.debug("saved item", index);
     let item = items[index];
-    // do not save any _tmp blocks
-    item.savedText = item.text.replace(
-      /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
-      ""
-    );
-    item.savedTime = item.time;
+    item.savedText = savedItem.text;
+    item.savedTime = savedItem.time;
     item.saving = false;
     items[index] = item; // trigger dom update
+    if (item.saveClosure) {
+      item.saveClosure(item.id);
+      delete item.saveClosure;
+    }
   }
 
   let layoutPending = false;
@@ -933,12 +934,17 @@
   function itemUpdateRunning(id: string, running: boolean) {
     let index = indexFromId.get(id);
     if (index == undefined) return;
-    if (items[index].running == running) return;
-    items[index].running = running;
-    if (!running) itemShowLogs(id);
+    // console.debug("itemUpdateRunning", id, running);
+    if (items[index].running != running) {
+      items[index].running = running;
+      if (running) items[index].runStartTime = Date.now();
+      else itemShowLogs(id);
+    }
+    items[index] = items[index]; // trigger dom update
+    return items[index].runStartTime;
   }
 
-  let evalIndex = -1;
+  let evalItemId;
   function evalJSInput(
     text: string,
     label: string = "",
@@ -958,7 +964,7 @@
       );
     const start = Date.now();
     try {
-      evalIndex = index;
+      evalItemId = item.id;
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
       let out = eval(evaljs);
       // ignore output if Promise
@@ -974,13 +980,13 @@
         )
           out = undefined;
       }
-      evalIndex = -1;
+      evalItemId = null;
       // automatically _write_log into item
       window["_write_log"](item.id, start);
       itemShowLogs(item.id);
       return out;
     } catch (e) {
-      evalIndex = -1;
+      evalItemId = null;
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
       if (console["_eval_error"]) console["_eval_error"](msg);
@@ -1020,18 +1026,25 @@
     let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
     if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
     if (item.debug) prefix = ""; // debug items are self-contained
-    let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
     item.text = item.text.replace(
       /(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs,
       ""
     );
+    let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
     if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
     return item.text;
   }
 
-  function saveItem(index: number) {
-    // console.log("saving item", index);
+  function saveItem(id: string) {
+    // console.debug("saving item", id);
+    const index = indexFromId.get(id);
+    if (index == undefined) return; // item deleted
     let item = items[index];
+    // if item is already saving, set saveClosure and return (no need to chain)
+    if (item.saving) {
+      item.saveClosure = saveItem;
+      return;
+    }
     item.saving = true;
     let itemToSave = { time: item.time, text: item.text };
     // do not save any _tmp blocks
@@ -1047,8 +1060,7 @@
       .doc(item.id)
       .update(itemToSave)
       .then(() => {
-        // console.log("saved item", index);
-        onItemSaved(item.id);
+        onItemSaved(item.id, itemToSave);
       })
       .catch(console.error);
     // also save to items-history ...
@@ -1152,7 +1164,7 @@
           lastEditPosition = textarea.selectionStart;
         }
         if (item.time != item.savedTime || item.text != item.savedText)
-          saveItem(index);
+          saveItem(item.id);
         onEditorChange(editorText); // item time and/or text has changed
       }
 
@@ -1164,14 +1176,14 @@
         (document.activeElement as HTMLElement).blur();
       }
     }
-    // console.log(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
+    // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
   }
 
   // WARNING: onItemFocused may NOT be invoked when editor is destroyed
   function onItemFocused(index: number, focused: boolean) {
     if (focused) focusedItem = index;
     else focusedItem = -1;
-    // console.log(
+    // console.debug(
     //   `item ${index} focused: ${focused}, focusedItem:${focusedItem}`
     // );
   }
@@ -1191,14 +1203,14 @@
     itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
     appendJSOutput(index);
     item.time = Date.now();
-    if (!item.editing) saveItem(index);
+    if (!item.editing) saveItem(item.id);
     editorBlurTime = 0; // prevent re-focus on editor
     onEditorChange(editorText); // item time/text has changed
   }
 
   function onItemTouch(index: number) {
     items[index].time = Date.now();
-    saveItem(index);
+    saveItem(items[index].id);
     editorBlurTime = 0; // prevent re-focus on editor
     onEditorChange(editorText); // item time has changed
   }
@@ -1387,7 +1399,7 @@
     });
 
     // Sign in user as needed ...
-    if (error) console.log(error); // log server-side error
+    if (error) console.error(error); // log server-side error
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
     firebase()
       .auth()
@@ -1424,8 +1436,8 @@
                     indexFromId.has(window["_script_item_id"])
                   ) {
                     item = items[indexFromId.get(window["_script_item_id"])];
-                  } else if (evalIndex) {
-                    item = items[evalIndex];
+                  } else if (evalItemId) {
+                    item = items[indexFromId.get(evalItemId)];
                   }
                   if (item) {
                     // prepent item index, label (if any)
@@ -1498,7 +1510,7 @@
               .getIdToken(false /*force refresh*/)
               .then((token) => {
                 document.cookie = "__session=" + token + ";max-age=86400";
-                // console.log("updated cookie", error || "(no error)");
+                // console.debug("updated cookie", error || "(no error)");
                 // reload with new cookie if we are on error page
                 if (error) location.reload();
               })
@@ -1605,8 +1617,8 @@
 
     function indicesForItem(item: string) {
       if (item == "auto" || item == "self" || item == "this") item = "";
-      if (!item && evalIndex >= 0) {
-        return [evalIndex];
+      if (!item && evalItemId) {
+        return [indexFromId.get(evalItemId)];
       } else if (
         !item &&
         window["_script_item_id"] &&
@@ -1764,30 +1776,27 @@
             return; // cancel write
         }
         // if writing *_log, clear any existing *_log blocks
+        // (and skip write if block is empty)
         if (type.endsWith("_log")) {
           item.text = item.text.replace(
             /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
             "$3"
           );
+          if (text) item.text = appendBlock(item.text, type, text);
+        } else {
+          if (type == "") item.text = text;
+          else item.text = appendBlock(item.text, type, text);
         }
-        if (type == "") item.text = text;
-        else item.text = appendBlock(item.text, type, text);
         item.time = Date.now();
         onEditorChange(editorText); // item time/text has changed
         if (type.endsWith("_tmp")) return; // do not save _tmp blocks
-        saveItem(index);
+        saveItem(item.id);
       });
     };
 
     // default level (1) excludes debug messages, and default since (-1) is lastRunTime
-    // NOTE: default lastRunTime is only accurate if _write_log is invoked synchronously
-    // NOTE: type can be changed but only _log type is attached to another pending write
-    window["_write_log"] = function (
-      item: string,
-      since: number = -1,
-      level: number = 1,
-      type: string = "_log"
-    ) {
+    // NOTE: default since=lastRunTime is only accurate if _read_log is invoked synchronously
+    window["_read_log"] = function (since: number = -1, level: number = 1) {
       let log = [];
       if (since < 0) since = lastRunTime;
       for (let i = consoleLog.length - 1; i >= 0; --i) {
@@ -1803,9 +1812,17 @@
         log.push(prefix + text);
       }
       log = log.reverse();
-      if (log.length > 0) {
-        window["_write"](item, log.join("\n"), type);
-      }
+      return log.join("\n");
+    };
+
+    window["_write_log"] = function (
+      item: string,
+      since: number = -1,
+      level: number = 1,
+      type: string = "_log"
+    ) {
+      const log = window["_read_log"](since, level);
+      window["_write"](item, log, type);
     };
 
     window["_task"] = function (
@@ -2063,13 +2080,13 @@
       };
       return new Promise((resolve, reject) => {
         if (!id) {
-          if (evalIndex < 0) {
+          if (!evalItemId) {
             const err = new Error("_run_webppl: invoked from async javascript");
             console.error(err); // synchronous error that should get written into item
             reject(err);
             return;
           }
-          id = items[evalIndex].id;
+          id = evalItemId;
         }
         let item = items[indexFromId.get(id)];
         if (!item) {
@@ -2152,17 +2169,17 @@
 
     window["_running"] = function (id: string = "", running: boolean = true) {
       if (!id) {
-        if (evalIndex < 0) {
+        if (!evalItemId) {
           console.error("_running() invoked from async javascript");
           return;
         }
-        id = items[evalIndex].id;
+        id = evalItemId;
       }
-      itemUpdateRunning(id, running);
+      return itemUpdateRunning(id, running);
     };
 
     window["_done"] = function (id: string) {
-      window["_running"](id, false);
+      return window["_running"](id, false);
     };
 
     window["_array"] = function (length: number, func) {
@@ -2220,7 +2237,7 @@
 
   // disable editor shortcuts
   function onKeyPress(e: KeyboardEvent) {
-    // console.log(e);
+    // console.debug(e);
     if (
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
       (e.code == "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey)
