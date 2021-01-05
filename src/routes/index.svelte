@@ -1360,10 +1360,10 @@
   }
 
   function errorMessage(e) {
-    // NOTE: for UnhandledPromiseRejection, event object is placed in e.reason
+    // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
     if (
-      (e instanceof Event && e.type == "error") ||
-      (e.reason && e.reason instanceof Event && e.reason.type == "error")
+      !e.message &&
+      (e.type == "error" || (e.reason && e.reason.type == "error"))
     ) {
       if (e.reason) e = e.reason;
       let url =
@@ -1374,7 +1374,9 @@
     }
     return e.reason
       ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
-      : `${e.message} (line:${e.lineno}, col:${e.colno})`;
+      : e.message
+      ? `${e.message} (line:${e.lineno}, col:${e.colno})`
+      : undefined;
   }
 
   import { onMount } from "svelte";
@@ -1466,11 +1468,7 @@
                   }
                   // log url for "error" Events that do not have message/reason
                   // see https://www.w3schools.com/jsref/event_onerror.asp
-                  if (
-                    args.length == 1 &&
-                    args[0] instanceof Event &&
-                    args[0].type == "error"
-                  ) {
+                  if (args.length == 1 && errorMessage(args[0])) {
                     elem.textContent = errorMessage(args[0]);
                   } else {
                     elem.textContent = args.join(" ") + "\n";

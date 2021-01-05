@@ -57,7 +57,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^\-\*]/)) html += line + "\n";
+        if (line.match(/^    \s*[^-*]/)) html += line + "\n";
         else
           html +=
             highlightMath(highlightCode(highlightTags(escapeHTML(line)))) +
@@ -300,6 +300,11 @@
       !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
     ) {
       if (enterStart >= 0) {
+        // extend bullet points to new lines
+        const bullet = textarea.value
+          .substring(0, enterStart)
+          .match(/(?:^|\n) *([-*] ).*$/);
+        if (bullet) enterIndentation += bullet[1];
         if (enterIndentation) {
           let newlines = textarea.value.substring(
             enterStart,
@@ -354,8 +359,9 @@
     // force replace tabs with spaces
     if (textarea.value.indexOf("\t") >= 0) {
       // if tabbed line is preceded by a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      if (textarea.value.match(/(?:^|\n)\s*[-*].*\n?.*\t/))
-        textarea.value = textarea.value.replace(/(\t+)/g, "$1- ");
+      let bullet;
+      if ((bullet = textarea.value.match(/(?:^|\n) *([-*] ).*\n?.*\t/)))
+        textarea.value = textarea.value.replace(/(\t+)/g, "$1" + bullet[1]);
       textarea.value = textarea.value.replace(/\t/g, "  ");
     }
     text = textarea.value; // no trimming until onDone
