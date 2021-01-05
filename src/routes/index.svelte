@@ -1357,6 +1357,24 @@
     }
   }
 
+  function errorMessage(e) {
+    // NOTE: for UnhandledPromiseRejection, event object is placed in e.reason
+    if (
+      (e instanceof Event && e.type == "error") ||
+      (e.reason && e.reason instanceof Event && e.reason.type == "error")
+    ) {
+      if (e.reason) e = e.reason;
+      let url =
+        e.target && (e.target["url"] || e.target["src"])
+          ? e.target["url"] || e.target["src"]
+          : "(unknown url)";
+      return `error loading ${url}`;
+    }
+    return e.reason
+      ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
+      : `${e.message} (line:${e.lineno}, col:${e.colno})`;
+  }
+
   import { onMount } from "svelte";
   import { hashCode, numberWithCommas, extractBlock } from "../util.js";
 
@@ -1451,11 +1469,7 @@
                     args[0] instanceof Event &&
                     args[0].type == "error"
                   ) {
-                    let url =
-                      args[0].target && args[0]["target"]["url"]
-                        ? args[0]["target"]["url"]
-                        : "(unknown url)";
-                    elem.textContent = `error loading ${url}\n`;
+                    elem.textContent = errorMessage(args[0]);
                   } else {
                     elem.textContent = args.join(" ") + "\n";
                   }
@@ -2273,9 +2287,7 @@
   function onError(e) {
     if (!consolediv) return; // can happen during login process
     // NOTE: if this is from onunhandledrejection, then we need to use e.reason
-    let msg = e.reason
-      ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
-      : `${e.message} (line:${e.lineno}, col:${e.colno})`;
+    let msg = errorMessage(e);
     if (console["_window_error"]) console["_window_error"](msg);
     else alert(msg);
     if (!window["_errors"]) window["_errors"] = [];
