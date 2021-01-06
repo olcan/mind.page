@@ -416,21 +416,6 @@
         enterIndentation = "";
       }
     }
-
-    // update highlights if current position is next to a parenthesis
-    // (of if there are highlights that may need to be cleared)
-    if (
-      highlights.querySelector("span.highlight") ||
-      (textarea.selectionStart > 0 &&
-        textarea.selectionStart < text.length &&
-        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
-      (textarea.selectionStart > 0 &&
-        textarea.selectionStart < text.length &&
-        "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
-    ) {
-      updateTextDivs();
-      return;
-    }
   }
 
   function onKeyPress(e: KeyboardEvent) {
@@ -481,8 +466,33 @@
     onChange(textarea.value);
   }
 
-  import { afterUpdate } from "svelte";
+  import { afterUpdate, onMount, onDestroy } from "svelte";
   afterUpdate(updateTextDivs);
+
+  function onSelectionChange(e) {
+    if (!document.activeElement.isSameNode(textarea)) return;
+    if (textarea.selectionStart != textarea.selectionEnd) return;
+    // update highlights if current position is next to a parenthesis
+    // (of if there are highlights that may need to be cleared)
+    if (
+      highlights.querySelector("span.highlight") ||
+      (textarea.selectionStart > 0 &&
+        textarea.selectionStart < text.length &&
+        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
+      (textarea.selectionStart > 0 &&
+        textarea.selectionStart < text.length &&
+        "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
+    ) {
+      updateTextDivs();
+      return;
+    }
+  }
+  onMount(() =>
+    document.addEventListener("selectionchange", onSelectionChange)
+  );
+  onDestroy(() =>
+    document.removeEventListener("selectionchange", onSelectionChange)
+  );
 </script>
 
 <style>
