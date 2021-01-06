@@ -81,7 +81,7 @@
   function highlightPosition(text, pos, type) {
     return (
       text.substring(0, pos) +
-      `__highlight_${type}_${text[pos]}__` +
+      `%%_highlight_${type}_%%${text[pos]}` +
       text.substring(pos + 1)
     );
   }
@@ -175,9 +175,10 @@
       '<span class="section-delimiter">$1</span>'
     );
     // convert special highlight syntax into spans
+    // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
     html = html.replace(
-      /__highlight_(\w+?)_(.+?)__/g,
-      '<span class="highlight $1">$2</span>'
+      /%%_highlight_(\w+?)_%%(.*?)([(){}\[\]])/g,
+      '<span class="highlight $1">$3</span>$2'
     );
 
     highlights.innerHTML = html;
@@ -469,7 +470,7 @@
   import { afterUpdate, onMount, onDestroy } from "svelte";
   afterUpdate(updateTextDivs);
 
-  const selectionUpdateDebounceTime = 250;
+  const selectionUpdateDebounceTime = 0;
   let selectionUpdatePending = false;
   function onSelectionChange(e) {
     if (!document.activeElement.isSameNode(textarea)) return;

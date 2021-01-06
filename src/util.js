@@ -44,22 +44,32 @@ export function extractBlock(text, type) {
 
 import "highlight.js/styles/sunburst.css";
 import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
+// custom registration function that can extend highlighting for all languages
+function registerLanguage(name, func) {
+  const custom_func = function (hljs) {
+    let def = func(hljs);
+    // let comment = hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 });
+    // if (!def.contains) def.contains = [];
+    // def.contains.push(hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 }));
+    return def;
+  };
+  hljs.registerLanguage(name, custom_func);
+}
 import plaintext from "highlight.js/lib/languages/plaintext.js";
-hljs.registerLanguage("plaintext", plaintext);
+registerLanguage("plaintext", plaintext);
 import javascript from "highlight.js/lib/languages/javascript.js";
-hljs.registerLanguage("javascript", javascript);
+registerLanguage("javascript", javascript);
 import typescript from "highlight.js/lib/languages/typescript.js";
-hljs.registerLanguage("typescript", typescript);
+registerLanguage("typescript", typescript);
 import css from "highlight.js/lib/languages/css.js";
-hljs.registerLanguage("css", css);
+registerLanguage("css", css);
 import json from "highlight.js/lib/languages/json.js";
-hljs.registerLanguage("json", json);
+registerLanguage("json", json);
 import xml from "highlight.js/lib/languages/xml.js";
-hljs.registerLanguage("xml", xml); // including html
-hljs.configure({
-  tabReplace: "  ",
-});
+registerLanguage("xml", xml); // including html
 hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
+hljs.configure({ tabReplace: "  " });
+
 export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
