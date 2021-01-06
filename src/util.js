@@ -59,6 +59,7 @@ hljs.registerLanguage("xml", xml); // including html
 hljs.configure({
   tabReplace: "  ",
 });
+hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
 export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
@@ -74,7 +75,6 @@ export function highlight(code, language) {
       )
       .join("\n");
   }
-  if (language == "js_input" || language == "webppl" || language == "webppl_input") language = "js";
   if (language.startsWith("_html")) language = "html";
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
