@@ -32,8 +32,56 @@
 
   import { highlight } from "../util.js";
 
+  function findMatchingParenthesis(text, pos) {
+    let close = text[pos];
+    let open;
+    switch (close) {
+      case ")":
+        open = "(";
+        break;
+      case "]":
+        open = "[";
+        break;
+      case "}":
+        open = "{";
+        break;
+    }
+    let closed = 1;
+    while (closed > 0 && pos >= 0) {
+      pos--;
+      if (text[pos] == open) closed--;
+      else if (text[pos] == close) closed++;
+    }
+    return pos;
+  }
+
+  function highlightPosition(text, pos, type) {
+    return (
+      text.substring(0, pos) +
+      `<span class="highlight ${type}">${text[pos]}</span>` +
+      text.substring(pos + 1)
+    );
+  }
+
   function updateTextDivs() {
-    const text = textarea.value || placeholder;
+    let text = textarea.value || placeholder;
+
+    // pre-highlight matching parentheses (span unescaped below)
+    if (
+      textarea.selectionStart == textarea.selectionEnd &&
+      textarea.selectionStart > 0 &&
+      textarea.selectionStart < text.length &&
+      ")]}".indexOf(text[textarea.selectionStart]) >= 0
+    ) {
+      let matchpos = findMatchingParenthesis(text, textarea.selectionStart);
+      if (matchpos >= 0) {
+        text = highlightPosition(text, textarea.selectionStart, "matched");
+        text = highlightPosition(text, matchpos, "matched");
+      } else {
+        text = highlightPosition(text, textarea.selectionStart, "unmatched");
+      }
+    }
+
     let insideBlock = false;
     let language = "";
     let code = "";
@@ -81,6 +129,11 @@
     html = html.replace(
       /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)/g,
       '<span class="section-delimiter">$1</span>'
+    );
+    // unescape highlighted spans
+    html = html.replace(
+      /&ltspan class="(highlight *\S*?)"&gt(.*?)&lt\/span&gt/g,
+      '<span class="$1">$2</span>'
     );
 
     highlights.innerHTML = html;
@@ -319,6 +372,18 @@
         enterIndentation = "";
       }
     }
+
+    // update highlights if current position is a closing parenthesis
+    // (of if there are highlights that may need to be cleared)
+    if (
+      highlights.querySelector("span.highlight") ||
+      (textarea.selectionStart > 0 &&
+        textarea.selectionStart < text.length &&
+        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0)
+    ) {
+      updateTextDivs();
+      return;
+    }
   }
 
   function onKeyPress(e: KeyboardEvent) {
@@ -456,6 +521,16 @@
   :global(.section-delimiter) {
     color: #666;
   }
+  :global(span.highlight.matched) {
+    color: black;
+    background: #9f9;
+    border-radius: 4px;
+  }
+  :global(span.highlight.unmatched) {
+    color: black;
+    background: #f99;
+    border-radius: 4px;
+  }
 
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
@@ -477,6 +552,7 @@
     bind:this={textarea}
     {placeholder}
     on:input={onInput}
+    on:click={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
     on:keypress={onKeyPress}
