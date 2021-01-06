@@ -32,7 +32,7 @@
 
   import { highlight } from "../util.js";
 
-  function findMatchingParenthesis(text, pos) {
+  function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos];
     let open;
     switch (close) {
@@ -55,10 +55,33 @@
     return pos;
   }
 
+  function findMatchingCloseParenthesis(text, pos) {
+    let open = text[pos];
+    let close;
+    switch (open) {
+      case "(":
+        close = ")";
+        break;
+      case "[":
+        close = "]";
+        break;
+      case "{":
+        close = "}";
+        break;
+    }
+    let opened = 1;
+    while (opened > 0 && pos < text.length) {
+      pos++;
+      if (text[pos] == close) opened--;
+      else if (text[pos] == open) opened++;
+    }
+    return pos;
+  }
+
   function highlightPosition(text, pos, type) {
     return (
       text.substring(0, pos) +
-      `<span class="highlight ${type}">${text[pos]}</span>` +
+      `__highlight__${type}_${text[pos]}__` +
       text.substring(pos + 1)
     );
   }
@@ -66,19 +89,40 @@
   function updateTextDivs() {
     let text = textarea.value || placeholder;
 
-    // pre-highlight matching parentheses (span unescaped below)
+    // pre-highlight matching parentheses using special syntax processed below
     if (
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart > 0 &&
       textarea.selectionStart < text.length &&
       ")]}".indexOf(text[textarea.selectionStart]) >= 0
     ) {
-      let matchpos = findMatchingParenthesis(text, textarea.selectionStart);
+      let matchpos = findMatchingOpenParenthesis(text, textarea.selectionStart);
       if (matchpos >= 0) {
         text = highlightPosition(text, textarea.selectionStart, "matched");
         text = highlightPosition(text, matchpos, "matched");
       } else {
         text = highlightPosition(text, textarea.selectionStart, "unmatched");
+      }
+    }
+    if (
+      textarea.selectionStart == textarea.selectionEnd &&
+      textarea.selectionStart > 0 &&
+      textarea.selectionStart < text.length &&
+      "([{".indexOf(text[textarea.selectionStart - 1]) >= 0
+    ) {
+      let matchpos = findMatchingCloseParenthesis(
+        text,
+        textarea.selectionStart - 1
+      );
+      if (matchpos < text.length) {
+        text = highlightPosition(text, matchpos, "matched");
+        text = highlightPosition(text, textarea.selectionStart - 1, "matched");
+      } else {
+        text = highlightPosition(
+          text,
+          textarea.selectionStart - 1,
+          "unmatched"
+        );
       }
     }
 
@@ -130,10 +174,10 @@
       /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)/g,
       '<span class="section-delimiter">$1</span>'
     );
-    // unescape highlighted spans
+    // convert special highlight syntax into spans
     html = html.replace(
-      /&ltspan class="(highlight *\S*?)"&gt(.*?)&lt\/span&gt/g,
-      '<span class="$1">$2</span>'
+      /__highlight__(\w+?)_(.+?)__/g,
+      '<span class="highlight $1">$2</span>'
     );
 
     highlights.innerHTML = html;
@@ -373,13 +417,16 @@
       }
     }
 
-    // update highlights if current position is a closing parenthesis
+    // update highlights if current position is next to a parenthesis
     // (of if there are highlights that may need to be cleared)
     if (
       highlights.querySelector("span.highlight") ||
       (textarea.selectionStart > 0 &&
         textarea.selectionStart < text.length &&
-        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0)
+        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
+      (textarea.selectionStart > 0 &&
+        textarea.selectionStart < text.length &&
+        "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
     ) {
       updateTextDivs();
       return;
