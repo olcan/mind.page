@@ -81,7 +81,7 @@
   function highlightPosition(text, pos, type) {
     return (
       text.substring(0, pos) +
-      `__highlight__${type}_${text[pos]}__` +
+      `__highlight_${type}_${text[pos]}__` +
       text.substring(pos + 1)
     );
   }
@@ -176,7 +176,7 @@
     );
     // convert special highlight syntax into spans
     html = html.replace(
-      /__highlight__(\w+?)_(.+?)__/g,
+      /__highlight_(\w+?)_(.+?)__/g,
       '<span class="highlight $1">$2</span>'
     );
 
@@ -469,23 +469,27 @@
   import { afterUpdate, onMount, onDestroy } from "svelte";
   afterUpdate(updateTextDivs);
 
+  const selectionUpdateDebounceTime = 250;
+  let selectionUpdatePending = false;
   function onSelectionChange(e) {
     if (!document.activeElement.isSameNode(textarea)) return;
     if (textarea.selectionStart != textarea.selectionEnd) return;
-    // update highlights if current position is next to a parenthesis
-    // (of if there are highlights that may need to be cleared)
-    if (
-      highlights.querySelector("span.highlight") ||
-      (textarea.selectionStart > 0 &&
-        textarea.selectionStart < text.length &&
-        ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
-      (textarea.selectionStart > 0 &&
-        textarea.selectionStart < text.length &&
-        "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
-    ) {
-      updateTextDivs();
-      return;
-    }
+    if (selectionUpdatePending) return;
+    selectionUpdatePending = true;
+    setTimeout(() => {
+      selectionUpdatePending = false;
+      if (
+        highlights.querySelector("span.highlight") ||
+        (textarea.selectionStart > 0 &&
+          textarea.selectionStart < text.length &&
+          ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
+        (textarea.selectionStart > 0 &&
+          textarea.selectionStart < text.length &&
+          "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
+      ) {
+        updateTextDivs();
+      }
+    }, selectionUpdateDebounceTime);
   }
   onMount(() =>
     document.addEventListener("selectionchange", onSelectionChange)
