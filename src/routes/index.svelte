@@ -283,6 +283,13 @@
         item.lctext.startsWith(terms[0]) &&
         (idsFromLabel.get(terms[0]) || 0) <= 1;
 
+      // find "pinned match" term = tags containing /pin with prefix match on first term
+      item.pinnedMatchTerm =
+        item.tags.find(
+          (t) => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)
+        ) || "";
+      item.pinnedMatch = item.pinnedMatchTerm.length > 0;
+
       // use item w/ unique-label matching first term as "listing" item
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
@@ -335,6 +342,7 @@
           t != "#log" &&
           t != "#menu" &&
           !t.match(/^#pin(?:\/|$)/) &&
+          !t.match(/\/pin(?:\/|$)/) &&
           (tagCounts.get(t) || 0) <= 1
       );
       // if (item.missingTags.length > 0) console.log(item.missingTags, item.tags);
@@ -361,15 +369,21 @@
     //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
     //       (afterUpdate is also triggered by the various assignments above)
     // NOTE: undefined values produce NaN, which is treated as 0
-    items = stableSort(items, (a, b) => {
-      // pinned (contains #pin)
-      return (
+    items = stableSort(
+      items,
+      (a, b) =>
+        // dotted? (contains #pin/dot or #pin/dot/*)
         b.dotted - a.dotted ||
         // alphanumeric ordering on #pin/dot/* term
         a.dotTerm.localeCompare(b.dotTerm) ||
+        // pinned? (contains #pin or #pin/*)
         b.pinned - a.pinned ||
         // alphanumeric ordering on #pin/* term
         a.pinTerm.localeCompare(b.pinTerm) ||
+        // pinned match? (contains /pin or /pin/*)
+        b.pinnedMatch - a.pinnedMatch ||
+        // alphanumeric ordering on #*/pin/* term
+        a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm) ||
         // listing item label prefix match length (for context for listing item)
         listingLabelPrefixes.indexOf(b.label) -
           listingLabelPrefixes.indexOf(a.label) ||
@@ -393,8 +407,7 @@
         b.hasError - a.hasError ||
         // time (most recent first)
         b.time - a.time
-      );
-    });
+    );
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
@@ -1397,6 +1410,8 @@
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
       item.prefixMatch = false;
+      item.pinnedMatch = false;
+      item.pinnedMatchTerm = "";
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
