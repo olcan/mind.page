@@ -376,6 +376,12 @@
       '<div style="display:none">$1</div>'
     );
 
+    // replace special macros <<id|hash|deephash>>
+    // NOTE: Special macros are different from $id/$hash/$deephash which are intended for use in scripts and are only replaced inside _html blocks (above), inside js_input blocks (in index.html), or during _read given replace_$id option. These replacements are generally not visible in the rendered item. In contrast, macros are intended to affect the rendered item and are generally not replaced during script execution.
+    text = text.replace(/<<id>>/g, tmpid || id);
+    text = text.replace(/<<hash>>/g, hash);
+    text = text.replace(/<<deephash>>/g, deephash);
+
     // evaluate inline <<macros>>
     text = text.replace(/<<(.*?)>>/g, (m, js) => {
       try {

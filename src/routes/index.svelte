@@ -953,7 +953,9 @@
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
     let item = items[index];
-    jsin = jsin.replace(/\$id/g, item.id);
+    jsin = jsin.replace(/\$id/g, item.tmpid || item.id);
+    jsin = jsin.replace(/\$hash/g, item.hash);
+    jsin = jsin.replace(/\$deephash/g, item.deephash);
     //const evaljs = "(function(){\n" + jsin + "\n})()";
     const evaljs = jsin;
     if (lastRunText)
