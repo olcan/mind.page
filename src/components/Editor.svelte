@@ -433,6 +433,8 @@
   }
 
   function onKeyUp(e: KeyboardEvent) {
+    // console.debug(e);
+    if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
     // indent lines created by Enter (based on state recorded in onKeyDown above)
     if (
       e.code == "Enter" &&
@@ -458,6 +460,23 @@
         enterIndentation = "";
       }
     }
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    let content = e.clipboardData.getData("text");
+    if (content.indexOf("\t") >= 0) {
+      let bullet;
+      if (
+        (bullet = textarea.value
+          .substring(0, textarea.selectionStart)
+          .match(/(?:^|\n)( *)([-*] +)$/))
+      )
+        content = content.replace(/(\t+)/g, bullet[1] + "$1" + bullet[2]);
+      content = content.replace(/\t/g, "  ");
+    }
+    document.execCommand("insertText", false, content);
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   function onKeyPress(e: KeyboardEvent) {
@@ -495,14 +514,6 @@
   }
 
   function onInput() {
-    // force replace tabs with spaces
-    if (textarea.value.indexOf("\t") >= 0) {
-      // if tabbed line is preceded by a bullet, convert all tabs to indented bullets (e.g. for MindNode import)
-      let bullet;
-      if ((bullet = textarea.value.match(/(?:^|\n) *([-*] ).*\n?.*\t/)))
-        textarea.value = textarea.value.replace(/(\t+)/g, "$1" + bullet[1]);
-      textarea.value = textarea.value.replace(/\t/g, "  ");
-    }
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
     onChange(textarea.value);
@@ -666,6 +677,7 @@
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
     on:keypress={onKeyPress}
+    on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
     autocapitalize="off">{text}</textarea>
