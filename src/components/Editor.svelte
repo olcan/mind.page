@@ -22,11 +22,12 @@
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
-  // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
-  let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
-  let unescapeHTML = (t) => t.replace(/&lt/g, "<").replace(/&gt/g, ">");
+  let escapeHTML = (t) =>
+    t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let unescapeHTML = (t) =>
+    t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   let highlightTags = (text) => {
-    const tags = parseTags(text).raw;
+    const tags = parseTags(unescapeHTML(text)).raw;
     if (tags.length == 0) return text;
     const regex = new RegExp(
       `(^|\\s|;)(${tags.map(regexEscape).join("|")})`,
@@ -85,10 +86,17 @@
     return pos;
   }
 
-  function highlightPosition(text, pos, type) {
+  function highlightOpen(text, pos, type) {
     return (
       text.substring(0, pos) +
-      `%%_highlight_${type}_%%${text[pos]}` +
+      `${text[pos]}%%_highlight_open_${type}_%%` +
+      text.substring(pos + 1)
+    );
+  }
+  function highlightClose(text, pos, type) {
+    return (
+      text.substring(0, pos) +
+      `%%_highlight_close_${type}_%%${text[pos]}` +
       text.substring(pos + 1)
     );
   }
@@ -105,13 +113,12 @@
     ) {
       let matchpos = findMatchingOpenParenthesis(text, textarea.selectionStart);
       if (matchpos >= 0) {
-        text = highlightPosition(text, textarea.selectionStart, "matched");
-        text = highlightPosition(text, matchpos, "matched");
+        text = highlightClose(text, textarea.selectionStart, "matched");
+        text = highlightOpen(text, matchpos, "matched");
       } else {
-        text = highlightPosition(text, textarea.selectionStart, "unmatched");
+        text = highlightClose(text, textarea.selectionStart, "unmatched");
       }
-    }
-    if (
+    } else if (
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart > 0 &&
       textarea.selectionStart < text.length &&
@@ -122,14 +129,10 @@
         textarea.selectionStart - 1
       );
       if (matchpos < text.length) {
-        text = highlightPosition(text, matchpos, "matched");
-        text = highlightPosition(text, textarea.selectionStart - 1, "matched");
+        text = highlightClose(text, matchpos, "matched");
+        text = highlightOpen(text, textarea.selectionStart - 1, "matched");
       } else {
-        text = highlightPosition(
-          text,
-          textarea.selectionStart - 1,
-          "unmatched"
-        );
+        text = highlightOpen(text, textarea.selectionStart - 1, "unmatched");
       }
     }
 
@@ -169,38 +172,50 @@
 
     // wrap hidden/removed sections
     html = html.replace(
-      /(^|\n\s*?)(&lt!--\s*?hidden\s*?--&gt.+?&lt!--\s*?\/hidden\s*?--&gt\s*?\n)/gs,
+      /(^|\n\s*?)(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
       '$1<div class="section hidden">$2</div>'
     );
     html = html.replace(
-      /(^|\n\s*?)(&lt!--\s*?removed\s*?--&gt.+?&lt!--\s*?\/removed\s*?--&gt\s*?\n)/gs,
+      /(^|\n\s*?)(&lt;!--\s*?removed\s*?--&gt;.+?&lt;!--\s*?\/removed\s*?--&gt;\s*?\n)/gs,
       '$1<div class="section removed">$2</div>'
     );
     // indicate section delimiters
     html = html.replace(
-      /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)/g,
+      /(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g,
       '<span class="section-delimiter">$1</span>'
     );
     // highlight css inside html tags
     html = html.replace(
-      /(&ltstyle&gt)(.+?)(&lt\/style&gt)/gs,
+      /(&lt;style&gt;)(.+?)(&lt;\/style&gt;)/gs,
       (m, pfx, css, sfx) => pfx + highlight(css, "css") + sfx
     );
     // highlight javascript inside script tags
     html = html.replace(
-      /(&ltscript.*?&gt)(.+?)(&lt\/script&gt)/gs,
+      /(&lt;script.*?&gt;)(.+?)(&lt;\/script&gt;)/gs,
       (m, pfx, js, sfx) => pfx + highlight(js, "js") + sfx
     );
     // highlight html tags
-    html = html.replace(/&lt\/?\w.*?&gt/g, (m) =>
+    html = html.replace(/&lt;\/?\w.*?&gt;/g, (m) =>
       highlight(unescapeHTML(m), "html")
     );
+    // highlight <{js}> macros
+    html = html.replace(
+      /&lt;{(.*?)}&gt;/g,
+      (m, js) =>
+        '<span class="macro"><span class="macro-delimiter">&lt;{</span>' +
+        highlight(js, "js") +
+        '<span class="macro-delimiter">}&gt;</span></span>'
+    );
 
-    // convert special highlight syntax into spans
+    // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
     html = html.replace(
-      /%%_highlight_(\w+?)_%%(.*?)([(){}\[\]])/g,
+      /%%_highlight_close_(\w+?)_%%(.*?)([)}\]])/g,
       '<span class="highlight $1">$3</span>$2'
+    );
+    html = html.replace(
+      /([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g,
+      '<span class="highlight $3">$1</span>$2'
     );
 
     highlights.innerHTML = html;
@@ -596,6 +611,13 @@
     padding: 2px 4px;
     margin: -2px -4px;
     border-radius: 4px;
+  }
+  :global(.editor .macro) {
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+  }
+  :global(.editor .macro .macro-delimiter) {
+    color: #666;
   }
   :global(.section) {
     border: 1px dashed #444;

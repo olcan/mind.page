@@ -215,7 +215,7 @@
     const lctext = text.toLowerCase().trim();
     const headerTags = Array.from(
       (text.split("\n")[0].toLowerCase() as any).matchAll(
-        /(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g
+        /(?:^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g
       ),
       (m) => m[1].replace(/^#_/, "#")
     );
@@ -223,7 +223,7 @@
 
     // remove hidden tags (unless missing) and trim
     text = text
-      .replace(/(^|\s|;)(#_[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, (m, pfx, tag) => {
+      .replace(/(^|\s|;)(#_[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g, (m, pfx, tag) => {
         const lctag = tag.toLowerCase().replace(/^#_/, "#");
         return missingTags.has(lctag) ? pfx + tag : "";
       })
@@ -306,7 +306,7 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
           str = str.replace(
-            /(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g,
+            /(^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g,
             (match, pfx, tag) => {
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
@@ -364,6 +364,18 @@
       /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
       '<div style="display:none">$1</div>'
     );
+
+    // evaluate inline <{macros}>
+    text = text.replace(/<{(.*?)}>/g, (m, js) => {
+      try {
+        return window["_eval"](js, tmpid || id);
+      } catch (e) {
+        console.error(
+          `macro error in item ${label || "id:" + (tmpid || id)}: ${e}`
+        );
+        return undefined;
+      }
+    });
 
     // convert markdown to html
     text = marked(text);
@@ -1111,6 +1123,10 @@
   }
   :global(.item > ul:not(:last-child)) {
     padding-bottom: 2px;
+  }
+  /* avoid breaking list items in multi-column items */
+  :global(.item li) {
+    break-inside: avoid;
   }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/

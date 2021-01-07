@@ -98,8 +98,8 @@ export function parseTags(text) {
         // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
         .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
         .replace(/`.*?`/g, "") // remove inline code spans
-        .replace(/(?:<|&lt)\/?\w.*?(?:>|&gt)/g, "") // remove html tags
-        .matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
+        .replace(/(?:<|&lt;)\/?\w.*?(?:>|&gt;)/g, "") // remove html tags
+        .matchAll(/(?:^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g),
       (m) => m[1]
     )
   );

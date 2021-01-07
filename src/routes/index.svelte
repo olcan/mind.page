@@ -480,7 +480,7 @@
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
     item.runnable = item.lctext.match(/\s*```js_input\s/);
-    item.scripted = item.lctext.match(/<script.*?>/);
+    item.scripted = item.lctext.match(/<script.*?>|<{.*?}>/);
 
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
@@ -1013,20 +1013,22 @@
   let lastRunTime = 0;
   function appendJSOutput(index: number): string {
     let item = items[index];
-    if (!item.text.match(/\s*```js_input\s/)) return; // no js code in text
-    lastRunTime = Date.now(); // used in _write_log, see below
-    lastRunText = item.text;
-    // execute JS code, including any 'js' blocks from this and any tag-referenced items
-    // NOTE: js_input blocks are assumed "local", i.e. not intended for export
-    let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
-    if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
-    if (item.debug) prefix = ""; // debug items are self-contained
-    item.text = item.text.replace(
-      /(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs,
-      ""
-    );
-    let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
-    if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
+    // eval js_input blocks
+    if (item.text.match(/\s*```js_input\s/)) {
+      lastRunTime = Date.now(); // used in _write_log, see below
+      lastRunText = item.text;
+      // execute JS code, including any 'js' blocks from this and any tag-referenced items
+      // NOTE: js_input blocks are assumed "local", i.e. not intended for export
+      let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
+      if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
+      if (item.debug) prefix = ""; // debug items are self-contained
+      item.text = item.text.replace(
+        /(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs,
+        ""
+      );
+      let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
+      if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
+    }
     return item.text;
   }
 
@@ -1620,15 +1622,6 @@
       } else {
         location.href = "twitter://post?message=" + encodeURIComponent(tweet);
       }
-    };
-    window["_eval"] = function (tag: string) {
-      const indices = (idsFromLabel.get(tag) || []).map((id) =>
-        indexFromId.get(id)
-      );
-      const jsout = indices.map((index) =>
-        evalJSInput(items[index].text, items[index].label, index)
-      );
-      return jsout.length == 1 ? jsout[0] : jsout;
     };
 
     function indicesForItem(item: string) {
