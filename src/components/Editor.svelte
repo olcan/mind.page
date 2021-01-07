@@ -26,19 +26,50 @@
     t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   let unescapeHTML = (t) =>
     t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+  // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
   let highlightTags = (text) => {
     const tags = parseTags(unescapeHTML(text)).raw;
     if (tags.length == 0) return text;
-    const regex = new RegExp(
-      `(^|\\s|;)(${tags.map(regexEscape).join("|")})`,
-      "g"
-    );
+    const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
+    const regex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
     return text.replace(regex, "$1<mark>$2</mark>");
   };
-  let highlightCode = (t) =>
-    t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
-  let highlightMath = (t) =>
-    t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
+  let highlightOther = (text) => {
+    return text.replace(
+      /(`|\$\$?|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`|\$\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      (match, begin, content, end) => {
+        if (begin == end && begin == "`")
+          return `<span class="code">${match}</span>`;
+        else if (begin == end && begin.match(/\$\$?/))
+          return `<span class="math">${match}</span>`;
+        else if (begin == "&lt;&lt;" && end == "&gt;&gt;")
+          return (
+            `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
+            highlight(unescapeHTML(content), "js") +
+            `<span class="macro-delimiter">${end}</span></span>`
+          );
+        else if (
+          begin.match(/&lt;script.*?&gt;/) &&
+          end.match(/&lt;\/script&gt;/)
+        )
+          return (
+            highlight(unescapeHTML(begin), "html") +
+            highlight(unescapeHTML(content), "js") +
+            highlight(unescapeHTML(end), "html")
+          );
+        else if (begin.match(/&lt;style&gt;/) && end.match(/&lt;\/style&gt;/))
+          return (
+            highlight(unescapeHTML(begin), "html") +
+            highlight(unescapeHTML(content), "css") +
+            highlight(unescapeHTML(end), "html")
+          );
+        else if (begin.match(/&lt;\/?\w/) && end.match(/&gt;/))
+          return highlight(unescapeHTML(match), "html");
+        else return match;
+      }
+    );
+  };
 
   function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos];
@@ -105,6 +136,7 @@
     let text = textarea.value || placeholder;
 
     // pre-highlight matching parentheses using special syntax processed below
+    // NOTE: We take care not to break other highlighting with this syntax, but it can be difficult to avoid completely across all languages depending on how they interpret the special syntax. Although we can force "comment" interpration (see util.js) comments can still affect interpretation of surrounding code.
     if (
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart > 0 &&
@@ -160,15 +192,11 @@
         code += line + "\n";
       } else {
         if (line.match(/^    \s*[^-*]/)) html += line + "\n";
-        else
-          html +=
-            highlightMath(highlightCode(highlightTags(escapeHTML(line)))) +
-            "\n";
+        else html += highlightOther(highlightTags(escapeHTML(line))) + "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock)
-      html += highlightMath(highlightCode(highlightTags(escapeHTML(code))));
+    if (insideBlock) html += highlightOther(highlightTags(escapeHTML(code)));
 
     // wrap hidden/removed sections
     html = html.replace(
@@ -184,29 +212,6 @@
       /(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g,
       '<span class="section-delimiter">$1</span>'
     );
-    // highlight css inside html tags
-    html = html.replace(
-      /(&lt;style&gt;)(.+?)(&lt;\/style&gt;)/gs,
-      (m, pfx, css, sfx) => pfx + highlight(css, "css") + sfx
-    );
-    // highlight javascript inside script tags
-    html = html.replace(
-      /(&lt;script.*?&gt;)(.+?)(&lt;\/script&gt;)/gs,
-      (m, pfx, js, sfx) => pfx + highlight(js, "js") + sfx
-    );
-    // highlight html tags
-    html = html.replace(/&lt;\/?\w.*?&gt;/g, (m) =>
-      highlight(unescapeHTML(m), "html")
-    );
-    // highlight <{js}> macros
-    html = html.replace(
-      /&lt;{(.*?)}&gt;/g,
-      (m, js) =>
-        '<span class="macro"><span class="macro-delimiter">&lt;{</span>' +
-        highlight(js, "js") +
-        '<span class="macro-delimiter">}&gt;</span></span>'
-    );
-
     // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
     html = html.replace(
@@ -217,7 +222,6 @@
       /([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g,
       '<span class="highlight $3">$1</span>$2'
     );
-
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }

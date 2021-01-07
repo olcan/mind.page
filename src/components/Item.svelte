@@ -4,7 +4,13 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import { highlight, extractBlock, hashCode, regexEscape } from "../util.js";
+  import {
+    highlight,
+    extractBlock,
+    hashCode,
+    regexEscape,
+    parseTags,
+  } from "../util.js";
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
@@ -41,6 +47,7 @@
   export let dotted: boolean;
   export let runnable: boolean;
   export let scripted: boolean;
+  export let macroed: boolean;
 
   export let text: string;
   export let hash: string;
@@ -228,6 +235,12 @@
         return missingTags.has(lctag) ? pfx + tag : "";
       })
       .trim();
+
+    // parse tags and construct regex for matching
+    const tags = parseTags(text).raw;
+    const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
+    const tagRegex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
+
     // replace naked URLs with markdown links (or images) named after host name
     text = text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
       if (pfx.match(/\]\(|[="']$/)) return pfx + url; // maintain markdown link url
@@ -305,9 +318,8 @@
           // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
-          str = str.replace(
-            /(^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g,
-            (match, pfx, tag) => {
+          if (tags.length)
+            str = str.replace(tagRegex, (m, pfx, tag) => {
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (matchingTerms.has(lctag)) classNames += " selected";
@@ -328,8 +340,7 @@
                   ? "#" + tag.substring(label.length)
                   : tag;
               return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
-            }
-          );
+            });
         }
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
@@ -365,8 +376,8 @@
       '<div style="display:none">$1</div>'
     );
 
-    // evaluate inline <{macros}>
-    text = text.replace(/<{(.*?)}>/g, (m, js) => {
+    // evaluate inline <<macros>>
+    text = text.replace(/<<(.*?)>>/g, (m, js) => {
       try {
         return window["_eval"](js, tmpid || id);
       } catch (e) {
@@ -420,7 +431,7 @@
       }
       if (divid.indexOf(tmpid || id) < 0) {
         console.warn(
-          'div without proper id (of the form "type-$id") in item at index',
+          "div without proper id (that includes $id) in item at index",
           index + 1
         );
         return m;
@@ -972,7 +983,8 @@
     border: 0;
   }
   .runnable .index,
-  .scripted .index {
+  .scripted .index,
+  .macroed .index {
     background: #468;
   }
 
@@ -1037,10 +1049,6 @@
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
 
-  /* .runnable,
-  .scripted {
-    border: 1px solid #224;
-  } */
   .context {
     border-left: 1px solid #242;
   }
@@ -1453,6 +1461,7 @@
     class:bordered={error || warning || running}
     class:runnable
     class:scripted
+    class:macroed
     class:timeOutOfOrder>
     {#if editing}
       <div class="edit-menu">

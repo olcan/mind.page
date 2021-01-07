@@ -48,9 +48,10 @@ import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.
 function registerLanguage(name, func) {
   const custom_func = function (hljs) {
     let def = func(hljs);
-    // let comment = hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 });
-    // if (!def.contains) def.contains = [];
-    // def.contains.push(hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 }));
+    // interpret %%__%% for all languages (turns out to be critical for css)
+    let comment = hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 });
+    if (!def.contains) def.contains = [];
+    def.contains.push(hljs.COMMENT("%%_", "_%%", { className: "comment-custom", relevance: 0 }));
     return def;
   };
   hljs.registerLanguage(name, custom_func);
@@ -98,7 +99,11 @@ export function parseTags(text) {
         // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
         .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
         .replace(/`.*?`/g, "") // remove inline code spans
-        .replace(/(?:<|&lt;)\/?\w.*?(?:>|&gt;)/g, "") // remove html tags
+        .replace(/\$\$?.+?\$\$?/g, "") // remove math
+        .replace(/<script.*>.*<\/script>/g, "") // remove scripts
+        .replace(/<style>.*<\/style>/g, "") // remove styles
+        .replace(/<\/?\w.*?>/g, "") // remove html tags
+        .replace(/<<.*?>>/g, "") // remove macros
         .matchAll(/(?:^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g),
       (m) => m[1]
     )

@@ -483,7 +483,8 @@
     item.hash = hashCode(text);
     item.lctext = text.toLowerCase();
     item.runnable = item.lctext.match(/\s*```js_input\s/);
-    item.scripted = item.lctext.match(/<script.*?>|<{.*?}>/);
+    item.scripted = item.lctext.match(/<script.*?>/);
+    item.macroed = item.lctext.match(/<<.*?>>/);
 
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
@@ -1653,7 +1654,7 @@
       let ids = [];
       let indices = indicesForItem(item);
       if (!item && indices.length == 0) {
-        console.error("_id() invoked from async javascript");
+        console.error("_id() invoked from async javascript or macro");
         return null;
       }
       indices.map((index) => {
@@ -1672,7 +1673,7 @@
       let labels = [];
       let indices = indicesForItem(item);
       if (!item && indices.length == 0) {
-        console.error("_label() invoked from async javascript");
+        console.error("_label() invoked from async javascript or macro");
         return null;
       }
       indices.map((index) => {
@@ -1749,7 +1750,7 @@
         Object.assign({ include_deps: true, replace_$id: true }, options)
       );
       const evaljs = prefix + "\n" + code;
-      const index = indicesForItem("")[0]; // same as _id(), may be undefined
+      const index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
       lastEvalText = appendBlock(
         index != undefined
           ? `\`_eval\` invoked from ${
@@ -2094,7 +2095,9 @@
       return new Promise((resolve, reject) => {
         if (!id) {
           if (!evalItemId) {
-            const err = new Error("_run_webppl: invoked from async javascript");
+            const err = new Error(
+              "_run_webppl: invoked from async javascript or macro"
+            );
             console.error(err); // synchronous error that should get written into item
             reject(err);
             return;
@@ -2183,7 +2186,7 @@
     window["_running"] = function (id: string = "", running: boolean = true) {
       if (!id) {
         if (!evalItemId) {
-          console.error("_running() invoked from async javascript");
+          console.error("_running() invoked from async javascript or macro");
           return;
         }
         id = evalItemId;
@@ -2593,7 +2596,8 @@
               createTime={item.createTime}
               dotted={item.dotted}
               runnable={item.runnable}
-              scripted={item.scripted} />
+              scripted={item.scripted}
+              macroed={item.macroed} />
             {#if item.nextColumn >= 0}
               <div class="section-separator">
                 <hr />
