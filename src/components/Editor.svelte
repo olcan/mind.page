@@ -621,7 +621,7 @@
     border-radius: 4px;
   }
   :global(.editor .macro .macro-delimiter) {
-    color: #666;
+    color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
   }
   :global(.section) {
     border: 1px dashed #444;
