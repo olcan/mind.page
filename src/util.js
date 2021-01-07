@@ -89,3 +89,27 @@ export function highlight(code, language) {
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
 }
+
+export function parseTags(text) {
+  const tags = _.uniq(
+    Array.from(
+      text
+        .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
+        // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
+        .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
+        .replace(/`.*?`/g, "") // remove inline code spans
+        .replace(/(?:<|&lt)\/?\w.*?(?:>|&gt)/g, "") // remove html tags
+        .matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
+      (m) => m[1]
+    )
+  );
+  return {
+    raw: _.uniq(tags),
+    all: _.uniq(tags.map((t) => t.replace(/^#_/, "#"))),
+    visible: tags.filter((t) => !t.startsWith("#_")),
+  };
+}
+
+export function regexEscape(str) {
+  return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+}

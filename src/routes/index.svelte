@@ -194,24 +194,6 @@
       .map(({ item }) => item);
   }
 
-  function itemTags(lctext): any {
-    let tags = _.uniq(
-      Array.from(
-        lctext
-          .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
-          // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
-          .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
-          .replace(/`.*?`/g, "") // remove inline code spans
-          .matchAll(/(?:^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g),
-        (m) => m[1]
-      )
-    );
-    return {
-      all: _.uniq(tags.map((t) => t.replace(/^#_/, "#"))),
-      visible: tags.filter((t) => !t.startsWith("#_")),
-    };
-  }
-
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
   //       Invoke updateItemLayout directly if only item sizes have changed.
   const editorDebounceTime = 500;
@@ -252,10 +234,10 @@
         text
           .split(/\s+/)
           // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
-          .concat(itemTags(text).all)
+          .concat(parseTags(text).all)
       ),
     ].filter((t) => t);
-    // let terms = [...new Set([text].concat(itemTags(text).all))].filter((t) => t);
+    // let terms = [...new Set([text].concat(parseTags(text).all))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsSecondary
@@ -500,7 +482,7 @@
     item.runnable = item.lctext.match(/\s*```js_input\s/);
     item.scripted = item.lctext.match(/<script.*?>/);
 
-    const tags = itemTags(item.lctext);
+    const tags = parseTags(item.lctext);
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
     item.log = item.tags.indexOf("#log") >= 0;
@@ -1393,7 +1375,12 @@
   }
 
   import { onMount } from "svelte";
-  import { hashCode, numberWithCommas, extractBlock } from "../util.js";
+  import {
+    hashCode,
+    numberWithCommas,
+    extractBlock,
+    parseTags,
+  } from "../util.js";
 
   let consoleLog = [];
   const consoleLogMaxSize = 10000;
@@ -1707,7 +1694,7 @@
       let tags = [];
       let indices = indicesForItem(item);
       indices.map((index) => {
-        tags = tags.concat(itemTags(items[index].text.toLowerCase()).all);
+        tags = tags.concat(parseTags(items[index].text.toLowerCase()).all);
       });
       return tags;
     };

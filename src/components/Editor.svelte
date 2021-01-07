@@ -15,6 +15,8 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
+  import { highlight, parseTags, regexEscape } from "../util.js";
+
   const placeholder = " ";
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
@@ -22,15 +24,19 @@
   let textarea: HTMLTextAreaElement;
   // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
   let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
-  // TODO: refactor regex for tag matching (contains [^#...])
-  let highlightTags = (t) =>
-    t.replace(/(^|\s|;)(#[^#\s<>,.;:"'`\(\)\[\]\{\}]+)/g, "$1<mark>$2</mark>");
+  let highlightTags = (text) => {
+    const tags = parseTags(text).raw;
+    if (tags.length == 0) return text;
+    const regex = new RegExp(
+      `(^|\\s|;)(${tags.map(regexEscape).join("|")})`,
+      "g"
+    );
+    return text.replace(regex, "$1<mark>$2</mark>");
+  };
   let highlightCode = (t) =>
     t.replace(/(`.*?`)/g, '<span class="code">$1</span>');
   let highlightMath = (t) =>
     t.replace(/(\$\$?.+?\$\$?)/g, '<span class="math">$1</span>');
-
-  import { highlight } from "../util.js";
 
   function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos];

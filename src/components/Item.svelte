@@ -4,7 +4,7 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import { highlight, extractBlock, hashCode } from "../util.js";
+  import { highlight, extractBlock, hashCode, regexEscape } from "../util.js";
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
@@ -155,10 +155,6 @@
       e.stopPropagation();
       onLogSummaryClick(id);
     };
-
-  function regexEscape(str) {
-    return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-  }
 
   if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
   if (window["_html_cache"] == undefined) window["_html_cache"] = {};
