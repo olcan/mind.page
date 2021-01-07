@@ -24,6 +24,7 @@
   let textarea: HTMLTextAreaElement;
   // NOTE: we omit the semicolon as it is optional and simplifies regex for tags which otherwise split at semicolons
   let escapeHTML = (t) => t.replace(/</g, "&lt").replace(/>/g, "&gt");
+  let unescapeHTML = (t) => t.replace(/&lt/g, "<").replace(/&gt/g, ">");
   let highlightTags = (text) => {
     const tags = parseTags(text).raw;
     if (tags.length == 0) return text;
@@ -180,6 +181,21 @@
       /(&lt!--\s*?\/?(?:hidden|removed)\s*?--&gt)/g,
       '<span class="section-delimiter">$1</span>'
     );
+    // highlight css inside html tags
+    html = html.replace(
+      /(&ltstyle&gt)(.+?)(&lt\/style&gt)/gs,
+      (m, pfx, css, sfx) => pfx + highlight(css, "css") + sfx
+    );
+    // highlight javascript inside script tags
+    html = html.replace(
+      /(&ltscript.*?&gt)(.+?)(&lt\/script&gt)/gs,
+      (m, pfx, js, sfx) => pfx + highlight(js, "js") + sfx
+    );
+    // highlight html tags
+    html = html.replace(/&lt\/?\w.*?&gt/g, (m) =>
+      highlight(unescapeHTML(m), "html")
+    );
+
     // convert special highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
     html = html.replace(
