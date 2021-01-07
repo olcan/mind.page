@@ -234,7 +234,7 @@
         text
           .split(/\s+/)
           // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
-          .concat(parseTags(text).all)
+          .concat(parseTags(text).raw)
       ),
     ].filter((t) => t);
     // let terms = [...new Set([text].concat(parseTags(text).all))].filter((t) => t);
@@ -262,8 +262,7 @@
 
       // prefix-match only non-labels or unique labels
       item.prefixMatch =
-        item.lctext.startsWith(terms[0]) &&
-        (idsFromLabel.get(terms[0]) || 0) <= 1;
+        item.lctext.startsWith(terms[0]) && (!item.label || item.labelUnique);
 
       // find "pinned match" term = tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
@@ -283,13 +282,17 @@
           .concat(item.label);
       }
 
-      // match non-tag terms loosely
+      // match non-tag terms (anywhere in text)
       item.matchingTerms = terms.filter(
         (t) => t[0] != "#" && item.lctext.indexOf(t) >= 0
       );
-      // match tags against expanded set (including prefixes) (we do not require visibility for now but could do so using tagsVisibleExpanded as including full tags in secondary terms which would still match against tagsExpanded)
+      // match (raw) tags against item (raw) tags, allowing prefix matches
       item.matchingTerms = item.matchingTerms.concat(
-        terms.filter((t) => t[0] == "#" && item.tagsExpanded.indexOf(t) >= 0)
+        terms.filter(
+          (t) =>
+            t[0] == "#" &&
+            item.tagsRaw.findIndex((tag) => tag.startsWith(t)) >= 0
+        )
       );
       // match regex:* terms
       item.matchingTerms = item.matchingTerms.concat(
@@ -485,6 +488,7 @@
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
+    item.tagsRaw = tags.raw;
     item.log = item.tags.indexOf("#log") >= 0;
     item.debug = item.tags.indexOf("#debug") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
