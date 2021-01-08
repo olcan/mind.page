@@ -260,9 +260,13 @@
       // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
 
-      // prefix-match only non-labels or unique labels
+      // prefix-match only if first query term is non-label or unique label
+      // NOTE: otherwise term is considered generic and time ordering more important
+      //       (e.g. #todo/someday should not be ahead of recent #todo items)
       item.prefixMatch =
-        item.header.startsWith(terms[0]) && (!item.label || item.labelUnique);
+        item.header.startsWith(terms[0]) &&
+        (idsFromLabel.get(terms[0]) || 0) <= 1;
+      // (!item.label || item.labelUnique);
 
       // find "pinned match" term = tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
@@ -518,7 +522,9 @@
     // if item stats with a visible tag, it is taken as a "label" for the item
     // (we allow some tags/macros to precede the label tag for styling purposes)
     const prevLabel = item.label;
-    item.header = item.lctext.replace(/^<.*>\s+#/, "#").match(/^.*?(?:\n|$)/)[0]
+    item.header = item.lctext
+      .replace(/^<.*>\s+#/, "#")
+      .match(/^.*?(?:\n|$)/)[0];
     item.label = item.header.startsWith(item.tagsVisible[0])
       ? item.tagsVisible[0]
       : "";
