@@ -433,7 +433,6 @@
     // push new state with "final" flag so it is not modified by onEditorChange
     history.pushState({ editorText: editorText, final: true }, editorText);
     onEditorChange(editorText);
-    window.top.scrollTo(0, 0);
   }
 
   function onLogSummaryClick(id: string) {
