@@ -67,8 +67,11 @@ registerLanguage("css", css);
 import json from "highlight.js/lib/languages/json.js";
 registerLanguage("json", json);
 import xml from "highlight.js/lib/languages/xml.js";
-registerLanguage("xml", xml); // including html
+registerLanguage("xml", xml); // includes html
+import latex from "highlight.js/lib/languages/latex.js";
+registerLanguage("latex", latex); // includes tex
 hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
+hljs.registerAliases(["math", "mathjax"], { languageName: "latex" });
 hljs.configure({ tabReplace: "  " });
 
 export function highlight(code, language) {
@@ -87,6 +90,7 @@ export function highlight(code, language) {
       .join("\n");
   }
   if (language.startsWith("_html")) language = "html";
+  // if (language.startsWith("_math")) language = "math"; // editor-only
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
 }

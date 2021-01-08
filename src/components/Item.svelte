@@ -263,14 +263,23 @@
       }
     });
 
+    const regexTerms = Array.from(matchingTerms)
+      .map(regexEscape)
+      .sort((a, b) => b.length - a.length);
     let mathTermRegex = new RegExp(
-      `\\$.*(?:${Array.from(matchingTerms).map(regexEscape).join("|")}).*\\$`,
+      `\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`,
       "i"
     );
 
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
     let lastLine = "";
+    let mathCounts = {};
+    let wrapMath = (m) =>
+      `<span class="${
+        m.startsWith("$$") || !m.startsWith("$") ? "math-display" : "math"
+      }" _cache_key="${m}-${(mathCounts[m] =
+        (mathCounts[m] || 0) + 1)}">${m}</span>`;
     text = text
       .split("\n")
       .map((line) => {
@@ -310,10 +319,7 @@
             matchingTerms.size == 0 ||
             (!str.match(mathTermRegex) && !matchingTerms.has("$"))
           )
-            str = str.replace(
-              /(\$\$?.+?\$\$?)/g,
-              '<span class="math" _cache_key="$1">$1</span>'
-            );
+            str = str.replace(/\$?\$`.+?`\$\$?/g, wrapMath);
           // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
@@ -359,7 +365,7 @@
             .replace(/\$hash/g, hash)
             .replace(/\$deephash/g, deephash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
-      ) /*unwrap _html_ blocks*/;
+      ); /*unwrap _html* blocks*/
 
     if (isMenu) {
       // parse icon replacement urls
@@ -395,6 +401,12 @@
 
     // convert markdown to html
     text = marked(text);
+
+    // replace _math blocks, preserving whitespace
+    text = text.replace(
+      /<pre><code class="_math">(.*?)<\/code><\/pre>/gs,
+      (m, _math) => wrapMath(_math)
+    );
 
     // wrap menu items
     if (isMenu) text = '<div class="menu">' + text + "</div>";
@@ -608,6 +620,7 @@
                   : NodeFilter.FILTER_ACCEPT;
               case "svg":
               case "math":
+              case "math-display":
               case "script":
                 return NodeFilter.FILTER_REJECT;
               default:
@@ -726,29 +739,28 @@
       itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
     target = itemdiv.querySelector("mark.selected.label.unique") != null;
 
-    // remove <code></code> wrapper block for math blocks
-    itemdiv.querySelectorAll("code").forEach((code) => {
-      if (code.textContent.startsWith("$") && code.textContent.endsWith("$"))
-        code.outerHTML = code.innerHTML;
-    });
-
-    // replace <pre></pre> wrapper with <blockquote></blockquote> for math blocks
-    itemdiv.querySelectorAll("pre").forEach((pre) => {
-      if (pre.textContent.startsWith("$") && pre.textContent.endsWith("$"))
-        pre.outerHTML = "<blockquote>" + pre.innerHTML + "</blockquote>";
-    });
-
     // trigger typesetting of any math elements
     // NOTE: we do this async to see if we can load MathJax async in template.html
     setTimeout(() => {
       if (!itemdiv) return;
       let math = [];
-      itemdiv.querySelectorAll(".math").forEach((elem) => {
-        if (elem.hasAttribute("_rendered")) return;
-        // console.debug("rendering math", math.innerHTML);
-        elem.setAttribute("_rendered", Date.now().toString());
-        math.push(elem);
-      });
+      itemdiv
+        .querySelectorAll("span.math,span.math-display")
+        .forEach((elem) => {
+          if (elem.hasAttribute("_rendered")) return;
+          // console.debug("rendering math", math.innerHTML);
+          elem.setAttribute("_rendered", Date.now().toString());
+          // unwrap code blocks (should exist for both $``$ and $$``$$)
+          let code;
+          if ((code = elem.querySelector("code")))
+            code.outerHTML = code.innerHTML;
+          // insert delimiters if missing (in particular for multi-line _math blocks)
+          if (!elem.textContent.match(/^\$.+\$$/)) {
+            elem.innerHTML = "$$\n" + elem.innerHTML + "\n$$";
+            console.log(elem.textContent);
+          }
+          math.push(elem);
+        });
       renderMath(math);
     });
 
@@ -1243,11 +1255,12 @@
   :global(.item .vertical-bar) {
     color: #444;
   }
-  :global(.item .math) {
+  :global(.item span.math, .item span.math-display) {
     display: inline-block;
-    /* background: #222; */
-    /* padding: 2px 4px; */
-    border-radius: 4px;
+  }
+  /* display top-level .math-display as block */
+  :global(.item > span.math-display) {
+    display: block;
   }
   :global(.item hr) {
     background: transparent;
@@ -1321,8 +1334,20 @@
   }
 
   :global(.item .MathJax) {
-    margin-bottom: 0;
+    margin-top: 0 !important; /* override some highly specific css */
+    margin-bottom: 0 !important;
   }
+  :global(.item .math-display) {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  :global(.item > .math-display:first-child) {
+    padding-top: 0;
+  }
+  :global(.item > .math-display:last-child) {
+    padding-bottom: 0;
+  }
+
   :global(.item blockquote .MathJax) {
     display: block;
   }

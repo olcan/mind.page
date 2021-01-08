@@ -37,12 +37,16 @@
   };
   let highlightOther = (text) => {
     return text.replace(
-      /(`|\$\$?|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`|\$\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      /(\$?\$?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$?\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
       (match, begin, content, end) => {
         if (begin == end && begin == "`")
           return `<span class="code">${match}</span>`;
-        else if (begin == end && begin.match(/\$\$?/))
-          return `<span class="math">${match}</span>`;
+        else if (begin.endsWith("$`") && end.startsWith("`$"))
+          return (
+            `<span class="math">` +
+            highlight(unescapeHTML(match), "latex") +
+            `</span>`
+          );
         else if (begin == "&lt;&lt;" && end == "&gt;&gt;")
           return (
             `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
@@ -182,6 +186,7 @@
         html += "</span>\n";
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
+        if (language.startsWith("_math")) language = "math"; // editor-only highlighting
         html += highlight(code, language);
         html += "</div>";
         insideBlock = false;
