@@ -218,15 +218,14 @@
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(text, "_log");
 
-    // parse header tags (tags on first line only)
-    const lctext = text.toLowerCase().trim();
-    const headerTags = Array.from(
-      (text.split("\n")[0].toLowerCase() as any).matchAll(
-        /(?:^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g
-      ),
-      (m) => m[1].replace(/^#_/, "#")
-    );
-    const isMenu = headerTags.indexOf("#menu") >= 0;
+    // parse header tags (tags on first line, excluding any styling html)
+    const header = text
+      .replace(/^<.*>\s+#/, "#")
+      .match(/^.*?(?:\n|$)/)[0]
+      .toLowerCase();
+    const isMenu = parseTags(header).all.indexOf("#menu") >= 0;
+    // introduce a line break between any styling html and first tag
+    text = text.replace(/^(<.*>)\s+#/, "$1\n#");
 
     // remove hidden tags (unless missing) and trim
     text = text

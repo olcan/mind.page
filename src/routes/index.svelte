@@ -262,7 +262,7 @@
 
       // prefix-match only non-labels or unique labels
       item.prefixMatch =
-        item.lctext.startsWith(terms[0]) && (!item.label || item.labelUnique);
+        item.header.startsWith(terms[0]) && (!item.label || item.labelUnique);
 
       // find "pinned match" term = tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
@@ -516,8 +516,10 @@
     }
 
     // if item stats with a visible tag, it is taken as a "label" for the item
+    // (we allow some tags/macros to precede the label tag for styling purposes)
     const prevLabel = item.label;
-    item.label = item.lctext.startsWith(item.tagsVisible[0])
+    item.header = item.lctext.replace(/^<.*>\s+#/, "#").match(/^.*?(?:\n|$)/)[0]
+    item.label = item.header.startsWith(item.tagsVisible[0])
       ? item.tagsVisible[0]
       : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
