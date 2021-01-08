@@ -1129,7 +1129,6 @@
       }
       setTimeout(() => {
         textArea(item.index).focus();
-        // if (item.index < index) window.top.scrollTo(0, 0); // scroll to top if item was moved up
       }, 0); // trigger resort
     } else {
       // stopped editing
@@ -1185,9 +1184,20 @@
       if (editingItems.length > 0 || window.scrollY == 0) {
         focusOnNearestEditingItem(index);
       } else {
-        (document.activeElement as HTMLElement).blur();
+        // scroll up if needed, allowing dom update before calculating new position
+        // (particularly important for items that are much taller when editing)
+        setTimeout(() => {
+          const div = document.querySelector("#super-container-" + item.id);
+          if (!div) return; // item deleted or hidden
+          const itemTop = (div as HTMLElement).offsetTop;
+          if (itemTop < window.scrollY) {
+            // console.debug("scrolling up", itemTop, window.scrollY);
+            window.top.scrollTo(0, itemTop);
+          }
+        });
       }
     }
+
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
   }
 
