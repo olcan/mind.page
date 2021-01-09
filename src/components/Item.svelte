@@ -229,17 +229,23 @@
 
     // remove hidden tags (unless missing) and trim
     text = text
-      .replace(/(^|\s|;)(#_[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g, (m, pfx, tag) => {
-        const lctag = tag.toLowerCase().replace(/^#_/, "#");
-        return missingTags.has(lctag) ? pfx + tag : "";
-      })
+      .replace(
+        /(^|[\s<>&,.;:"'`(){}\[\]])(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
+        (m, pfx, tag) => {
+          const lctag = tag.toLowerCase().replace(/^#_/, "#");
+          return missingTags.has(lctag) ? pfx + tag : "";
+        }
+      )
       .trim();
 
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
     if (tags.indexOf("#id") >= 0) console.debug(tags);
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
-    const tagRegex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
+    const tagRegex = new RegExp(
+      `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
+      "g"
+    );
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = (text) =>

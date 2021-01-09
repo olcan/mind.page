@@ -32,7 +32,10 @@
     const tags = parseTags(unescapeHTML(text)).raw;
     if (tags.length == 0) return text;
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
-    const regex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
+    const regex = new RegExp(
+      `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
+      "g"
+    );
     return text.replace(regex, "$1<mark>$2</mark>");
   };
   let highlightOther = (text) => {
