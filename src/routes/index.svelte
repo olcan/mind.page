@@ -56,6 +56,7 @@
 
   function onEditorFocused(focused: boolean) {
     if (!focused) editorBlurTime = Date.now();
+    else blurOnNextCancel = editorText == ""; // blur on next cancel (e.g. escape) if empty
   }
 
   function itemTimeString(delta: number) {
@@ -202,8 +203,9 @@
   let textLength = 0;
   let editorChangePending = false;
   function onEditorChange(text: string) {
-    // if editor has focus and it is too soon since last change/return, debounce
+    // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
     if (
+      text &&
       document.activeElement == textArea(-1) &&
       Date.now() - lastEditorChangeTime < editorDebounceTime
     ) {
@@ -589,6 +591,7 @@
       .join("\n");
   }
 
+  let blurOnNextCancel = false;
   let editorText = "";
   function onEditorDone(
     text: string,
@@ -596,13 +599,17 @@
     run: boolean = false
   ) {
     if (cancelled) {
-      // just clear and return
-      if (text != "") {
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = ""));
-      }
+      // just clear and return, also blur on double-cancel
+      if (blurOnNextCancel) {
+        setTimeout(() => textArea(-1).blur());
+        blurOnNextCancel = false;
+      } else blurOnNextCancel = true;
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange((editorText = ""));
       return;
     }
+    blurOnNextCancel = false;
+
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
     let origText = text;
@@ -2279,6 +2286,8 @@
   // disable editor shortcuts
   function onKeyPress(e: KeyboardEvent) {
     // console.debug(e);
+
+    // resume-edit items on Shift-(save shortcut)
     if (
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
       (e.code == "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey)
@@ -2287,6 +2296,7 @@
       resumeLastEdit();
       return;
     }
+
     // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (

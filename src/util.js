@@ -104,8 +104,8 @@ export function parseTags(text) {
         .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
         .replace(/`.*?`/g, "") // remove inline code spans
         .replace(/\$\$?.+?\$\$?/g, "") // remove math
-        .replace(/<script.*>.*<\/script>/g, "") // remove scripts
-        .replace(/<style>.*<\/style>/g, "") // remove styles
+        .replace(/<script.*?>.*?<\/script>/gs, "") // remove scripts (can be multi-line)
+        .replace(/<style>.*?<\/style>/gs, "") // remove styles (can be multi-line)
         .replace(/<\/?\w.*?>/g, "") // remove html tags
         .replace(/<<.*?>>/g, "") // remove macros
         .matchAll(/(?:^|\s|;)(#[^#\s<>&,.;:"'`\(\)\[\]\{\}]+)/g),

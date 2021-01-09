@@ -237,12 +237,16 @@
 
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
+    if (tags.indexOf("#id") >= 0) console.debug(tags);
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
     const tagRegex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
 
     // replace naked URLs with markdown links (or images) named after host name
-    text = text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
-      if (pfx.match(/\]\(|[="']$/)) return pfx + url; // maintain markdown link url
+    const replaceURLs = (text) => text;
+    text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+      // try to maintain markdown links, html attributes, other url strings, etc
+      // NOTE: markdown parser may still convert naked URLs to links
+      if (pfx.match(/\]\(|[="'`]/)) return m;
       let sfx = "";
       if (url[url.length - 1].match(/[\.,;:]/)) {
         // move certain last characters out of the url
@@ -314,6 +318,8 @@
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
+          // replace URLs
+          str = replaceURLs(str);
           // wrap math inside span.math (unless text matches search terms)
           if (
             matchingTerms.size == 0 ||
@@ -367,14 +373,6 @@
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
       ); /*unwrap _html* blocks*/
 
-    if (isMenu) {
-      // parse icon replacement urls
-      let replacements = (text as any).matchAll(/<!-- (\w+?) (.+?) -->/g);
-      for (let pair of replacements) {
-        text = text.replace(pair[1], pair[2]);
-      }
-    }
-
     // hide hidden sections
     text = text.replace(
       /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
@@ -386,6 +384,10 @@
     text = text.replace(/<<id>>/g, tmpid || id);
     text = text.replace(/<<hash>>/g, hash);
     text = text.replace(/<<deephash>>/g, deephash);
+
+    // replace #id.item for use in item-specific css-styles
+    // (#$id could also be used inside _html blocks but will break css highlighting)
+    text = text.replace(/#id\.item/g, `#${tmpid || id}.item`);
 
     // evaluate inline <<macros>>
     text = text.replace(/<<(.*?)>>/g, (m, js) => {
@@ -408,7 +410,7 @@
       (m, _math) => wrapMath(_math)
     );
 
-    // wrap menu items
+    // wrap menu items in special .menu class
     if (isMenu) text = '<div class="menu">' + text + "</div>";
 
     // wrap list items in span to control spacing from bullets
@@ -1150,9 +1152,10 @@
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
-  :global(.item li) {
+  /* NOTE: this turns out to be too performance-intensive and can make columns difficult to balance out */
+  /* :global(.item li) {
     break-inside: avoid;
-  }
+  } */
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
@@ -1523,7 +1526,8 @@
           class:matching={matchingTerms.length > 0}
           on:click={onIndexClick}>{index + 1}</span>
       </div>
-      <div class="item" bind:this={itemdiv} class:saving>
+      <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
+      <div class="item" {id} bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
