@@ -304,10 +304,15 @@
           console.log(str);
         }
 
-        // preserve inline whitespace and line breaks by inserting &nbsp; and <br> outside of code blocks
-        // (we exclude |^> to break inside blockquotes for now)
+        // preserve inline whitespace and line breaks by inserting &nbsp; and <br>\n outside of code blocks
         // (we miss indented blocks that start with bullets -/* for now since it requires prior-line context)
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>/)) {
+        // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
+        // (we also exclude /^\s*>/ to break inside blockquotes for now)
+        // (also note since we process lines, \s does not match \n)
+        if (
+          !insideBlock &&
+          !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>|^\s*\|/)
+        ) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
             return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
           });
@@ -315,6 +320,7 @@
         }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
