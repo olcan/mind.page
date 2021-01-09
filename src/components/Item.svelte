@@ -242,30 +242,30 @@
     const tagRegex = new RegExp(`(^|\\s|;)(${regexTags.join("|")})`, "g");
 
     // replace naked URLs with markdown links (or images) named after host name
-    const replaceURLs = (text) => text;
-    text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
-      // try to maintain markdown links, html attributes, other url strings, etc
-      // NOTE: markdown parser may still convert naked URLs to links
-      if (pfx.match(/\]\(|[="'`]/)) return m;
-      let sfx = "";
-      if (url[url.length - 1].match(/[\.,;:]/)) {
-        // move certain last characters out of the url
-        sfx = url[url.length - 1] + sfx;
-        url = url.substring(0, url.length - 1);
-      }
-      // convert dropbox urls to direct download
-      url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
-      url = url.replace("?dl=0", "");
-      try {
-        let obj = new URL(url);
-        if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
-          return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`;
+    const replaceURLs = (text) =>
+      text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+        // try to maintain markdown links, html attributes, other url strings, etc
+        // NOTE: markdown parser may still convert naked URLs to links
+        if (pfx.match(/\]\(|[="'`]/)) return m;
+        let sfx = "";
+        if (url[url.length - 1].match(/[\.,;:]/)) {
+          // move certain last characters out of the url
+          sfx = url[url.length - 1] + sfx;
+          url = url.substring(0, url.length - 1);
         }
-        return `${pfx}[${obj.host}](${url})${sfx}`;
-      } catch (_) {
-        return pfx + url + sfx;
-      }
-    });
+        // convert dropbox urls to direct download
+        url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
+        url = url.replace("?dl=0", "");
+        try {
+          let obj = new URL(url);
+          if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
+            return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`;
+          }
+          return `${pfx}[${obj.host}](${url})${sfx}`;
+        } catch (_) {
+          return pfx + url + sfx;
+        }
+      });
 
     const regexTerms = Array.from(matchingTerms)
       .map(regexEscape)

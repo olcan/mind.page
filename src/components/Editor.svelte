@@ -249,9 +249,13 @@
 
     // indent/comment selection or current line
     // NOTE: tab key will indent at bullet heads or when there is a selection
-    const tabShouldIndent =
-      textarea.value.substring(0, textarea.selectionEnd).match(/[-*] $/) ||
-      textarea.selectionEnd > textarea.selectionStart;
+    // NOTE: an alternative is to indent anywhere on a bullet line
+    //       (requires taking full current line, not just from current position)
+    // const tabShouldIndent =
+    //   (textarea.selectionStart == textarea.selectionEnd &&
+    //   textarea.value.substring(0, textarea.selectionStart).match(/[-*] $/)) ||
+    //   textarea.selectionEnd > textarea.selectionStart;
+    const tabShouldIndent = true; // always indent
     if (
       ((e.code == "BracketLeft" || e.code == "BracketRight") && e.ctrlKey) ||
       (e.code == "Tab" && tabShouldIndent) ||
