@@ -239,7 +239,6 @@
           .concat(parseTags(text).raw)
       ),
     ].filter((t) => t);
-    // let terms = [...new Set([text].concat(parseTags(text).all))].filter((t) => t);
     if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsSecondary
@@ -504,22 +503,6 @@
     item.dotTerm =
       pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
 
-    const prevTagsExpanded = item.tagsExpanded || [];
-    item.tagsExpanded = item.tags.slice();
-    item.tags.forEach((tag) => {
-      let pos;
-      while ((pos = tag.lastIndexOf("/")) >= 0)
-        item.tagsExpanded.push((tag = tag.slice(0, pos)));
-    });
-    if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
-      prevTagsExpanded.forEach((tag) =>
-        tagCounts.set(tag, tagCounts.get(tag) - 1)
-      );
-      item.tagsExpanded.forEach((tag) =>
-        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1)
-      );
-    }
-
     // if item stats with a visible tag, it is taken as a "label" for the item
     // (we allow some tags/macros to precede the label tag for styling purposes)
     const prevLabel = item.label;
@@ -531,6 +514,18 @@
       : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
+    if (item.label) {
+      // convert relative tags to absolute
+      item.tags = item.tags.map((tag) =>
+        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
+      );
+      item.tagsVisible = item.tagsVisible.map((tag) =>
+        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
+      );
+      item.tagsRaw = item.tagsRaw.map((tag) =>
+        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
+      );
+    }
     if (item.label != prevLabel) {
       item.labelUnique = false;
       if (prevLabel) {
@@ -550,6 +545,24 @@
       while ((pos = label.lastIndexOf("/")) >= 0)
         item.labelPrefixes.push((label = label.slice(0, pos)));
     }
+
+    // compute expanded tags including prefixes
+    const prevTagsExpanded = item.tagsExpanded || [];
+    item.tagsExpanded = item.tags.slice();
+    item.tags.forEach((tag) => {
+      let pos;
+      while ((pos = tag.lastIndexOf("/")) >= 0)
+        item.tagsExpanded.push((tag = tag.slice(0, pos)));
+    });
+    if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
+      prevTagsExpanded.forEach((tag) =>
+        tagCounts.set(tag, tagCounts.get(tag) - 1)
+      );
+      item.tagsExpanded.forEach((tag) =>
+        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1)
+      );
+    }
+
     if (update_deps) {
       item.deps = itemDeps(index);
       const prevDeepHash = item.deephash;

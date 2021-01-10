@@ -227,18 +227,6 @@
     // introduce a line break between any styling html and first tag
     text = text.replace(/^(<.*>)\s+#/, "$1\n#");
 
-    // remove hidden tags (unless missing) and trim
-    text = text
-      .replace(
-        // /(^|\s<>&,.;:"'`(){}\[\]])(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
-        /(^|\s)(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
-        (m, pfx, tag) => {
-          const lctag = tag.toLowerCase().replace(/^#_/, "#");
-          return missingTags.has(lctag) ? pfx + tag : "";
-        }
-      )
-      .trim();
-
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
     if (tags.indexOf("#id") >= 0) console.debug(tags);
@@ -248,6 +236,15 @@
       `(^|\\s)(${regexTags.join("|")})`,
       "g"
     );
+
+    // remove hidden tags (unless missing) and trim
+    text = text
+      .replace(tagRegex, (m, pfx, tag) => {
+        if (!tag.startsWith("#_")) return m;
+        const lctag = tag.toLowerCase().replace(/^#_/, "#");
+        return missingTags.has(lctag) ? pfx + tag : "";
+      })
+      .trim();
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = (text) =>
@@ -345,6 +342,8 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag) => {
+              // make relative tag absolute
+              if (label && tag.startsWith("#/")) tag = label + tag.substring(1);
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (matchingTerms.has(lctag)) classNames += " selected";
