@@ -319,7 +319,7 @@
         // (also note since we process lines, \s does not match \n)
         if (
           !insideBlock &&
-          !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>|^\s*\|/)
+          !str.match(/^\s*```|^    \s*[^\-\*]|^\s*>|^\s*\|/)
         ) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
             return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
@@ -327,11 +327,11 @@
           str = str + "<br>\n";
         }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```/)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]/)) {
           // replace URLs
           str = replaceURLs(str);
           // wrap math inside span.math (unless text matches search terms)
