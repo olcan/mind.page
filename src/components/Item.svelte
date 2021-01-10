@@ -283,12 +283,11 @@
     // NOTE: modifications should only happen outside of code blocks
     let insideBlock = false;
     let lastLine = "";
-    let mathCounts = {};
+    let cacheIndex = 0;
     let wrapMath = (m) =>
       `<span class="${
         m.startsWith("$$") || !m.startsWith("$") ? "math-display" : "math"
-      }" _cache_key="${m}-${(mathCounts[m] =
-        (mathCounts[m] || 0) + 1)}">${m}</span>`;
+      }" _cache_key="${m}-${cacheIndex++}">${m}</span>`;
     text = text
       .split("\n")
       .map((line) => {
@@ -330,8 +329,6 @@
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
         if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
-          // replace URLs
-          str = replaceURLs(str);
           // wrap math inside span.math (unless text matches search terms)
           if (
             matchingTerms.size == 0 ||
@@ -367,6 +364,9 @@
               return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
             });
         }
+        // replace URLs
+        if (!insideBlock) str = replaceURLs(str);
+
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
         if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/))
@@ -449,7 +449,8 @@
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // console.debug("img src", src, m);
       return (
-        m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}">`
+        m.substring(0, m.length - 1) +
+        ` src="${src}" _cache_key="${key}-${cacheIndex++}">`
       );
     });
 
@@ -472,7 +473,9 @@
       // m = m.replace(/ _cache_key=[^> ]*/, "");
       // console.debug("img src", src, m);
       const key = divid + "-" + deephash;
-      return m.substring(0, m.length - 1) + ` _cache_key="${key}">`;
+      return (
+        m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`
+      );
     });
 
     // append log summary div
