@@ -372,19 +372,15 @@
       }
     }
 
-    // remove spaced tabs with backspace
+    // remove spaced tabs (and optional bullet) with backspace
     // (for backspace, unlike shift-tab, we require/allow an _extra_ space and we require even number of spaces)
+    const prefix = textarea.value.substring(0, textarea.selectionStart);
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
-      textarea.selectionStart >= 3 &&
-      textarea.value
-        .substring(textarea.selectionStart - 3, textarea.selectionStart)
-        .match(/\s  /) &&
-      !(
-        textarea.value.substring(0, textarea.selectionStart).match(/ +$/)[0]
-          .length % 2
-      )
+      textarea.selectionStart >= 2 &&
+      prefix.match(/(?:^|\s)[-* ] $/) &&
+      prefix.match(/ *[-* ] $/)[0].length % 2 == 0
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
