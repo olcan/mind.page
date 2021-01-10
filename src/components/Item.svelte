@@ -287,7 +287,7 @@
     let wrapMath = (m) =>
       `<span class="${
         m.startsWith("$$") || !m.startsWith("$") ? "math-display" : "math"
-      }" _cache_key="${m}-${cacheIndex++}">${m}</span>`;
+      }" _cache_key="${m}-${tmpid || id}-${cacheIndex++}">${m}</span>`;
     text = text
       .split("\n")
       .map((line) => {
@@ -450,7 +450,7 @@
       // console.debug("img src", src, m);
       return (
         m.substring(0, m.length - 1) +
-        ` src="${src}" _cache_key="${key}-${cacheIndex++}">`
+        ` src="${src}" _cache_key="${key}-${tmpid || id}-${cacheIndex++}">`
       );
     });
 
