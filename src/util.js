@@ -108,7 +108,8 @@ export function parseTags(text) {
         .replace(/<style>.*?<\/style>/gs, "") // remove styles (can be multi-line)
         .replace(/<\/?\w.*?>/g, "") // remove html tags
         .replace(/<<.*?>>/g, "") // remove macros
-        .matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
+        //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
+        .matchAll(/(?:^|\s)(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
       (m) => m[1]
     )
   );

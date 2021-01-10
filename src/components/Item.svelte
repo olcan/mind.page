@@ -230,7 +230,8 @@
     // remove hidden tags (unless missing) and trim
     text = text
       .replace(
-        /(^|[\s<>&,.;:"'`(){}\[\]])(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
+        // /(^|\s<>&,.;:"'`(){}\[\]])(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
+        /(^|\s)(#_[^#\s<>&,.;:"'`(){}\[\]]+)/g,
         (m, pfx, tag) => {
           const lctag = tag.toLowerCase().replace(/^#_/, "#");
           return missingTags.has(lctag) ? pfx + tag : "";
@@ -243,7 +244,8 @@
     if (tags.indexOf("#id") >= 0) console.debug(tags);
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
     const tagRegex = new RegExp(
-      `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
+      // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
+      `(^|\\s)(${regexTags.join("|")})`,
       "g"
     );
 
