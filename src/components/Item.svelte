@@ -14,7 +14,9 @@
 
   let renderer = new marked.Renderer();
   renderer.link = (href, title, text) => {
-    return `<a target="_blank" href="${href}" onclick="event.stopPropagation()">${text}</a>`;
+    return href.startsWith("#")
+      ? `<a href="${href}" onclick="event.stopPropagation()">${text}</a>`
+      : `<a target="_blank" href="${href}" onclick="event.stopPropagation()">${text}</a>`;
   };
   // marked.use({ renderer });
   marked.setOptions({

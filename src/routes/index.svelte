@@ -444,6 +444,7 @@
   }
 
   function onPopState(e) {
+    if (!e?.state) return; // for fragment (#id) hrefs
     editorText = e.state.editorText || "";
     onEditorChange(editorText);
   }
