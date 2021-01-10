@@ -315,7 +315,9 @@
         // (also note since we process lines, \s does not match \n)
         if (
           !insideBlock &&
-          !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<|^\s*>|^\s*\|/)
+          !str.match(
+            /^\s*```|^    \s*[^\-\*]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
+          )
         ) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
             return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
@@ -364,8 +366,9 @@
               return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
             });
         }
-        // replace URLs
-        if (!insideBlock) str = replaceURLs(str);
+        // replace URLs (except in lines that look like a reference-style link)
+        if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/))
+          str = replaceURLs(str);
 
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
