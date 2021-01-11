@@ -405,9 +405,12 @@
     text = text.replace(/<<hash>>/g, hash);
     text = text.replace(/<<deephash>>/g, deephash);
 
-    // replace #item between <style> tags for use in item-specific css-styles
+    // replace #item between style tags for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
-    text = text.replace(/(<style>.*)#item(\b.*<\/style>)/sg, `$1#item-${id}.item$2`);
+    text = text.replace(
+      /(<[s]tyle>.*)#item(\W.*<\/style>)/gs,
+      `$1#item-${id}.item$2`
+    );
 
     // evaluate inline <<macros>>
     text = text.replace(/<<(.*?)>>/g, (m, js) => {
@@ -1550,7 +1553,7 @@
           on:click={onIndexClick}>{index + 1}</span>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div class="item" id={'item-'+id} bind:this={itemdiv} class:saving>
+      <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(text || placeholder, id, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
