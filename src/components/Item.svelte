@@ -170,6 +170,7 @@
 
   function toHTML(
     text: string,
+    id: string,
     deephash: string,
     labelUnique: boolean,
     // NOTE: passing in arrays has proven problematic (e.g. infinite render loops)
@@ -289,7 +290,7 @@
     let wrapMath = (m) =>
       `<span class="${
         m.startsWith("$$") || !m.startsWith("$") ? "math-display" : "math"
-      }" _cache_key="${m}-${tmpid || id}-${cacheIndex++}">${m}</span>`;
+      }" _cache_key="${m}-${id}-${cacheIndex++}">${m}</span>`;
     text = text
       .split("\n")
       .map((line) => {
@@ -386,7 +387,7 @@
         /(^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
         (m, pfx, _html) =>
           (pfx + _html)
-            .replace(/\$id/g, tmpid || id)
+            .replace(/\$id/g, id)
             .replace(/\$hash/g, hash)
             .replace(/\$deephash/g, deephash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
@@ -400,13 +401,13 @@
 
     // replace special macros <<id|hash|deephash>>
     // NOTE: Special macros are different from $id/$hash/$deephash which are intended for use in scripts and are only replaced inside _html blocks (above), inside js_input blocks (in index.html), or during _read given replace_$id option. These replacements are generally not visible in the rendered item. In contrast, macros are intended to affect the rendered item and are generally not replaced during script execution.
-    text = text.replace(/<<id>>/g, tmpid || id);
+    text = text.replace(/<<id>>/g, id);
     text = text.replace(/<<hash>>/g, hash);
     text = text.replace(/<<deephash>>/g, deephash);
 
-    // replace #id.item for use in item-specific css-styles
+    // replace #item between <style> tags for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
-    text = text.replace(/#id\.item/g, `#${tmpid || id}.item`);
+    text = text.replace(/(<style>.*)#item(\b.*<\/style>)/sg, `$1#item-${id}.item$2`);
 
     // evaluate inline <<macros>>
     text = text.replace(/<<(.*?)>>/g, (m, js) => {
@@ -1497,7 +1498,7 @@
   {#if timeString}
     <div class="time" class:timeOutOfOrder>{timeString}</div>
   {/if}
-  {#if { showDebugString }}
+  {#if showDebugString}
     <div class="debug">{debugString}</div>
   {/if}
   <div
@@ -1549,9 +1550,9 @@
           on:click={onIndexClick}>{index + 1}</span>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div class="item" {id} bind:this={itemdiv} class:saving>
+      <div class="item" id={'item-'+id} bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(text || placeholder, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
+        {@html toHTML(text || placeholder, id, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
       </div>
     {/if}
     {#if running}
