@@ -319,7 +319,7 @@
         if (
           !insideBlock &&
           !str.match(
-            /^\s*```|^    \s*[^\-\*]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
+            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
           )
         ) {
           str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
@@ -1036,6 +1036,14 @@
   .index.matching {
     background: #9f9;
   }
+  .index .arrow {
+    color: black;
+    opacity: 0.25;
+    font-size: 15px;
+    line-height: 15px;
+    margin-top: 1px; /* aligns better with index*/
+    padding-right: 2px;
+  }
   .delete {
     /* color: #900; */
     background: #b66;
@@ -1145,36 +1153,44 @@
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
-  :global(h1, h2, h3, h4, h5, h6, p, ul, blockquote, pre) {
+  :global(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre) {
     margin: 0;
   }
   /* :global(h1, h2, h3, h4, h5, h6) {
     clear: both;
   } */
-  :global(.item ul) {
+  :global(.item ul),
+  :global(.item ol) {
     padding-left: 20px;
+    color: #666;
   }
   :global(.item span.list-item) {
     display: block;
     margin-left: -5px;
+    color: #ddd;
   }
   /* additional space between list items */
-  :global(.item ul > li:not(:last-of-type)) {
+  :global(.item ul > li:not(:last-of-type)),
+  :global(.item ol > li:not(:last-of-type)) {
     padding-bottom: 2px;
   }
   /* reduced space between nested list items */
-  :global(.item ul > li ul > li:not(:last-of-type)) {
+  :global(.item ul > li ul > li:not(:last-of-type)),
+  :global(.item ol > li ol > li:not(:last-of-type)) {
     padding-bottom: 1px;
   }
   /* additional space below nested lists for inner list items */
-  :global(.item li:not(:last-of-type) > ul) {
+  :global(.item li:not(:last-of-type) > ul),
+  :global(.item li:not(:last-of-type) > ol) {
     padding-bottom: 2px;
   }
   /* add some space before/after lists for more even spacing with surrounding text */
-  :global(.item > ul:not(:first-child)) {
+  :global(.item > ul:not(:first-child)),
+  :global(.item > ol:not(:first-child)) {
     padding-top: 2px;
   }
-  :global(.item > ul:not(:last-child)) {
+  :global(.item > ul:not(:last-child)),
+  :global(.item > ol:not(:first-child)) {
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
@@ -1550,7 +1566,7 @@
         <span class="run" on:click={onRunClick}>run</span><span
           class="index"
           class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}>{index + 1}</span>
+          on:click={onIndexClick}><span class="arrow">▲</span>{index + 1}</span>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>

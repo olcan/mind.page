@@ -200,7 +200,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^-*]/)) html += line + "\n";
+        if (line.match(/^    \s*[^-*+]/)) html += line + "\n";
         else html += highlightOther(highlightTags(escapeHTML(line))) + "\n";
       }
     });
@@ -257,7 +257,7 @@
     //       (requires taking full current line, not just from current position)
     // const tabShouldIndent =
     //   (textarea.selectionStart == textarea.selectionEnd &&
-    //   textarea.value.substring(0, textarea.selectionStart).match(/[-*] $/)) ||
+    //   textarea.value.substring(0, textarea.selectionStart).match(/[-*+] $/)) ||
     //   textarea.selectionEnd > textarea.selectionStart;
     const tabShouldIndent = true; // always indent
     if (
@@ -379,8 +379,8 @@
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
       textarea.selectionStart >= 2 &&
-      prefix.match(/(?:^|\s)[-* ] $/) &&
-      prefix.match(/ *[-* ] $/)[0].length % 2 == 0
+      prefix.match(/(?:^|\s)[-*+ ] $/) &&
+      prefix.match(/ *[-*+ ] $/)[0].length % 2 == 0
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
       document.execCommand("delete", false);
@@ -457,7 +457,7 @@
         // extend bullet points to new lines
         const bullet = textarea.value
           .substring(0, enterStart)
-          .match(/(?:^|\n) *([-*] ).*$/);
+          .match(/(?:^|\n) *([-*+] ).*$/);
         if (bullet) enterIndentation += bullet[1];
         if (enterIndentation) {
           let newlines = textarea.value.substring(
@@ -482,7 +482,7 @@
       if (
         (bullet = textarea.value
           .substring(0, textarea.selectionStart)
-          .match(/(?:^|\n)( *)([-*] +)$/))
+          .match(/(?:^|\n)( *)([-*+] +)$/))
       )
         content = content.replace(/(\t+)/g, bullet[1] + "$1" + bullet[2]);
       content = content.replace(/\t/g, "  ");
