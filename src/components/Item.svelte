@@ -339,7 +339,12 @@
             matchingTerms.size == 0 ||
             (!str.match(mathTermRegex) && !matchingTerms.has("$"))
           )
-            str = str.replace(/\$?\$`.+?`\$\$?/g, wrapMath);
+            str = str.replace(/(^|[^\\])(\$?\$`.+?`\$\$?)/g, (m, pfx, math) =>
+              (math.startsWith("$`") && math.endsWith("`$")) ||
+              (math.startsWith("$$`") && math.endsWith("`$$"))
+                ? pfx + wrapMath(math)
+                : m
+            );
           // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>');
           // wrap #tags inside clickable <mark></mark>
@@ -387,9 +392,9 @@
         /(^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
         (m, pfx, _html) =>
           (pfx + _html)
-            .replace(/\$id/g, id)
-            .replace(/\$hash/g, hash)
-            .replace(/\$deephash/g, deephash)
+            .replace(/(^|[^\\])\$id/g, "$1" + id)
+            .replace(/(^|[^\\])\$hash/g, "$1" + hash)
+            .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
             .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
       ); /*unwrap _html* blocks*/
 
@@ -401,26 +406,26 @@
 
     // replace special macros <<id|hash|deephash>>
     // NOTE: Special macros are different from $id/$hash/$deephash which are intended for use in scripts and are only replaced inside _html blocks (above), inside js_input blocks (in index.html), or during _read given replace_$id option. These replacements are generally not visible in the rendered item. In contrast, macros are intended to affect the rendered item and are generally not replaced during script execution.
-    text = text.replace(/<<id>>/g, id);
-    text = text.replace(/<<hash>>/g, hash);
-    text = text.replace(/<<deephash>>/g, deephash);
+    text = text.replace(/(^|[^\\])<<id>>/g, "$1" + id);
+    text = text.replace(/(^|[^\\])<<hash>>/g, "$1" + hash);
+    text = text.replace(/(^|[^\\])<<deephash>>/g, "$1" + deephash);
 
     // replace #item between style tags for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
     text = text.replace(
-      /(<[s]tyle>.*)#item(\W.*<\/style>)/gs,
-      `$1#item-${id}.item$2`
+      /(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs,
+      `$1$2#item-${id}.item$3`
     );
 
     // evaluate inline <<macros>>
-    text = text.replace(/<<(.*?)>>/g, (m, js) => {
+    text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
       try {
-        return window["_eval"](js, tmpid || id);
+        return pfx + window["_eval"](js, tmpid || id);
       } catch (e) {
         console.error(
           `macro error in item ${label || "id:" + (tmpid || id)}: ${e}`
         );
-        return undefined;
+        return pfx + "undefined";
       }
     });
 

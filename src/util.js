@@ -102,12 +102,12 @@ export function parseTags(text) {
         .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
         // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
         .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
-        .replace(/`.*?`/g, "") // remove inline code spans
-        .replace(/\$\$?.+?\$\$?/g, "") // remove math
-        .replace(/<script.*?>.*?<\/script>/gs, "") // remove scripts (can be multi-line)
-        .replace(/<style>.*?<\/style>/gs, "") // remove styles (can be multi-line)
-        .replace(/<\/?\w.*?>/g, "") // remove html tags
-        .replace(/<<.*?>>/g, "") // remove macros
+        .replace(/(^|[^\\])`.*?`/g, "$1") // remove inline code spans
+        .replace(/(^|[^\\])\$?\$`.+?`\$\$?/g, "$1") // remove math
+        .replace(/(^|[^\\])<script.*?>.*?<\/script>/gs, "$1") // remove scripts (can be multi-line)
+        .replace(/(^|[^\\])<style>.*?<\/style>/gs, "$1") // remove styles (can be multi-line)
+        .replace(/(^|[^\\])<\/?\w.*?>/g, "$1") // remove html tags
+        .replace(/(^|[^\\])<<.*?>>/g, "$1") // remove macros
         //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
         .matchAll(/(?:^|\s)(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
       (m) => m[1]

@@ -239,7 +239,7 @@
           .concat(parseTags(text).raw)
       ),
     ].filter((t) => t);
-    if (text.startsWith("/")) terms = [];
+    // if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsSecondary
     let termsSecondary = [];
@@ -986,9 +986,9 @@
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
     let item = items[index];
-    jsin = jsin.replace(/\$id/g, item.tmpid || item.id);
-    jsin = jsin.replace(/\$hash/g, item.hash);
-    jsin = jsin.replace(/\$deephash/g, item.deephash);
+    jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
+    jsin = jsin.replace(/(^|[^\\])\$hash/g, "$1" + item.hash);
+    jsin = jsin.replace(/(^|[^\\])\$deephash/g, "$1" + item.deephash);
     //const evaljs = "(function(){\n" + jsin + "\n})()";
     const evaljs = jsin;
     if (lastRunText)
@@ -1769,7 +1769,8 @@
             );
         }
         let text = type ? extractBlock(item.text, type) : item.text;
-        if (options["replace_$id"]) text = text.replace(/\$id/g, item.id);
+        if (options["replace_$id"])
+          text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
         content.push(text);
       });
       return content.filter((s) => s).join("\n");

@@ -41,18 +41,23 @@
   };
   let highlightOther = (text) => {
     return text.replace(
-      /(\$?\$?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$?\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
-      (match, begin, content, end) => {
+      /(^|[^\\])(\$?\$`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      (m, pfx, begin, content, end) => {
         if (begin == end && begin == "`")
-          return `<span class="code">${match}</span>`;
-        else if (begin.endsWith("$`") && end.startsWith("`$"))
+          return pfx + `<span class="code">${begin + content + end}</span>`;
+        else if (
+          (begin == "$`" && end == "`$") ||
+          (begin == "$$`" && end == "`$$")
+        )
           return (
+            pfx +
             `<span class="math">` +
-            highlight(unescapeHTML(match), "latex") +
+            highlight(unescapeHTML(begin + content + end), "latex") +
             `</span>`
           );
         else if (begin == "&lt;&lt;" && end == "&gt;&gt;")
           return (
+            pfx +
             `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
             highlight(unescapeHTML(content), "js") +
             `<span class="macro-delimiter">${end}</span></span>`
@@ -62,19 +67,21 @@
           end.match(/&lt;\/script&gt;/)
         )
           return (
+            pfx +
             highlight(unescapeHTML(begin), "html") +
             highlight(unescapeHTML(content), "js") +
             highlight(unescapeHTML(end), "html")
           );
         else if (begin.match(/&lt;style&gt;/) && end.match(/&lt;\/style&gt;/))
           return (
+            pfx +
             highlight(unescapeHTML(begin), "html") +
             highlight(unescapeHTML(content), "css") +
             highlight(unescapeHTML(end), "html")
           );
         else if (begin.match(/&lt;\/?\w/) && end.match(/&gt;/))
-          return highlight(unescapeHTML(match), "html");
-        else return match;
+          return pfx + highlight(unescapeHTML(begin + content + end), "html");
+        else return m;
       }
     );
   };
@@ -484,7 +491,7 @@
           .substring(0, textarea.selectionStart)
           .match(/(?:^|\n)( *)([-*+] +)$/))
       )
-        content = content.replace(/(\t+)/g, bullet[1] + "$1" + bullet[2]);
+        content = content.replace(/(\n\t*)/g, bullet[1] + "$1" + bullet[2]);
       content = content.replace(/\t/g, "  ");
     }
     document.execCommand("insertText", false, content);
