@@ -261,13 +261,14 @@
       // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
       //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
 
-      // prefix-match only if first query term is non-label or unique label
-      // NOTE: otherwise term is considered generic and time ordering more important
-      //       (e.g. #todo/someday should not be ahead of recent #todo items)
-      item.prefixMatch =
-        item.header.startsWith(terms[0]) &&
-        (idsFromLabel.get(terms[0]) || 0) <= 1;
-      // (!item.label || item.labelUnique);
+      // match first query term against item label
+      item.labelMatch = item.label == terms[0];
+
+      // match first query term against visible tags in item
+      item.tagMatch = item.tagsVisible.indexOf(terms[0]) >= 0;
+
+      // prefix-match first query term against item header text (excluding html preamble)
+      item.prefixMatch = item.header.startsWith(terms[0]);
 
       // find "pinned match" term = tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
@@ -276,7 +277,7 @@
         ) || "";
       item.pinnedMatch = item.pinnedMatchTerm.length > 0;
 
-      // use item w/ unique-label matching first term as "listing" item
+      // detect "listing" item w/ unique label matching first term
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
         listingLabelPrefixes = item.labelPrefixes;
@@ -382,10 +383,14 @@
         listing.indexOf(b.label) - listing.indexOf(a.label) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
+        // label match on first term
+        b.labelMatch - a.labelMatch ||
+        // tag match on first term
+        b.tagMatch - a.tagMatch ||
         // position of longest matching label prefix in listing item
         min_pos(listing.map((pfx) => b.labelPrefixes.indexOf(pfx))) -
           min_pos(listing.map((pfx) => a.labelPrefixes.indexOf(pfx))) ||
-        // prefix match on first term (if non-label or unique label)
+        // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // # of matching words
         b.matchingTerms.length - a.matchingTerms.length ||
@@ -1443,6 +1448,8 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
+      item.labelMatch = false;
+      item.tagMatch = false;
       item.prefixMatch = false;
       item.pinnedMatch = false;
       item.pinnedMatchTerm = "";
