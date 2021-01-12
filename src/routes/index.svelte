@@ -1942,6 +1942,7 @@
         grid: { focus: { show: !barchart } },
         legend: { show: false },
       };
+      if (rotated) defaults["padding"] = { bottom: 7 };
       spec = _.merge(defaults, spec);
       document.querySelectorAll(selector).forEach((elem) => {
         if (labeled) elem.classList.add("c3-labeled");
