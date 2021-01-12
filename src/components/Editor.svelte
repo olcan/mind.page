@@ -484,16 +484,16 @@
 
   function onPaste(e: ClipboardEvent) {
     let content = e.clipboardData.getData("text");
-    if (content.indexOf("\t") >= 0) {
-      let bullet;
-      if (
-        (bullet = textarea.value
-          .substring(0, textarea.selectionStart)
-          .match(/(?:^|\n)( *)([-*+] +)$/))
-      )
-        content = content.replace(/(\n\t*)/g, bullet[1] + "$1" + bullet[2]);
-      content = content.replace(/\t/g, "  ");
-    }
+    // copy bullet and indentation to subsequent lines
+    let bullet;
+    if (
+      (bullet = textarea.value
+        .substring(0, textarea.selectionStart)
+        .match(/(?:^|\n)( *)([-*+] +)$/))
+    )
+      content = content.replace(/(\n\s*)/g, "$1" + bullet[1] + bullet[2]);
+    // replace tabs with double-space
+    content = content.replace(/\t/g, "  ");
     document.execCommand("insertText", false, content);
     e.preventDefault();
     e.stopPropagation();
