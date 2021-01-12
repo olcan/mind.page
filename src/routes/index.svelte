@@ -97,7 +97,6 @@
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
-      if (item.tmpid) indexFromId.set(item.tmpid, index);
       if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
 
@@ -236,7 +235,7 @@
         text
           .split(/\s+/)
           // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
-          .concat(parseTags(text).raw)
+          .concat(parseTags(text).all)
       ),
     ].filter((t) => t);
     // if (text.startsWith("/")) terms = [];
@@ -292,12 +291,11 @@
       item.matchingTerms = terms.filter(
         (t) => t[0] != "#" && item.lctext.indexOf(t) >= 0
       );
-      // match (raw) tags against item (raw) tags, allowing prefix matches
+      // match tags against item tags, allowing prefix matches
       item.matchingTerms = item.matchingTerms.concat(
         terms.filter(
           (t) =>
-            t[0] == "#" &&
-            item.tagsRaw.findIndex((tag) => tag.startsWith(t)) >= 0
+            t[0] == "#" && item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
         )
       );
       // match regex:* terms
@@ -435,6 +433,7 @@
         console.warn("got null range for tag click: ", tag, e);
       }
     }
+    tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     // push new state with "final" flag so it is not modified by onEditorChange
     history.pushState({ editorText: editorText, final: true }, editorText);
@@ -499,7 +498,6 @@
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
-    item.tagsRaw = tags.raw;
     item.log = item.tags.indexOf("#log") >= 0;
     item.debug = item.tags.indexOf("#debug") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
@@ -526,9 +524,6 @@
         tag.startsWith("#/") ? item.label + tag.substring(1) : tag
       );
       item.tagsVisible = item.tagsVisible.map((tag) =>
-        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
-      );
-      item.tagsRaw = item.tagsRaw.map((tag) =>
         tag.startsWith("#/") ? item.label + tag.substring(1) : tag
       );
     }
@@ -778,12 +773,14 @@
       }
     }
 
-    let tmpid = Date.now().toString();
-    let itemToSave = { time: time, text: text };
+    let itemToSave = {
+      time: time,
+      text: text,
+    };
     let item = {
       ...itemToSave,
-      id: tmpid,
-      tmpid: tmpid,
+      id: Date.now().toString(), // temporary id for this session only
+      savedId: null, // filled in below after save
       editing: editing,
       // saving: true,
       saving: !editing,
@@ -802,7 +799,7 @@
     onEditorChange(editorText); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
     if (!editing) {
-      appendJSOutput(indexFromId.get(tmpid));
+      appendJSOutput(indexFromId.get(item.id));
       if (item.text != text) {
         itemToSave.text = item.text;
         // invoke onEditorChange again due to text change
@@ -819,7 +816,7 @@
       // if (text != origText) selectionStart = selectionEnd = text.length;
       if (text != origText) selectionStart = selectionEnd = 0;
       setTimeout(() => {
-        let textarea = textArea(indexFromId.get(tmpid));
+        let textarea = textArea(indexFromId.get(item.id));
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
         textarea.focus();
@@ -830,7 +827,8 @@
       .collection("items")
       .add(itemToSave)
       .then((doc) => {
-        let index = indexFromId.get(tmpid); // since index can change
+        let index = indexFromId.get(item.id); // since index can change
+        item = items[index];
         if (index == undefined) {
           // item was deleted before it could be saved
           doc.delete().catch(console.error);
@@ -839,27 +837,15 @@
         let textarea = textArea(index);
         let selectionStart = textarea ? textarea.selectionStart : 0;
         let selectionEnd = textarea ? textarea.selectionEnd : 0;
-        let item = items[index];
-        item.id = doc.id;
-        indexFromId.set(doc.id, index);
-        // NOTE: we maintain mapping from tmpid in case there is async JS with $id plugged in
-        //       (also for render-time <script> tags, toHTML (Item.svelte) will continue to plug in tmpid for session)
-        indexFromId.set(tmpid, index);
-        // we also need itemTextChanged to update deps/etc with permanent id
-        // (need to also remove old id from idsFromLabel)
-        if (item.label) {
-          const ids = idsFromLabel.get(item.label).filter((id) => id != tmpid);
-          idsFromLabel.set(item.label, ids.concat(item.id));
-        }
-        itemTextChanged(index, text);
+        item.savedId = doc.id;
         // if editing, we do not call onItemSaved so save is postponed to post-edit
-        if (!item.editing) onItemSaved(doc.id, itemToSave);
+        if (!item.editing) onItemSaved(item.id, itemToSave);
         else items[index] = item; // trigger dom update
 
         if (focusedItem == index)
           // maintain focus (and caret placement) through id/element change
           setTimeout(() => {
-            let index = indexFromId.get(doc.id);
+            let index = indexFromId.get(item.id);
             if (index == undefined) return;
             let textarea = textArea(index);
             if (!textarea) return;
@@ -867,7 +853,7 @@
             textarea.selectionEnd = selectionEnd;
             textarea.focus();
           }, 0);
-        // also save to items-history ...
+        // also save to items-history (using persistent doc.id) ...
         firestore()
           .collection("items-history")
           .add({ item: doc.id, ...itemToSave })
@@ -1083,7 +1069,10 @@
       return;
     }
     item.saving = true;
-    let itemToSave = { time: item.time, text: item.text };
+    let itemToSave = {
+      time: item.time,
+      text: item.text,
+    };
     // do not save any _tmp blocks
     itemToSave.text = item.text.replace(
       /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
@@ -1094,7 +1083,7 @@
       itemTextChanged(index, itemToSave.text);
     firestore()
       .collection("items")
-      .doc(item.id)
+      .doc(item.savedId)
       .update(itemToSave)
       .then(() => {
         onItemSaved(item.id, itemToSave);
@@ -1103,7 +1092,7 @@
     // also save to items-history ...
     firestore()
       .collection("items-history")
-      .add({ item: item.id, ...itemToSave })
+      .add({ item: item.savedId, ...itemToSave })
       .catch(console.error);
   }
 
@@ -1175,7 +1164,7 @@
         }); // for /undelete
         firestore()
           .collection("items")
-          .doc(item.id)
+          .doc(item.savedId)
           .delete()
           .catch(console.error);
       } else {
@@ -1444,6 +1433,7 @@
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
+      item.savedId = item.id;
       item.savedText = item.text;
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
@@ -1705,7 +1695,7 @@
         return null;
       }
       indices.map((index) => {
-        ids.push(items[index].tmpid || items[index].id);
+        ids.push(items[index].id);
       });
       if (multiple) return ids; // return as array
       if (ids.length > 1)
@@ -1797,12 +1787,12 @@
         item,
         Object.assign({ include_deps: true, replace_$id: true }, options)
       );
-      const evaljs = prefix + "\n" + code;
+      let evaljs = prefix + "\n" + code;
       const index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
       lastEvalText = appendBlock(
         index != undefined
           ? `\`_eval\` invoked from ${
-              items[index].label || "id:" + items[index].label
+              items[index].label || "id:" + items[index].id
             }`
           : "",
         "js_input",
@@ -1895,11 +1885,9 @@
       let indices = indicesForItem(item);
       if (!window["_tasks"]) window["_tasks"] = {};
       indices.map((index) => {
-        // clear any previous tasks for item, under id or tmpid
+        // clear any previous tasks for item under id
         clearInterval(window["_tasks"][items[index].id]);
-        clearInterval(window["_tasks"][items[index].tmpid]);
         delete window["_tasks"][items[index].id];
-        delete window["_tasks"][items[index].tmpid];
         window["_tasks"][items[index].id] = setInterval(task, interval);
         task(); //  also execute immediately
       });
@@ -2634,7 +2622,6 @@
               bind:time={item.time}
               index={item.index}
               id={item.id}
-              tmpid={item.tmpid}
               label={item.label}
               labelUnique={item.labelUnique}
               hash={item.hash}

@@ -35,7 +35,6 @@
   // NOTE: required props should not have default values
   export let index: number;
   export let id: string;
-  export let tmpid: string; // temporary id for items created in current session
   export let label: string;
   export let labelUnique: boolean;
   export let missingTags: any;
@@ -232,7 +231,6 @@
 
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
-    if (tags.indexOf("#id") >= 0) console.debug(tags);
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
     const tagRegex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
@@ -240,12 +238,17 @@
       "g"
     );
 
-    // remove hidden tags (unless missing) and trim
+    // TODO: do not remove matching hidden tags, test tag search, e.g. for bar_chart
+    // remove hidden tags (unless missing or matching) and trim
     text = text
       .replace(tagRegex, (m, pfx, tag) => {
         if (!tag.startsWith("#_")) return m;
         const lctag = tag.toLowerCase().replace(/^#_/, "#");
-        return missingTags.has(lctag) ? pfx + tag : "";
+        return missingTags.has(lctag) ||
+          matchingTerms.has(lctag) ||
+          matchingTermsSecondary.has(lctag)
+          ? pfx + tag
+          : "";
       })
       .trim();
 
@@ -284,6 +287,7 @@
     );
 
     // NOTE: modifications should only happen outside of code blocks
+
     let insideBlock = false;
     let lastLine = "";
     let cacheIndex = 0;
@@ -404,27 +408,25 @@
       '<div style="display:none">$1</div>'
     );
 
-    // replace special macros <<id|hash|deephash>>
-    // NOTE: Special macros are different from $id/$hash/$deephash which are intended for use in scripts and are only replaced inside _html blocks (above), inside js_input blocks (in index.html), or during _read given replace_$id option. These replacements are generally not visible in the rendered item. In contrast, macros are intended to affect the rendered item and are generally not replaced during script execution.
-    text = text.replace(/(^|[^\\])<<id>>/g, "$1" + id);
-    text = text.replace(/(^|[^\\])<<hash>>/g, "$1" + hash);
-    text = text.replace(/(^|[^\\])<<deephash>>/g, "$1" + deephash);
-
     // replace #item between style tags for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
     text = text.replace(
       /(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs,
-      `$1$2#item-${id}.item$3`
+      `$1$2#item-${id}$3`
     );
 
     // evaluate inline <<macros>>
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
       try {
-        return pfx + window["_eval"](js, tmpid || id);
+        let out = pfx + window["_eval"](js, id);
+        // console.debug("macro output: ", out);
+        // plug in $id/etc just like _html blocks
+        out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
+        out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
+        out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        return out;
       } catch (e) {
-        console.error(
-          `macro error in item ${label || "id:" + (tmpid || id)}: ${e}`
-        );
+        console.error(`macro error in item ${label || "id:" + id}: ${e}`);
         return pfx + "undefined";
       }
     });
@@ -464,7 +466,7 @@
       // console.debug("img src", src, m);
       return (
         m.substring(0, m.length - 1) +
-        ` src="${src}" _cache_key="${key}-${tmpid || id}-${cacheIndex++}">`
+        ` src="${src}" _cache_key="${key}-${id}-${cacheIndex++}">`
       );
     });
 
@@ -477,7 +479,7 @@
         );
         return m;
       }
-      if (divid.indexOf(tmpid || id) < 0) {
+      if (divid.indexOf(id) < 0) {
         console.warn(
           "div without proper id (that includes $id) in item at index",
           index + 1
@@ -508,9 +510,7 @@
           : "log";
         summary += `<span class="console-${type}">·</span>`;
       });
-      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${
-        tmpid || id
-      }',event)">${summary}</div>`;
+      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${id}',event)">${summary}</div>`;
     }
 
     return (window["_html_cache"][cache_key] = text);
