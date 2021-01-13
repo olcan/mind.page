@@ -27,8 +27,7 @@
       let items = await firebaseAdmin()
         .firestore()
         .collection("items")
-        // unnecessary for admin, and better to hide from index.js
-        // .where("user", "==", user.uid)
+        .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
         .orderBy("time", "desc")
         .get();
       // return {}
