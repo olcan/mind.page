@@ -735,7 +735,7 @@
         let added = 0;
         items.forEach((item) => {
           firestore()
-            .collection("items-history")
+            .collection("history")
             .add({
               item: item.id,
               user: user.uid,
@@ -744,7 +744,7 @@
             })
             .then((doc) => {
               console.debug(
-                `"added ${++added} of ${items.length} items to items-history`
+                `"added ${++added} of ${items.length} items to history`
               );
             })
             .catch(console.error);
@@ -898,9 +898,9 @@
             textarea.selectionEnd = selectionEnd;
             textarea.focus();
           }, 0);
-        // also save to items-history (using persistent doc.id) ...
+        // also save to history (using persistent doc.id) ...
         firestore()
-          .collection("items-history")
+          .collection("history")
           .add({ item: doc.id, ...itemToSave })
           .catch(console.error);
       })
@@ -1134,9 +1134,9 @@
         onItemSaved(item.id, itemToSave);
       })
       .catch(console.error);
-    // also save to items-history ...
+    // also save to history ...
     firestore()
-      .collection("items-history")
+      .collection("history")
       .add({ user: user.uid, item: item.savedId, ...itemToSave })
       .catch(console.error);
   }
