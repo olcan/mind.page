@@ -7,7 +7,12 @@
     firestore,
     firebaseAdmin,
   } from "../../firebase.js";
-  const allowedUsers = ["y2swh7JY2ScO5soV7mJMHVltAOX2"]; // user.uid for olcans@gmail.com
+
+  // NOTE: this code is actually exposed in index.js so in principle it could be hacked to allow access to other user ids BUT the server must be bypassed and ALL read/write queries will still be restricted to the specific user that is authenticated by firebase. Authentication requires a secure access token (a.k.a. id token) that is stored only on authenticated machines and expires every 60 minutes. See item #firebase/security.
+  const allowedUsers = [
+    "y2swh7JY2ScO5soV7mJMHVltAOX2", // olcans@gmail.com
+    "26ViK7B4pKaAtWJGZk8rgiIdUjO2", // adesercin@gmail.com
+  ];
 
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
@@ -22,6 +27,8 @@
       let items = await firebaseAdmin()
         .firestore()
         .collection("items")
+        // unnecessary for admin, and better to hide from index.js
+        // .where("user", "==", user.uid)
         .orderBy("time", "desc")
         .get();
       // return {}
@@ -118,6 +125,7 @@
           timeString != lastTimeString;
       }
       lastTimeString = timeString;
+      item.canMoveUp = index > 0 && !lastItem.pinned;
 
       // determine item column
       item.nextColumn = -1;
@@ -462,7 +470,8 @@
       })
       .catch(console.error);
     document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
-    location.reload();
+    location.href = "https://accounts.google.com/logout";
+    // location.reload();
   }
 
   let idsFromLabel = new Map<string, string[]>();
@@ -1281,6 +1290,7 @@
   }
 
   function onItemTouch(index: number) {
+    if (!items[index].canMoveUp) return;
     items[index].time = Date.now();
     saveItem(items[index].id);
     editorBlurTime = 0; // prevent re-focus on editor
@@ -1487,6 +1497,7 @@
       item.index = index;
       item.timeString = "";
       item.timeOutOfOrder = false;
+      item.canMoveUp = false;
       item.height = 0;
       item.column = 0;
       item.nextColumn = -1;
@@ -1510,7 +1521,7 @@
       .onAuthStateChanged((authUser) => {
         if (authUser) {
           // user logged in
-          user = authUser;
+          window["_user"] = user = authUser;
           loggedIn = true;
 
           // copy console into #console if it exists
@@ -1624,7 +1635,7 @@
             .auth()
             .getRedirectResult()
             .then((result) => {
-              user = result.user;
+              window["_user"] = user = result.user;
               console.log("signed in after redirect", error || "no error");
               // reload if we are on an error page
               // NOTE: this can lead to infinite loop if done without some delay
@@ -2324,7 +2335,7 @@
     // Restore user from localStorage for faster init
     // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
     if (!user && localStorage.getItem("user")) {
-      user = JSON.parse(localStorage.getItem("user"));
+      window["_user"] = user = JSON.parse(localStorage.getItem("user"));
       console.log("restored user from local storage");
     }
     console.log("first script run, items:", items.length);
@@ -2667,6 +2678,7 @@
               matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
               timeString={item.timeString}
               timeOutOfOrder={item.timeOutOfOrder}
+              canMoveUp={item.canMoveUp}
               updateTime={item.updateTime}
               createTime={item.createTime}
               dotted={item.dotted}

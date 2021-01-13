@@ -43,6 +43,7 @@
   export let time: number;
   export let timeString: string;
   export let timeOutOfOrder: boolean;
+  export let canMoveUp: boolean;
   export let updateTime: number;
   export let createTime: number;
   export let dotted: boolean;
@@ -951,11 +952,12 @@
     box-sizing: border-box;
   }
   .item-menu {
+    display: flex;
     position: absolute;
     top: -1px;
     right: -1px;
     /* background: #333; */
-    /* opacity: 0.75; */
+    opacity: 0.5;
     /* NOTE: border-radius causes pixel alignment issues on right edge, so we add rounding to menu items */
     /* border-radius: 0 5px 0 4px; */
     /* overflow: hidden; */
@@ -1043,11 +1045,16 @@
   }
   .index .arrow {
     color: black;
-    opacity: 0.25;
-    font-size: 15px;
-    line-height: 15px;
-    margin-top: 1px; /* aligns better with index*/
+    opacity: 0.5;
+    font-size: 12px;
     padding-right: 2px;
+  }
+  .index:not(.canMoveUp) {
+    cursor: auto;
+    pointer-events: none;
+  }
+  .index:not(.canMoveUp) .arrow {
+    display: none;
   }
   .delete {
     /* color: #900; */
@@ -1570,8 +1577,10 @@
       <div class="item-menu">
         <span class="run" on:click={onRunClick}>run</span><span
           class="index"
+          class:canMoveUp
           class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}><span class="arrow">▲</span>{index + 1}</span>
+          on:click={onIndexClick}><span
+            class="arrow">⬆︎</span>{index + 1}</span>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>
