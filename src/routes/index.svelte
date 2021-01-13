@@ -461,16 +461,16 @@
   }
 
   function signOut() {
+    document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
     firebase()
       .auth()
       .signOut()
       .then(() => {
         console.log("signed out");
+        location.href = "https://accounts.google.com/logout";
+        // location.reload();
       })
       .catch(console.error);
-    document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
-    location.href = "https://accounts.google.com/logout";
-    // location.reload();
   }
 
   let idsFromLabel = new Map<string, string[]>();
