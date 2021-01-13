@@ -707,6 +707,41 @@
         editing = true;
         break;
       }
+      case "/add_user": {
+        let batch = firestore().batch();
+        let collection = firestore().collection("items");
+        items.forEach((item) => {
+          let doc = collection.doc(item.savedId);
+          batch.update(doc, { user: user.uid });
+        });
+        batch
+          .commit()
+          .then(() => {
+            alert("done!");
+          })
+          .catch(console.error);
+        return;
+      }
+      case "/init_history": {
+        let added = 0;
+        items.forEach((item) => {
+          firestore()
+            .collection("items-history")
+            .add({
+              item: item.id,
+              user: user.uid,
+              time: item.time,
+              text: item.text,
+            })
+            .then((doc) => {
+              console.debug(
+                `"added ${++added} of ${items.length} items to items-history`
+              );
+            })
+            .catch(console.error);
+        });
+        return;
+      }
       case "/tweet": {
         if (editingItems.length == 0) {
           alert("/tweet: no item selected");
@@ -774,6 +809,7 @@
     }
 
     let itemToSave = {
+      user: user.uid,
       time: time,
       text: text,
     };
@@ -1092,7 +1128,7 @@
     // also save to items-history ...
     firestore()
       .collection("items-history")
-      .add({ item: item.savedId, ...itemToSave })
+      .add({ user: user.uid, item: item.savedId, ...itemToSave })
       .catch(console.error);
   }
 
