@@ -1048,6 +1048,7 @@
     opacity: 0.5;
     font-size: 12px;
     padding-right: 2px;
+    padding-bottom: 1px;
   }
   .index:not(.canMoveUp) {
     cursor: auto;
