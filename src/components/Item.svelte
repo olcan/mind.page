@@ -94,7 +94,12 @@
     });
   }
 
-  function onDone(editorText: string, cancelled: boolean, run: boolean) {
+  function onDone(
+    editorText: string,
+    e: KeyboardEvent,
+    cancelled: boolean,
+    run: boolean
+  ) {
     if (run && !cancelled) invalidateCache();
     onEditing(index, (editing = false), cancelled, run);
   }

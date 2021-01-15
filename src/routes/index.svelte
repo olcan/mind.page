@@ -617,12 +617,13 @@
   let editorText = "";
   function onEditorDone(
     text: string,
+    e: KeyboardEvent = null,
     cancelled: boolean = false,
     run: boolean = false
   ) {
     if (cancelled) {
       // just clear and return, also blur on double-cancel
-      if (blurOnNextCancel) {
+      if (blurOnNextCancel && e?.code == "Escape") {
         setTimeout(() => textArea(-1).blur());
         blurOnNextCancel = false;
       } else blurOnNextCancel = true;

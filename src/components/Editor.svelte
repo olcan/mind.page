@@ -8,6 +8,7 @@
   export let onChange = (text) => {};
   export let onDone = (
     text: string,
+    e: KeyboardEvent,
     cancelled: boolean = false,
     run: boolean = false
   ) => {};
@@ -402,14 +403,14 @@
       textarea.value.trim() == "" &&
       textarea.selectionStart == 0
     ) {
-      onDone((text = ""), cancelOnDelete); // if cancelled, item will not be deleted
+      onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
     }
 
     // cancel edit with escape
     if (e.code == "Escape") {
-      onDone(text /* maintain text */, true /* cancelled */);
+      onDone(text /* maintain text */, e, true /* cancelled */);
       e.preventDefault();
       return;
     }
@@ -426,7 +427,7 @@
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
-      onDone((text = ""), cancelOnDelete); // if cancelled, item will not be deleted
+      onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
     }
@@ -511,6 +512,7 @@
       e.stopPropagation(); // do not propagate to window
       onDone(
         (text = textarea.value),
+        e,
         false,
         e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/
       );
