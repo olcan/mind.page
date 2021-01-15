@@ -2381,11 +2381,14 @@
           snapshot.docChanges().forEach(function (change) {
             const doc = change.doc;
             // on first snapshot, we only need to append for initItems (see above)
+            // and only if items were not returned by server (and initialized) already
             if (firstSnapshot) {
               if (change.type != "added")
                 console.warn("unexpected change type: ", change.type);
-              // NOTE: snapshot items do not have update/createTime available
-              items.push(Object.assign(doc.data(), { id: doc.id }));
+              if (!itemsReturnedByServer) {
+                // NOTE: snapshot items do not have update/createTime available
+                items.push(Object.assign(doc.data(), { id: doc.id }));
+              }
               return;
             }
             if (doc.metadata.hasPendingWrites) return; // ignore local change
