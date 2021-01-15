@@ -8,42 +8,36 @@
     firebaseAdmin,
   } from "../../firebase.js";
 
-  // NOTE: this code is actually exposed in index.js so in principle it could be hacked to allow access to other user ids BUT the server must be bypassed and ALL read/write queries will still be restricted to the specific user that is authenticated by firebase. Authentication requires a secure access token (a.k.a. id token) that is stored only on authenticated machines and expires every 60 minutes. See item #firebase/security.
-  const allowedUsers = [
-    "y2swh7JY2ScO5soV7mJMHVltAOX2", // olcans@gmail.com
-    "26ViK7B4pKaAtWJGZk8rgiIdUjO2", // adesercin@gmail.com
-  ];
-
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
   export async function preload(page, session) {
-    // return {};
-
     // console.debug("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-    const user: any = await firebaseAdmin()
-      .auth()
-      .verifyIdToken(session.cookie)
-      .catch(console.error);
-    if (user && allowedUsers.includes(user.uid)) {
-      let items = await firebaseAdmin()
-        .firestore()
-        .collection("items")
-        .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
-        .orderBy("time", "desc")
-        .get();
-      return {
-        items: items.docs.map((doc) =>
-          Object.assign(doc.data(), {
-            id: doc.id,
-            updateTime: doc.updateTime.seconds,
-            createTime: doc.createTime.seconds,
-          })
-        ),
-      };
+    let user = null;
+    if (!session.cookie) {
+      user = { uid: "anonymous" };
     } else {
-      return { error: "invalid session cookie" };
+      user = await firebaseAdmin()
+        .auth()
+        .verifyIdToken(session.cookie)
+        .catch(console.error);
+      if (!user) return { error: "invalid session cookie" };
     }
+    let items = await firebaseAdmin()
+      .firestore()
+      .collection("items")
+      .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
+      .orderBy("time", "desc")
+      .get();
+    return {
+      items: items.docs.map((doc) =>
+        Object.assign(doc.data(), {
+          id: doc.id,
+          updateTime: doc.updateTime.seconds,
+          createTime: doc.createTime.seconds,
+        })
+      ),
+    };
   }
 </script>
 
@@ -54,7 +48,6 @@
   export let items = [];
   export let error = null;
   let user = null;
-  let loggedIn = false;
   let deletedItems = [];
   let editingItems = [];
   let focusedItem = -1;
@@ -342,7 +335,7 @@
           !t.match(/\/pin(?:\/|$)/) &&
           (tagCounts.get(t) || 0) <= 1
       );
-      // if (item.missingTags.length > 0) console.log(item.missingTags, item.tags);
+      // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
       item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null;
     });
@@ -462,15 +455,16 @@
   }
 
   function signOut() {
+    user = { photoURL: "/loading.gif", email: "Signing out ..." };
     localStorage.removeItem("user");
+    window.sessionStorage.removeItem("signin_pending");
     document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
     firebase()
       .auth()
       .signOut()
       .then(() => {
         console.log("signed out");
-        location.href = "https://accounts.google.com/logout";
-        // location.reload();
+        location.reload();
       })
       .catch(console.error);
   }
@@ -719,22 +713,7 @@
         editing = true;
         break;
       }
-      case "/add_user": {
-        let batch = firestore().batch();
-        let collection = firestore().collection("items");
-        items.forEach((item) => {
-          let doc = collection.doc(item.savedId);
-          batch.update(doc, { user: user.uid });
-        });
-        batch
-          .commit()
-          .then(() => {
-            alert("done!");
-          })
-          .catch(console.error);
-        return;
-      }
-      case "/init_history": {
+      case "/backup": {
         let added = 0;
         items.forEach((item) => {
           firestore()
@@ -1521,142 +1500,142 @@
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
   }
 
+  function signIn() {
+    user = { photoURL: "/loading.gif", email: "Signing in ..." };
+    let provider = new window.firebase.auth.GoogleAuthProvider();
+    firebase().auth().useDeviceLanguage();
+    // firebase().auth().setPersistence("none")
+    // firebase().auth().setPersistence("session")
+    firebase().auth().setPersistence("local");
+    // NOTE: getRedirectResult() seem to be redundant given onAuthStateChanged
+    window.sessionStorage.setItem("signin_pending", "1");
+    firebase().auth().signInWithRedirect(provider);
+    // NOTE: signInWithPopup also requires a reload since we are currently unable to cleanly re-initialize items via firebase realtime snapshot once they have already been initialize via server-side request; reloading allows the next server response to be ignored so that session cookie can be set; forced reload also means that we might as well do a redirect which can be cleaner anyway (esp. on mobile, as stated on https://firebase.google.com/docs/auth/web/google-signin)
+    // firebase()
+    //   .auth()
+    //   .signInWithPopup(provider)
+    //   .then(() => location.reload())
+    //   .catch(console.error);
+  }
+
   if (isClient) {
+    // if we are in process of signing in, ignore items returned by server
+    if (window.sessionStorage.getItem("signin_pending")) items = [];
+
     // initialize items now if returned by server
     if (items.length > 0) initialize();
+
     // Sign in user as needed ...
     if (error) console.error(error); // log server-side error
+
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
     firebase()
       .auth()
       .onAuthStateChanged((authUser) => {
-        if (authUser) {
-          // user logged in
-          window["_user"] = user = authUser;
-          loggedIn = true;
+        if (!authUser) return; // signed out state
+        // console.debug("onAuthStateChanged", user, authUser);
+        window.sessionStorage.removeItem("signin_pending"); // no longer signing in
+        window["_user"] = user = authUser;
 
-          // copy console into #console if it exists
-          if (consolediv) {
-            // NOTE: some errors do not go through console.error but are reported via window.onerror
-            console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
-            console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-            const levels = [
-              "debug",
-              "info",
-              "log",
-              "warn",
-              "error",
-              "_window_error",
-              "_eval_error",
-            ];
-            levels.forEach(function (verb) {
-              console[verb] = (function (method, verb, div) {
-                return function (...args) {
-                  method(...args);
-                  var elem = document.createElement("div");
-                  if (verb.endsWith("error")) verb = "error";
-                  elem.classList.add("console-" + verb);
-                  let item; // if the source is an item (and the logging is done _synchronously_)
-                  if (
-                    window["_script_item_id"] &&
-                    indexFromId.has(window["_script_item_id"])
-                  ) {
-                    item = items[indexFromId.get(window["_script_item_id"])];
-                  } else if (evalItemId) {
-                    item = items[indexFromId.get(evalItemId)];
-                  }
-                  if (item) {
-                    // prepent item index, label (if any)
-                    if (item.label) args.unshift(item.label + ":");
-                    args.unshift(`[${item.index + 1}]`);
-                  }
-                  // log url for "error" Events that do not have message/reason
-                  // see https://www.w3schools.com/jsref/event_onerror.asp
-                  if (args.length == 1 && errorMessage(args[0])) {
-                    elem.textContent = errorMessage(args[0]);
-                  } else {
-                    elem.textContent = args.join(" ") + "\n";
-                  }
-                  elem.setAttribute("_time", Date.now().toString());
-                  elem.setAttribute("_level", levels.indexOf(verb).toString());
-                  div.appendChild(elem);
-                  consoleLog.push({
-                    type: verb,
-                    text: elem.textContent.trim(),
-                    time: Date.now(),
-                    level: levels.indexOf(verb),
-                  });
-                  if (consoleLog.length > consoleLogMaxSize)
-                    consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
+        // copy console into #console if it exists
+        if (consolediv) {
+          // NOTE: some errors do not go through console.error but are reported via window.onerror
+          console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
+          console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
+          const levels = [
+            "debug",
+            "info",
+            "log",
+            "warn",
+            "error",
+            "_window_error",
+            "_eval_error",
+          ];
+          levels.forEach(function (verb) {
+            console[verb] = (function (method, verb, div) {
+              return function (...args) {
+                method(...args);
+                var elem = document.createElement("div");
+                if (verb.endsWith("error")) verb = "error";
+                elem.classList.add("console-" + verb);
+                let item; // if the source is an item (and the logging is done _synchronously_)
+                if (
+                  window["_script_item_id"] &&
+                  indexFromId.has(window["_script_item_id"])
+                ) {
+                  item = items[indexFromId.get(window["_script_item_id"])];
+                } else if (evalItemId) {
+                  item = items[indexFromId.get(evalItemId)];
+                }
+                if (item) {
+                  // prepent item index, label (if any)
+                  if (item.label) args.unshift(item.label + ":");
+                  args.unshift(`[${item.index + 1}]`);
+                }
+                // log url for "error" Events that do not have message/reason
+                // see https://www.w3schools.com/jsref/event_onerror.asp
+                if (args.length == 1 && errorMessage(args[0])) {
+                  elem.textContent = errorMessage(args[0]);
+                } else {
+                  elem.textContent = args.join(" ") + "\n";
+                }
+                elem.setAttribute("_time", Date.now().toString());
+                elem.setAttribute("_level", levels.indexOf(verb).toString());
+                div.appendChild(elem);
+                consoleLog.push({
+                  type: verb,
+                  text: elem.textContent.trim(),
+                  time: Date.now(),
+                  level: levels.indexOf(verb),
+                });
+                if (consoleLog.length > consoleLogMaxSize)
+                  consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
 
-                  document.getElementById(
-                    "console-summary"
-                  ).style.visibility = showDotted ? "hidden" : "visible";
-                  const summaryDiv = document.getElementById("console-summary");
-                  const summaryElem = document.createElement("span");
-                  summaryElem.innerText = "·";
-                  summaryElem.classList.add("console-" + verb);
-                  summaryDiv.appendChild(summaryElem);
+                document.getElementById(
+                  "console-summary"
+                ).style.visibility = showDotted ? "hidden" : "visible";
+                const summaryDiv = document.getElementById("console-summary");
+                const summaryElem = document.createElement("span");
+                summaryElem.innerText = "·";
+                summaryElem.classList.add("console-" + verb);
+                summaryDiv.appendChild(summaryElem);
 
-                  // if console is hidden, make sure summary is visible
-                  if (div.style.display == "none")
+                // if console is hidden, make sure summary is visible
+                if (div.style.display == "none")
+                  summaryDiv.style.visibility = "visible";
+
+                // auto-remove after 15 seconds ...
+                setTimeout(() => {
+                  elem.remove();
+                  summaryElem.remove();
+                  if (div.childNodes.length == 0) {
+                    div.style.display = "none";
                     summaryDiv.style.visibility = "visible";
-
-                  // auto-remove after 15 seconds ...
-                  setTimeout(() => {
-                    elem.remove();
-                    summaryElem.remove();
-                    if (div.childNodes.length == 0) {
-                      div.style.display = "none";
-                      summaryDiv.style.visibility = "visible";
-                    }
-                  }, statusLogExpiration);
-                };
-              })(console[verb].bind(console), verb, consolediv);
-            });
-          }
-
-          console.log("signed in", user.email);
-          localStorage.setItem("user", JSON.stringify(user));
-
-          // if user is allowed, set up server-side session cookie and initialize firebase realtime
-          if (allowedUsers.includes(user.uid)) {
-            // Store user's ID token as a 1-hour __session cookie to send to server for preload
-            // NOTE: __session is the only cookie allowed by firebase for efficient caching
-            //       (see https://stackoverflow.com/a/44935288)
-            user
-              .getIdToken(false /*force refresh*/)
-              .then((token) => {
-                document.cookie = "__session=" + token + ";max-age=86400";
-                // console.debug("updated cookie", error || "(no error)");
-                // reload with new cookie if we are on error page
-                if (error) location.reload();
-              })
-              .catch(console.error);
-
-            initFirebaseRealtime();
-          }
-        } else {
-          // return // test signed out state
-          let provider = new window.firebase.auth.GoogleAuthProvider();
-          firebase().auth().useDeviceLanguage();
-          // firebase().auth().setPersistence("none")
-          // firebase().auth().setPersistence("session")
-          firebase().auth().setPersistence("local");
-          firebase().auth().signInWithRedirect(provider);
-          firebase()
-            .auth()
-            .getRedirectResult()
-            .then((result) => {
-              window["_user"] = user = result.user;
-              console.log("signed in after redirect", error || "no error");
-              // reload if we are on an error page
-              // NOTE: this can lead to infinite loop if done without some delay
-              // if (error) location.reload()
-              // setTimeout(()=>{if (error) location.reload()}, 1000)
-            })
-            .catch(console.error);
+                  }
+                }, statusLogExpiration);
+              };
+            })(console[verb].bind(console), verb, consolediv);
+          });
         }
+
+        console.log("signed in", user.email);
+        localStorage.setItem("user", JSON.stringify(user));
+
+        // set up server-side session cookie
+        // store user's ID token as a 1-hour __session cookie to send to server for preload
+        // NOTE: __session is the only cookie allowed by firebase for efficient caching
+        //       (see https://stackoverflow.com/a/44935288)
+        user
+          .getIdToken(false /*force refresh*/)
+          .then((token) => {
+            document.cookie = "__session=" + token + ";max-age=86400";
+            // console.debug("updated cookie", error || "(no error)");
+            // reload with new cookie if we are on error page
+            if (error) location.reload();
+          })
+          .catch(console.error);
+
+        initFirebaseRealtime();
       });
 
     // Set up global helper functions for javascript:... shortcuts
@@ -2318,7 +2297,7 @@
       if (Date.now() - lastScrollTime > 250) {
         const documentWidth = document.documentElement.clientWidth;
         if (documentWidth != lastDocumentWidth) {
-          console.log(
+          console.debug(
             `document width changed from ${lastDocumentWidth} to ${documentWidth}`
           );
           updateItemLayout();
@@ -2348,93 +2327,103 @@
         .collection("items")
         .where("user", "==", user.uid)
         .orderBy("time", "desc")
-        .onSnapshot(function (snapshot) {
-          if (firstSnapshot) {
-            // console.debug(
-            //   `onSnapshot invoked at ${Math.round(
-            //     window.performance.now()
-            //   )}ms w/ ${items.length} items`
-            // );
-            setTimeout(() => {
-              console.debug(
-                `first snapshot done at ${Math.round(
-                  window.performance.now()
-                )}ms w/ ${items.length} items`
-              );
-              if (!initTime) initialize();
-              else
-                console.debug(
-                  `items already initialized from server at ${initTime}ms`
-                );
-              firstSnapshot = false;
-            });
-          }
-          snapshot.docChanges().forEach(function (change) {
-            const doc = change.doc;
-            // on first snapshot, we only need to append for initalize (see above)
-            // and only if items were not returned by server (and initialized) already
-            // (otherwise we can just skip the first snapshot, which is hopefully coming
-            //  from a local cache so that it is cheap and worse than the server snapshot)
+        .onSnapshot(
+          function (snapshot) {
             if (firstSnapshot) {
-              if (change.type != "added")
-                console.warn("unexpected change type: ", change.type);
-              if (!initTime) {
-                // NOTE: snapshot items do not have update/createTime available
-                items.push(Object.assign(doc.data(), { id: doc.id }));
-              }
-              return;
-            }
-            if (doc.metadata.hasPendingWrites) return; // ignore local change
-            // no need to log initial snapshot
-            console.debug("detected remote change:", change.type, doc.id);
-            if (change.type === "added") {
-              // NOTE: remote add is similar to onEditorDone without js, saving, etc
-              let item = Object.assign(doc.data(), {
-                id: doc.id,
-                savedId: doc.id,
-                savedTime: doc.data().time,
-                savedText: doc.data().text,
+              // console.debug(
+              //   `onSnapshot invoked at ${Math.round(
+              //     window.performance.now()
+              //   )}ms w/ ${items.length} items`
+              // );
+              setTimeout(() => {
+                console.debug(
+                  `first snapshot done at ${Math.round(
+                    window.performance.now()
+                  )}ms w/ ${items.length} items`
+                );
+                if (!initTime) initialize();
+                else
+                  console.debug(
+                    `items already initialized from server at ${initTime}ms`
+                  );
+                firstSnapshot = false;
               });
-              items = [item, ...items];
-              // update indices as needed by itemTextChanged
-              items.forEach((item, index) => indexFromId.set(item.id, index));
-              itemTextChanged(0, item.text);
-              lastEditorChangeTime = 0; // disable debounce even if editor focused
-              onEditorChange(editorText); // integrate new item at index 0
-            } else if (change.type == "removed") {
-              // NOTE: remote remove is similar to onItemEditing (deletion case)
-              // NOTE: document may be under temporary id if it was added locally
-              let index = indexFromId.get(
-                tempIdFromSavedId.get(doc.id) || doc.id
-              );
-              if (index == undefined) return; // nothing to remove
-              console.debug("removing item at", index);
-              let item = items[index];
-              itemTextChanged(index, ""); // clears label, deps, etc
-              items.splice(index, 1);
-              lastEditorChangeTime = 0; // disable debounce even if editor focused
-              onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
-              deletedItems.unshift({
-                time: item.savedTime,
-                text: item.savedText,
-              }); // for /undelete
-            } else if (change.type == "modified") {
-              // NOTE: remote modify is similar to _write without saving
-              // NOTE: document may be under temporary id if it was added locally
-              let index = indexFromId.get(
-                tempIdFromSavedId.get(doc.id) || doc.id
-              );
-              if (index == undefined) return; // nothing to modify
-              let item = items[index];
-              item.text = item.savedText = doc.data().text;
-              item.time = items[index].savedTime = doc.data().time;
-              // since there is no
-              itemTextChanged(index, item.text); // updates label, deps, etc
-              lastEditorChangeTime = 0; // disable debounce even if editor focused
-              onEditorChange(editorText); // item time/text has changed
             }
-          });
-        });
+            snapshot.docChanges().forEach(function (change) {
+              const doc = change.doc;
+              // on first snapshot, we only need to append for initalize (see above)
+              // and only if items were not returned by server (and initialized) already
+              // (otherwise we can just skip the first snapshot, which is hopefully coming
+              //  from a local cache so that it is cheap and worse than the server snapshot)
+              if (firstSnapshot) {
+                if (change.type != "added")
+                  console.warn("unexpected change type: ", change.type);
+                if (!initTime) {
+                  // NOTE: snapshot items do not have update/createTime available
+                  items.push(Object.assign(doc.data(), { id: doc.id }));
+                }
+                return;
+              }
+              if (doc.metadata.hasPendingWrites) return; // ignore local change
+              // no need to log initial snapshot
+              console.debug("detected remote change:", change.type, doc.id);
+              if (change.type === "added") {
+                // NOTE: remote add is similar to onEditorDone without js, saving, etc
+                let item = Object.assign(doc.data(), {
+                  id: doc.id,
+                  savedId: doc.id,
+                  savedTime: doc.data().time,
+                  savedText: doc.data().text,
+                });
+                items = [item, ...items];
+                // update indices as needed by itemTextChanged
+                items.forEach((item, index) => indexFromId.set(item.id, index));
+                itemTextChanged(0, item.text);
+                lastEditorChangeTime = 0; // disable debounce even if editor focused
+                onEditorChange(editorText); // integrate new item at index 0
+              } else if (change.type == "removed") {
+                // NOTE: remote remove is similar to onItemEditing (deletion case)
+                // NOTE: document may be under temporary id if it was added locally
+                let index = indexFromId.get(
+                  tempIdFromSavedId.get(doc.id) || doc.id
+                );
+                if (index == undefined) return; // nothing to remove
+                console.debug("removing item at", index);
+                let item = items[index];
+                itemTextChanged(index, ""); // clears label, deps, etc
+                items.splice(index, 1);
+                lastEditorChangeTime = 0; // disable debounce even if editor focused
+                onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
+                deletedItems.unshift({
+                  time: item.savedTime,
+                  text: item.savedText,
+                }); // for /undelete
+              } else if (change.type == "modified") {
+                // NOTE: remote modify is similar to _write without saving
+                // NOTE: document may be under temporary id if it was added locally
+                let index = indexFromId.get(
+                  tempIdFromSavedId.get(doc.id) || doc.id
+                );
+                if (index == undefined) return; // nothing to modify
+                let item = items[index];
+                item.text = item.savedText = doc.data().text;
+                item.time = items[index].savedTime = doc.data().time;
+                // since there is no
+                itemTextChanged(index, item.text); // updates label, deps, etc
+                lastEditorChangeTime = 0; // disable debounce even if editor focused
+                onEditorChange(editorText); // item time/text has changed
+              }
+            });
+          },
+          (error) => {
+            if (error.code == "permission-denied")
+              alert(
+                `This account requires activation. Plese email support@mind.page from your email address ${user.email} and specify your account id:${user.uid}. Signing you out for now!`
+              );
+            console.error(error);
+            signOut();
+          }
+        );
     }
 
     onMount(() => {
@@ -2449,19 +2438,29 @@
       });
       setInterval(tryResize, 250); // no need to destroy since page-level
       updateDotted();
-      console.log(
-        `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
-          items.length
-        } items`
-      );
+      // console.debug(
+      //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
+      //     items.length
+      //   } items`
+      // );
     });
 
-    // Restore user from localStorage for faster init
-    // NOTE: Making the user immediately available creates two problems: (1) user.photoURL returns 403 (even though URL is the same and even if user object is maintained in onAuthStateChanged), (2) initial editor focus fails mysteriously. Both problems are fixed if we condition these elements on a loggedIn flag set to true in onAuthStateChanged call from firebase auth.
+    // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
+    // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
     if (!user && localStorage.getItem("user")) {
       window["_user"] = user = JSON.parse(localStorage.getItem("user"));
       console.debug("restored user from local storage");
+    } else if (window.sessionStorage.getItem("signin_pending")) {
+      user = { photoURL: "/loading.gif", email: "Signing in ..." };
+    } else {
+      // NOTE: window._user remains null for anonymous users
+      window["_user"] = user = {
+        photoURL: "/incognito.png",
+        displayName: "Anonymous",
+        uid: "anonymous",
+      };
     }
+
     console.debug(
       `index.js executed at ${Math.round(window.performance.now())}ms w/ ${
         items.length
@@ -2513,19 +2512,17 @@
 </script>
 
 <style>
-  #loading {
+  /* #loading {
     position: absolute;
     top: 0;
     left: 0;
     display: flex;
     width: 100%;
     height: 100%;
-    min-height: -webkit-fill-available; /*consider bottom bar on iOS Safari*/
+    min-height: -webkit-fill-available;
     justify-content: center;
     align-items: center;
-    /* background: url(/loading.gif) no-repeat center; */
-    /* background-size: 200px; */
-  }
+  } */
   #header {
     max-width: 100%;
   }
@@ -2555,10 +2552,13 @@
   }
   #user {
     height: 44px; /* must match height of single-line editor (also see @media query below) */
-    margin-right: 4px;
+    width: 44px;
+    min-width: 44px; /* seems necessary to ensure full width inside flex */
+    /* margin-right: 4px; */
     border-radius: 50%;
-    background: gray;
+    background: #333;
     cursor: pointer;
+    overflow: hidden;
   }
   #console {
     display: none;
@@ -2642,6 +2642,9 @@
     /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
+    /* fill full height of page even if no items are shown */
+    height: 100%;
+    min-height: -webkit-fill-available;
   }
   .column {
     flex: 1;
@@ -2706,153 +2709,137 @@
   @media only screen and (max-width: 600px) {
     #user {
       height: 41px; /* must match height of single-line editor (on narrow window) */
+      width: 41px;
+      min-width: 41px;
     }
   }
 </style>
 
-{#if user && allowedUsers.includes(user.uid) && !error}
-  <!-- all good! user logged in, has permissions, and no error from server -->
-  <div class="items" class:multi-column={columnCount > 1}>
-    {#each { length: columnCount } as _, column}
-      <div class="column">
-        {#if column == 0}
-          <div
-            id="header"
-            bind:this={headerdiv}
-            on:click={() => textArea(-1).focus()}>
-            <div id="header-container" class:focused>
-              <div id="editor">
-                <Editor
-                  bind:text={editorText}
-                  bind:focused
-                  cancelOnDelete={true}
-                  allowCommandBracket={true}
-                  onFocused={onEditorFocused}
-                  onChange={onEditorChange}
-                  onDone={onEditorDone}
-                  onPrev={onPrevItem}
-                  onNext={onNextItem} />
-              </div>
-              <div class="spacer" />
-              {#if loggedIn}
-                <img
-                  id="user"
-                  src={user.photoURL}
-                  alt={user.email}
-                  on:click={signOut} />
+<!-- all good! user logged in, has permissions, and no error from server -->
+<div class="items" class:multi-column={columnCount > 1}>
+  {#each { length: columnCount } as _, column}
+    <div class="column">
+      {#if column == 0}
+        <div
+          id="header"
+          bind:this={headerdiv}
+          on:click={() => textArea(-1).focus()}>
+          <div id="header-container" class:focused>
+            <div id="editor">
+              <Editor
+                bind:text={editorText}
+                bind:focused
+                cancelOnDelete={true}
+                allowCommandBracket={true}
+                onFocused={onEditorFocused}
+                onChange={onEditorChange}
+                onDone={onEditorDone}
+                onPrev={onPrevItem}
+                onNext={onNextItem} />
+            </div>
+            <div class="spacer" />
+            {#if user}
+              <img
+                id="user"
+                src={user.photoURL}
+                alt={user.displayName || user.email}
+                title={user.displayName || user.email}
+                on:click={() => (!user.email ? signIn() : signOut())} />
+            {/if}
+          </div>
+          <div id="status" on:click={onStatusClick}>
+            <span id="console-summary" on:click={onConsoleSummaryClick} />
+            <span class="dots">
+              {#each { length: dotCount } as _}•{/each}
+            </span>
+            <div class="counts">
+              {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
+              {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
+              {items.length}
+              {#if matchingItemCount > 0}
+                &nbsp;<span class="matching">{matchingItemCount}</span>
               {/if}
             </div>
-            <div id="status" on:click={onStatusClick}>
-              <span id="console-summary" on:click={onConsoleSummaryClick} />
-              <span class="dots">
-                {#each { length: dotCount } as _}•{/each}
-              </span>
-              <div class="counts">
-                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
-                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
-                {items.length}
-                {#if matchingItemCount > 0}
-                  &nbsp;<span class="matching">{matchingItemCount}</span>
-                {/if}
-              </div>
-              <div
-                id="console"
-                bind:this={consolediv}
-                on:click={onConsoleClick} />
-            </div>
+            <div
+              id="console"
+              bind:this={consolediv}
+              on:click={onConsoleClick} />
           </div>
-          <!-- auto-focus on the editor unless on iPhone -->
-          {#if loggedIn}
-            <script>
-              // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-              //       programmatic focus except in click handlers, when returning to app, etc
-              if (
-                document.activeElement.tagName.toLowerCase() != "textarea" &&
-                !navigator.platform.startsWith("iPhone")
-              )
-                document.getElementById("textarea-editor").focus();
-            </script>
-          {/if}
-        {/if}
+        </div>
+        <!-- auto-focus on the editor unless on iPhone -->
+        <script>
+          // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+          //       programmatic focus except in click handlers, when returning to app, etc
+          setTimeout(() => {
+            if (
+              document.activeElement.tagName.toLowerCase() != "textarea" &&
+              !navigator.platform.startsWith("iPhone")
+            )
+              document.getElementById("textarea-editor").focus();
+          });
+        </script>
+      {/if}
 
-        {#each items as item (item.id)}
-          {#if item.column == column && item.index < maxIndexToShow}
-            <Item
-              onEditing={onItemEditing}
-              onFocused={onItemFocused}
-              onRun={onItemRun}
-              onTouch={onItemTouch}
-              onResized={onItemResized}
-              {onTagClick}
-              {onLogSummaryClick}
-              onPrev={onPrevItem}
-              onNext={onNextItem}
-              bind:text={item.text}
-              bind:editing={item.editing}
-              bind:focused={item.focused}
-              bind:saving={item.saving}
-              bind:running={item.running}
-              bind:showLogs={item.showLogs}
-              bind:height={item.height}
-              bind:time={item.time}
-              index={item.index}
-              id={item.id}
-              label={item.label}
-              labelUnique={item.labelUnique}
-              hash={item.hash}
-              deephash={item.deephash}
-              missingTags={item.missingTags.join(' ')}
-              matchingTerms={item.matchingTerms.join(' ')}
-              matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-              timeString={item.timeString}
-              timeOutOfOrder={item.timeOutOfOrder}
-              canMoveUp={item.canMoveUp}
-              updateTime={item.updateTime}
-              createTime={item.createTime}
-              dotted={item.dotted}
-              runnable={item.runnable}
-              scripted={item.scripted}
-              macroed={item.macroed} />
-            {#if item.nextColumn >= 0}
-              <div class="section-separator">
-                <hr />
-                {item.index + 2}<span class="arrows"> {item.arrows} </span>
-                &nbsp;
-                {#if item.nextItemInColumn >= 0}
-                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
-                {/if}
-                <hr />
-              </div>
-            {/if}
-          {:else if item.column == column && item.index == maxIndexToShow}
-            <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
-              show all
-              {items.length}
-              items
+      {#each items as item (item.id)}
+        {#if item.column == column && item.index < maxIndexToShow}
+          <Item
+            onEditing={onItemEditing}
+            onFocused={onItemFocused}
+            onRun={onItemRun}
+            onTouch={onItemTouch}
+            onResized={onItemResized}
+            {onTagClick}
+            {onLogSummaryClick}
+            onPrev={onPrevItem}
+            onNext={onNextItem}
+            bind:text={item.text}
+            bind:editing={item.editing}
+            bind:focused={item.focused}
+            bind:saving={item.saving}
+            bind:running={item.running}
+            bind:showLogs={item.showLogs}
+            bind:height={item.height}
+            bind:time={item.time}
+            index={item.index}
+            id={item.id}
+            label={item.label}
+            labelUnique={item.labelUnique}
+            hash={item.hash}
+            deephash={item.deephash}
+            missingTags={item.missingTags.join(' ')}
+            matchingTerms={item.matchingTerms.join(' ')}
+            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+            timeString={item.timeString}
+            timeOutOfOrder={item.timeOutOfOrder}
+            canMoveUp={item.canMoveUp}
+            updateTime={item.updateTime}
+            createTime={item.createTime}
+            dotted={item.dotted}
+            runnable={item.runnable}
+            scripted={item.scripted}
+            macroed={item.macroed} />
+          {#if item.nextColumn >= 0}
+            <div class="section-separator">
+              <hr />
+              {item.index + 2}<span class="arrows"> {item.arrows} </span>
+              &nbsp;
+              {#if item.nextItemInColumn >= 0}
+                {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+              {/if}
+              <hr />
             </div>
           {/if}
-        {/each}
-      </div>
-    {/each}
-  </div>
-{:else if user && !allowedUsers.includes(user.uid)}
-  <!-- user logged in but not allowed -->
-  Hello
-  {user.email}!
-{:else if error}
-  <!-- user logged in, has permissions, but server returned error -->
-  <div id="loading">
-    <DoubleBounce size="60" unit="px" />
-  </div>
-{:else if !user && !error}
-  <!-- user not logged in and no errors from server yet (login in progress) -->
-  <div id="loading">
-    <Circle2 size="60" unit="px" />
-  </div>
-{:else}
-  <!-- should not happen -->
-  ?
-{/if}
+        {:else if item.column == column && item.index == maxIndexToShow}
+          <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
+            show all
+            {items.length}
+            items
+          </div>
+        {/if}
+      {/each}
+    </div>
+  {/each}
+</div>
 
 <svelte:window
   on:keypress={onKeyPress}
