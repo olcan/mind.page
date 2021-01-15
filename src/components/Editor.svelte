@@ -42,7 +42,7 @@
   };
   let highlightOther = (text) => {
     return text.replace(
-      /(^|[^\\])(\$?\$`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      /(^|[^\\])(\$?\$?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$?\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && begin == "`")
           return pfx + `<span class="code">${begin + content + end}</span>`;
