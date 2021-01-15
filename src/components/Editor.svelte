@@ -631,9 +631,6 @@
     margin: 0 -2px;
     cursor: pointer;
   }
-  :global(mark.language) {
-    background: #7bf;
-  }
   :global(.block) {
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
