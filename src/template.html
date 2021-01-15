@@ -41,12 +41,12 @@
       };
     </script>
 
-    <!-- lodash (window._) is included in client.js -->
     <!-- sync libraries available at client init and render time (e.g. in afterUpdate in Item.svelte) -->
-    <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.20/lodash.min.js"></script>
+    <!-- NOTE: including these in client.ts is possible but was SLOWER in testing due to lack of caching -->
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.0.0/firebase-firestore.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.20/lodash.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@latest/es5/tex-svg.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/c3@latest/c3.min.js"></script>
@@ -54,11 +54,11 @@
     <script src="https://cdn.jsdelivr.net/npm/d3-graphviz@latest/build/d3-graphviz.min.js"></script>
 
     <!-- async libraries available at edit/save time (and possibly async render time) -->
-    <script async src="https://cdn.jsdelivr.net/npm/mathjs@latest/lib/browser/math.min.js"></script>
-    <script async src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
+    <!-- <script async src="https://cdn.jsdelivr.net/npm/mathjs@latest/lib/browser/math.min.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script> -->
 
     <!-- CDN URLs found from https://probmods.github.io/webppl-editor/ and https://www.problang.org/chapters/app-06-intro-to-webppl.html -->
-    <script async src="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-v0.9.9.js"></script>
+    <!-- <script async src="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-v0.9.9.js"></script> -->
     <!-- <script async src="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-viz-0.7.11.js"></script> -->
 
     %sapper.scripts%
