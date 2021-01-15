@@ -462,6 +462,7 @@
   }
 
   function signOut() {
+    localStorage.removeItem("user");
     document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
     firebase()
       .auth()
@@ -1622,7 +1623,7 @@
           console.log("signed in", user.email);
           localStorage.setItem("user", JSON.stringify(user));
 
-          // proceeed to set up server-side session cookie only if user is allowed
+          // if user is allowed, set up server-side session cookie and initialize firebase realtime
           if (allowedUsers.includes(user.uid)) {
             // Store user's ID token as a 1-hour __session cookie to send to server for preload
             // NOTE: __session is the only cookie allowed by firebase for efficient caching
@@ -1636,6 +1637,8 @@
                 if (error) location.reload();
               })
               .catch(console.error);
+
+            initFirebaseRealtime();
           }
         } else {
           // return // test signed out state
@@ -2341,6 +2344,103 @@
     visualViewport.addEventListener("scroll", onScroll);
 
     let firstSnapshot = true;
+    function initFirebaseRealtime() {
+      // start listening for remote changes
+      // (also initialize if items were not returned by server)
+      firebase()
+        .firestore()
+        .collection("items")
+        .where("user", "==", user.uid) // TODO: this can be null
+        .orderBy("time", "desc")
+        .onSnapshot(function (snapshot) {
+          if (firstSnapshot) {
+            console.debug(
+              `onSnapshot invoked at ${Math.round(
+                window.performance.now()
+              )}ms w/ ${items.length} items`
+            );
+            setTimeout(() => {
+              console.debug(
+                `first snapshot done at ${Math.round(
+                  window.performance.now()
+                )}ms w/ ${items.length} items`
+              );
+              if (!itemsReturnedByServer) {
+                initItems();
+                console.debug(
+                  `initialized ${
+                    items.length
+                  } items from first snapshot at ${Math.round(
+                    performance.now()
+                  )}ms`
+                );
+              }
+              firstSnapshot = false;
+            });
+          }
+          snapshot.docChanges().forEach(function (change) {
+            const doc = change.doc;
+            // on first snapshot, we only need to append for initItems (see above)
+            if (firstSnapshot) {
+              if (change.type != "added")
+                console.warn("unexpected change type: ", change.type);
+              // NOTE: snapshot items do not have update/createTime available
+              items.push(Object.assign(doc.data(), { id: doc.id }));
+              return;
+            }
+            if (doc.metadata.hasPendingWrites) return; // ignore local change
+            // no need to log initial snapshot
+            console.debug("detected remote change:", change.type, doc.id);
+            if (change.type === "added") {
+              // NOTE: remote add is similar to onEditorDone without js, saving, etc
+              let item = Object.assign(doc.data(), {
+                id: doc.id,
+                savedId: doc.id,
+                savedTime: doc.data().time,
+                savedText: doc.data().text,
+              });
+              items = [item, ...items];
+              // update indices as needed by itemTextChanged
+              items.forEach((item, index) => indexFromId.set(item.id, index));
+              itemTextChanged(0, item.text);
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange(editorText); // integrate new item at index 0
+            } else if (change.type == "removed") {
+              // NOTE: remote remove is similar to onItemEditing (deletion case)
+              // NOTE: document may be under temporary id if it was added locally
+              let index = indexFromId.get(
+                tempIdFromSavedId.get(doc.id) || doc.id
+              );
+              if (index == undefined) return; // nothing to remove
+              console.debug("removing item at", index);
+              let item = items[index];
+              itemTextChanged(index, ""); // clears label, deps, etc
+              items.splice(index, 1);
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
+              deletedItems.unshift({
+                time: item.savedTime,
+                text: item.savedText,
+              }); // for /undelete
+            } else if (change.type == "modified") {
+              // NOTE: remote modify is similar to _write without saving
+              // NOTE: document may be under temporary id if it was added locally
+              let index = indexFromId.get(
+                tempIdFromSavedId.get(doc.id) || doc.id
+              );
+              if (index == undefined) return; // nothing to modify
+              let item = items[index];
+              item.text = item.savedText = doc.data().text;
+              item.time = items[index].savedTime = doc.data().time;
+              // since there is no
+              itemTextChanged(index, item.text); // updates label, deps, etc
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange(editorText); // item time/text has changed
+            }
+          });
+        });
+    }
+
     onMount(() => {
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
       setTimeout(() => {
@@ -2350,100 +2450,6 @@
           )}ms w/ ${items.length} items`
         );
         onEditorChange("");
-        // start listening for remote changes
-        // (also initialize if items were not returned by server)
-        firebase()
-          .firestore()
-          .collection("items")
-          .where("user", "==", user.uid)
-          .orderBy("time", "desc")
-          .onSnapshot(function (snapshot) {
-            if (firstSnapshot) {
-              console.debug(
-                `onSnapshot invoked at ${Math.round(
-                  window.performance.now()
-                )}ms w/ ${items.length} items`
-              );
-              setTimeout(() => {
-                console.debug(
-                  `first snapshot done at ${Math.round(
-                    window.performance.now()
-                  )}ms w/ ${items.length} items`
-                );
-                if (!itemsReturnedByServer) {
-                  initItems();
-                  console.debug(
-                    `initialized ${
-                      items.length
-                    } items from first snapshot at ${Math.round(
-                      performance.now()
-                    )}ms`
-                  );
-                }
-                firstSnapshot = false;
-              });
-            }
-            snapshot.docChanges().forEach(function (change) {
-              const doc = change.doc;
-              // on first snapshot, we only need to append for initItems (see above)
-              if (firstSnapshot) {
-                if (change.type != "added")
-                  console.warn("unexpected change type: ", change.type);
-                // NOTE: snapshot items do not have update/createTime available
-                items.push(Object.assign(doc.data(), { id: doc.id }));
-                return;
-              }
-              if (doc.metadata.hasPendingWrites) return; // ignore local change
-              // no need to log initial snapshot
-              console.debug("detected remote change:", change.type, doc.id);
-              if (change.type === "added") {
-                // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                let item = Object.assign(doc.data(), {
-                  id: doc.id,
-                  savedId: doc.id,
-                  savedTime: doc.data().time,
-                  savedText: doc.data().text,
-                });
-                items = [item, ...items];
-                // update indices as needed by itemTextChanged
-                items.forEach((item, index) => indexFromId.set(item.id, index));
-                itemTextChanged(0, item.text);
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // integrate new item at index 0
-              } else if (change.type == "removed") {
-                // NOTE: remote remove is similar to onItemEditing (deletion case)
-                // NOTE: document may be under temporary id if it was added locally
-                let index = indexFromId.get(
-                  tempIdFromSavedId.get(doc.id) || doc.id
-                );
-                if (index == undefined) return; // nothing to remove
-                console.debug("removing item at", index);
-                let item = items[index];
-                itemTextChanged(index, ""); // clears label, deps, etc
-                items.splice(index, 1);
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
-                deletedItems.unshift({
-                  time: item.savedTime,
-                  text: item.savedText,
-                }); // for /undelete
-              } else if (change.type == "modified") {
-                // NOTE: remote modify is similar to _write without saving
-                // NOTE: document may be under temporary id if it was added locally
-                let index = indexFromId.get(
-                  tempIdFromSavedId.get(doc.id) || doc.id
-                );
-                if (index == undefined) return; // nothing to modify
-                let item = items[index];
-                item.text = item.savedText = doc.data().text;
-                item.time = items[index].savedTime = doc.data().time;
-                // since there is no
-                itemTextChanged(index, item.text); // updates label, deps, etc
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // item time/text has changed
-              }
-            });
-          });
       });
       setInterval(tryResize, 250); // no need to destroy since page-level
       updateDotted();
