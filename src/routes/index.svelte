@@ -17,7 +17,7 @@
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
   export async function preload(page, session) {
-    return {};
+    // return {};
 
     // console.debug("preloading, client?", isClient);
     // NOTE: for development server, admin credentials require `gcloud auth application-default login`
@@ -1476,8 +1476,9 @@
   let consoleLog = [];
   const consoleLogMaxSize = 10000;
   const statusLogExpiration = 15000;
-  let itemsReturnedByServer = false;
-  function initItems() {
+
+  let initTime = 0;
+  function initialize() {
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
@@ -1515,19 +1516,14 @@
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
     });
+
+    initTime = Math.round(performance.now());
+    console.debug(`initialized ${items.length} items at ${initTime}ms`);
   }
 
   if (isClient) {
     // initialize items now if returned by server
-    if (items.length > 0) {
-      itemsReturnedByServer = true;
-      initItems();
-      console.debug(
-        `initialized ${items.length} items from server at ${Math.round(
-          performance.now()
-        )}ms`
-      );
-    }
+    if (items.length > 0) initialize();
     // Sign in user as needed ...
     if (error) console.error(error); // log server-side error
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
@@ -2350,42 +2346,39 @@
       firebase()
         .firestore()
         .collection("items")
-        .where("user", "==", user.uid) // TODO: this can be null
+        .where("user", "==", user.uid)
         .orderBy("time", "desc")
         .onSnapshot(function (snapshot) {
           if (firstSnapshot) {
-            console.debug(
-              `onSnapshot invoked at ${Math.round(
-                window.performance.now()
-              )}ms w/ ${items.length} items`
-            );
+            // console.debug(
+            //   `onSnapshot invoked at ${Math.round(
+            //     window.performance.now()
+            //   )}ms w/ ${items.length} items`
+            // );
             setTimeout(() => {
               console.debug(
                 `first snapshot done at ${Math.round(
                   window.performance.now()
                 )}ms w/ ${items.length} items`
               );
-              if (!itemsReturnedByServer) {
-                initItems();
+              if (!initTime) initialize();
+              else
                 console.debug(
-                  `initialized ${
-                    items.length
-                  } items from first snapshot at ${Math.round(
-                    performance.now()
-                  )}ms`
+                  `items already initialized from server at ${initTime}ms`
                 );
-              }
               firstSnapshot = false;
             });
           }
           snapshot.docChanges().forEach(function (change) {
             const doc = change.doc;
-            // on first snapshot, we only need to append for initItems (see above)
+            // on first snapshot, we only need to append for initalize (see above)
             // and only if items were not returned by server (and initialized) already
+            // (otherwise we can just skip the first snapshot, which is hopefully coming
+            //  from a local cache so that it is cheap and worse than the server snapshot)
             if (firstSnapshot) {
               if (change.type != "added")
                 console.warn("unexpected change type: ", change.type);
-              if (!itemsReturnedByServer) {
+              if (!initTime) {
                 // NOTE: snapshot items do not have update/createTime available
                 items.push(Object.assign(doc.data(), { id: doc.id }));
               }
