@@ -1,48 +1,15 @@
 <script context="module" lang="ts">
   import _ from "lodash";
-
-  import {
-    isClient,
-    firebase,
-    firestore,
-    firebaseAdmin,
-  } from "../../firebase.js";
-
+  import { isClient, firebase, firestore } from "../../firebase.js";
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
   export async function preload(page, session) {
-    // console.debug("preloading, client?", isClient);
-    // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-    let user = null;
-    if (!session.cookie) {
-      user = { uid: "anonymous" };
-    } else {
-      user = await firebaseAdmin()
-        .auth()
-        .verifyIdToken(session.cookie)
-        .catch(console.error);
-      if (!user) return { error: "invalid session cookie" };
-    }
-    let items = await firebaseAdmin()
-      .firestore()
-      .collection("items")
-      .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
-      .orderBy("time", "desc")
-      .get();
-    return {
-      items: items.docs.map((doc) =>
-        Object.assign(doc.data(), {
-          id: doc.id,
-          updateTime: doc.updateTime.seconds,
-          createTime: doc.createTime.seconds,
-        })
-      ),
-    };
+    return process["server-preload"](page, session);
   }
 </script>
 
 <script lang="ts">
-  import { Circle2, DoubleBounce } from "svelte-loading-spinners";
+  // import { Circle2, DoubleBounce } from "svelte-loading-spinners";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
   export let items = [];
@@ -53,6 +20,9 @@
   let focusedItem = -1;
   let focused = false;
   let editorBlurTime = 0;
+  // in read-only mode, "items" collection is used only for server-side init, "items-tmp" for all other reads/writes
+  const readonly = () =>
+    user.uid == "anonymous" && location.host != "localhost:3000";
 
   function onEditorFocused(focused: boolean) {
     if (!focused) editorBlurTime = Date.now();
@@ -714,6 +684,7 @@
         break;
       }
       case "/backup": {
+        if (readonly()) return;
         let added = 0;
         items.forEach((item) => {
           firestore()
@@ -851,7 +822,7 @@
     }
 
     firestore()
-      .collection("items")
+      .collection(readonly() ? "items-tmp" : "items")
       .add(itemToSave)
       .then((doc) => {
         let index = indexFromId.get(item.id); // since index can change
@@ -882,10 +853,12 @@
             textarea.focus();
           }, 0);
         // also save to history (using persistent doc.id) ...
-        firestore()
-          .collection("history")
-          .add({ item: doc.id, ...itemToSave })
-          .catch(console.error);
+        if (!readonly()) {
+          firestore()
+            .collection("history")
+            .add({ item: doc.id, ...itemToSave })
+            .catch(console.error);
+        }
       })
       .catch(console.error);
   }
@@ -1109,19 +1082,46 @@
     // trigger itemTextChanged only if savedText is different (not just for time change)
     if (itemToSave.text != item.savedText)
       itemTextChanged(index, itemToSave.text);
-    firestore()
-      .collection("items")
-      .doc(item.savedId)
-      .update(itemToSave)
-      .then(() => {
-        onItemSaved(item.id, itemToSave);
-      })
-      .catch(console.error);
-    // also save to history ...
-    firestore()
-      .collection("history")
-      .add({ user: user.uid, item: item.savedId, ...itemToSave })
-      .catch(console.error);
+
+    if (readonly()) {
+      // if read-only, we can only "update" items added (to items-tmp) in this session
+      if (tempIdFromSavedId.get(item.savedId)) {
+        firestore()
+          .collection("items-tmp")
+          .doc(item.savedId)
+          .update(itemToSave)
+          .then(() => {
+            onItemSaved(item.id, itemToSave);
+          })
+          .catch(console.error);
+      } else {
+        firestore()
+          .collection("items-tmp")
+          .add({ user: user.uid, ...itemToSave })
+          .then(() => {
+            onItemSaved(item.id, itemToSave);
+          })
+          .catch(console.error);
+        tempIdFromSavedId.set(item.savedId, item.id); // can update next time
+      }
+    } else {
+      firestore()
+        .collection(readonly() ? "items-tmp" : "items")
+        .doc(item.savedId)
+        .update(itemToSave)
+        .then(() => {
+          onItemSaved(item.id, itemToSave);
+        })
+        .catch(console.error);
+    }
+
+    if (!readonly()) {
+      // also save to history ...
+      firestore()
+        .collection("history")
+        .add({ user: user.uid, item: item.savedId, ...itemToSave })
+        .catch(console.error);
+    }
   }
 
   // https://stackoverflow.com/a/9039885
@@ -1191,7 +1191,7 @@
           text: item.savedText,
         }); // for /undelete
         firestore()
-          .collection("items")
+          .collection(readonly() ? "items-tmp" : "items")
           .doc(item.savedId)
           .delete()
           .catch(console.error);
@@ -2320,6 +2320,8 @@
 
     let firstSnapshot = true;
     function initFirebaseRealtime() {
+      if (user.uid == "anonymous") return; // should not be invoked for anonymous
+
       // start listening for remote changes
       // (also initialize if items were not returned by server)
       firebase()

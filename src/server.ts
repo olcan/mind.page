@@ -29,4 +29,36 @@ if (!("FIREBASE_CONFIG" in process.env)) {
   });
 }
 
+import { firebaseAdmin } from "../firebase.js";
+
+// server-side preload hidden from client-side code
+process["server-preload"] = async (page, session) => {
+  // console.debug("preloading, client?", isClient);
+  // NOTE: for development server, admin credentials require `gcloud auth application-default login`
+  let user = null;
+  if (!session.cookie) {
+    user = { uid: "anonymous" };
+  } else {
+    // uncomment this to disable server-side init for non-anonymous accounts
+    // return {}
+    user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
+    if (!user) return { error: "invalid session cookie" };
+  }
+  let items = await firebaseAdmin()
+    .firestore()
+    .collection("items") // server always reads from primary collection
+    .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
+    .orderBy("time", "desc")
+    .get();
+  return {
+    items: items.docs.map((doc) =>
+      Object.assign(doc.data(), {
+        id: doc.id,
+        updateTime: doc.updateTime.seconds,
+        createTime: doc.createTime.seconds,
+      })
+    ),
+  };
+};
+
 export { sapperServer }; // for use as handler in index.js
