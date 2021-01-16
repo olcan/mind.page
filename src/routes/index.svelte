@@ -22,7 +22,7 @@
   let editorBlurTime = 0;
   // in read-only mode, "items" collection is used only for server-side init, "items-tmp" for all other reads/writes
   const readonly = () =>
-    user.uid == "anonymous" && location.host != "localhost:3000";
+    user.uid == "anonymous" && !location.href.endsWith("#__anonymous");
 
   function onEditorFocused(focused: boolean) {
     if (!focused) editorBlurTime = Date.now();
