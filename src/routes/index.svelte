@@ -41,10 +41,9 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
-  let oldestTime = Infinity;
-  let oldestTimeString = "";
   let maxIndexToShowDefault = 50;
   let maxIndexToShow = maxIndexToShowDefault;
+  let oldestTimeString = "";
   function updateItemLayout() {
     // console.debug("updateItemLayout");
     editingItems = [];
@@ -61,6 +60,8 @@
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
     let lastTimeString = "";
     let topMovedIndex = items.length;
+    let oldestTime = Infinity;
+    oldestTimeString = "";
 
     items.forEach((item, index) => {
       if (index < item.index && index < topMovedIndex) topMovedIndex = index;
@@ -2757,14 +2758,16 @@
             <span class="dots">
               {#each { length: dotCount } as _}•{/each}
             </span>
-            <div class="counts">
-              {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
-              {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
-              {items.length}
-              {#if matchingItemCount > 0}
-                &nbsp;<span class="matching">{matchingItemCount}</span>
-              {/if}
-            </div>
+            {#if items.length > 0}
+              <div class="counts">
+                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
+                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
+                {items.length}
+                {#if matchingItemCount > 0}
+                  &nbsp;<span class="matching">{matchingItemCount}</span>
+                {/if}
+              </div>
+            {/if}
             <div
               id="console"
               bind:this={consolediv}
