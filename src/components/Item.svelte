@@ -43,7 +43,6 @@
   export let time: number;
   export let timeString: string;
   export let timeOutOfOrder: boolean;
-  export let canMoveUp: boolean;
   export let updateTime: number;
   export let createTime: number;
   export let dotted: boolean;
@@ -1055,13 +1054,6 @@
     padding-right: 2px;
     padding-bottom: 1px;
   }
-  .index:not(.canMoveUp) {
-    cursor: auto;
-    pointer-events: none;
-  }
-  .index:not(.canMoveUp) .arrow {
-    display: none;
-  }
   .delete {
     /* color: #900; */
     background: #b66;
@@ -1583,10 +1575,8 @@
       <div class="item-menu">
         <span class="run" on:click={onRunClick}>run</span><span
           class="index"
-          class:canMoveUp
           class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}><span
-            class="arrow">⬆︎</span>{index + 1}</span>
+          on:click={onIndexClick}>{index + 1}</span>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>

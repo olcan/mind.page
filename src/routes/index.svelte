@@ -89,7 +89,6 @@
           timeString != lastTimeString;
       }
       lastTimeString = timeString;
-      item.canMoveUp = index > 0 && !lastItem.pinned;
 
       // determine item column
       item.nextColumn = -1;
@@ -1277,7 +1276,6 @@
   }
 
   function onItemTouch(index: number) {
-    if (!items[index].canMoveUp) return;
     items[index].time = Date.now();
     saveItem(items[index].id);
     editorBlurTime = 0; // prevent re-focus on editor
@@ -1484,7 +1482,6 @@
       item.index = index;
       item.timeString = "";
       item.timeOutOfOrder = false;
-      item.canMoveUp = false;
       item.height = 0;
       item.column = 0;
       item.nextColumn = -1;
@@ -2819,7 +2816,6 @@
             matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
             timeString={item.timeString}
             timeOutOfOrder={item.timeOutOfOrder}
-            canMoveUp={item.canMoveUp}
             updateTime={item.updateTime}
             createTime={item.createTime}
             dotted={item.dotted}
