@@ -2556,7 +2556,7 @@
     height: 44px; /* must match height of single-line editor (also see @media query below) */
     width: 44px;
     min-width: 44px; /* seems necessary to ensure full width inside flex */
-    /* margin-right: 4px; */
+    margin-right: 4px;
     border-radius: 50%;
     background: #333;
     cursor: pointer;
