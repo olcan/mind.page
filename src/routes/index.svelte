@@ -1089,7 +1089,7 @@
         firestore()
           .collection("items-tmp")
           .doc(item.savedId)
-          .update(itemToSave)
+          .update({ user: user.uid, ...itemToSave })
           .then(() => {
             onItemSaved(item.id, itemToSave);
           })
@@ -1098,11 +1098,14 @@
         firestore()
           .collection("items-tmp")
           .add({ user: user.uid, ...itemToSave })
-          .then(() => {
+          .then((doc) => {
+            let index = indexFromId.get(item.id);
+            if (index == undefined) return; // deleted
+            items[index].savedId = doc.id;
             onItemSaved(item.id, itemToSave);
+            tempIdFromSavedId.set(items[index].savedId, item.id); // can update next time
           })
           .catch(console.error);
-        tempIdFromSavedId.set(item.savedId, item.id); // can update next time
       }
     } else {
       firestore()
