@@ -133,10 +133,19 @@
     });
 
     if (focusedItem >= 0) {
-      // console.debug("updateItemLayout focusedItem", focusedItem);
-      // maintain focus on item
-      const textarea = textArea(focusedItem);
-      if (textarea) setTimeout(() => textarea.focus(), 0); // allow dom update before refocus
+      // maintain focus/selection
+      let textarea = textArea(focusedItem);
+      if (textarea) {
+        let selectionStart = textarea.selectionStart;
+        let selectionEnd = textarea.selectionEnd;
+        setTimeout(() => {
+          textarea = textArea(focusedItem);
+          if (!textarea) return;
+          textarea.focus();
+          textarea.selectionStart = selectionStart;
+          textarea.selectionEnd = selectionEnd;
+        }); // allow dom update before refocus
+      }
     } else if (Date.now() - editorBlurTime < 250) {
       // refocus on editor if it was unfocused within last .25 seconds
       textArea(-1).focus();
