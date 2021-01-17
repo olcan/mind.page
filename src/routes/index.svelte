@@ -1536,14 +1536,13 @@
   }
 
   if (isClient) {
-    // if we are in process of signing in, ignore items returned by server
-    if (window.sessionStorage.getItem("signin_pending")) items = [];
+    // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
+    if (error) console.warn(error); // log server-side error
 
     // initialize items now if returned by server
-    if (items.length > 0) initialize();
-
-    // Sign in user as needed ...
-    if (error) console.error(error); // log server-side error
+    // (if we are signing in, ignore any items returned by server)
+    if (window.sessionStorage.getItem("signin_pending")) items = [];
+    else if (items.length > 0) initialize();
 
     // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
     firebase()
@@ -1564,7 +1563,6 @@
           .getIdToken(false /*force refresh*/)
           .then((token) => {
             document.cookie = "__session=" + token + ";max-age=86400";
-            if (error) console.error(error);
           })
           .catch(console.error);
 
