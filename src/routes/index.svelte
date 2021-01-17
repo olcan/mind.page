@@ -501,6 +501,9 @@
     item.label = item.header.startsWith(item.tagsVisible[0])
       ? item.tagsVisible[0]
       : "";
+    item.labelText = item.label
+      ? item.text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0]
+      : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label) {
@@ -804,10 +807,8 @@
     // NOTE: we keep the starting tag if it is a non-unique label
     //       (useful for adding items, e.g. todo items, without losing context)
     editorText =
-      items[0].label &&
-      !items[0].labelUnique &&
-      editorText.match(/^\S*/)[0].toLowerCase() == items[0].label
-        ? editorText.match(/^\S*/)[0] + " "
+      items[0].label && !items[0].labelUnique && items[0].labelText
+        ? items[0].labelText + " "
         : "";
     onEditorChange(editorText); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
@@ -2395,7 +2396,7 @@
               item = items[indexFromId.get(evalItemId)];
             }
             if (item) {
-              // prepent item index, label (if any)
+              // prepend item index, label (if any)
               if (item.label) args.unshift(item.label + ":");
               args.unshift(`[${item.index + 1}]`);
             }
@@ -2834,6 +2835,7 @@
               id={item.id}
               label={item.label}
               labelUnique={item.labelUnique}
+              labelText={item.labelText}
               hash={item.hash}
               deephash={item.deephash}
               missingTags={item.missingTags.join(' ')}

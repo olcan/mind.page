@@ -36,6 +36,7 @@
   export let index: number;
   export let id: string;
   export let label: string;
+  export let labelText: string;
   export let labelUnique: boolean;
   export let missingTags: any;
   export let matchingTerms: any;
@@ -353,7 +354,8 @@
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag) => {
               // make relative tag absolute
-              if (label && tag.startsWith("#/")) tag = label + tag.substring(1);
+              if (label && tag.startsWith("#/"))
+                tag = labelText + tag.substring(1);
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (matchingTerms.has(lctag)) classNames += " selected";
@@ -371,9 +373,17 @@
                 label &&
                 tag.length > label.length &&
                 tag[label.length] == "/" &&
-                tag.substring(0, label.length) == label
+                tag.substring(0, label.length) == labelText
                   ? "#" + tag.substring(label.length)
                   : tag;
+              // shorted selected labels
+              if (
+                label.indexOf("/") >= 0 &&
+                lctag == label &&
+                labelUnique &&
+                (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag))
+              )
+                reltag = "#/" + tag.substring(tag.lastIndexOf("/"));
               return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
             });
         }
@@ -718,7 +728,7 @@
                   document.createElement("div"),
                   node.parentElement.firstChild
                 );
-                spacer.style.background = "#9c9"; // .item mark span.highlight background
+                spacer.style.background = "#9b9"; // .item mark span.highlight background
                 spacer.style.height = "100%";
                 spacer.style.flexGrow = "1";
                 spacer.style.paddingLeft = tagStyle.paddingLeft;
@@ -749,7 +759,7 @@
                 let spacer = node.parentElement.appendChild(
                   document.createElement("div")
                 );
-                spacer.style.background = "#9c9"; // .item mark span.highlight background
+                spacer.style.background = "#9b9"; // .item mark span.highlight background
                 spacer.style.height = "100%";
                 spacer.style.flexGrow = "1";
                 spacer.style.paddingRight = tagStyle.paddingRight;
@@ -1287,7 +1297,7 @@
     background: #9f9;
   }
   :global(.item mark.secondary-selected) {
-    background: #9c9;
+    background: #9b9;
   }
   :global(.item mark.missing) {
     background: #f88;
@@ -1302,7 +1312,7 @@
     border: 1px dashed #9f9;
   }
   :global(.item mark.hidden.secondary-selected) {
-    border: 1px dashed #9c9;
+    border: 1px dashed #9b9;
   }
   :global(.item mark.hidden.missing) {
     border: 1px dashed #f88;
@@ -1315,7 +1325,7 @@
   }
   :global(.item mark span.highlight) {
     color: black;
-    background: #9c9;
+    background: #9b9;
     padding-left: 0;
     padding-right: 0;
   }

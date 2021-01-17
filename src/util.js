@@ -110,7 +110,7 @@ export function parseTags(text) {
         .replace(/(^|[^\\])<\/?\w.*?>/g, "$1") // remove html tags
         .replace(/(^|[^\\])<<.*?>>/g, "$1") // remove macros
         //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
-        .matchAll(/(?:^|\s)(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
+        .matchAll(/(?:^|\s)(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g),
       (m) => m[1]
     )
   );
