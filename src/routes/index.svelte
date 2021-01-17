@@ -9,7 +9,7 @@
 </script>
 
 <script lang="ts">
-  // import { Circle2, DoubleBounce } from "svelte-loading-spinners";
+  import { Circle2 } from "svelte-loading-spinners";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
   export let items = [];
@@ -20,9 +20,8 @@
   let focusedItem = -1;
   let focused = false;
   let editorBlurTime = 0;
-  // in read-only mode, "items" collection is used only for server-side init, "items-tmp" for all other reads/writes
-  const readonly = () =>
-    user.uid == "anonymous" && !location.href.endsWith("#__anonymous");
+  let anonymous = false;
+  let readonly = false;
 
   function onEditorFocused(focused: boolean) {
     if (!focused) editorBlurTime = Date.now();
@@ -428,13 +427,16 @@
   }
 
   function onPopState(e) {
+    readonly = !location.href.endsWith("#__anonymous");
     if (!e?.state) return; // for fragment (#id) hrefs
     editorText = e.state.editorText || "";
     onEditorChange(editorText);
   }
 
   function signOut() {
-    user = { photoURL: "/loading.gif", email: "Signing out ..." };
+    if (!firebase().auth().currentUser) return; // not logged in yet, so ignore click for now
+    // user = { photoURL: "/loading.gif", email: "Signing out ..." };
+    user = null;
     localStorage.removeItem("user");
     window.sessionStorage.removeItem("signin_pending");
     document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
@@ -693,7 +695,7 @@
         break;
       }
       case "/backup": {
-        if (readonly()) return;
+        if (readonly) return;
         let added = 0;
         items.forEach((item) => {
           firestore()
@@ -835,7 +837,7 @@
     }
 
     firestore()
-      .collection(readonly() ? "items-tmp" : "items")
+      .collection(readonly ? "items-tmp" : "items")
       .add(itemToSave)
       .then((doc) => {
         let index = indexFromId.get(item.id); // since index can change
@@ -866,7 +868,7 @@
             textarea.focus();
           }, 0);
         // also save to history (using persistent doc.id) ...
-        if (!readonly()) {
+        if (!readonly) {
           firestore()
             .collection("history")
             .add({ item: doc.id, ...itemToSave })
@@ -1096,7 +1098,7 @@
       time: item.time,
       text: item.text,
     };
-    if (readonly()) {
+    if (readonly) {
       // if read-only, we can only "update" items added (to items-tmp) in this session
       if (tempIdFromSavedId.get(item.savedId)) {
         firestore()
@@ -1122,7 +1124,7 @@
       }
     } else {
       firestore()
-        .collection(readonly() ? "items-tmp" : "items")
+        .collection(readonly ? "items-tmp" : "items")
         .doc(item.savedId)
         .update(itemToSave)
         .then(() => {
@@ -1131,7 +1133,7 @@
         .catch(console.error);
     }
 
-    if (!readonly()) {
+    if (!readonly) {
       // also save to history ...
       firestore()
         .collection("history")
@@ -1204,7 +1206,7 @@
           text: item.savedText,
         }); // for /undelete
         firestore()
-          .collection(readonly() ? "items-tmp" : "items")
+          .collection(readonly ? "items-tmp" : "items")
           .doc(item.savedId)
           .delete()
           .catch(console.error);
@@ -1515,7 +1517,8 @@
   }
 
   function signIn() {
-    user = { photoURL: "/loading.gif", email: "Signing in ..." };
+    // user = { photoURL: "/loading.gif", email: "Signing in ..." };
+    user = null;
     let provider = new window.firebase.auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
     // firebase().auth().setPersistence("none")
@@ -1561,9 +1564,7 @@
           .getIdToken(false /*force refresh*/)
           .then((token) => {
             document.cookie = "__session=" + token + ";max-age=86400";
-            // console.debug("updated cookie", error || "(no error)");
-            // reload with new cookie if we are on error page
-            if (error) location.reload();
+            if (error) console.error(error);
           })
           .catch(console.error);
 
@@ -2256,7 +2257,7 @@
 
     let firstSnapshot = true;
     function initFirebaseRealtime() {
-      if (user.uid == "anonymous") return; // should not be invoked for anonymous
+      if (!user || user.uid == "anonymous") return; // should not be invoked for anonymous
 
       // start listening for remote changes
       // (also initialize if items were not returned by server)
@@ -2365,87 +2366,88 @@
     }
 
     onMount(() => {
-      // copy console into #console if it exists
-      if (consolediv) {
-        // NOTE: some errors do not go through console.error but are reported via window.onerror
-        console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
-        console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-        const levels = [
-          "debug",
-          "info",
-          "log",
-          "warn",
-          "error",
-          "_window_error",
-          "_eval_error",
-        ];
-        levels.forEach(function (verb) {
-          console[verb] = (function (method, verb, div) {
-            return function (...args) {
-              method(...args);
-              var elem = document.createElement("div");
-              if (verb.endsWith("error")) verb = "error";
-              elem.classList.add("console-" + verb);
-              let item; // if the source is an item (and the logging is done _synchronously_)
-              if (
-                window["_script_item_id"] &&
-                indexFromId.has(window["_script_item_id"])
-              ) {
-                item = items[indexFromId.get(window["_script_item_id"])];
-              } else if (evalItemId) {
-                item = items[indexFromId.get(evalItemId)];
-              }
-              if (item) {
-                // prepent item index, label (if any)
-                if (item.label) args.unshift(item.label + ":");
-                args.unshift(`[${item.index + 1}]`);
-              }
-              // log url for "error" Events that do not have message/reason
-              // see https://www.w3schools.com/jsref/event_onerror.asp
-              if (args.length == 1 && errorMessage(args[0])) {
-                elem.textContent = errorMessage(args[0]);
-              } else {
-                elem.textContent = args.join(" ") + "\n";
-              }
-              elem.setAttribute("_time", Date.now().toString());
-              elem.setAttribute("_level", levels.indexOf(verb).toString());
-              div.appendChild(elem);
-              consoleLog.push({
-                type: verb,
-                text: elem.textContent.trim(),
-                time: Date.now(),
-                level: levels.indexOf(verb),
-              });
-              if (consoleLog.length > consoleLogMaxSize)
-                consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
+      // copy console into #console (if it exists)
+      // NOTE: some errors do not go through console.error but are reported via window.onerror
+      console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
+      console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
+      const levels = [
+        "debug",
+        "info",
+        "log",
+        "warn",
+        "error",
+        "_window_error",
+        "_eval_error",
+      ];
+      levels.forEach(function (verb) {
+        console[verb] = (function (method, verb, div) {
+          return function (...args) {
+            method(...args);
+            if (!consolediv) return;
+            var elem = document.createElement("div");
+            if (verb.endsWith("error")) verb = "error";
+            elem.classList.add("console-" + verb);
+            let item; // if the source is an item (and the logging is done _synchronously_)
+            if (
+              window["_script_item_id"] &&
+              indexFromId.has(window["_script_item_id"])
+            ) {
+              item = items[indexFromId.get(window["_script_item_id"])];
+            } else if (evalItemId) {
+              item = items[indexFromId.get(evalItemId)];
+            }
+            if (item) {
+              // prepent item index, label (if any)
+              if (item.label) args.unshift(item.label + ":");
+              args.unshift(`[${item.index + 1}]`);
+            }
+            // log url for "error" Events that do not have message/reason
+            // see https://www.w3schools.com/jsref/event_onerror.asp
+            if (args.length == 1 && errorMessage(args[0])) {
+              elem.textContent = errorMessage(args[0]);
+            } else {
+              elem.textContent = args.join(" ") + "\n";
+            }
+            elem.setAttribute("_time", Date.now().toString());
+            elem.setAttribute("_level", levels.indexOf(verb).toString());
+            consolediv.appendChild(elem);
+            consoleLog.push({
+              type: verb,
+              text: elem.textContent.trim(),
+              time: Date.now(),
+              level: levels.indexOf(verb),
+            });
+            if (consoleLog.length > consoleLogMaxSize)
+              consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
 
-              document.getElementById(
-                "console-summary"
-              ).style.visibility = showDotted ? "hidden" : "visible";
-              const summaryDiv = document.getElementById("console-summary");
-              const summaryElem = document.createElement("span");
-              summaryElem.innerText = "·";
-              summaryElem.classList.add("console-" + verb);
-              summaryDiv.appendChild(summaryElem);
+            document.getElementById(
+              "console-summary"
+            ).style.visibility = showDotted ? "hidden" : "visible";
+            const summarydiv = document.getElementById("console-summary");
+            const summaryelem = document.createElement("span");
+            summaryelem.innerText = "·";
+            summaryelem.classList.add("console-" + verb);
+            summarydiv.appendChild(summaryelem);
 
-              // if console is hidden, make sure summary is visible
-              if (div.style.display == "none")
-                summaryDiv.style.visibility = "visible";
+            // if console is hidden, make sure summary is visible
+            if (consolediv.style.display == "none")
+              summarydiv.style.visibility = "visible";
 
-              // auto-remove after 15 seconds ...
-              setTimeout(() => {
-                elem.remove();
-                summaryElem.remove();
-                if (div.childNodes.length == 0) {
-                  div.style.display = "none";
-                  summaryDiv.style.visibility = "visible";
-                }
-              }, statusLogExpiration);
-            };
-          })(console[verb].bind(console), verb, consolediv);
-        });
-      }
-      if (user.uid == "anonymous") console.log("user is anonymous");
+            // auto-remove after 15 seconds ...
+            setTimeout(() => {
+              elem.remove();
+              summaryelem.remove();
+              if (consolediv.childNodes.length == 0) {
+                consolediv.style.display = "none";
+                summarydiv.style.visibility = "visible";
+              }
+            }, statusLogExpiration);
+          };
+        })(console[verb].bind(console), verb);
+      });
+      anonymous = user?.uid == "anonymous";
+      readonly = !location.href.endsWith("#__anonymous");
+      if (anonymous) console.log("user is anonymous");
 
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
       setTimeout(() => {
@@ -2471,9 +2473,9 @@
       window["_user"] = user = JSON.parse(localStorage.getItem("user"));
       console.debug("restored user from local storage");
     } else if (window.sessionStorage.getItem("signin_pending")) {
-      user = { photoURL: "/loading.gif", email: "Signing in ..." };
+      // user = { photoURL: "/loading.gif", email: "Signing in ..." };
+      user = null;
     } else {
-      // NOTE: window._user remains null for anonymous users
       window["_user"] = user = {
         photoURL: "/incognito.png",
         displayName: "Anonymous",
@@ -2532,7 +2534,7 @@
 </script>
 
 <style>
-  /* #loading {
+  #loading {
     position: absolute;
     top: 0;
     left: 0;
@@ -2542,7 +2544,7 @@
     min-height: -webkit-fill-available;
     justify-content: center;
     align-items: center;
-  } */
+  }
   #header {
     max-width: 100%;
   }
@@ -2576,9 +2578,12 @@
     min-width: 44px; /* seems necessary to ensure full width inside flex */
     margin-right: 4px;
     border-radius: 50%;
-    background: #333;
+    background: #222;
     cursor: pointer;
     overflow: hidden;
+  }
+  #user.anonymous:not(.readonly) {
+    background: red;
   }
   #console {
     display: none;
@@ -2734,132 +2739,139 @@
   }
 </style>
 
-<!-- all good! user logged in, has permissions, and no error from server -->
-<div class="items" class:multi-column={columnCount > 1}>
-  {#each { length: columnCount } as _, column}
-    <div class="column">
-      {#if column == 0}
-        <div
-          id="header"
-          bind:this={headerdiv}
-          on:click={() => textArea(-1).focus()}>
-          <div id="header-container" class:focused>
-            <div id="editor">
-              <Editor
-                bind:text={editorText}
-                bind:focused
-                cancelOnDelete={true}
-                allowCommandBracket={true}
-                onFocused={onEditorFocused}
-                onChange={onEditorChange}
-                onDone={onEditorDone}
-                onPrev={onPrevItem}
-                onNext={onNextItem} />
+{#if !user}
+  <div id="loading">
+    <Circle2 size="60" unit="px" />
+  </div>
+{:else}
+  <div class="items" class:multi-column={columnCount > 1}>
+    {#each { length: columnCount } as _, column}
+      <div class="column">
+        {#if column == 0}
+          <div
+            id="header"
+            bind:this={headerdiv}
+            on:click={() => textArea(-1).focus()}>
+            <div id="header-container" class:focused>
+              <div id="editor">
+                <Editor
+                  bind:text={editorText}
+                  bind:focused
+                  cancelOnDelete={true}
+                  allowCommandBracket={true}
+                  onFocused={onEditorFocused}
+                  onChange={onEditorChange}
+                  onDone={onEditorDone}
+                  onPrev={onPrevItem}
+                  onNext={onNextItem} />
+              </div>
+              <div class="spacer" />
+              {#if user}
+                <img
+                  id="user"
+                  class:anonymous
+                  class:readonly
+                  src={user.photoURL}
+                  alt={user.displayName || user.email}
+                  title={user.displayName || user.email}
+                  on:click={() => (!user.email ? signIn() : signOut())} />
+              {/if}
             </div>
-            <div class="spacer" />
-            {#if user}
-              <img
-                id="user"
-                src={user.photoURL}
-                alt={user.displayName || user.email}
-                title={user.displayName || user.email}
-                on:click={() => (!user.email ? signIn() : signOut())} />
-            {/if}
+            <div id="status" on:click={onStatusClick}>
+              <span id="console-summary" on:click={onConsoleSummaryClick} />
+              <span class="dots">
+                {#each { length: dotCount } as _}•{/each}
+              </span>
+              {#if items.length > 0}
+                <div class="counts">
+                  {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
+                  {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
+                  {items.length}
+                  {#if matchingItemCount > 0}
+                    &nbsp;<span class="matching">{matchingItemCount}</span>
+                  {/if}
+                </div>
+              {/if}
+              <div
+                id="console"
+                bind:this={consolediv}
+                on:click={onConsoleClick} />
+            </div>
           </div>
-          <div id="status" on:click={onStatusClick}>
-            <span id="console-summary" on:click={onConsoleSummaryClick} />
-            <span class="dots">
-              {#each { length: dotCount } as _}•{/each}
-            </span>
-            {#if items.length > 0}
-              <div class="counts">
-                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
-                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
-                {items.length}
-                {#if matchingItemCount > 0}
-                  &nbsp;<span class="matching">{matchingItemCount}</span>
+          <!-- auto-focus on the editor unless on iPhone -->
+          <script>
+            // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+            //       programmatic focus except in click handlers, when returning to app, etc
+            setTimeout(() => {
+              if (
+                document.activeElement.tagName.toLowerCase() != "textarea" &&
+                !navigator.platform.startsWith("iPhone")
+              )
+                document.getElementById("textarea-editor").focus();
+            });
+          </script>
+        {/if}
+
+        {#each items as item (item.id)}
+          {#if item.column == column && item.index < maxIndexToShow}
+            <Item
+              onEditing={onItemEditing}
+              onFocused={onItemFocused}
+              onRun={onItemRun}
+              onTouch={onItemTouch}
+              onResized={onItemResized}
+              {onTagClick}
+              {onLogSummaryClick}
+              onPrev={onPrevItem}
+              onNext={onNextItem}
+              bind:text={item.text}
+              bind:editing={item.editing}
+              bind:focused={item.focused}
+              bind:saving={item.saving}
+              bind:running={item.running}
+              bind:showLogs={item.showLogs}
+              bind:height={item.height}
+              bind:time={item.time}
+              index={item.index}
+              id={item.id}
+              label={item.label}
+              labelUnique={item.labelUnique}
+              hash={item.hash}
+              deephash={item.deephash}
+              missingTags={item.missingTags.join(' ')}
+              matchingTerms={item.matchingTerms.join(' ')}
+              matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+              timeString={item.timeString}
+              timeOutOfOrder={item.timeOutOfOrder}
+              updateTime={item.updateTime}
+              createTime={item.createTime}
+              dotted={item.dotted}
+              runnable={item.runnable}
+              scripted={item.scripted}
+              macroed={item.macroed} />
+            {#if item.nextColumn >= 0}
+              <div class="section-separator">
+                <hr />
+                {item.index + 2}<span
+                  class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
+                  &nbsp;
+                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
                 {/if}
+                <hr />
               </div>
             {/if}
-            <div
-              id="console"
-              bind:this={consolediv}
-              on:click={onConsoleClick} />
-          </div>
-        </div>
-        <!-- auto-focus on the editor unless on iPhone -->
-        <script>
-          // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-          //       programmatic focus except in click handlers, when returning to app, etc
-          setTimeout(() => {
-            if (
-              document.activeElement.tagName.toLowerCase() != "textarea" &&
-              !navigator.platform.startsWith("iPhone")
-            )
-              document.getElementById("textarea-editor").focus();
-          });
-        </script>
-      {/if}
-
-      {#each items as item (item.id)}
-        {#if item.column == column && item.index < maxIndexToShow}
-          <Item
-            onEditing={onItemEditing}
-            onFocused={onItemFocused}
-            onRun={onItemRun}
-            onTouch={onItemTouch}
-            onResized={onItemResized}
-            {onTagClick}
-            {onLogSummaryClick}
-            onPrev={onPrevItem}
-            onNext={onNextItem}
-            bind:text={item.text}
-            bind:editing={item.editing}
-            bind:focused={item.focused}
-            bind:saving={item.saving}
-            bind:running={item.running}
-            bind:showLogs={item.showLogs}
-            bind:height={item.height}
-            bind:time={item.time}
-            index={item.index}
-            id={item.id}
-            label={item.label}
-            labelUnique={item.labelUnique}
-            hash={item.hash}
-            deephash={item.deephash}
-            missingTags={item.missingTags.join(' ')}
-            matchingTerms={item.matchingTerms.join(' ')}
-            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-            timeString={item.timeString}
-            timeOutOfOrder={item.timeOutOfOrder}
-            updateTime={item.updateTime}
-            createTime={item.createTime}
-            dotted={item.dotted}
-            runnable={item.runnable}
-            scripted={item.scripted}
-            macroed={item.macroed} />
-          {#if item.nextColumn >= 0}
-            <div class="section-separator">
-              <hr />
-              {item.index + 2}<span
-                class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
-                &nbsp;
-                {item.nextItemInColumn + 1}<span class="arrows">↓</span>
-              {/if}
-              <hr />
+          {:else if item.column == column && item.index == maxIndexToShow}
+            <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
+              show all
+              {items.length}
+              items
             </div>
           {/if}
-        {:else if item.column == column && item.index == maxIndexToShow}
-          <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
-            show all
-            {items.length}
-            items
-          </div>
-        {/if}
-      {/each}
-    </div>
-  {/each}
-</div>
+        {/each}
+      </div>
+    {/each}
+  </div>
+{/if}
 
 <svelte:window
   on:keypress={onKeyPress}
