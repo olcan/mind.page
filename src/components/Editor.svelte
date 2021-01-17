@@ -42,9 +42,9 @@
   };
   let highlightOther = (text) => {
     return text.replace(
-      /(^|[^\\])(\$?\$?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$?\$?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
       (m, pfx, begin, content, end) => {
-        if (begin == end && begin == "`")
+        if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
         else if (
           (begin == "$`" && end == "`$") ||
@@ -191,7 +191,7 @@
     text.split("\n").map((line) => {
       if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
         insideBlock = true;
-        language = line.match(/^\s*```(\w*)$/).pop();
+        language = line.match(/^\s*```(\w*)(?:_removed|_hidden|_tmp)?$/)[1];
         code = "";
         html += '<span class="block-delimiter">';
         html += escapeHTML(line);

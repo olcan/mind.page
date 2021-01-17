@@ -28,7 +28,7 @@ Promise.prototype.delay = function (t) {
 export function extractBlock(text, type) {
   // NOTE: this logic is consistent with onInput() in Editor.svelte
   let insideBlock = false;
-  let regex = RegExp("^\\s*```" + type + "(\\s|$)");
+  let regex = RegExp("^\\s*```" + type + "(?:_hidden|_removed|_tmp)?(?:\\s|$)");
   return text
     .split("\n")
     .map((line) => {
@@ -77,6 +77,7 @@ hljs.configure({ tabReplace: "  " });
 export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
+  language = language.replace(/(?:_removed|_hidden|_tmp)$/, "");
   if (language == "_log") {
     return code
       .split("\n")
@@ -89,7 +90,7 @@ export function highlight(code, language) {
       )
       .join("\n");
   }
-  if (language.startsWith("_html")) language = "html";
+  if (language.match(/^_html(_|$)/)) language = "html";
   // if (language.startsWith("_math")) language = "math"; // editor-only
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;

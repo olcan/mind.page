@@ -243,15 +243,12 @@
       "g"
     );
 
-    // TODO: do not remove matching hidden tags, test tag search, e.g. for bar_chart
     // remove hidden tags (unless missing or matching) and trim
     text = text
       .replace(tagRegex, (m, pfx, tag) => {
         if (!tag.startsWith("#_")) return m;
         const lctag = tag.toLowerCase().replace(/^#_/, "#");
-        return missingTags.has(lctag) ||
-          matchingTerms.has(lctag) ||
-          matchingTermsSecondary.has(lctag)
+        return missingTags.has(lctag) || matchingTerms.has(lctag) // || matchingTermsSecondary.has(lctag)
           ? pfx + tag
           : "";
       })
@@ -317,10 +314,9 @@
           str = str
             .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
             .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>');
-          console.log(str);
         }
 
-        // preserve inline whitespace and line breaks by inserting &nbsp; and <br>\n outside of code blocks
+        // preserve line breaks by inserting <br>\n outside of code blocks
         // (we miss indented blocks that start with bullets -/* for now since it requires prior-line context)
         // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
         // (we also exclude /^\s*>/ to break inside blockquotes for now)
@@ -330,12 +326,8 @@
           !str.match(
             /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
           )
-        ) {
-          str = str.replace(/(\S)(\s\s+)/g, (m, pfx, space) => {
-            return pfx + space.replace(/  /g, " &nbsp;"); // second space is replaced since ; can be followed by tags
-          });
+        )
           str = str + "<br>\n";
-        }
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
 
@@ -367,6 +359,7 @@
               else if (matchingTermsSecondary.has(lctag))
                 classNames += " secondary-selected";
               if (missingTags.has(lctag)) classNames += " missing";
+              if (tag.startsWith("#_")) classNames += " hidden";
               if (lctag == label) {
                 classNames += " label";
                 if (labelUnique) classNames += " unique";
@@ -396,16 +389,30 @@
       })
       .join("\n")
       .replace(/\\<br>\n\n/g, "")
-      .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>")
-      .replace(
-        /(^|\n)```_html\w*?\n\s*(.*?)\s*\n```/gs,
-        (m, pfx, _html) =>
-          (pfx + _html)
-            .replace(/(^|[^\\])\$id/g, "$1" + id)
-            .replace(/(^|[^\\])\$hash/g, "$1" + hash)
-            .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
-            .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
-      ); /*unwrap _html* blocks*/
+      .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>");
+
+    // remove *_removed blocks
+    text = text.replace(
+      /(^|\n)```\w*_removed\n\s*(.*?)\s*\n```/gs,
+      (m, pfx) => pfx
+    );
+
+    // hide *_hidden blocks
+    text = text.replace(
+      /(^|\n)```\w*_hidden\n\s*(.*?)\s*\n```/gs,
+      (m, pfx) => "<!--hidden-->\n" + m + "\n<!--/hidden-->"
+    );
+
+    // replace _html_* blocks
+    text = text.replace(
+      /(^|\n)```_html(?:_\w+)?\n\s*(.*?)\s*\n```/gs,
+      (m, pfx, html) =>
+        (pfx + html)
+          .replace(/(^|[^\\])\$id/g, "$1" + id)
+          .replace(/(^|[^\\])\$hash/g, "$1" + hash)
+          .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
+          .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
+    );
 
     // hide hidden sections
     text = text.replace(
@@ -795,7 +802,6 @@
           // insert delimiters if missing (in particular for multi-line _math blocks)
           if (!elem.textContent.match(/^\$.+\$$/)) {
             elem.innerHTML = "$$\n" + elem.innerHTML + "\n$$";
-            console.log(elem.textContent);
           }
           math.push(elem);
         });
@@ -1285,6 +1291,22 @@
   :global(.item mark.missing) {
     background: #f88;
   }
+
+  :global(.item mark.hidden) {
+    color: #ddd;
+    background: #222;
+    border: 1px dashed #ddd;
+  }
+  :global(.item mark.hidden.selected) {
+    border: 1px dashed #9f9;
+  }
+  :global(.item mark.hidden.secondary-selected) {
+    border: 1px dashed #9c9;
+  }
+  :global(.item mark.hidden.missing) {
+    border: 1px dashed #f88;
+  }
+
   :global(.item span.highlight) {
     color: black;
     background: #9f9;

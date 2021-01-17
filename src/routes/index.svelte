@@ -98,9 +98,11 @@
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
+        // (also stay on same column if item is being edited, to minimize disruption)
         const lastColumn = lastItem.column;
         const minColumnHeight = Math.min(...columnHeights);
         if (
+          item.editing ||
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
           columnHeights[lastColumn] + item.outerHeight + 40 <=
             minColumnHeight + 0.9 * outerHeight
@@ -793,7 +795,11 @@
     // NOTE: we keep the starting tag if it is a non-unique label
     //       (useful for adding items, e.g. todo items, without losing context)
     editorText =
-      items[0].label && !items[0].labelUnique ? items[0].label + " " : "";
+      items[0].label &&
+      !items[0].labelUnique &&
+      editorText.match(/^\S*/)[0].toLowerCase() == items[0].label
+        ? editorText.match(/^\S*/)[0] + " "
+        : "";
     onEditorChange(editorText); // integrate new item at index 0
     // NOTE: if not editing, append JS output and trigger another layout if necessary
     if (!editing) {
@@ -1049,9 +1055,10 @@
       let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       if (item.debug) prefix = ""; // debug items are self-contained
+      // empty out js_output blocks
       item.text = item.text.replace(
-        /(?:^|\n) *```js_output\n(?: *```|.*?\n *```)/gs,
-        ""
+        /(^|\n) *```js_output\n(?: *```|.*?\n *```) *(\n|$)/gs,
+        "$1```js_output\n```$2"
       );
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
       if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
@@ -1299,6 +1306,8 @@
     lastEditorChangeTime = 0; // force immediate update
     onEditorChange(editorText); // since edit state changed
     setTimeout(() => {
+      let index = indexFromId.get(lastEditItem);
+      if (index == undefined) return;
       textArea(index).focus();
       textArea(index).selectionStart = lastEditPosition;
     });
@@ -1537,88 +1546,6 @@
         // console.debug("onAuthStateChanged", user, authUser);
         window.sessionStorage.removeItem("signin_pending"); // no longer signing in
         window["_user"] = user = authUser;
-
-        // copy console into #console if it exists
-        if (consolediv) {
-          // NOTE: some errors do not go through console.error but are reported via window.onerror
-          console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
-          console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-          const levels = [
-            "debug",
-            "info",
-            "log",
-            "warn",
-            "error",
-            "_window_error",
-            "_eval_error",
-          ];
-          levels.forEach(function (verb) {
-            console[verb] = (function (method, verb, div) {
-              return function (...args) {
-                method(...args);
-                var elem = document.createElement("div");
-                if (verb.endsWith("error")) verb = "error";
-                elem.classList.add("console-" + verb);
-                let item; // if the source is an item (and the logging is done _synchronously_)
-                if (
-                  window["_script_item_id"] &&
-                  indexFromId.has(window["_script_item_id"])
-                ) {
-                  item = items[indexFromId.get(window["_script_item_id"])];
-                } else if (evalItemId) {
-                  item = items[indexFromId.get(evalItemId)];
-                }
-                if (item) {
-                  // prepent item index, label (if any)
-                  if (item.label) args.unshift(item.label + ":");
-                  args.unshift(`[${item.index + 1}]`);
-                }
-                // log url for "error" Events that do not have message/reason
-                // see https://www.w3schools.com/jsref/event_onerror.asp
-                if (args.length == 1 && errorMessage(args[0])) {
-                  elem.textContent = errorMessage(args[0]);
-                } else {
-                  elem.textContent = args.join(" ") + "\n";
-                }
-                elem.setAttribute("_time", Date.now().toString());
-                elem.setAttribute("_level", levels.indexOf(verb).toString());
-                div.appendChild(elem);
-                consoleLog.push({
-                  type: verb,
-                  text: elem.textContent.trim(),
-                  time: Date.now(),
-                  level: levels.indexOf(verb),
-                });
-                if (consoleLog.length > consoleLogMaxSize)
-                  consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
-
-                document.getElementById(
-                  "console-summary"
-                ).style.visibility = showDotted ? "hidden" : "visible";
-                const summaryDiv = document.getElementById("console-summary");
-                const summaryElem = document.createElement("span");
-                summaryElem.innerText = "·";
-                summaryElem.classList.add("console-" + verb);
-                summaryDiv.appendChild(summaryElem);
-
-                // if console is hidden, make sure summary is visible
-                if (div.style.display == "none")
-                  summaryDiv.style.visibility = "visible";
-
-                // auto-remove after 15 seconds ...
-                setTimeout(() => {
-                  elem.remove();
-                  summaryElem.remove();
-                  if (div.childNodes.length == 0) {
-                    div.style.display = "none";
-                    summaryDiv.style.visibility = "visible";
-                  }
-                }, statusLogExpiration);
-              };
-            })(console[verb].bind(console), verb, consolediv);
-          });
-        }
-
         console.log("signed in", user.email);
         localStorage.setItem("user", JSON.stringify(user));
 
@@ -2430,6 +2357,88 @@
     }
 
     onMount(() => {
+      // copy console into #console if it exists
+      if (consolediv) {
+        // NOTE: some errors do not go through console.error but are reported via window.onerror
+        console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
+        console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
+        const levels = [
+          "debug",
+          "info",
+          "log",
+          "warn",
+          "error",
+          "_window_error",
+          "_eval_error",
+        ];
+        levels.forEach(function (verb) {
+          console[verb] = (function (method, verb, div) {
+            return function (...args) {
+              method(...args);
+              var elem = document.createElement("div");
+              if (verb.endsWith("error")) verb = "error";
+              elem.classList.add("console-" + verb);
+              let item; // if the source is an item (and the logging is done _synchronously_)
+              if (
+                window["_script_item_id"] &&
+                indexFromId.has(window["_script_item_id"])
+              ) {
+                item = items[indexFromId.get(window["_script_item_id"])];
+              } else if (evalItemId) {
+                item = items[indexFromId.get(evalItemId)];
+              }
+              if (item) {
+                // prepent item index, label (if any)
+                if (item.label) args.unshift(item.label + ":");
+                args.unshift(`[${item.index + 1}]`);
+              }
+              // log url for "error" Events that do not have message/reason
+              // see https://www.w3schools.com/jsref/event_onerror.asp
+              if (args.length == 1 && errorMessage(args[0])) {
+                elem.textContent = errorMessage(args[0]);
+              } else {
+                elem.textContent = args.join(" ") + "\n";
+              }
+              elem.setAttribute("_time", Date.now().toString());
+              elem.setAttribute("_level", levels.indexOf(verb).toString());
+              div.appendChild(elem);
+              consoleLog.push({
+                type: verb,
+                text: elem.textContent.trim(),
+                time: Date.now(),
+                level: levels.indexOf(verb),
+              });
+              if (consoleLog.length > consoleLogMaxSize)
+                consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
+
+              document.getElementById(
+                "console-summary"
+              ).style.visibility = showDotted ? "hidden" : "visible";
+              const summaryDiv = document.getElementById("console-summary");
+              const summaryElem = document.createElement("span");
+              summaryElem.innerText = "·";
+              summaryElem.classList.add("console-" + verb);
+              summaryDiv.appendChild(summaryElem);
+
+              // if console is hidden, make sure summary is visible
+              if (div.style.display == "none")
+                summaryDiv.style.visibility = "visible";
+
+              // auto-remove after 15 seconds ...
+              setTimeout(() => {
+                elem.remove();
+                summaryElem.remove();
+                if (div.childNodes.length == 0) {
+                  div.style.display = "none";
+                  summaryDiv.style.visibility = "visible";
+                }
+              }, statusLogExpiration);
+            };
+          })(console[verb].bind(console), verb, consolediv);
+        });
+      }
+      if (user.uid == "anonymous") console.log("user is anonymous");
+
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
       setTimeout(() => {
         console.debug(
