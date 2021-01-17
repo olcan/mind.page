@@ -1075,6 +1075,8 @@
       );
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
       if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
+      // NOTE: index can change during JS eval due to _writes
+      itemTextChanged(indexFromId.get(item.id), item.text);
     }
     return item.text;
   }
@@ -1094,15 +1096,6 @@
       time: item.time,
       text: item.text,
     };
-    // do not save any _tmp blocks
-    itemToSave.text = item.text.replace(
-      /(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs,
-      ""
-    );
-    // trigger itemTextChanged only if savedText is different (not just for time change)
-    if (itemToSave.text != item.savedText)
-      itemTextChanged(index, itemToSave.text);
-
     if (readonly()) {
       // if read-only, we can only "update" items added (to items-tmp) in this session
       if (tempIdFromSavedId.get(item.savedId)) {
@@ -1180,9 +1173,6 @@
       item.time = Date.now();
     }
 
-    // remove _tmp blocks whenever editing state changes
-    item.text = item.text.replace(/(?:^|\n) *```(\w*?_tmp)\n.*?\s*```/gs, "");
-
     if (editing) {
       // started editing
       editingItems.push(index);
@@ -1219,7 +1209,8 @@
           .delete()
           .catch(console.error);
       } else {
-        // // clear _output and execute javascript unless cancelled
+        itemTextChanged(index, item.text);
+        // clear _output and execute javascript unless cancelled
         if (run && !cancelled) {
           // empty out any *_output|*_log blocks as they should be re-generated
           item.text = item.text.replace(
@@ -1739,6 +1730,7 @@
             );
         }
         let text = type ? extractBlock(item.text, type) : item.text;
+        // console.debug("_read", item.label, item.text, text);
         if (options["replace_$id"])
           text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
         content.push(text);
@@ -1820,10 +1812,13 @@
           else item.text = appendBlock(item.text, type, text);
         }
         item.time = Date.now();
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange(editorText); // item time/text has changed
-        if (type.endsWith("_tmp")) return; // do not save _tmp blocks
-        saveItem(item.id);
+        itemTextChanged(index, item.text);
+        // we dispatch onEditorChange to prevent index changes _during_ JS eval
+        setTimeout(() => {
+          lastEditorChangeTime = 0; // disable debounce even if editor focused
+          onEditorChange(editorText); // item time/text has changed
+          saveItem(item.id);
+        });
       });
     };
 

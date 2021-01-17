@@ -182,6 +182,7 @@
     matchingTerms: any, // space-separated string converted to Set
     matchingTermsSecondary: any // space-separated string converted to Set
   ) {
+    // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key =
       "html-" + hashCode(Array.from(arguments).slice(1).toString());
     if (window["_html_cache"].hasOwnProperty(cache_key)) {
@@ -1329,9 +1330,9 @@
     display: inline-block;
   }
   /* display top-level .math-display as block */
-  :global(.item > span.math-display) {
+  /* :global(.item > span.math-display) {
     display: block;
-  }
+  } */
   :global(.item hr) {
     background: transparent;
     border: 0;
