@@ -98,11 +98,9 @@
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
-        // (also stay on same column if item is being edited, to minimize disruption)
         const lastColumn = lastItem.column;
         const minColumnHeight = Math.min(...columnHeights);
         if (
-          item.editing ||
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
           columnHeights[lastColumn] + item.outerHeight + 40 <=
             minColumnHeight + 0.9 * outerHeight
@@ -932,7 +930,13 @@
     item.height = height;
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
-    if (height == 0 || prevHeight == 0 || height != prevHeight) {
+    if (
+      height == 0 ||
+      prevHeight == 0 ||
+      height != prevHeight
+      // height < 0.5 * prevHeight ||
+      // height > prevHeight + 100
+    ) {
       if (!layoutPending) {
         layoutPending = true;
         setTimeout(() => {
@@ -2668,16 +2672,16 @@
     padding-right: 8px;
   }
   .section-separator {
-    height: 33px; /* 4 full dashes on left border, 40px offsetHeigt is assumed during layout */
-    margin-top: 2px;
-    margin-bottom: 5px;
-    padding-top: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px; /* 40px offset height assumed by column layout */
     color: #444; /* same as time indicators */
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
-    text-align: center;
   }
   .section-separator .arrows {
+    margin-bottom: 5px; /* aligns better w/ surrounding text */
     font-family: monospace;
     font-size: 20px;
   }
@@ -2689,8 +2693,7 @@
     border-top: 2px solid #444;
     height: 1px; /* disappears if both height and border are 0 */
     width: 25%;
-    margin-right: 15px;
-    margin-left: 11px;
+    margin: 0 15px;
   }
 
   /* allow time strings to overlap preceding section separators */
@@ -2834,9 +2837,9 @@
           {#if item.nextColumn >= 0}
             <div class="section-separator">
               <hr />
-              {item.index + 2}<span class="arrows"> {item.arrows} </span>
-              &nbsp;
-              {#if item.nextItemInColumn >= 0}
+              {item.index + 2}<span
+                class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
+                &nbsp;
                 {item.nextItemInColumn + 1}<span class="arrows">↓</span>
               {/if}
               <hr />
