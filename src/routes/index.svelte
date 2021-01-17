@@ -427,7 +427,7 @@
   }
 
   function onPopState(e) {
-    readonly = !location.href.endsWith("#__anonymous");
+    readonly = anonymous && !location.href.endsWith("#__anonymous");
     if (!e?.state) return; // for fragment (#id) hrefs
     editorText = e.state.editorText || "";
     onEditorChange(editorText);
@@ -2444,7 +2444,7 @@
         })(console[verb].bind(console), verb);
       });
       anonymous = user?.uid == "anonymous";
-      readonly = !location.href.endsWith("#__anonymous");
+      readonly = anonymous && !location.href.endsWith("#__anonymous");
       if (anonymous) console.log("user is anonymous");
 
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
