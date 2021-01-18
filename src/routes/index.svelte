@@ -1293,7 +1293,7 @@
     items[index].time = Date.now();
     saveItem(items[index].id);
     editorBlurTime = 0; // prevent re-focus on editor
-    onEditorChange(editorText); // item time has changed
+    onEditorChange((editorText = "")); // item time has changed, and editor cleared
   }
 
   function editItem(index: number) {

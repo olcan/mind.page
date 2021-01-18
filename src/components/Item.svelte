@@ -192,6 +192,7 @@
     }
     // console.debug("toHTML");
 
+    const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : "";
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
     matchingTermsSecondary = new Set<string>(
       matchingTermsSecondary.split(" ").filter((t) => t)
@@ -376,15 +377,24 @@
                 tag.substring(0, label.length) == labelText
                   ? "#" + tag.substring(label.length)
                   : tag;
-              // shorted selected labels
+              // shorten selected labels
               if (
-                label.indexOf("/") >= 0 &&
                 lctag == label &&
+                label.indexOf("/") >= 0 &&
                 labelUnique &&
                 (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag))
               )
-                reltag = "#/" + tag.substring(tag.lastIndexOf("/"));
-              return `${pfx}<mark${classNames} onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
+                reltag = "#…" + tag.substring(tag.lastIndexOf("/"));
+              // shorten prefix-matching labels
+              if (
+                lctag == label &&
+                label.indexOf("/") >= 0 &&
+                label.length > firstTerm.length &&
+                label[firstTerm.length] == "/" &&
+                label.substring(0, firstTerm.length) == firstTerm
+              )
+                reltag = "#…" + tag.substring(firstTerm.length);
+              return `${pfx}<mark${classNames} title="${tag}" onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
             });
         }
         // replace URLs (except in lines that look like a reference-style link)
@@ -686,15 +696,26 @@
         }
       );
       while (treeWalker.nextNode()) {
-        let node = treeWalker.currentNode;
+        const node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
-        let parent = node.parentNode;
+        const parent = node.parentNode;
         let text = node.nodeValue;
-        let m;
         let regex = new RegExp(
           `^(.*?)(${terms.map(regexEscape).join("|")})`,
           "si"
         );
+        // if we are highlighting inside a non-selected tag, then we expand the regex to include #… which can be used to shorten prefix-matching labels
+        if (
+          node.parentElement.tagName == "MARK" &&
+          !node.parentElement.classList.contains("selected") &&
+          !node.parentElement.classList.contains("secondary-selected")
+        ) {
+          regex = new RegExp(
+            `^(.*?)(${terms.concat("#…").map(regexEscape).join("|")})`,
+            "si"
+          );
+        }
+        let m;
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
           parent.insertBefore(document.createTextNode(m[1]), node);
