@@ -432,7 +432,8 @@
           .replace(/(^|[^\\])\$id/g, "$1" + id)
           .replace(/(^|[^\\])\$hash/g, "$1" + hash)
           .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
-          .replace(/(^|[^\\])\$pos/g, "$1" + cacheIndex++) // same cacheIndex for whole _html block
+          .replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex) // same cacheIndex for whole _html block
+          .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`)
           .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
     );
 
@@ -458,7 +459,11 @@
         out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
         out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        out = out.replace(/(^|[^\\])\$pos/g, "$1" + cacheIndex++); // same cacheIndex for whole macro
+        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro
+        out = out.replace(
+          /(^|[^\\])\$cid/g,
+          "$1" + `${id}-${deephash}-${cacheIndex}`
+        );
         return out;
       } catch (e) {
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
