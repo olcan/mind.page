@@ -1138,7 +1138,7 @@
     word-wrap: break-word;
     font-family: Avenir Next, Helvetica;
     font-size: 18px;
-    line-height: 26px;
+    line-height: 28px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   }
@@ -1252,11 +1252,15 @@
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
     font-size: 15px;
-    line-height: 24px;
+    line-height: 26px;
+    margin-top: 4px;
+  }
+  :global(.item pre:first-child) {
+    margin-top: 0;
   }
   :global(.item code) {
     font-size: 15px;
-    line-height: 24px;
+    line-height: 26px;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1267,6 +1271,14 @@
     background: none;
     padding: 0;
     border-radius: 0;
+  }
+  :global(.item pre > code) {
+    display: block;
+    /* background: #171717; */
+    /* border-radius: 4px; */
+    padding: 2px 5px;
+    margin: -2px -5px;
+    border-left: 1px solid #333;
   }
   :global(.item a) {
     color: #79e;
@@ -1287,7 +1299,7 @@
   /* .menu styling: paragraphs become flex boxes */
   :global(.item .menu p) {
     display: flex;
-    line-height: 24px; /* match image height */
+    line-height: 26px; /* match image height */
     width: 95%; /* leave some extra space for editing and item count/index indicators */
   }
   :global(.item .menu a),
@@ -1390,12 +1402,9 @@
 
   :global(.item ._log) {
     display: none; /* toggled via .showLogs class */
-    border-radius: 0 4px 4px 0;
-    border-left: 0;
-    padding: 4px 0;
     opacity: 0.75;
     font-size: 80%;
-    line-height: 150%;
+    line-height: 160%;
   }
   :global(.container.showLogs .item ._log) {
     display: block;
@@ -1552,7 +1561,7 @@
   @media only screen and (max-width: 600px) {
     .item {
       font-size: 16px;
-      line-height: 23px;
+      line-height: 25px;
     }
     .time {
       font-size: 14px;
@@ -1560,7 +1569,7 @@
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
       font-size: 13px;
-      line-height: 21px;
+      line-height: 23px;
     }
   }
 </style>
