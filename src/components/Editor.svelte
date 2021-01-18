@@ -587,7 +587,7 @@
   textarea {
     font-family: monospace;
     font-size: 15px;
-    line-height: 26px;
+    line-height: 24px;
   }
   .backdrop {
     /* color: transparent; */
@@ -678,7 +678,7 @@
     .backdrop,
     textarea {
       font-size: 13px;
-      line-height: 25px;
+      line-height: 23px;
     }
   }
 </style>

@@ -1252,7 +1252,7 @@
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
     font-size: 15px;
-    line-height: 26px;
+    line-height: 24px;
     margin-top: 4px;
   }
   :global(.item pre:first-child) {
@@ -1260,7 +1260,7 @@
   }
   :global(.item code) {
     font-size: 15px;
-    line-height: 26px;
+    line-height: 24px;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
