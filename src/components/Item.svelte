@@ -432,6 +432,7 @@
           .replace(/(^|[^\\])\$id/g, "$1" + id)
           .replace(/(^|[^\\])\$hash/g, "$1" + hash)
           .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
+          .replace(/(^|[^\\])\$pos/g, "$1" + cacheIndex++) // same cacheIndex for whole _html block
           .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
     );
 
@@ -457,6 +458,7 @@
         out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
         out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        out = out.replace(/(^|[^\\])\$pos/g, "$1" + cacheIndex++); // same cacheIndex for whole macro
         return out;
       } catch (e) {
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
@@ -503,7 +505,7 @@
       );
     });
 
-    // process divs with item-unique id to add _cache_key="<id>-$deephash" automatically
+    // process divs with item-unique id to add _cache_key="<id>-$deephash-$pos" automatically
     text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
         console.warn(
@@ -1387,6 +1389,7 @@
   :global(.item img) {
     max-width: 100%;
     max-height: 100%;
+    vertical-align: middle;
   }
   /* set default size/padding of loading images */
   :global(.item img[src$="loading.gif"]) {

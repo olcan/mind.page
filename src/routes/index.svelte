@@ -209,14 +209,9 @@
     }
 
     text = text.toLowerCase().trim();
-    let terms = [
-      ...new Set(
-        text
-          .split(/\s+/)
-          // .concat(text.split(/[.,!$%\^&\*;:{}=\-`~()]/))
-          .concat(parseTags(text).all)
-      ),
-    ].filter((t) => t);
+    let terms = _.uniq(
+      text.split(/\s+/).concat(parseTags(text).all) //.concat(text.split(/\W+/))
+    ).filter((t) => t);
     // if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsSecondary
@@ -266,17 +261,16 @@
           .concat(item.label);
       }
 
-      // match non-tag terms (anywhere in text)
-      item.matchingTerms = terms.filter(
-        (t) => t[0] != "#" && item.lctext.indexOf(t) >= 0
-      );
       // match tags against item tags, allowing prefix matches
-      item.matchingTerms = item.matchingTerms.concat(
-        terms.filter(
-          (t) =>
-            t[0] == "#" && item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
-        )
+      item.matchingTerms = terms.filter(
+        (t) =>
+          t[0] == "#" && item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
       );
+      // match non-tag terms (anywhere in text)
+      item.matchingTerms = item.matchingTerms.concat(
+        terms.filter((t) => t[0] != "#" && item.lctext.indexOf(t) >= 0)
+      );
+
       // match regex:* terms
       item.matchingTerms = item.matchingTerms.concat(
         terms.filter(
