@@ -585,6 +585,7 @@
       .typesetPromise(elems)
       .then(() => {
         const itemdiv = elems[0].closest(".item");
+        if (!itemdiv) return;
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv
           .querySelectorAll(".MathJax")
