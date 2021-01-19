@@ -2719,7 +2719,7 @@
   }
 </style>
 
-{#if !user}
+{#if !user || !initTime}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
