@@ -1011,11 +1011,13 @@
       item.deps.map((id) => items[indexFromId.get(id)].async).includes(true)
     )
       evaljs = [
-        "(async function() {",
+        "(async function(done) {",
         "await _running()",
         jsin,
-        `await _done('${item.id}')`,
-        "})()",
+        "})(function(output) {",
+        `  _write('${item.id}', output)`,
+        `  _done('${item.id}')`,
+        "})",
       ].join("\n");
     if (lastRunText)
       lastRunText = appendBlock(
