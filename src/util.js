@@ -90,7 +90,8 @@ export function highlight(code, language) {
       )
       .join("\n");
   }
-  if (language.match(/^_html(_|$)/)) language = "html";
+  if (language.match(/^_?html(_|$)/)) language = "html";
+  if (language.match(/^_?js(_|$)/)) language = "js";
   // if (language.startsWith("_math")) language = "math"; // editor-only
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;

@@ -83,13 +83,8 @@
     Object.values(window["_elem_cache"]).filter((elem: HTMLElement) => {
       if (elem.getAttribute("_item") == id) {
         delete window["_elem_cache"][elem.getAttribute("_cache_key")];
-        // destroy any c3 charts inside element
-        elem.querySelectorAll(".c3").forEach((div) => {
-          if (div["_chart"]) {
-            div["_chart"].destroy();
-            delete div["_chart"];
-          }
-        });
+        // destroy all children w/ _destroy attribute (and property)
+        elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
       }
     });
   }
@@ -107,16 +102,9 @@
     // ignore clicks on loading div
     if ((e.target as HTMLElement).closest(".loading")) return;
     // console.debug(e.target);
-    // ignore (most) clicks inside c3 charts
-    if (
-      (e.target as HTMLElement).closest(
-        ".c3-legend-item-event,.c3-event-rect" // bars can be too small
-      ) ||
-      ((e.target as HTMLElement).closest(".c3") &&
-        (e.target as HTMLElement).style.cursor == "pointer") // click on bars/etc
-    ) {
-      return;
-    }
+    // ignore clicks on "clickable" elements
+    let clickable = e.target.closest("[_clickable]");
+    if (clickable && clickable["_clickable"](e)) return true;
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
     onEditing(index, (editing = true));
@@ -571,16 +559,8 @@
         // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
         elem.replaceWith(window["_elem_cache"][key]);
         elem = window["_elem_cache"][key];
-        // fix any zero-width c3 charts inside element
-        // (can be reset to zero when removed from dom)
-        itemdiv.querySelectorAll(".c3 > svg").forEach((svg) => {
-          if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
-            svg.parentElement["_chart"].resize();
-        });
-        // resize/refresh any c3 charts inside element
-        elem.querySelectorAll(".c3").forEach((div) => {
-          if (div["_chart"]) div["_chart"].resize();
-        });
+        // resize all children w/ _resize attribute (and property)
+        elem.querySelectorAll("[_resize]").forEach((e) => e["_resize"]());
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
@@ -640,12 +620,8 @@
       matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       // console.debug("afterUpdate skipped");
-      // fix any zero-width c3 charts inside element
-      // (can be reset to zero during editing if main window loses focus)
-      itemdiv.querySelectorAll(".c3 > svg").forEach((svg) => {
-        if (svg.getAttribute("width") == "0" && svg.parentElement["_chart"])
-          svg.parentElement["_chart"].resize();
-      });
+      // update all children w/ _update attribute (and property)
+      itemdiv.querySelectorAll("[_update]").forEach((e) => e["_update"]());
       return;
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
@@ -914,75 +890,68 @@
         // if no errors, cache elems with _cache_key that had scripts in them
         if (scriptErrors.length > 0) return;
         cacheElems();
-        // render new math inside dot graph nodes that may have been rendered by the script
-        itemdiv.querySelectorAll(".dot").forEach((dot) => {
-          dot["_dotrendered"] = function () {
-            // render "stack" clusters (subgraphs)
-            dot.querySelectorAll(".cluster.stack").forEach((cluster) => {
-              let path = cluster.children[1]; // first child is title
-              (path as HTMLElement).setAttribute("fill", "#111");
-              let path2 = path.cloneNode();
-              (path2 as HTMLElement).setAttribute(
-                "transform",
-                "translate(-3,3)"
-              );
-              (path2 as HTMLElement).setAttribute("opacity", "0.75");
-              cluster.insertBefore(path2, path);
-              let path3 = path.cloneNode();
-              (path3 as HTMLElement).setAttribute(
-                "transform",
-                "translate(-6,6)"
-              );
-              (path3 as HTMLElement).setAttribute("opacity", "0.5");
-              cluster.insertBefore(path3, path2);
-            });
 
-            // render math in text nodes
-            let math = [];
-            dot.querySelectorAll("text").forEach((text) => {
-              if (text.textContent.match(/^\$.+\$$/)) {
-                text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
-                math.push(text);
-              }
-            });
-            renderMath(math, function () {
-              dot
-                .querySelectorAll(".node > text > .MathJax > svg > *")
-                .forEach((elem) => {
-                  let math = elem as SVGGraphicsElement;
-                  let dot = elem.parentNode.parentNode.parentNode.parentNode;
-                  // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
-                  let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
-                  let text = dot.children[dot.children.length - 1]; // text is last child
-                  let shaperect = shape.getBBox();
-                  let textrect = text["_bbox"]; // recover text bbox pre-mathjax
-                  let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
-                  elem.parentElement.parentElement.parentElement.remove(); // remove text node
-                  dot.appendChild(elem);
-                  let mathrect = math.getBBox();
-                  let scale =
-                    (0.6 * textscale * shaperect.height) / mathrect.height;
-                  let xt0 = -mathrect.x;
-                  let yt0 = -mathrect.y;
-                  let xt =
-                    shaperect.x +
-                    shaperect.width / 2 -
-                    (mathrect.width * scale) / 2;
-                  let yt =
-                    shaperect.y +
-                    shaperect.height / 2 +
-                    (mathrect.height * scale) / 2;
-                  elem.setAttribute(
-                    "transform",
-                    `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
-                  );
-                });
-            });
-          };
-        });
+        // if element contains dot graphs, they may trigger window._dot_rendered, defined below
       });
-    }, 0);
+    });
   });
+
+  if (!window["_dot_rendered"]) {
+    window["_dot_rendered"] = function (dot) {
+      // render "stack" clusters (subgraphs)
+      dot.querySelectorAll(".cluster.stack").forEach((cluster) => {
+        let path = cluster.children[1]; // first child is title
+        (path as HTMLElement).setAttribute("fill", "#111");
+        let path2 = path.cloneNode();
+        (path2 as HTMLElement).setAttribute("transform", "translate(-3,3)");
+        (path2 as HTMLElement).setAttribute("opacity", "0.75");
+        cluster.insertBefore(path2, path);
+        let path3 = path.cloneNode();
+        (path3 as HTMLElement).setAttribute("transform", "translate(-6,6)");
+        (path3 as HTMLElement).setAttribute("opacity", "0.5");
+        cluster.insertBefore(path3, path2);
+      });
+
+      // render math in text nodes
+      let math = [];
+      dot.querySelectorAll("text").forEach((text) => {
+        if (text.textContent.match(/^\$.+\$$/)) {
+          text["_bbox"] = (text as SVGGraphicsElement).getBBox(); // needed below
+          math.push(text);
+        }
+      });
+      renderMath(math, function () {
+        dot
+          .querySelectorAll(".node > text > .MathJax > svg > *")
+          .forEach((elem) => {
+            let math = elem as SVGGraphicsElement;
+            let dot = elem.parentNode.parentNode.parentNode.parentNode;
+            // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
+            let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+            let text = dot.children[dot.children.length - 1]; // text is last child
+            let shaperect = shape.getBBox();
+            let textrect = text["_bbox"]; // recover text bbox pre-mathjax
+            let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
+            elem.parentElement.parentElement.parentElement.remove(); // remove text node
+            dot.appendChild(elem);
+            let mathrect = math.getBBox();
+            let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
+            let xt0 = -mathrect.x;
+            let yt0 = -mathrect.y;
+            let xt =
+              shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
+            let yt =
+              shaperect.y +
+              shaperect.height / 2 +
+              (mathrect.height * scale) / 2;
+            elem.setAttribute(
+              "transform",
+              `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
+            );
+          });
+      });
+    };
+  }
 </script>
 
 <style>
@@ -1469,100 +1438,6 @@
 
   :global(.item blockquote .MathJax) {
     display: block;
-  }
-  :global(.item .c3) {
-    /* background: #0a0a0a; */
-    background: #171717;
-    border-radius: 4px;
-  }
-  :global(.item > .c3:not(:first-child)) {
-    margin-top: 4px;
-  }
-  :global(.item > .c3:not(:last-child)) {
-    margin-bottom: 4px;
-  }
-
-  /* NOTE: c3 styles are modifications to https://github.com/c3js/c3/blob/master/c3.css */
-  :global(path.domain) {
-    stroke: gray;
-  }
-  :global(.tick line),
-  :global(.tick text) {
-    stroke: gray;
-  }
-  :global(.c3-legend-item text) {
-    stroke: gray;
-  }
-  :global(.c3-tooltip) {
-    -webkit-box-shadow: none;
-    -moz-box-shadow: none;
-    box-shadow: none;
-  }
-  :global(.c3-tooltip th),
-  :global(.c3-tooltip tr),
-  :global(.c3-tooltip td) {
-    background-color: #999;
-    border: 1px solid #444;
-    color: black;
-    font-weight: 600;
-  }
-  :global(.c3-tooltip th) {
-    font-weight: 700;
-  }
-  :global(.c3-grid) {
-    opacity: 0.5;
-  }
-  :global(.c3 text) {
-    fill: gray;
-    stroke: none;
-    font-size: 14px;
-    font-family: Avenir Next, Helvetica;
-  }
-  :global(.c3-line) {
-    stroke-width: 3px;
-  }
-
-  /* fix an annoying alignment issue where x axis line does not align with bottom tick of y axis */
-  :global(.c3-axis-x .domain),
-  :global(.c3-axis-x .tick line) {
-    transform: translate(0, 0.5pt);
-  }
-
-  /* move data labels up on un-rotated charts to accommodate larger point radius */
-  :global(.c3:not(.c3-rotated) .c3-text) {
-    transform: translate(0, -5px);
-  }
-
-  /* rotated chart text adjustments for pixel-perfect alignment with Avenir Next fonts */
-  :global(.c3-rotated .c3-axis-x) {
-    transform: translate(0, 1px);
-  }
-  :global(.c3-rotated .c3-texts .c3-text) {
-    transform: translate(0, -1px);
-  }
-
-  :global(.c3-barchart .c3-axis-x .tick line) {
-    display: none;
-  }
-
-  :global(.c3-barchart .c3-axis-x .domain) {
-    display: none;
-  }
-
-  /* NOTE: global CSS for graphviz are not defaults but forced values due to low priority of dot/svg attributes */
-  :global(.dot > svg) {
-    display: block;
-    height: 100%;
-    width: auto;
-    max-width: 100%;
-    margin: auto;
-  }
-  :global(.dot) {
-    padding: 5px 0;
-    width: fit-content; /* left-aligns graph assuming it has width:auto */
-  }
-  :global(.dot .graph text) {
-    stroke: none !important;
   }
 
   /* adapt to smaller windows/devices */

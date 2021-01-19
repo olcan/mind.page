@@ -12,6 +12,7 @@
   import { Circle2 } from "svelte-loading-spinners";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
+  import { tick } from "svelte";
   export let items = [];
   export let error = null;
   let user = null;
@@ -303,6 +304,9 @@
           t != item.label &&
           t != "#log" &&
           t != "#menu" &&
+          t != "#debug" &&
+          t != "#init" &&
+          t != "#async" &&
           !t.match(/^#pin(?:\/|$)/) &&
           !t.match(/\/pin(?:\/|$)/) &&
           (tagCounts.get(t) || 0) <= 1
@@ -479,6 +483,8 @@
     item.tagsVisible = tags.visible;
     item.log = item.tags.indexOf("#log") >= 0;
     item.debug = item.tags.indexOf("#debug") >= 0;
+    item.init = item.tags.indexOf("#init") >= 0;
+    item.async = item.tags.indexOf("#async") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -992,8 +998,11 @@
     jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
     jsin = jsin.replace(/(^|[^\\])\$hash/g, "$1" + item.hash);
     jsin = jsin.replace(/(^|[^\\])\$deephash/g, "$1" + item.deephash);
-    //const evaljs = "(function(){\n" + jsin + "\n})()";
-    const evaljs = jsin;
+    // const evaljs = jsin;
+    // const evaljs = "(function(){\n" + jsin + "\n})()";
+    const evaljs = item.async
+      ? "(async function(){\nawait _running()\n" + jsin + "\n})()"
+      : jsin;
     if (lastRunText)
       lastRunText = appendBlock(
         lastRunText,
@@ -1505,8 +1514,9 @@
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
+      // dispatch evaluation of _init() on #init items
+      if (item.init) setTimeout(() => window["_eval"]("_init()", item.id));
     });
-
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
   }
@@ -1871,73 +1881,6 @@
       return a;
     }
 
-    // wrapper for c3.generate that stores a reference (_chart) on the DOM element
-    // (allows us to get a list of all charts and e.g. trigger resize on font resize (see onMount below))
-    // also sets some default options and classes (e.g. c3-labeled and c3-rotated) for custom styling
-    // also ensures element style.height matches size.height if specified (otherwise sizing is lost on window resize)
-    window["_chart"] = function (selector: string, spec: object) {
-      let rotated = spec["axis"] && spec["axis"]["rotated"];
-      let labeled = spec["data"] && spec["data"]["labels"];
-      let barchart = spec["data"] && spec["data"]["type"] == "bar";
-      let defaults = {
-        bindto: selector,
-        point: { r: 5 },
-        axis: {
-          x: {
-            show: true,
-            tick: { outer: false, multiline: false },
-            padding: 0,
-          },
-          y: {
-            show: !labeled,
-            tick: { outer: false, multiline: false },
-            padding: {
-              bottom: 10,
-              top: rotated && labeled ? 70 : labeled ? 40 : 10,
-            },
-          },
-        },
-        grid: { focus: { show: !barchart } },
-        legend: { show: false },
-      };
-      if (rotated) defaults["padding"] = { bottom: 7 };
-      spec = _.merge(defaults, spec);
-      document.querySelectorAll(selector).forEach((elem) => {
-        if (labeled) elem.classList.add("c3-labeled");
-        if (rotated) elem.classList.add("c3-rotated");
-        if (barchart) elem.classList.add("c3-barchart");
-      });
-      const chart = window["c3"].generate(spec);
-      document.querySelectorAll(selector).forEach((elem) => {
-        if (spec["size"] && spec["size"]["height"])
-          (elem as HTMLElement).style.height = spec["size"]["height"] + "px";
-        elem["_chart"] = chart;
-      });
-      return chart;
-    };
-
-    // wrapper for d3 graphviz
-    window["_dot"] = function (selector: string, dot: string) {
-      // NOTE: best way to define defaults seems to be by inserting attributes into the dot, which are turned into SVG attributes by d3 graphviz, which take lowest priority (as opposed to inline styles which would take highest, see https://stackoverflow.com/a/24294284) and can be easily modified either in the dot code or using CSS
-      const nodedefs =
-        'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",fontsize=20,shape=circle,fixedsize=true';
-      const edgedefs =
-        'color="#999999",fontcolor="#999999",fontname="Avenir Next, Helvetica",penwidth=1';
-      const graphdefs = `bgcolor=invis; color="#666666"; fontcolor="#666666"; fontname="Avenir Next, Helvetica"; fontsize=20; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;
-      const subgraphdefs = `labeljust="r"; labelloc="b"; edge[minlen=2]`;
-      dot = dot.replace(/(subgraph.*?{)/g, `$1\n${subgraphdefs};\n`);
-      dot = dot.replace(/(graph.*?{)/g, `$1\n${graphdefs};\n`);
-      window["d3"]
-        .select(selector)
-        .graphviz()
-        .zoom(false)
-        .renderDot(dot, function () {
-          const elem = document.querySelector(selector);
-          // NOTE: _dotrendered is defined automatically in Item.svelte
-          if (elem && elem["_dotrendered"]) elem["_dotrendered"]();
-        });
-    };
-
     window["_histogram"] = function (
       numbers: any,
       bins: number = 10,
@@ -2198,7 +2141,25 @@
         }
         id = evalItemId;
       }
-      return itemUpdateRunning(id, running);
+      const runStartTime = itemUpdateRunning(id, running);
+      return new Promise((resolve) => {
+        // tick() did not work to ensure the spinner is visible for cpu-intensive javascript
+        // even polling for loading indicator did not work reliably, so we leave it to calling code
+        // to introduce a delay() as needed before expensive compute
+        tick().then(() => resolve(runStartTime));
+        // var checkLoading = setInterval(function () {
+        //   const itemdiv = document.querySelector("#super-container-" + id);
+        //   const loadingdiv = itemdiv?.querySelector(".loading");
+        //   const loading =
+        //     loadingdiv != null &&
+        //     getComputedStyle(loadingdiv).visibility == "visible";
+        //   console.debug(itemdiv, running, loading);
+        //   if (!itemdiv || running == loading) {
+        //     clearInterval(checkLoading);
+        //     resolve(runStartTime);
+        //   }
+        // }, 100);
+      });
     };
 
     window["_done"] = function (
@@ -2206,9 +2167,13 @@
       log_type: string = "_log",
       log_level: number = 1
     ) {
-      const runStartTime = window["_running"](id, false);
-      if (log_type) window["_write_log"](id, runStartTime, log_level, log_type);
-      return runStartTime;
+      return new Promise((resolve) => {
+        window["_running"](id, false).then((runStartTime) => {
+          if (log_type)
+            window["_write_log"](id, runStartTime, log_level, log_type);
+          resolve(runStartTime);
+        });
+      });
     };
 
     window["_array"] = function (length: number, func) {
@@ -2231,10 +2196,10 @@
             `document width changed from ${lastDocumentWidth} to ${documentWidth}`
           );
           updateItemLayout();
-          // also trigger resize of all charts on the page ...
-          document.querySelectorAll(".c3").forEach((div) => {
-            if (div["_chart"]) div["_chart"].resize();
-          });
+          // resize of all elements w/ _resize attribute (and property)
+          document
+            .querySelectorAll("[_resize]")
+            .forEach((elem) => elem["_resize"]());
           lastDocumentWidth = documentWidth;
         }
       } else if (!resizePending) {
@@ -2504,7 +2469,7 @@
         (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
       ((e.code == "BracketLeft" || e.code == "BracketRight") && e.ctrlKey) ||
-      (e.code == "Slash" && e.ctrlKey) ||
+      (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
       e.code == "Tab" ||
       e.code == "Escape"
     ) {
