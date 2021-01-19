@@ -1001,7 +1001,10 @@
     // const evaljs = jsin;
     // const evaljs = "(function(){\n" + jsin + "\n})()";
     let evaljs = jsin;
-    if (item.async)
+    if (
+      item.async ||
+      item.deps.map((id) => items[indexFromId.get(id)].async).includes(true)
+    )
       evaljs = [
         "(async function() {",
         "await _running()",
