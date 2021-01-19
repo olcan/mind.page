@@ -991,11 +991,7 @@
   }
 
   let evalItemId;
-  function evalJSInput(
-    text: string,
-    label: string = "",
-    index: number
-  ): string {
+  function evalJSInput(text: string, label: string = "", index: number): any {
     let jsin = extractBlock(text, "js_input");
     if (jsin.length == 0) return "";
     let item = items[index];
@@ -1024,19 +1020,6 @@
       evalItemId = item.id;
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
       let out = eval(evaljs);
-      // ignore output if Promise
-      if (out instanceof Promise) out = undefined;
-      const outputConfirmLength = 16 * 1024;
-      if (out && out.length >= outputConfirmLength) {
-        if (
-          !confirm(
-            `Write ${out.length} bytes (js_output) into ${
-              item.label || `item ${item.index + 1}`
-            }?`
-          )
-        )
-          out = undefined;
-      }
       evalItemId = null;
       // automatically _write_log into item
       window["_write_log"](item.id, start);
@@ -1084,13 +1067,21 @@
       let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       if (item.debug) prefix = ""; // debug items are self-contained
-      // empty out js_output blocks
-      item.text = item.text.replace(
-        /(^|\n) *```js_output\n(?: *```|.*?\n *```) *(\n|$)/gs,
-        "$1```js_output\n```$2"
-      );
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
-      if (jsout) item.text = appendBlock(item.text, "js_output", jsout);
+      // ignore output if Promise
+      if (jsout instanceof Promise) jsout = undefined;
+      const outputConfirmLength = 16 * 1024;
+      if (jsout && jsout.length >= outputConfirmLength) {
+        if (
+          !confirm(
+            `Write ${jsout.length} bytes (_output) into ${
+              item.label || `item ${item.index + 1}`
+            }?`
+          )
+        )
+          jsout = undefined;
+      }
+      if (jsout) item.text = appendBlock(item.text, "_output", jsout);
       // NOTE: index can change during JS eval due to _writes
       itemTextChanged(indexFromId.get(item.id), item.text);
     }
