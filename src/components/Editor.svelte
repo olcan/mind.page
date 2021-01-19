@@ -43,7 +43,7 @@
   let highlightOther = (text) => {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> will not highlight the second tag
     return text.replace(
-      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|&gt;)/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|[\w"']&gt;)/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
@@ -81,7 +81,7 @@
             highlight(unescapeHTML(content), "css") +
             highlight(unescapeHTML(end), "html")
           );
-        else if (begin.match(/&lt;\/?\w/) && end.match(/&gt;/))
+        else if (begin.match(/&lt;\/?\w/) && end.match(/[\w"']&gt;/))
           return pfx + highlight(unescapeHTML(begin + content + end), "html");
         else return m;
       }

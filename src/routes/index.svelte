@@ -1764,7 +1764,7 @@
         Object.assign({ include_deps: true, replace_$id: true }, options)
       );
       let evaljs = prefix + "\n" + code;
-      const index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
+      let index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
       lastEvalText = appendBlock(
         index != undefined
           ? `\`_eval\` invoked from ${
@@ -1774,6 +1774,14 @@
         "js_input",
         addLineNumbers(evaljs)
       );
+      // set up evalItemId if possible (not a recursive call from script or js_input)
+      index = indicesForItem(item)[0]; // index of specified (eval) item or undefined
+      if (!evalItemId && !window["_script_item_id"] && index != undefined) {
+        evalItemId = items[index].id;
+        const out = eval(evaljs);
+        evalItemId = null;
+        return out;
+      }
       return eval(evaljs);
     };
 

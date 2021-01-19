@@ -315,17 +315,17 @@
         if (
           !insideBlock &&
           !str.match(
-            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
+            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<[^<]|^\s*>|^\s*\|/
           )
         )
           str = str + "<br>\n";
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```|^\s*<[^<]/)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<[^<]/)) {
           // wrap math inside span.math (unless text matches search terms)
           if (
             matchingTerms.size == 0 ||
@@ -441,13 +441,21 @@
     // evaluate inline <<macros>>
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
       try {
+        js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
+        js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
+        js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
+        js = js.replace(
+          /(^|[^\\])\$cid/g,
+          "$1" + `${id}-${deephash}-${cacheIndex}`
+        );
         let out = pfx + window["_eval"](js, id);
         // console.debug("macro output: ", out);
         // plug in $id/etc just like _html blocks
         out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
         out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro
+        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
         out = out.replace(
           /(^|[^\\])\$cid/g,
           "$1" + `${id}-${deephash}-${cacheIndex}`
