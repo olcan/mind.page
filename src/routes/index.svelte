@@ -979,11 +979,15 @@
     // console.debug("itemUpdateRunning", id, running);
     if (items[index].running != running) {
       items[index].running = running;
-      if (running) items[index].runStartTime = Date.now();
-      else itemShowLogs(id);
+      if (running) {
+        items[index].runStartTime = Date.now();
+        items[index].runEndTime = 0;
+      } else {
+        items[index].runEndTime = Date.now();
+        itemShowLogs(id);
+      }
     }
     items[index] = items[index]; // trigger dom update
-    return items[index].runStartTime;
   }
 
   let evalItemId;
@@ -1000,9 +1004,15 @@
     jsin = jsin.replace(/(^|[^\\])\$deephash/g, "$1" + item.deephash);
     // const evaljs = jsin;
     // const evaljs = "(function(){\n" + jsin + "\n})()";
-    const evaljs = item.async
-      ? "(async function(){\nawait _running()\n" + jsin + "\n})()"
-      : jsin;
+    let evaljs = jsin;
+    if (item.async)
+      evaljs = [
+        "(async function() {",
+        "await _running()",
+        jsin,
+        `await _done('${item.id}')`,
+        "})()",
+      ].join("\n");
     if (lastRunText)
       lastRunText = appendBlock(
         lastRunText,
@@ -2149,24 +2159,15 @@
         }
         id = evalItemId;
       }
-      const runStartTime = itemUpdateRunning(id, running);
-      return new Promise((resolve) => {
-        // tick() did not work to ensure the spinner is visible for cpu-intensive javascript
-        // even polling for loading indicator did not work reliably, so we leave it to calling code
-        // to introduce a delay() as needed before expensive compute
-        tick().then(() => resolve(runStartTime));
-        // var checkLoading = setInterval(function () {
-        //   const itemdiv = document.querySelector("#super-container-" + id);
-        //   const loadingdiv = itemdiv?.querySelector(".loading");
-        //   const loading =
-        //     loadingdiv != null &&
-        //     getComputedStyle(loadingdiv).visibility == "visible";
-        //   console.debug(itemdiv, running, loading);
-        //   if (!itemdiv || running == loading) {
-        //     clearInterval(checkLoading);
-        //     resolve(runStartTime);
-        //   }
-        // }, 100);
+      const index = indexFromId.get(id);
+      if (index == undefined) return Promise.resolve(); // ignore missing
+      if (items[index].running == running) return Promise.resolve(); // no change
+      itemUpdateRunning(id, running);
+      return new Promise<void>((resolve) => {
+        const index = indexFromId.get(id);
+        if (index == undefined) return;
+        // NOTE: tick() did not work to ensure the spinner is visible for cpu-intensive javascript. even polling for loading indicator did not work reliably, so we are forced to leave it to calling code to introduce a delay() as needed before expensive compute
+        tick().then(() => resolve());
       });
     };
 
@@ -2175,11 +2176,24 @@
       log_type: string = "_log",
       log_level: number = 1
     ) {
-      return new Promise((resolve) => {
-        window["_running"](id, false).then((runStartTime) => {
+      const index = indexFromId.get(id);
+      if (index == undefined) return Promise.resolve(); // ignore missing
+      if (!items[index].running) return Promise.resolve(); // ignore not running
+      if (items[index].donePending) return Promise.resolve(); // duplicate _done
+      items[index].donePending = true;
+      return new Promise<void>((resolve) => {
+        window["_running"](id, false).then(() => {
+          const index = indexFromId.get(id);
+          if (index == undefined) return;
+          delete items[index].donePending;
           if (log_type)
-            window["_write_log"](id, runStartTime, log_level, log_type);
-          resolve(runStartTime);
+            window["_write_log"](
+              id,
+              items[index].runStartTime,
+              log_level,
+              log_type
+            );
+          resolve();
         });
       });
     };
