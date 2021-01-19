@@ -167,6 +167,18 @@
     }
   }
 
+  function isSpecialTag(tag) {
+    return (
+      tag == "#log" ||
+      tag == "#menu" ||
+      tag == "#debug" ||
+      tag == "#init" ||
+      tag == "#async" ||
+      tag.match(/^#pin(?:\/|$)/) ||
+      tag.match(/\/pin(?:\/|$)/)
+    );
+  }
+
   function stableSort(array, compare) {
     return array
       .map((item, index) => ({ item, index }))
@@ -301,15 +313,7 @@
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       item.missingTags = item.tags.filter(
         (t) =>
-          t != item.label &&
-          t != "#log" &&
-          t != "#menu" &&
-          t != "#debug" &&
-          t != "#init" &&
-          t != "#async" &&
-          !t.match(/^#pin(?:\/|$)/) &&
-          !t.match(/\/pin(?:\/|$)/) &&
-          (tagCounts.get(t) || 0) <= 1
+          t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1
       );
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
@@ -456,6 +460,7 @@
     deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
     item.tags.forEach((tag) => {
       if (tag == item.label) return;
+      if (isSpecialTag(tag)) return;
       if (!idsFromLabel.has(tag)) return;
       const ids = idsFromLabel.get(tag);
       if (ids.length > 1) return; // only unique labels can have dependents
@@ -1067,9 +1072,10 @@
       lastRunText = item.text;
       // execute JS code, including any 'js' blocks from this and any tag-referenced items
       // NOTE: js_input blocks are assumed "local", i.e. not intended for export
-      let prefix = window["_read_deep"]("js", item.id, { replace_$id: true });
+      let prefix = item.debug
+        ? "" // #debug items are assumed self-contained if they are run
+        : window["_read_deep"]("js", item.id, { replace_$id: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
-      if (item.debug) prefix = ""; // debug items are self-contained
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
       // ignore output if Promise
       if (jsout instanceof Promise) jsout = undefined;
@@ -1518,8 +1524,11 @@
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
-      // dispatch evaluation of _init() on #init items
-      if (item.init) setTimeout(() => window["_eval"]("_init()", item.id));
+      // dispatch evaluation of _init() on #init items, excluding dependencies
+      if (item.init)
+        setTimeout(() =>
+          window["_eval"]("_init()", item.id, { include_deps: false })
+        );
     });
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
