@@ -325,17 +325,17 @@
         if (
           !insideBlock &&
           !str.match(
-            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<[^<]|^\s*>|^\s*\|/
+            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
           )
         )
           str = str + "<br>\n";
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^\s*<[^<]/)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*<[^<]/)) {
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
           // wrap math inside span.math (unless text matches search terms)
           if (
             matchingTerms.size == 0 ||
