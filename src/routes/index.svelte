@@ -1225,11 +1225,14 @@
           time: item.savedTime,
           text: item.savedText,
         }); // for /undelete
-        firestore()
-          .collection(readonly ? "items-tmp" : "items")
-          .doc(item.savedId)
-          .delete()
-          .catch(console.error);
+        // we can skip delete if read-only and item not created under items-tmp
+        if (!readonly || tempIdFromSavedId.get(item.savedId)) {
+          firestore()
+            .collection(readonly ? "items-tmp" : "items")
+            .doc(item.savedId)
+            .delete()
+            .catch(console.error);
+        }
       } else {
         itemTextChanged(index, item.text);
         // clear _output and execute javascript unless cancelled
