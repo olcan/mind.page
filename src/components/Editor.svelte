@@ -392,7 +392,8 @@
       prefix.match(/ *[-*+ ] $/)[0].length % 2 == 0
     ) {
       textarea.selectionStart = textarea.selectionStart - 2;
-      document.execCommand("delete", false);
+      // NOTE: forwardDelete seems to behave better on iOS, as "delete" can sometimes cause an additional whitespace to be deleted (e.g. move back to upper bullet in bullet list) for unknown reasons (even only it is not contained in the selection if we comment out the delete)
+      document.execCommand("forwardDelete");
       e.preventDefault();
       onInput();
       return;
@@ -419,7 +420,7 @@
     // clear item (from current position to start) with shift-backspace
     if (e.code == "Backspace" && e.shiftKey) {
       textarea.selectionStart = 0;
-      document.execCommand("delete", false);
+      document.execCommand("forwardDelete");
       e.preventDefault();
       onInput();
       return;
@@ -447,7 +448,7 @@
         ) == "  "
       ) {
         textarea.selectionStart = textarea.selectionStart - 2;
-        document.execCommand("delete", false);
+        document.execCommand("forwardDelete");
       }
       onInput();
       return;
