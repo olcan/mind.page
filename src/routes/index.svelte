@@ -343,7 +343,7 @@
         ),
         final: editorText.trim() == lastClickedTag, // tag clicked states are final
       };
-      console.debug(history.state.final ? "push" : "replace", state);
+      // console.debug(history.state.final ? "push" : "replace", state);
       if (history.state.final) history.pushState(state, editorText);
       else history.replaceState(state, editorText);
     }
@@ -462,7 +462,7 @@
   function onPopState(e) {
     readonly = anonymous && !location.href.endsWith("#__anonymous");
     if (!e?.state) return; // for fragment (#id) hrefs
-    console.debug("pop", e.state);
+    // console.debug("pop", e.state);
     // restore editor text and unsaved times
     editorText = e.state.editorText;
     items.forEach((item) => (item.time = item.savedTime));
@@ -1059,7 +1059,7 @@
         `await _running('${item.id}')`,
         jsin,
         "})(function(output) {",
-        `  _write('${item.id}', output)`,
+        `  if (output) _write('${item.id}', output)`,
         `  _done('${item.id}')`,
         "})",
       ].join("\n");
@@ -1792,11 +1792,21 @@
           options["include_deps"] = false; // deps are recursive already
           item.deps
             .filter((id) => id != item.id)
-            .forEach((id) =>
+            .forEach((id) => {
+              const index = indexFromId.get(id);
+              if (index == undefined) return;
+              if (
+                options["exclude_async_deps"] &&
+                (items[index].async ||
+                  items[index].deps
+                    .map((id) => items[indexFromId.get(id)].async)
+                    .includes(true))
+              )
+                return; // exclude async dependency chain
               content.push(
                 window["_read"](options["dep_type"] || type, id, options)
-              )
-            );
+              );
+            });
         }
         let text = type ? extractBlock(item.text, type) : item.text;
         // console.debug("_read", item.label, item.text, text);
@@ -1826,7 +1836,10 @@
       let prefix = window["_read_deep"](
         "js",
         item,
-        Object.assign({ include_deps: true, replace_$id: true }, options)
+        Object.assign(
+          { include_deps: true, replace_$id: true, exclude_async_deps: true },
+          options
+        )
       );
       let evaljs = prefix + "\n" + code;
       let index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
@@ -1846,6 +1859,8 @@
         let out;
         try {
           out = eval(evaljs);
+        } catch (e) {
+          console.error(e);
         } finally {
           evalItemId = null;
           return out;
@@ -2273,9 +2288,9 @@
       if (Date.now() - lastScrollTime > 250) {
         const documentWidth = document.documentElement.clientWidth;
         if (documentWidth != lastDocumentWidth) {
-          console.debug(
-            `document width changed from ${lastDocumentWidth} to ${documentWidth}`
-          );
+          // console.debug(
+          //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
+          // );
           updateItemLayout();
           // resize of all elements w/ _resize attribute (and property)
           document
@@ -2314,11 +2329,11 @@
               //   )}ms w/ ${items.length} items`
               // );
               setTimeout(() => {
-                console.debug(
-                  `first snapshot done at ${Math.round(
-                    window.performance.now()
-                  )}ms w/ ${items.length} items`
-                );
+                // console.debug(
+                //   `first snapshot done at ${Math.round(
+                //     window.performance.now()
+                //   )}ms w/ ${items.length} items`
+                // );
                 if (!initTime) initialize();
                 else
                   console.debug(
@@ -2344,7 +2359,7 @@
               }
               if (doc.metadata.hasPendingWrites) return; // ignore local change
               // no need to log initial snapshot
-              console.debug("detected remote change:", change.type, doc.id);
+              // console.debug("detected remote change:", change.type, doc.id);
               if (change.type === "added") {
                 // NOTE: remote add is similar to onEditorDone without js, saving, etc
                 let item = Object.assign(doc.data(), {
@@ -2366,7 +2381,6 @@
                   tempIdFromSavedId.get(doc.id) || doc.id
                 );
                 if (index == undefined) return; // nothing to remove
-                console.debug("removing item at", index);
                 let item = items[index];
                 itemTextChanged(index, ""); // clears label, deps, etc
                 items.splice(index, 1);
@@ -2487,14 +2501,16 @@
       anonymous = user?.uid == "anonymous";
       readonly = anonymous && !location.href.endsWith("#__anonymous");
       if (anonymous) console.log("user is anonymous");
+      if (initTime)
+        console.debug(`items initialized from server at ${initTime}ms`);
 
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
       setTimeout(() => {
-        console.debug(
-          `onEditorChange invoked at ${Math.round(
-            window.performance.now()
-          )}ms w/ ${items.length} items`
-        );
+        // console.debug(
+        //   `onEditorChange invoked at ${Math.round(
+        //     window.performance.now()
+        //   )}ms w/ ${items.length} items`
+        // );
         onEditorChange("");
       });
       setInterval(tryResize, 250); // no need to destroy since page-level
