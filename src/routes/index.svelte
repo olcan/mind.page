@@ -43,6 +43,8 @@
   let columnCount = 0;
   let maxIndexToShowDefault = 50;
   let maxIndexToShow = maxIndexToShowDefault;
+  let newestTime = 0;
+  let oldestTime = Infinity;
   let oldestTimeString = "";
   function updateItemLayout() {
     // console.debug("updateItemLayout");
@@ -60,7 +62,8 @@
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
     let lastTimeString = "";
     let topMovedIndex = items.length;
-    let oldestTime = Infinity;
+    newestTime = 0;
+    oldestTime = Infinity;
     oldestTimeString = "";
 
     items.forEach((item, index) => {
@@ -77,6 +80,7 @@
         oldestTime = item.time;
         oldestTimeString = timeString;
       }
+      if (item.time > newestTime) newestTime = item.time;
 
       item.timeString = "";
       item.timeOutOfOrder = false;
@@ -387,7 +391,15 @@
     if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
-  function onTagClick(tag: string, reltag: string, e: MouseEvent) {
+  function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
+    const index = indexFromId.get(id);
+    if (index == undefined) return; // deleted
+    // "touch" item if not already newest
+    if (items[index].time > newestTime) console.warn("invalid item time");
+    else if (items[index].time < newestTime) {
+      items[index].time = Date.now();
+      saveItem(items[index].id);
+    }
     if (tag == reltag) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
@@ -1312,10 +1324,13 @@
   }
 
   function onItemTouch(index: number) {
-    items[index].time = Date.now();
-    saveItem(items[index].id);
-    editorBlurTime = 0; // prevent re-focus on editor
-    onEditorChange((editorText = "")); // item time has changed, and editor cleared
+    if (items[index].time > newestTime) console.warn("invalid item time");
+    else if (items[index].time < newestTime) {
+      items[index].time = Date.now();
+      saveItem(items[index].id);
+      editorBlurTime = 0; // prevent re-focus on editor
+      onEditorChange((editorText = "")); // item time has changed, and editor cleared
+    }
   }
 
   function editItem(index: number) {

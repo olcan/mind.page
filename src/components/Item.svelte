@@ -144,11 +144,21 @@
     onEditing(index, (editing = false), true /* cancelled */);
   }
 
-  export let onTagClick = (tag: string, reltag: string, e: MouseEvent) => {};
+  export let onTagClick = (
+    id: string,
+    tag: string,
+    reltag: string,
+    e: MouseEvent
+  ) => {};
   if (!window["handleTagClick"])
-    window["handleTagClick"] = (tag: string, reltag: string, e: MouseEvent) => {
+    window["handleTagClick"] = (
+      id: string,
+      tag: string,
+      reltag: string,
+      e: MouseEvent
+    ) => {
       e.stopPropagation();
-      onTagClick(tag, reltag, e);
+      onTagClick(id, tag, reltag, e);
     };
 
   export let onLogSummaryClick = (id: string) => {};
@@ -382,7 +392,7 @@
                 label.substring(0, firstTerm.length) == firstTerm
               )
                 reltag = "#…" + tag.substring(firstTerm.length);
-              return `${pfx}<mark${classNames} title="${tag}" onclick="handleTagClick('${tag}','${reltag}',event)">${reltag}</mark>`;
+              return `${pfx}<mark${classNames} title="${tag}" onclick="handleTagClick('${id}','${tag}','${reltag}',event)">${reltag}</mark>`;
             });
         }
         // replace URLs (except in lines that look like a reference-style link)
