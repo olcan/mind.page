@@ -470,13 +470,24 @@
           .match(/(?:^|\n) *([-*+] ).*$/);
         if (bullet) enterIndentation += bullet[1];
         if (enterIndentation) {
+          let offset = textarea.value
+            .substring(textarea.selectionEnd)
+            .match(/^[^\n]*/)[0]
+            .trimEnd().length;
+          textarea.selectionEnd += offset;
           let newlines = textarea.value.substring(
             enterStart,
             textarea.selectionEnd
           );
-          newlines = newlines.replace(/\n/g, "\n" + enterIndentation);
+          newlines = newlines.replace(/\n([^\n]*)/g, (m, sfx) => {
+            let trimmed_sfx = bullet ? sfx.replace(/^[-*+\s]*/, "") : sfx;
+            offset -= sfx.length - trimmed_sfx.length;
+            return "\n" + enterIndentation + trimmed_sfx;
+          });
           textarea.selectionStart = enterStart;
           document.execCommand("insertText", false, newlines);
+          textarea.selectionStart = textarea.selectionEnd =
+            textarea.selectionStart - offset;
           onInput();
         }
         enterStart = -1;
