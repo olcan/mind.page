@@ -245,7 +245,8 @@
     textLength = 0;
     let listing = [];
     let listingLabelPrefixes = [];
-    items.forEach((item) => {
+    let listingItemIndex = -1;
+    items.forEach((item, index) => {
       textLength += item.text.length;
 
       // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
@@ -270,6 +271,7 @@
       // detect "listing" item w/ unique label matching first term
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
       if (item.labelUnique && item.label == terms[0]) {
+        listingItemIndex = index;
         listingLabelPrefixes = item.labelPrefixes;
         listing = item.tagsVisible
           .filter((t) => t != item.label)
@@ -330,6 +332,9 @@
     items.forEach((item) => {
       if ((item.editing || item.running) && !item.log) item.time = now;
     });
+
+    // Update time for listing item (but not save yet, a.k.a. "soft (session) touch")
+    if (listingItemIndex >= 0) items[listingItemIndex].time = Date.now();
 
     // returns position of minimum non-negative number, or -1 if none found
     function min_pos(xJ) {
