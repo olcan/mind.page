@@ -458,7 +458,9 @@
     if (deps.indexOf(item.id) >= 0) return deps;
     // NOTE: dependency order matters for hashing and potentially for code import
     deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
-    item.tags.forEach((tag) => {
+    item.tagsRaw.forEach((tag) => {
+      if (!tag.startsWith("#_")) return; // only _hidden tags are used as dependencies
+      tag = tag.replace(/^#_/, "#"); // remove underscore prefix
       if (tag == item.label) return;
       if (isSpecialTag(tag)) return;
       if (!idsFromLabel.has(tag)) return;
@@ -486,10 +488,11 @@
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
+    item.tagsRaw = tags.raw;
     item.log = item.tags.indexOf("#log") >= 0;
-    item.debug = item.tags.indexOf("#debug") >= 0;
-    item.init = item.tags.indexOf("#init") >= 0;
-    item.async = item.tags.indexOf("#async") >= 0;
+    item.debug = item.tagsRaw.indexOf("#_debug") >= 0;
+    item.init = item.tagsRaw.indexOf("#_init") >= 0;
+    item.async = item.tagsRaw.indexOf("#_async") >= 0;
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -689,7 +692,7 @@
           alert(`/debug: no runs (in this session)`);
           return;
         }
-        text = "#debug " + lastRunText;
+        text = "#_debug " + lastRunText;
         editing = true;
         break;
       }
@@ -698,7 +701,7 @@
           alert(`/debug: no _eval calls (in this session)`);
           return;
         }
-        text = "#debug " + lastEvalText;
+        text = "#_debug " + lastEvalText;
         editing = true;
         break;
       }
@@ -1075,7 +1078,7 @@
       // execute JS code, including any 'js' blocks from this and any tag-referenced items
       // NOTE: js_input blocks are assumed "local", i.e. not intended for export
       let prefix = item.debug
-        ? "" // #debug items are assumed self-contained if they are run
+        ? "" // #_debug items are assumed self-contained if they are run
         : window["_read_deep"]("js", item.id, { replace_$id: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
@@ -1526,7 +1529,7 @@
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
-      // dispatch evaluation of _init() on #init items, excluding dependencies
+      // dispatch evaluation of _init() on #_init items, excluding dependencies
       if (item.init)
         setTimeout(() =>
           window["_eval"]("_init()", item.id, { include_deps: false })
@@ -1793,9 +1796,13 @@
       index = indicesForItem(item)[0]; // index of specified (eval) item or undefined
       if (!evalItemId && !window["_script_item_id"] && index != undefined) {
         evalItemId = items[index].id;
-        const out = eval(evaljs);
-        evalItemId = null;
-        return out;
+        let out;
+        try {
+          out = eval(evaljs);
+        } finally {
+          evalItemId = null;
+          return out;
+        }
       }
       return eval(evaljs);
     };
