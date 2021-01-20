@@ -398,7 +398,8 @@
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime && !items[index].pinned) {
       items[index].time = Date.now();
-      saveItem(items[index].id);
+      // "soft (session) touch": do not save until actual edit or index touch
+      // saveItem(items[index].id);
     }
     if (tag == reltag) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
