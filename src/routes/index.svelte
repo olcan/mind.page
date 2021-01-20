@@ -197,6 +197,8 @@
   let matchingItemCount = 0;
   let textLength = 0;
   let editorChangePending = false;
+  let lastClickedTag = "";
+  let lastClickedTagItemId = "";
   function onEditorChange(text: string) {
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
     if (
@@ -217,13 +219,6 @@
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     // console.debug("onEditorChange");
     maxIndexToShow = maxIndexToShowDefault; // reset item truncation
-
-    // update history, replace unless current state is final
-    if (history.state.editorText != text) {
-      // need to update history
-      if (history.state.final) history.pushState({ editorText: text }, text);
-      else history.replaceState({ editorText: text }, text);
-    }
 
     text = text.toLowerCase().trim();
     let terms = _.uniq(
@@ -336,6 +331,24 @@
     // Update time for listing item (but not save yet, a.k.a. "soft (session) touch")
     if (listingItemIndex >= 0) items[listingItemIndex].time = Date.now();
 
+    // update history, replace unless current state is final (from tag click)
+    if (history.state.editorText != editorText) {
+      // need to update history
+      const state = {
+        editorText: editorText,
+        unsavedTimes: _.compact(
+          items.map((item) =>
+            item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null
+          )
+        ),
+        final: editorText.trim() == lastClickedTag, // tag clicked states are final
+      };
+      console.debug(history.state.final ? "push" : "replace", state);
+      if (history.state.final) history.pushState(state, editorText);
+      else history.replaceState(state, editorText);
+    }
+    lastClickedTag = lastClickedTagItemId = ""; // processed above
+
     // returns position of minimum non-negative number, or -1 if none found
     function min_pos(xJ) {
       let jmin = -1;
@@ -399,13 +412,11 @@
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
-    // "touch" item if not already newest and not pinned
+    // "soft touch" item if not already newest and not pinned
     if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime && !items[index].pinned) {
+    else if (items[index].time < newestTime && !items[index].pinned)
       items[index].time = Date.now();
-      // "soft (session) touch": do not save until actual edit or index touch
-      // saveItem(items[index].id);
-    }
+
     if (tag == reltag) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
@@ -433,9 +444,11 @@
       }
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
-    editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
-    // push new state with "final" flag so it is not modified by onEditorChange
-    history.pushState({ editorText: editorText, final: true }, editorText);
+    lastClickedTag = tag; // consumed in onEditorChange
+    lastClickedTagItemId = id;
+    // editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
+    editorText = tag + " ";
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
 
@@ -449,7 +462,16 @@
   function onPopState(e) {
     readonly = anonymous && !location.href.endsWith("#__anonymous");
     if (!e?.state) return; // for fragment (#id) hrefs
-    editorText = e.state.editorText || "";
+    console.debug("pop", e.state);
+    // restore editor text and unsaved times
+    editorText = e.state.editorText;
+    items.forEach((item) => (item.time = item.savedTime));
+    e.state.unsavedTimes.forEach((entry) => {
+      const index = indexFromId.get(entry.id);
+      if (index == undefined) return;
+      items[index].time = entry.time;
+    });
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
 
