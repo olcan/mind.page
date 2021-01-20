@@ -446,8 +446,8 @@
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
     lastClickedTag = tag; // consumed in onEditorChange
     lastClickedTagItemId = id;
-    // editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
-    editorText = tag + " ";
+    editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
+    // editorText = tag + " ";
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
