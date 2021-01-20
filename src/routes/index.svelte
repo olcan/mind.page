@@ -1010,12 +1010,13 @@
     // const evaljs = "(function(){\n" + jsin + "\n})()";
     let evaljs = jsin;
     if (
-      item.async ||
-      item.deps.map((id) => items[indexFromId.get(id)].async).includes(true)
+      !item.debug &&
+      (item.async ||
+        item.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
     )
       evaljs = [
         "(async function(done) {",
-        "await _running()",
+        `await _running('${item.id}')`,
         jsin,
         "})(function(output) {",
         `  _write('${item.id}', output)`,
