@@ -394,9 +394,9 @@
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
-    // "touch" item if not already newest
+    // "touch" item if not already newest and not pinned
     if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime) {
+    else if (items[index].time < newestTime && !items[index].pinned) {
       items[index].time = Date.now();
       saveItem(items[index].id);
     }
