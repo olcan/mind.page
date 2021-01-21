@@ -1523,7 +1523,14 @@
     return e.reason
       ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
       : e.message
-      ? `${e.message} (line:${e.lineno}, col:${e.colno})`
+      ? e.lineno
+        ? `${e.message} (line:${e.lineno}, col:${e.colno})`
+        : e.stack
+        ? `${e.message}; STACK TRACE:\n${e.stack
+            .split("\n")
+            .map((s) => "ERROR: - " + s)
+            .join("\n")}`
+        : e.message
       : undefined;
   }
 
@@ -2329,16 +2336,12 @@
               //   )}ms w/ ${items.length} items`
               // );
               setTimeout(() => {
-                // console.debug(
-                //   `first snapshot done at ${Math.round(
-                //     window.performance.now()
-                //   )}ms w/ ${items.length} items`
-                // );
+                console.debug(
+                  `${items.length} items synchronized at ${Math.round(
+                    window.performance.now()
+                  )}ms`
+                );
                 if (!initTime) initialize();
-                else
-                  console.debug(
-                    `items already initialized from server at ${initTime}ms`
-                  );
                 firstSnapshot = false;
               });
             }
@@ -2502,7 +2505,7 @@
       readonly = anonymous && !location.href.endsWith("#__anonymous");
       if (anonymous) console.log("user is anonymous");
       if (initTime)
-        console.debug(`items initialized from server at ${initTime}ms`);
+        console.debug(`${items.length} items initialized at ${initTime}ms`);
 
       // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
       setTimeout(() => {
