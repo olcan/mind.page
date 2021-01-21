@@ -1525,7 +1525,9 @@
       : e.message
       ? e.lineno
         ? `${e.message} (line:${e.lineno}, col:${e.colno})`
-        : e.stack
+        : e.line
+        ? `${e.message} (line:${e.line}, col:${e.column})`
+        : e.stack // all we seem to have is a trace, so let's dump that ...
         ? `${e.message}; STACK TRACE:\n${e.stack
             .split("\n")
             .map((s) => "ERROR: - " + s)
@@ -2662,6 +2664,7 @@
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
     user-select: auto;
+    white-space: pre-wrap;
   }
   :global(.console-debug) {
     color: #555;
