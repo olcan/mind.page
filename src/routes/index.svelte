@@ -1120,7 +1120,7 @@
       // NOTE: js_input blocks are assumed "local", i.e. not intended for export
       let prefix = item.debug
         ? "" // #_debug items are assumed self-contained if they are run
-        : window["_read_deep"]("js", item.id, { replace_$id: true });
+        : window["_read_deep"]("js", item.id, { replace_ids: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
       // ignore output if Promise
@@ -1226,13 +1226,16 @@
   ) {
     let item = items[index];
 
-    // if cancelled, restore savedTime and savedText (unless empty)
-    if (cancelled) {
-      item.time = item.savedTime;
-      if (item.text) item.text = item.savedText;
-    } else if (!item.log) {
-      // update time for non-log item
+    // update time for non-log item
+    if (!item.log) {
       item.time = Date.now();
+    }
+
+    // if cancelled, restore savedText
+    // NOTE: we do not restore time so item remains "soft touched"
+    if (cancelled) {
+      // item.time = item.savedTime;
+      item.text = item.savedText;
     }
 
     if (editing) {
@@ -1295,9 +1298,12 @@
           lastEditItem = item.id;
           lastEditPosition = textarea.selectionStart;
         }
-        if (item.time != item.savedTime || item.text != item.savedText)
+        if (
+          !cancelled &&
+          (item.time != item.savedTime || item.text != item.savedText)
+        )
           saveItem(item.id);
-        onEditorChange(editorText); // item time and/or text has changed
+        onEditorChange(editorText); // item time and/or text may have changed
       }
 
       // NOTE: we do not focus back up on the editor unless we are already at the top
@@ -1819,7 +1825,7 @@
         }
         let text = type ? extractBlock(item.text, type) : item.text;
         // console.debug("_read", item.label, item.text, text);
-        if (options["replace_$id"])
+        if (options["replace_ids"])
           text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
         content.push(text);
       });
@@ -1845,10 +1851,7 @@
       let prefix = window["_read_deep"](
         "js",
         item,
-        Object.assign(
-          { include_deps: true, replace_$id: true, exclude_async_deps: true },
-          options
-        )
+        Object.assign({ replace_ids: true, exclude_async_deps: true }, options)
       );
       let evaljs = prefix + "\n" + code;
       let index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
@@ -2172,7 +2175,7 @@
           return;
         }
         let webppl_prefix = window["_read_deep"]("webppl", id, {
-          replace_$id: true,
+          replace_ids: true,
         });
 
         itemUpdateRunning(id, true);

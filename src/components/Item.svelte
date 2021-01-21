@@ -141,7 +141,7 @@
     e.stopPropagation();
     e.preventDefault();
     text = ""; // indicates deletion
-    onEditing(index, (editing = false), true /* cancelled */);
+    onEditing(index, (editing = false));
   }
 
   export let onTagClick = (
