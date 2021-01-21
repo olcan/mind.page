@@ -1832,6 +1832,7 @@
       return content.filter((s) => s).join("\n");
     };
 
+    // add include_deps
     window["_read_deep"] = function (
       type: string = "",
       item: string = "",
@@ -1843,6 +1844,23 @@
         Object.assign({ include_deps: true }, options)
       );
     };
+
+    // reads type_input with a prefix of type w/ include_deps + replace_ids
+    window["_read_input"] = function (
+      type: string = "",
+      item: string = "",
+      options: object = {}
+    ) {
+      return [
+        window["_read_deep"](
+          type,
+          item,
+          Object.assign({ replace_ids: true }, options)
+        ),
+        window["_read"](type + "_input", item, options),
+      ].join("\n");
+    };
+
     window["_eval"] = function (
       code: string = "",
       item: string = "",
