@@ -268,12 +268,6 @@
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(text, "_log");
 
-    // parse header tags (tags on first line, excluding any styling html)
-    const header = text
-      .replace(/^<.*>\s+#/, "#")
-      .match(/^.*?(?:\n|$)/)[0]
-      .toLowerCase();
-    const isMenu = parseTags(header).all.includes("#menu");
     // introduce a line break between any styling html and first tag
     text = text.replace(/^(<.*>)\s+#/, "$1\n#");
 
@@ -285,6 +279,7 @@
       `(^|\\s)(${regexTags.join("|")})`,
       "g"
     );
+    const isMenu = tags.includes("#_menu");
 
     // remove hidden tags (unless missing or matching) and trim
     text = text
@@ -1532,7 +1527,7 @@
   }
 
   :global(.item .deps-dot) {
-    margin-left: 2px;
+    margin-right: 2px;
     color: #666;
   }
 
@@ -1550,7 +1545,7 @@
   }
 
   :global(.item .dependents-dot) {
-    margin-right: 1px;
+    margin-left: 1px;
     color: #555;
   }
 
@@ -1564,6 +1559,10 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
+    white-space: nowrap;
+  }
+  /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
+  :global(.item > .deps) {
     margin-left: -6px;
   }
   :global(.container.showDeps .item .deps) {
@@ -1577,6 +1576,10 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
+    white-space: nowrap;
+  }
+  /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
+  :global(.item > .dependents) {
     margin-right: -6px;
   }
   :global(.container.showDependents .item .dependents) {

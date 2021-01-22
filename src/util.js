@@ -119,6 +119,7 @@ export function parseTags(text) {
     raw: _.uniq(tags),
     all: _.uniq(tags.map((t) => t.replace(/^#_/, "#"))),
     visible: tags.filter((t) => !t.startsWith("#_")),
+    hidden: tags.filter((t) => t.startsWith("#_")).map((t) => t.replace(/^#_/, "#")),
   };
 }
 

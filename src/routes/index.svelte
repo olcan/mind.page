@@ -222,7 +222,10 @@
 
     text = text.toLowerCase().trim();
     let terms = _.uniq(
-      text.split(/\s+/).concat(parseTags(text).all) //.concat(text.split(/\W+/))
+      text
+        .split(/\s+/)
+        .concat(parseTags(text).all)
+        .concat(parseTags(text).all.map(simplifyPinTag)) //.concat(text.split(/\W+/))
     ).filter((t) => t);
     // if (text.startsWith("/")) terms = [];
 
@@ -257,9 +260,9 @@
       // prefix-match first query term against item header text (excluding html preamble)
       item.prefixMatch = item.header.startsWith(terms[0]);
 
-      // find "pinned match" term = tags containing /pin with prefix match on first term
+      // find "pinned match" term = hidden tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
-        item.tags.find(
+        item.tagsHidden.find(
           (t) => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)
         ) || "";
       item.pinnedMatch = item.pinnedMatchTerm.length > 0;
@@ -276,10 +279,10 @@
           .concat(item.label);
       }
 
-      // match tags against item tags, allowing prefix matches
+      // match tags against item tagsForSearch, allowing prefix matches
       item.matchingTerms = terms.filter(
         (t) =>
-          t[0] == "#" && item.tags.findIndex((tag) => tag.startsWith(t)) >= 0
+          t[0] == "#" && item.tagsForSearch.findIndex((tag) => tag.startsWith(t)) >= 0
       );
       // match non-tag terms (anywhere in text)
       item.matchingTerms = item.matchingTerms.concat(
@@ -317,6 +320,13 @@
       item.missingTags = item.tags.filter(
         (t) =>
           t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1
+      );
+      // allow special tags to be missing if they are visible
+      item.missingTags = item.missingTags.concat(
+        item.tagsVisible.filter(
+          (t) =>
+            t != item.label && isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1
+        )
       );
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
@@ -369,18 +379,27 @@
     items = stableSort(
       items,
       (a, b) =>
-        // dotted? (contains #pin/dot or #pin/dot/*)
+        // dotted? (contains #_pin/dot or #_pin/dot/*)
         b.dotted - a.dotted ||
-        // alphanumeric ordering on #pin/dot/* term
-        a.dotTerm.localeCompare(b.dotTerm) ||
-        // pinned? (contains #pin or #pin/*)
+        // alphanumeric ordering on #_pin/dot/* term (see https://stackoverflow.com/a/38641281)
+        a.dotTerm.localeCompare(b.dotTerm, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) ||
+        // pinned? (contains #_pin or #_pin/*)
         b.pinned - a.pinned ||
-        // alphanumeric ordering on #pin/* term
-        a.pinTerm.localeCompare(b.pinTerm) ||
+        // alphanumeric ordering on #_pin/* term
+        a.pinTerm.localeCompare(b.pinTerm, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) ||
         // pinned match? (contains /pin or /pin/*)
         b.pinnedMatch - a.pinnedMatch ||
         // alphanumeric ordering on #*/pin/* term
-        a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm) ||
+        a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) ||
         // listing item label prefix match length (for context for listing item)
         listingLabelPrefixes.indexOf(b.label) -
           listingLabelPrefixes.indexOf(a.label) ||
@@ -500,6 +519,14 @@
       .catch(console.error);
   }
 
+  function simplifyPinTag(tag) {
+    if (tag.match(/^#pin$/)) return "#pin";
+    else if (tag.match(/^#pin\/dot(?:\/|$)/)) return "#pin/dotting";
+    else if (tag.match(/^#pin\//)) return "#pin/ordering";
+    else if (tag.match(/\/pin(?:\/|$)/)) return "#pin/context";
+    return tag;
+  }
+
   let idsFromLabel = new Map<string, string[]>();
   function itemDeps(index, deps = []) {
     let item = items[index];
@@ -509,8 +536,10 @@
     item.tagsRaw.forEach((tag) => {
       if (!tag.startsWith("#_")) return; // only _hidden tags are used as dependencies
       tag = tag.replace(/^#_/, "#"); // remove underscore prefix
+      tag = simplifyPinTag(tag);
       if (tag == item.label) return;
-      if (isSpecialTag(tag)) return;
+      // NOTE: we allow special tags as dependencies, providing visibility for the hidden tags and allowing the linked item to provide helpful information AND code/macros that would be available to all items with that special tag; this is a nice incentive to create these items, unless we prefer some special tags to remain hidden, which we can do by creating these items under different labels
+      // if (isSpecialTag(tag)) return;
       if (!idsFromLabel.has(tag)) return;
       const ids = idsFromLabel.get(tag);
       if (ids.length > 1) return; // only unique labels can have dependents
@@ -525,6 +554,7 @@
 
   function itemDepsString(item) {
     return item.deps
+      .filter((id) => id != item.id)
       .map((id) => {
         const dep = items[indexFromId.get(id)];
         const async =
@@ -564,17 +594,19 @@
     const tags = parseTags(item.lctext);
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
+    item.tagsHidden = tags.hidden;
     item.tagsRaw = tags.raw;
-    item.log = item.tags.includes("#log");
+    item.tagsForSearch = _.uniq(item.tags.concat(item.tags.map(simplifyPinTag)))
+    item.log = item.tags.includes("#log"); // only special tag that can be visible
     item.debug = item.tagsRaw.includes("#_debug");
     item.init = item.tagsRaw.includes("#_init");
     item.async = item.tagsRaw.includes("#_async");
-    const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
+    const pintags = item.tagsRaw.filter((t) => t.match(/^#_pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
-    item.dotted = pintags.findIndex((t) => t.match(/^#pin\/dot(?:\/|$)/)) >= 0;
+    item.dotted = pintags.findIndex((t) => t.match(/^#_pin\/dot(?:\/|$)/)) >= 0;
     item.dotTerm =
-      pintags.filter((t) => t.match(/^#pin\/dot(?:\/|$)/))[0] || "";
+      pintags.filter((t) => t.match(/^#_pin\/dot(?:\/|$)/))[0] || "";
 
     // if item stats with a visible tag, it is taken as a "label" for the item
     // (we allow some tags/macros to precede the label tag for styling purposes)
@@ -639,6 +671,7 @@
 
     if (update_deps) {
       const prevDeps = item.deps || [];
+      const prevDependents = item.dependents || [];
       item.deps = itemDeps(index);
       const prevDeepHash = item.deephash;
       item.deephash = hashCode(
@@ -647,33 +680,30 @@
       if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
       // we have to update deps/deephash for all dependent items
       // NOTE: changes to deephash trigger re-rendering and cache invalidation
-      item.dependents = [];
-      items.forEach((depitem, depindex) => {
-        if (depindex == index) return; // skip self
-        // NOTE: we only need to update dependencies if item label has changed
-        if (prevLabel != item.label) depitem.deps = itemDeps(depindex);
-        if (depitem.deps.length > 1 && depitem.deps.includes(item.id)) {
-          item.dependents.push(depitem.id);
+      // NOTE: we only need to update dependencies on first update_deps or if item label has changed
+      if (!item.dependents || prevLabel != item.label) {
+        item.dependents = [];
+        items.forEach((depitem, depindex) => {
+          if (depindex == index) return; // skip self
+          depitem.deps = itemDeps(depindex);
           const prevDeepHash = depitem.deephash;
-          // NOTE: updating deephash automatically triggers rendering of dependents
           depitem.deephash = hashCode(
             depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
           );
-          // // update/save scripted dependents
-          // if (depitem.deephash != prevDeepHash && depitem.scripted) {
-          //   // update times, offset to maintain existing ordering, with dependency most recent
-          //   if (!depitem.log) depitem.time = item.time - 1 - depindex;
-          //   // console.debug("saving scripted dependent", depindex);
-          //   saveItem(depitem.id);
-          // }
-        }
-      });
+          if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
+        });
+        console.debug("updated dependents:", item.dependents);
+      }
       // update deps/dependents strings
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
       _.uniq(item.deps.concat(prevDeps)).forEach((id) => {
         const dep = items[indexFromId.get(id)];
         dep.dependentsString = itemDependentsString(dep);
+      });
+      _.uniq(item.dependents.concat(prevDependents)).forEach((id) => {
+        const dep = items[indexFromId.get(id)];
+        dep.depsString = itemDepsString(dep);
       });
     }
   }
