@@ -46,6 +46,8 @@
   export let timeOutOfOrder: boolean;
   export let updateTime: number;
   export let createTime: number;
+  export let depsString: string;
+  export let dependentsString: string;
   export let dotted: boolean;
   export let runnable: boolean;
   export let scripted: boolean;
@@ -168,6 +170,20 @@
       onLogSummaryClick(id);
     };
 
+  if (!window["handleDepsSummaryClick"])
+    window["handleDepsSummaryClick"] = (id: string, e: MouseEvent) => {
+      const div = document.querySelector(`#super-container-${id} .deps`);
+      if (div) div.classList.toggle("show");
+      e.stopPropagation();
+    };
+
+  if (!window["handleDependentsSummaryClick"])
+    window["handleDependentsSummaryClick"] = (id: string, e: MouseEvent) => {
+      const div = document.querySelector(`#super-container-${id} .dependents`);
+      if (div) div.classList.toggle("show");
+      e.stopPropagation();
+    };
+
   if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
   if (window["_html_cache"] == undefined) window["_html_cache"] = {};
 
@@ -179,7 +195,9 @@
     // NOTE: passing in arrays has proven problematic (e.g. infinite render loops)
     missingTags: any, // space-separated string converted to Set
     matchingTerms: any, // space-separated string converted to Set
-    matchingTermsSecondary: any // space-separated string converted to Set
+    matchingTermsSecondary: any, // space-separated string converted to Set
+    depsString: string,
+    dependentsSring: string
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key =
@@ -217,6 +235,22 @@
       });
     }
 
+    // append divs for dependencies and dependents
+    if (depsString) {
+      depsString = depsString.replace(
+        /(^|\n)(id:\w+)/g,
+        `$1[$2](javascript:_toggle('$2'))`
+      );
+      text += `\n<div class="deps">\n${depsString}\n</div>`;
+    }
+    if (dependentsString) {
+      dependentsString = dependentsString.replace(
+        /(^|\n)(id:\w+)/g,
+        `$1[$2](javascript:_toggle('$2'))`
+      );
+      text += `\n<div class="dependents">\n${dependentsString}\n</div>`;
+    }
+
     // remove removed sections
     text = text.replace(
       /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs,
@@ -231,7 +265,7 @@
       .replace(/^<.*>\s+#/, "#")
       .match(/^.*?(?:\n|$)/)[0]
       .toLowerCase();
-    const isMenu = parseTags(header).all.indexOf("#menu") >= 0;
+    const isMenu = parseTags(header).all.includes("#menu");
     // introduce a line break between any styling html and first tag
     text = text.replace(/^(<.*>)\s+#/, "$1\n#");
 
@@ -378,7 +412,7 @@
               // shorten selected labels
               if (
                 lctag == label &&
-                label.indexOf("/") >= 0 &&
+                label.includes("/") &&
                 labelUnique &&
                 (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag))
               )
@@ -386,7 +420,7 @@
               // shorten prefix-matching labels
               if (
                 lctag == label &&
-                label.indexOf("/") >= 0 &&
+                label.includes("/") &&
                 label.length > firstTerm.length &&
                 label[firstTerm.length] == "/" &&
                 label.substring(0, firstTerm.length) == firstTerm
@@ -525,7 +559,7 @@
         );
         return m;
       }
-      if (divid.indexOf(id) < 0) {
+      if (!divid.includes(id)) {
         console.warn(
           "div without proper id (that includes $id) in item at index",
           index + 1
@@ -557,6 +591,23 @@
         summary += `<span class="console-${type}">·</span>`;
       });
       text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${id}',event)">${summary}</div>`;
+    }
+
+    // append dependencies ("deps") summary
+    if (depsString) {
+      const summary = depsString
+        .split("\n")
+        .map((dep) => "·")
+        .join("");
+      text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)">${summary}</div>`;
+    }
+    // append dependents ("deps") summary
+    if (dependentsString) {
+      const summary = dependentsString
+        .split("\n")
+        .map((dep) => "·")
+        .join("");
+      text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)">${summary}</div>`;
     }
 
     return (window["_html_cache"][cache_key] = text);
@@ -1136,6 +1187,8 @@
     line-height: 28px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    /* clear floats (e.g. deps, dependents) */
+    overflow: auto;
   }
 
   .context {
@@ -1350,6 +1403,8 @@
     color: black;
     background: #9f9;
     border-radius: 4px;
+    padding: 0 2px;
+    margin: 0 -2px;
   }
   :global(.item mark span.highlight) {
     color: black;
@@ -1417,7 +1472,9 @@
     content: "empty " attr(class);
   }
 
-  :global(.item .log-summary) {
+  :global(.item .log-summary),
+  :global(.item .deps-summary),
+  :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
     font-family: monospace;
@@ -1425,6 +1482,7 @@
     justify-content: center;
     /* background: red; */
     min-width: 100px;
+    max-width: 50%;
     height: 25px;
     position: absolute;
     left: 0;
@@ -1438,6 +1496,49 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  :global(.item .deps-summary) {
+    display: flex;
+    justify-content: flex-start;
+    min-width: 50px;
+    max-width: 25%;
+    right: auto;
+    margin: 0;
+  }
+
+  :global(.item .dependents-summary) {
+    display: flex;
+    justify-content: flex-end;
+    min-width: 50px;
+    max-width: 25%;
+    left: auto;
+    margin: 0;
+  }
+
+  :global(.item .deps) {
+    display: none;
+    float: left;
+    opacity: 0.75;
+    font-size: 80%;
+    line-height: 160%;
+    margin: 4px 0;
+  }
+  :global(.item .deps.show) {
+    display: block;
+  }
+
+  :global(.item .dependents) {
+    display: none;
+    float: right;
+    text-align: right;
+    opacity: 0.75;
+    font-size: 80%;
+    line-height: 160%;
+    margin: 4px 0;
+  }
+  :global(.item .dependents.show) {
+    display: block;
   }
 
   :global(.item .MathJax) {
@@ -1539,7 +1640,7 @@
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(text || placeholder, id, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary)}
+        {@html toHTML(text || placeholder, id, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary, depsString, dependentsString)}
       </div>
     {/if}
     {#if running}

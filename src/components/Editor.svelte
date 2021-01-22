@@ -158,7 +158,7 @@
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart > 0 &&
       textarea.selectionStart < text.length &&
-      ")]}".indexOf(text[textarea.selectionStart]) >= 0
+      ")]}".includes(text[textarea.selectionStart])
     ) {
       let matchpos = findMatchingOpenParenthesis(text, textarea.selectionStart);
       if (matchpos >= 0) {
@@ -171,7 +171,7 @@
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart > 0 &&
       textarea.selectionStart < text.length &&
-      "([{".indexOf(text[textarea.selectionStart - 1]) >= 0
+      "([{".includes(text[textarea.selectionStart - 1])
     ) {
       let matchpos = findMatchingCloseParenthesis(
         text,
@@ -571,10 +571,10 @@
         highlights.querySelector("span.highlight") ||
         (textarea.selectionStart > 0 &&
           textarea.selectionStart < text.length &&
-          ")]}".indexOf(textarea.value[textarea.selectionStart]) >= 0) ||
+          ")]}".includes(textarea.value[textarea.selectionStart])) ||
         (textarea.selectionStart > 0 &&
           textarea.selectionStart < text.length &&
-          "([{".indexOf(textarea.value[textarea.selectionStart - 1]) >= 0)
+          "([{".includes(textarea.value[textarea.selectionStart - 1]))
       ) {
         updateTextDivs();
       }

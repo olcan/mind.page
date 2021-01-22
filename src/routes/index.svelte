@@ -241,6 +241,7 @@
     let listing = [];
     let listingLabelPrefixes = [];
     let listingItemIndex = -1;
+    let idMatchItemIndices = [];
     items.forEach((item, index) => {
       textLength += item.text.length;
 
@@ -251,7 +252,7 @@
       item.labelMatch = item.label == terms[0];
 
       // match first query term against visible tags in item
-      item.tagMatch = item.tagsVisible.indexOf(terms[0]) >= 0;
+      item.tagMatch = item.tagsVisible.includes(terms[0]);
 
       // prefix-match first query term against item header text (excluding html preamble)
       item.prefixMatch = item.header.startsWith(terms[0]);
@@ -282,7 +283,7 @@
       );
       // match non-tag terms (anywhere in text)
       item.matchingTerms = item.matchingTerms.concat(
-        terms.filter((t) => t[0] != "#" && item.lctext.indexOf(t) >= 0)
+        terms.filter((t) => t[0] != "#" && item.lctext.includes(t))
       );
 
       // match regex:* terms
@@ -294,15 +295,15 @@
         )
       );
       // match id:* terms
-      item.matchingTerms = item.matchingTerms.concat(
-        terms.filter(
-          (t) => t.match(/^id:\S+/) && item.id.toLowerCase() == t.substring(3)
-        )
+      const idMatchTerms = terms.filter(
+        (t) => t.match(/^id:\w+/) && item.id.toLowerCase() == t.substring(3)
       );
+      item.matchingTerms = item.matchingTerms.concat(idMatchTerms);
+      if (idMatchTerms.length > 0) idMatchItemIndices.push(index);
 
       // match secondary terms (tag prefixes)
-      item.matchingTermsSecondary = termsSecondary.filter(
-        (t) => item.tagsExpanded.indexOf(t) >= 0
+      item.matchingTermsSecondary = termsSecondary.filter((t) =>
+        item.tagsExpanded.includes(t)
       );
 
       // item is considered matching if primary terms match
@@ -331,6 +332,9 @@
 
     // Update time for listing item (but not save yet, a.k.a. "soft (session) touch")
     if (listingItemIndex >= 0) items[listingItemIndex].time = Date.now();
+
+    // Update times for id-matching items (but not save yet, a.k.a. "soft (session) touch")
+    idMatchItemIndices.forEach((index) => (items[index].time = Date.now()));
 
     // update history, replace unless current state is final (from tag click)
     if (history.state.editorText != editorText) {
@@ -499,7 +503,7 @@
   let idsFromLabel = new Map<string, string[]>();
   function itemDeps(index, deps = []) {
     let item = items[index];
-    if (deps.indexOf(item.id) >= 0) return deps;
+    if (deps.includes(item.id)) return deps;
     // NOTE: dependency order matters for hashing and potentially for code import
     deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
     item.tagsRaw.forEach((tag) => {
@@ -519,6 +523,35 @@
     return deps.slice(1).concat(item.id);
   }
 
+  function itemDepsString(item) {
+    return item.deps
+      .map((id) => {
+        const dep = items[indexFromId.get(id)];
+        const async =
+          dep.async ||
+          dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
+        return (
+          (dep.labelUnique ? dep.label : "id:" + dep.id) +
+          (async ? " (async)" : "")
+        );
+      })
+      .join("\n");
+  }
+
+  function itemDependentsString(item) {
+    return item.dependents
+      .map((id) => {
+        const dep = items[indexFromId.get(id)];
+        return (
+          (dep.labelUnique ? dep.label : "id:" + dep.id) +
+          (item.labelUnique && dep.tagsVisible.includes(item.label)
+            ? " (visible)"
+            : "")
+        );
+      })
+      .join("\n");
+  }
+
   let tagCounts = new Map<string, number>();
   function itemTextChanged(index: number, text: string, update_deps = true) {
     // console.debug("itemTextChanged", index);
@@ -533,10 +566,10 @@
     item.tags = tags.all;
     item.tagsVisible = tags.visible;
     item.tagsRaw = tags.raw;
-    item.log = item.tags.indexOf("#log") >= 0;
-    item.debug = item.tagsRaw.indexOf("#_debug") >= 0;
-    item.init = item.tagsRaw.indexOf("#_init") >= 0;
-    item.async = item.tagsRaw.indexOf("#_async") >= 0;
+    item.log = item.tags.includes("#log");
+    item.debug = item.tagsRaw.includes("#_debug");
+    item.init = item.tagsRaw.includes("#_init");
+    item.async = item.tagsRaw.includes("#_async");
     const pintags = item.tags.filter((t) => t.match(/^#pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -606,6 +639,7 @@
     }
 
     if (update_deps) {
+      const prevDeps = item.deps || [];
       item.deps = itemDeps(index);
       const prevDeepHash = item.deephash;
       item.deephash = hashCode(
@@ -614,11 +648,13 @@
       if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
       // we have to update deps/deephash for all dependent items
       // NOTE: changes to deephash trigger re-rendering and cache invalidation
+      item.dependents = [];
       items.forEach((depitem, depindex) => {
         if (depindex == index) return; // skip self
         // NOTE: we only need to update dependencies if item label has changed
         if (prevLabel != item.label) depitem.deps = itemDeps(depindex);
-        if (depitem.deps.length > 1 && depitem.deps.indexOf(item.id) >= 0) {
+        if (depitem.deps.length > 1 && depitem.deps.includes(item.id)) {
+          item.dependents.push(depitem.id);
           const prevDeepHash = depitem.deephash;
           // NOTE: updating deephash automatically triggers rendering of dependents
           depitem.deephash = hashCode(
@@ -632,6 +668,13 @@
           //   saveItem(depitem.id);
           // }
         }
+      });
+      // update deps/dependents strings
+      item.depsString = itemDepsString(item);
+      item.dependentsString = itemDependentsString(item);
+      _.uniq(item.deps.concat(prevDeps)).forEach((id) => {
+        const dep = items[indexFromId.get(id)];
+        dep.dependentsString = itemDependentsString(dep);
       });
     }
   }
@@ -670,6 +713,7 @@
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
     let origText = text;
+    let clearLabel = false; // force clear, even if text starts with tag
 
     switch (text.trim()) {
       case "/signout": {
@@ -700,15 +744,8 @@
           alert("/dependencies: too many items selected");
           return;
         }
-        let item = items[editingItems[0]];
-
-        let deps = [];
-        item.deps.map((id) => {
-          const dep = items[indexFromId.get(id)];
-          deps.push(dep.label || dep.id);
-        });
-
-        text = deps.join(" ");
+        text = items[editingItems[0]].depsString;
+        clearLabel = true;
         break;
       }
       case "/dependents": {
@@ -720,16 +757,8 @@
           alert("/dependents: too many items selected");
           return;
         }
-        let item = items[editingItems[0]];
-        let deps = [];
-        items.forEach((dep) => {
-          if (dep.index == item.index) return; // skip self
-          if (dep.deps.length > 1 && dep.deps.indexOf(item.id) >= 0) {
-            if (dep.label && dep.labelUnique) deps.push(dep.label);
-            else deps.push("id:" + dep.id);
-          }
-        });
-        text = deps.join(" ");
+        text = items[editingItems[0]].dependentsString;
+        clearLabel = true;
         break;
       }
       case "/debug": {
@@ -860,7 +889,10 @@
     // NOTE: we keep the starting tag if it is a non-unique label
     //       (useful for adding items, e.g. todo items, without losing context)
     editorText =
-      items[0].label && !items[0].labelUnique && items[0].labelText
+      !clearLabel &&
+      items[0].label &&
+      !items[0].labelUnique &&
+      items[0].labelText
         ? items[0].labelText + " "
         : "";
     onEditorChange(editorText); // integrate new item at index 0
@@ -1603,6 +1635,9 @@
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
       item.outerHeight = 0;
+      // dependents (filled below)
+      item.dependents = [];
+      item.dependentsString = "";
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
@@ -1611,12 +1646,20 @@
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join()
       );
+      item.deps.forEach((id) => {
+        if (id != item.id) items[indexFromId.get(id)].dependents.push(item.id);
+      });
+    });
+    items.forEach((item) => {
+      item.depsString = itemDepsString(item);
+      item.dependentsString = itemDependentsString(item);
       // dispatch evaluation of _init() on #_init items, excluding dependencies
       if (item.init)
         setTimeout(() =>
           window["_eval"]("_init()", item.id, { include_deps: false })
         );
     });
+
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
   }
@@ -1717,6 +1760,16 @@
       onEditorChange((editorText = (text + " ").trimStart()));
       textArea(-1).focus();
     };
+    window["_toggle"] = function (text: string) {
+      if (editorText.trim() == text) text = "";
+      onEditorChange((editorText = text));
+    };
+    window["_toggle_edit"] = function (text: string) {
+      if (editorText.trim() == text) text = "";
+      onEditorChange((editorText = (text + " ").trimStart()));
+      textArea(-1).focus();
+    };
+
     window["_append"] = function (text: string) {
       onEditorChange(
         (editorText = (editorText.trim() + " " + text).trimStart())
@@ -2857,6 +2910,8 @@
               timeOutOfOrder={item.timeOutOfOrder}
               updateTime={item.updateTime}
               createTime={item.createTime}
+              depsString={item.depsString}
+              dependentsString={item.dependentsString}
               dotted={item.dotted}
               runnable={item.runnable}
               scripted={item.scripted}
