@@ -475,13 +475,16 @@
     onEditorChange(editorText);
   }
 
-  function signOut() {
-    if (!firebase().auth().currentUser) return; // not logged in yet, so ignore click for now
-    // user = { photoURL: "/loading.gif", email: "Signing out ..." };
-    user = null;
+  function resetUser() {
+    window["_user"] = user = null;
     localStorage.removeItem("user");
     window.sessionStorage.removeItem("signin_pending");
-    document.cookie = "__session=signed_out;max-age=0"; // delete cookie for server
+    document.cookie = "__session=;max-age=0"; // delete cookie for server
+  }
+
+  function signOut() {
+    if (!firebase().auth().currentUser) return; // not logged in yet, so ignore click for now
+    resetUser();
     firebase()
       .auth()
       .signOut()
@@ -1041,7 +1044,7 @@
   let evalItemId;
   function evalJSInput(text: string, label: string = "", index: number): any {
     let jsin = extractBlock(text, "js_input");
-    if (jsin.length == 0) return "";
+    if (jsin.length == 0) return undefined;
     let item = items[index];
     jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
     jsin = jsin.replace(/(^|[^\\])\$hash/g, "$1" + item.hash);
@@ -1053,7 +1056,14 @@
       !item.debug &&
       (item.async ||
         item.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-    )
+    ) {
+      if (!jsin.match(/\bdone\b/)) {
+        let msg =
+          "can not run async code block without any reference to completion callback function 'done'";
+        if (label) msg = label + ": " + msg;
+        alert(msg);
+        return undefined;
+      }
       evaljs = [
         "(async function(done) {",
         `await _running('${item.id}')`,
@@ -1063,6 +1073,7 @@
         `  _done('${item.id}')`,
         "})",
       ].join("\n");
+    }
     if (lastRunText)
       lastRunText = appendBlock(
         lastRunText,
@@ -1602,8 +1613,7 @@
   }
 
   function signIn() {
-    // user = { photoURL: "/loading.gif", email: "Signing in ..." };
-    user = null;
+    resetUser();
     let provider = new window.firebase.auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
     // firebase().auth().setPersistence("none")
@@ -1611,6 +1621,7 @@
     firebase().auth().setPersistence("local");
     // NOTE: getRedirectResult() seem to be redundant given onAuthStateChanged
     window.sessionStorage.setItem("signin_pending", "1");
+    document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
     firebase().auth().signInWithRedirect(provider);
     // NOTE: signInWithPopup also requires a reload since we are currently unable to cleanly re-initialize items via firebase realtime snapshot once they have already been initialize via server-side request; reloading allows the next server response to be ignored so that session cookie can be set; forced reload also means that we might as well do a redirect which can be cleaner anyway (esp. on mobile, as stated on https://firebase.google.com/docs/auth/web/google-signin)
     // firebase()
@@ -1624,35 +1635,70 @@
     // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
     if (error) console.warn(error); // log server-side error
 
-    // initialize items now if returned by server
-    // (if we are signing in, ignore any items returned by server)
-    if (window.sessionStorage.getItem("signin_pending")) items = [];
-    else if (items.length > 0) initialize();
+    // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
+    // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
+    if (!user && localStorage.getItem("user")) {
+      window["_user"] = user = JSON.parse(localStorage.getItem("user"));
+      console.debug("restored user from local storage");
+    } else if (window.sessionStorage.getItem("signin_pending")) {
+      window["_user"] = user = null;
+    } else {
+      document.cookie = "__session=;max-age=0"; // clear just in case
+      window["_user"] = user = {
+        photoURL: "/incognito.png",
+        displayName: "Anonymous",
+        uid: "anonymous",
+      };
+    }
+    anonymous = user?.uid == "anonymous";
+    readonly = anonymous && !location.href.endsWith("#__anonymous");
 
-    // NOTE: test server-side error with document.cookie='__session=signed_out;max-age=0';
-    firebase()
-      .auth()
-      .onAuthStateChanged((authUser) => {
-        if (!authUser) return; // signed out state
-        // console.debug("onAuthStateChanged", user, authUser);
-        window.sessionStorage.removeItem("signin_pending"); // no longer signing in
-        window["_user"] = user = authUser;
-        console.log("signed in", user.email);
-        localStorage.setItem("user", JSON.stringify(user));
+    // if items were returned from server, confirm user, then initialize if valid
+    if (items.length > 0) {
+      if (window.sessionStorage.getItem("signin_pending")) {
+        console.warn(
+          `ignoring ${items.length} items received while signing in`
+        );
+        items = [];
+      } else if (user && user.uid != items[0].user) {
+        // items are for wrong user, usually anonymous, due to missing cookie
+        // (you can test this with document.cookie='__session=;max-age=0' in console)
+        console.warn(
+          `ignoring ${items.length} items received for wrong user (${items[0].user})`
+        );
+        items = [];
+      } else {
+        initialize();
+      }
+    }
 
-        // set up server-side session cookie
-        // store user's ID token as a 1-hour __session cookie to send to server for preload
-        // NOTE: __session is the only cookie allowed by firebase for efficient caching
-        //       (see https://stackoverflow.com/a/44935288)
-        user
-          .getIdToken(false /*force refresh*/)
-          .then((token) => {
-            document.cookie = "__session=" + token + ";max-age=86400";
-          })
-          .catch(console.error);
+    // listen for auth state change if we are not anonymous ...
+    if (!anonymous) {
+      firebase()
+        .auth()
+        .onAuthStateChanged((authUser) => {
+          // console.debug("onAuthStateChanged", user, authUser);
+          resetUser(); // clean up first
+          if (!authUser) return;
+          window["_user"] = user = authUser;
+          console.log("signed in", user.email);
+          localStorage.setItem("user", JSON.stringify(user));
+          anonymous = readonly = false; // just in case (should already be false)
 
-        initFirebaseRealtime();
-      });
+          // set up server-side session cookie
+          // store user's ID token as a 1-hour __session cookie to send to server for preload
+          // NOTE: __session is the only cookie allowed by firebase for efficient caching
+          //       (see https://stackoverflow.com/a/44935288)
+          user
+            .getIdToken(false /*force refresh*/)
+            .then((token) => {
+              document.cookie = "__session=" + token + ";max-age=3600";
+            })
+            .catch(console.error);
+
+          initFirebaseRealtime();
+        });
+    }
 
     // Set up global helper functions for javascript:... shortcuts
     window["_replace"] = function (text: string) {
@@ -2524,8 +2570,6 @@
           };
         })(console[verb].bind(console), verb);
       });
-      anonymous = user?.uid == "anonymous";
-      readonly = anonymous && !location.href.endsWith("#__anonymous");
       if (anonymous) console.log("user is anonymous");
       if (initTime)
         console.debug(`${items.length} items initialized at ${initTime}ms`);
@@ -2547,22 +2591,6 @@
       //   } items`
       // );
     });
-
-    // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
-    // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
-    if (!user && localStorage.getItem("user")) {
-      window["_user"] = user = JSON.parse(localStorage.getItem("user"));
-      console.debug("restored user from local storage");
-    } else if (window.sessionStorage.getItem("signin_pending")) {
-      // user = { photoURL: "/loading.gif", email: "Signing in ..." };
-      user = null;
-    } else {
-      window["_user"] = user = {
-        photoURL: "/incognito.png",
-        displayName: "Anonymous",
-        uid: "anonymous",
-      };
-    }
 
     console.debug(
       `index.js executed at ${Math.round(window.performance.now())}ms w/ ${

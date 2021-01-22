@@ -36,13 +36,15 @@ process["server-preload"] = async (page, session) => {
   // console.debug("preloading, client?", isClient);
   // NOTE: for development server, admin credentials require `gcloud auth application-default login`
   let user = null;
-  if (!session.cookie) {
+  if (session.cookie == "signin_pending") {
+    return {}; // do not waste time retrieving data
+  } else if (!session.cookie) {
     user = { uid: "anonymous" };
   } else {
     // uncomment this to disable server-side init for non-anonymous accounts
     // return {}
     user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
-    if (!user) return { error: "invalid session cookie" };
+    if (!user) return { error: "invalid session cookie: " + session.cookie };
   }
   let items = await firebaseAdmin()
     .firestore()
