@@ -1044,8 +1044,14 @@
   }
 
   let evalItemId;
-  function evalJSInput(text: string, label: string = "", index: number): any {
+  function evalJSInput(
+    text: string,
+    text_nodeps: string,
+    label: string = "",
+    index: number
+  ): any {
     let jsin = extractBlock(text, "js_input");
+    let jsin_nodeps = extractBlock(text_nodeps, "js_input");
     if (jsin.length == 0) return undefined;
     let item = items[index];
     jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
@@ -1059,7 +1065,7 @@
       (item.async ||
         item.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
     ) {
-      if (!jsin.match(/\bdone\b/)) {
+      if (!jsin_nodeps.match(/\bdone\b/)) {
         let msg =
           "can not run async code block without any reference to completion callback function 'done'";
         if (label) msg = label + ": " + msg;
@@ -1135,7 +1141,8 @@
         ? "" // #_debug items are assumed self-contained if they are run
         : window["_read_deep"]("js", item.id, { replace_ids: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
-      let jsout = evalJSInput(prefix + item.text, item.label, index) || "";
+      let jsout =
+        evalJSInput(prefix + item.text, item.text, item.label, index) || "";
       // ignore output if Promise
       if (jsout instanceof Promise) jsout = undefined;
       const outputConfirmLength = 16 * 1024;

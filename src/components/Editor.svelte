@@ -566,6 +566,7 @@
     selectionUpdatePending = true;
     setTimeout(() => {
       selectionUpdatePending = false;
+      if (!highlights) return;
       if (
         highlights.querySelector("span.highlight") ||
         (textarea.selectionStart > 0 &&
