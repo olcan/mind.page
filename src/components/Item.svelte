@@ -1502,10 +1502,10 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: -6px; /*4px left*/
+    padding: 0 3px; /* aligns best with code block left border on iOS Safari */
+    bottom: -7px; /* 3px remaining */
     margin-left: auto;
     margin-right: auto;
-    padding: 0 4px;
     width: fit-content;
     cursor: pointer;
     -webkit-touch-callout: none;
