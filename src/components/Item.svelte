@@ -172,15 +172,15 @@
 
   if (!window["handleDepsSummaryClick"])
     window["handleDepsSummaryClick"] = (id: string, e: MouseEvent) => {
-      const div = document.querySelector(`#super-container-${id} .deps`);
-      if (div) div.classList.toggle("show");
+      const div = document.querySelector(`#super-container-${id} .container`);
+      if (div) div.classList.toggle("showDeps");
       e.stopPropagation();
     };
 
   if (!window["handleDependentsSummaryClick"])
     window["handleDependentsSummaryClick"] = (id: string, e: MouseEvent) => {
-      const div = document.querySelector(`#super-container-${id} .dependents`);
-      if (div) div.classList.toggle("show");
+      const div = document.querySelector(`#super-container-${id} .container`);
+      if (div) div.classList.toggle("showDependents");
       e.stopPropagation();
     };
 
@@ -236,20 +236,28 @@
     }
 
     // append divs for dependencies and dependents
+    if (depsString || dependentsString)
+      text += `\n<div class="deps-separator"></div>`;
+    const depsTitle = `${depsString.split("\n").length} dependency items`;
     if (depsString) {
       depsString = depsString.replace(
         /(^|\n)(id:\w+)/g,
         `$1[$2](javascript:_toggle('$2'))`
       );
-      text += `\n<div class="deps">\n${depsString}\n</div>`;
+      text += `\n<div class="deps">\n${depsTitle}\n${depsString}\n</div>`;
     }
+    const dependentsTitle = `${
+      dependentsString.split("\n").length
+    } dependent items`;
     if (dependentsString) {
       dependentsString = dependentsString.replace(
         /(^|\n)(id:\w+)/g,
         `$1[$2](javascript:_toggle('$2'))`
       );
-      text += `\n<div class="dependents">\n${dependentsString}\n</div>`;
+      text += `\n<div class="dependents">\n${dependentsTitle}\n${dependentsString}\n</div>`;
     }
+    if (depsString || dependentsString)
+      text += `\n<div class="clear-floats"></div>`;
 
     // remove removed sections
     text = text.replace(
@@ -588,26 +596,36 @@
           : line.match(/^DEBUG:/)
           ? "debug"
           : "log";
-        summary += `<span class="console-${type}">·</span>`;
+        summary += `<span class="log-dot console-${type}">⸱</span>`;
       });
-      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${id}',event)">${summary}</div>`;
+      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`;
     }
 
     // append dependencies ("deps") summary
     if (depsString) {
       const summary = depsString
         .split("\n")
-        .map((dep) => "·")
+        .map(
+          (dep) =>
+            `<span class="deps-dot${
+              dep.endsWith(" async") ? " async" : ""
+            }">⸱</span>`
+        )
         .join("");
-      text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)">${summary}</div>`;
+      text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`;
     }
     // append dependents ("deps") summary
     if (dependentsString) {
       const summary = dependentsString
         .split("\n")
-        .map((dep) => "·")
+        .map(
+          (dep) =>
+            `<span class="dependents-dot${
+              dep.startsWith("visible ") ? " visible" : ""
+            }">⸱</span>`
+        )
         .join("");
-      text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)">${summary}</div>`;
+      text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
 
     return (window["_html_cache"][cache_key] = text);
@@ -1188,7 +1206,8 @@
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
-    overflow: auto;
+    /* this causes scrolling for popups */
+    /* overflow: auto; */
   }
 
   .context {
@@ -1429,7 +1448,7 @@
   :global(.item hr) {
     background: transparent;
     border: 0;
-    border-top: 1px dashed #222;
+    border-top: 1px dashed #333;
     height: 1px; /* disappears if both height and border are 0 */
     margin: 10px 0;
     clear: both; /* clear floats on both sides by default */
@@ -1483,14 +1502,15 @@
     /* background: red; */
     min-width: 100px;
     max-width: 50%;
+    overflow: hidden;
     height: 25px;
     position: absolute;
     left: 0;
     right: 0;
-    bottom: -6px;
+    bottom: -6px; /*4px left*/
     margin-left: auto;
     margin-right: auto;
-    padding: 0 8px;
+    padding: 0 4px;
     width: fit-content;
     cursor: pointer;
     -webkit-touch-callout: none;
@@ -1498,22 +1518,44 @@
     user-select: none;
   }
 
+  :global(.item .log-dot) {
+    margin: 0 1px;
+  }
+
   :global(.item .deps-summary) {
     display: flex;
     justify-content: flex-start;
-    min-width: 50px;
     max-width: 25%;
     right: auto;
+    padding-right: 0;
     margin: 0;
+  }
+
+  :global(.item .deps-dot) {
+    margin-left: 2px;
+    color: #666;
+  }
+
+  :global(.item .deps-dot.async) {
+    color: #999;
   }
 
   :global(.item .dependents-summary) {
     display: flex;
     justify-content: flex-end;
-    min-width: 50px;
     max-width: 25%;
     left: auto;
+    padding-left: 0;
     margin: 0;
+  }
+
+  :global(.item .dependents-dot) {
+    margin-right: 1px;
+    color: #555;
+  }
+
+  :global(.item .dependents-dot.visible) {
+    color: #999;
   }
 
   :global(.item .deps) {
@@ -1522,9 +1564,9 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
-    margin: 4px 0;
+    margin-left: -6px;
   }
-  :global(.item .deps.show) {
+  :global(.container.showDeps .item .deps) {
     display: block;
   }
 
@@ -1535,9 +1577,29 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
-    margin: 4px 0;
+    margin-right: -6px;
   }
-  :global(.item .dependents.show) {
+  :global(.container.showDependents .item .dependents) {
+    display: block;
+  }
+
+  :global(.item .clear-floats) {
+    width: 100%;
+    height: 0;
+    clear: both;
+  }
+
+  :global(.item .deps-separator) {
+    display: none;
+    clear: both;
+    margin: 0 -10px;
+    height: 1px;
+    border-top: 1px dashed #333;
+    margin-top: 8px;
+  }
+
+  :global(.container.showDependents .item .deps-separator),
+  :global(.container.showDeps .item .deps-separator) {
     display: block;
   }
 
