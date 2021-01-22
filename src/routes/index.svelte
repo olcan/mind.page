@@ -312,6 +312,7 @@
 
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
+      // NOTE: tagCounts include prefix tags, deduplicated at item level
       item.missingTags = item.tags.filter(
         (t) =>
           t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1
@@ -594,6 +595,7 @@
       while ((pos = tag.lastIndexOf("/")) >= 0)
         item.tagsExpanded.push((tag = tag.slice(0, pos)));
     });
+    item.tagsExpanded = _.uniq(item.tagsExpanded);
     if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
       prevTagsExpanded.forEach((tag) =>
         tagCounts.set(tag, tagCounts.get(tag) - 1)
