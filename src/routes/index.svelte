@@ -575,7 +575,7 @@
           dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
         return (
           (dep.labelUnique ? dep.label : "id:" + dep.id) +
-          (async ? "[async]" : "")
+          (async ? "(async)" : "")
         );
       })
       .join(" ");
@@ -586,9 +586,10 @@
       .map((id) => {
         const dep = items[indexFromId.get(id)];
         return (
+          (dep.labelUnique ? dep.label : "id:" + dep.id) +
           (item.labelUnique && dep.tagsVisible.includes(item.label)
-            ? "[visible]"
-            : "") + (dep.labelUnique ? dep.label : "id:" + dep.id)
+            ? "(visible)"
+            : "")
         );
       })
       .join(" ");
@@ -688,6 +689,8 @@
       const prevDeps = item.deps || [];
       const prevDependents = item.dependents || [];
       item.deps = itemDeps(index);
+      // console.debug("updated dependencies:", item.deps);
+
       const prevDeepHash = item.deephash;
       item.deephash = hashCode(
         item.deps.map((id) => items[indexFromId.get(id)].hash).join(",")
@@ -707,14 +710,22 @@
           );
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
         });
-        console.debug("updated dependents:", item.dependents);
+        // console.debug("updated dependents:", item.dependents);
       }
       // update deps/dependents strings
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
       _.uniq(item.deps.concat(prevDeps)).forEach((id) => {
         const dep = items[indexFromId.get(id)];
+        if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id))
+          dep.dependents.push(item.id);
+        else if (
+          !item.deps.includes(dep.id) &&
+          dep.dependents.includes(item.id)
+        )
+          dep.dependents = dep.dependents.filter((id) => id != item.id);
         dep.dependentsString = itemDependentsString(dep);
+        // console.debug("updated dependentsString:", dep.dependentsString);
       });
       _.uniq(item.dependents.concat(prevDependents)).forEach((id) => {
         const dep = items[indexFromId.get(id)];

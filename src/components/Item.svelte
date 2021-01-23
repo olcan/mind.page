@@ -230,26 +230,38 @@
     }
 
     // append divs for dependencies and dependents
-    if (depsString || dependentsString)
-      text += `\n<div class="deps-separator"></div>`;
-    const depsTitle = `${depsString.split(" ").length} dependencies`;
-    if (depsString) {
-      depsString = depsString.replace(
-        /(^|\s)(id:\w+)/g,
-        `$1[$2](javascript:_toggle('$2'))`
-      );
-      text += `\n<div class="deps">\n${depsTitle}: ${depsString}\n</div>`;
+    function depsStringToHtml(str) {
+      return str
+        .split(" ")
+        .map((dep) => {
+          const spanclass = dep.match(/\((.*?)\)$/)?.pop() || "";
+          dep = dep.replace(/\(.*?\)$/, "");
+          return `<span class="${spanclass}"> ${
+            dep.startsWith("#")
+              ? dep
+              : `<a href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)">${dep}</a>`
+          } </span>`;
+        })
+        .join(" ");
     }
-    const dependentsTitle = `${dependentsString.split(" ").length} dependents`;
-    if (dependentsString) {
-      dependentsString = dependentsString.replace(
-        /(^|\s)(id:\w+)/g,
-        `$1[$2](javascript:_toggle('$2'))`
-      );
-      text += `\n<div class="dependents">\n${dependentsTitle}: ${dependentsString}\n</div>`;
+    let depsTitle = "";
+    let dependentsTitle = "";
+    if (depsString || dependentsString) {
+      text += `\n<div class="deps-and-dependents">`;
+      if (depsString) {
+        depsTitle = `${depsString.split(" ").length} dependencies`;
+        text += `<span class="deps"><span class="deps-title">${depsTitle}:</span> ${depsStringToHtml(
+          depsString
+        )}</span> `;
+      }
+      if (dependentsString) {
+        dependentsTitle = `${dependentsString.split(" ").length} dependents`;
+        text += `<span class="dependents"><span class="dependents-title">${dependentsTitle}:</span> ${depsStringToHtml(
+          dependentsString
+        )}</span>`;
+      }
+      text += "</div>";
     }
-    if (depsString || dependentsString)
-      text += `\n<div class="clear-floats"></div>`;
 
     // remove removed sections
     text = text.replace(
@@ -364,7 +376,11 @@
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</)) {
+        const depline = str.startsWith('<div class="deps-and-dependents">');
+        if (
+          !insideBlock &&
+          (depline || !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</))
+        ) {
           // wrap math inside span.math (unless text matches search terms)
           if (
             matchingTerms.size == 0 ||
@@ -396,6 +412,7 @@
                 if (labelUnique) classNames += " unique";
               }
               classNames = classNames.trim();
+              if (depline) classNames = ""; // disable styling for deps/dependents
               if (classNames) classNames = ` class="${classNames}"`;
               let reltag =
                 label &&
@@ -527,8 +544,14 @@
       (m, _math) => wrapMath(_math)
     );
 
-    // wrap menu items in special .menu class
-    if (isMenu) text = '<div class="menu">' + text + "</div>";
+    // wrap menu items in special .menu div, but exclude deps/dependents
+    if (isMenu)
+      text =
+        '<div class="menu">' +
+        text.replace(
+          /^(.*?)($|<div class="deps-and-dependents">)/s,
+          "$1</div>$2"
+        );
 
     // wrap list items in span to control spacing from bullets
     text = text
@@ -607,7 +630,7 @@
         .map(
           (dep) =>
             `<span class="deps-dot${
-              dep.endsWith("[async]") ? " async" : ""
+              dep.endsWith("(async)") ? " async" : ""
             }">⸱</span>`
         )
         .join("");
@@ -620,7 +643,7 @@
         .map(
           (dep) =>
             `<span class="dependents-dot${
-              dep.startsWith("[visible]") ? " visible" : ""
+              dep.endsWith("(visible)") ? " visible" : ""
             }">⸱</span>`
         )
         .join("");
@@ -755,12 +778,17 @@
                   ? NodeFilter.FILTER_REJECT
                   : NodeFilter.FILTER_ACCEPT;
               case "svg":
-              case "math":
-              case "math-display":
               case "script":
                 return NodeFilter.FILTER_REJECT;
               default:
-                return NodeFilter.FILTER_ACCEPT;
+                switch ((node as HTMLElement).className) {
+                  case "math":
+                  case "math-display":
+                  case "deps-and-dependents":
+                    return NodeFilter.FILTER_REJECT;
+                  default:
+                    return NodeFilter.FILTER_ACCEPT;
+                }
             }
           },
         }
@@ -1578,60 +1606,55 @@
     }
   }
 
-  :global(.item .deps) {
+  :global(.item .deps-and-dependents) {
     display: none;
-    float: left;
-    opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
     /* white-space: nowrap; */
-    padding-bottom: 7px; /* avoid overlap with summary */
+    padding-top: 10px;
+    padding-bottom: 7px; /* avoid overlap with summaries */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
-  :global(.item > .deps) {
+  :global(.item > .deps-and-dependents) {
     margin-left: -6px;
   }
-  :global(.container.showDeps .item .deps) {
+  :global(.container.showDeps .item .deps-and-dependents),
+  :global(.container.showDependents .item .deps-and-dependents) {
     display: block;
   }
-
-  :global(.item .dependents) {
+  :global(.item .deps-and-dependents .deps),
+  :global(.item .deps-and-dependents .dependents) {
     display: none;
-    float: right;
-    text-align: right;
+  }
+  :global(.container.showDeps .item .deps-and-dependents .deps),
+  :global(.container.showDependents .item .deps-and-dependents .dependents) {
+    display: inline;
+  }
+
+  :global(.item .deps-and-dependents a) {
     opacity: 0.75;
-    font-size: 80%;
-    line-height: 160%;
-    /* white-space: nowrap; */
-    padding-bottom: 7px; /* avoid overlap with summary */
+    color: black;
+    background: #999;
+    font-weight: 500;
   }
-  /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
-  :global(.item > .dependents) {
-    margin-right: -6px;
+  :global(.item .deps-and-dependents mark) {
+    opacity: 0.75;
   }
-  :global(.container.showDependents .item .dependents) {
-    display: block;
+  :global(.item .deps-and-dependents span.visible mark),
+  :global(.item .deps-and-dependents span.async mark) {
+    opacity: 1;
   }
-
-  :global(.item .clear-floats) {
-    width: 100%;
-    height: 0;
-    clear: both;
+  :global(.item .deps-and-dependents span.visible a),
+  :global(.item .deps-and-dependents span.async a) {
+    opacity: 1;
   }
 
-  :global(.item .deps-separator) {
-    display: none;
-    clear: both;
-    margin: 0 -10px;
-    height: 1px;
-    border-top: 1px dashed #333;
-    margin-top: 8px;
-    margin-bottom: 4px;
-  }
-
-  :global(.container.showDependents .item .deps-separator),
-  :global(.container.showDeps .item .deps-separator) {
-    display: block;
+  :global(.item .deps-and-dependents .deps-title),
+  :global(.item .deps-and-dependents .dependents-title) {
+    background: #333;
+    padding: 0 4px;
+    border-radius: 4px;
+    white-space: nowrap;
   }
 
   :global(.item .MathJax) {
