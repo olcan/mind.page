@@ -269,7 +269,7 @@
 
       // detect "listing" item w/ unique label matching first term
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
-      if (item.labelUnique && item.label == terms[0]) {
+      if (item.uniqueLabel == terms[0]) {
         listingItemIndex = index;
         listingLabelPrefixes = item.labelPrefixes;
         listing = item.tagsVisible
@@ -401,21 +401,21 @@
           numeric: true,
           sensitivity: "base",
         }) ||
-        // listing item label prefix match length (for context for listing item)
-        listingLabelPrefixes.indexOf(b.label) -
-          listingLabelPrefixes.indexOf(a.label) ||
-        // position of label in listing item (item w/ unique label = first term)
+        // listing item (unique) label prefix match length (for context for listing item)
+        listingLabelPrefixes.indexOf(b.uniqueLabel) -
+          listingLabelPrefixes.indexOf(a.uniqueLabel) ||
+        // position of (unique) label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
-        listing.indexOf(b.label) - listing.indexOf(a.label) ||
+        listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // label match on first term
         b.labelMatch - a.labelMatch ||
         // tag match on first term
         b.tagMatch - a.tagMatch ||
-        // position of longest matching label prefix in listing item
-        min_pos(listing.map((pfx) => b.labelPrefixes.indexOf(pfx))) -
-          min_pos(listing.map((pfx) => a.labelPrefixes.indexOf(pfx))) ||
+        // // position of longest matching label prefix in listing item
+        // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
+        //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
         // # of matching words
@@ -666,6 +666,8 @@
       while ((pos = label.lastIndexOf("/")) >= 0)
         item.labelPrefixes.push((label = label.slice(0, pos)));
     }
+    item.uniqueLabel = item.labelUnique ? item.label : "";
+    item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
@@ -716,6 +718,7 @@
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
       _.uniq(item.deps.concat(prevDeps)).forEach((id) => {
+        if (id == item.id) return;
         const dep = items[indexFromId.get(id)];
         if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id))
           dep.dependents.push(item.id);
