@@ -806,6 +806,9 @@
             word.style.marginTop = "-" + word.style.paddingTop;
             word.style.paddingBottom = tagStyle.paddingBottom;
             word.style.marginBottom = "-" + word.style.paddingBottom;
+            // left/right margin matches span.highlight css
+            word.style.paddingLeft = word.style.paddingRight = "1px";
+            word.style.marginLeft = word.style.marginRight = "-1px";
             if (m[2][0] == "#") {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
@@ -1423,8 +1426,8 @@
     color: black;
     background: #9f9;
     border-radius: 4px;
-    padding: 0 2px;
-    margin: 0 -2px;
+    padding: 0 1px;
+    margin: 0 -1px;
   }
   :global(.item mark span.highlight) {
     color: black;
