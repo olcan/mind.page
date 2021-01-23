@@ -282,7 +282,8 @@
       // match tags against item tagsForSearch, allowing prefix matches
       item.matchingTerms = terms.filter(
         (t) =>
-          t[0] == "#" && item.tagsForSearch.findIndex((tag) => tag.startsWith(t)) >= 0
+          t[0] == "#" &&
+          item.tagsForSearch.findIndex((tag) => tag.startsWith(t)) >= 0
       );
       // match non-tag terms (anywhere in text)
       item.matchingTerms = item.matchingTerms.concat(
@@ -476,6 +477,18 @@
     onEditorChange(editorText);
   }
 
+  function onLinkClick(id: string, href: string, e: MouseEvent) {
+    const index = indexFromId.get(id);
+    if (index == undefined) return; // deleted
+    // "soft touch" item if not already newest and not pinned
+    if (items[index].time > newestTime) console.warn("invalid item time");
+    else if (items[index].time < newestTime) {
+      items[index].time = Date.now();
+      editorBlurTime = 0; // prevent re-focus on editor
+      onEditorChange((editorText = "")); // item time has changed, and editor cleared
+    }
+  }
+
   function onLogSummaryClick(id: string) {
     let index = indexFromId.get(id);
     if (index == undefined) return;
@@ -596,7 +609,9 @@
     item.tagsVisible = tags.visible;
     item.tagsHidden = tags.hidden;
     item.tagsRaw = tags.raw;
-    item.tagsForSearch = _.uniq(item.tags.concat(item.tags.map(simplifyPinTag)))
+    item.tagsForSearch = _.uniq(
+      item.tags.concat(item.tags.map(simplifyPinTag))
+    );
     item.log = item.tags.includes("#log"); // only special tag that can be visible
     item.debug = item.tagsRaw.includes("#_debug");
     item.init = item.tagsRaw.includes("#_init");
@@ -2914,6 +2929,7 @@
               onTouch={onItemTouch}
               onResized={onItemResized}
               {onTagClick}
+              {onLinkClick}
               {onLogSummaryClick}
               onPrev={onPrevItem}
               onNext={onNextItem}

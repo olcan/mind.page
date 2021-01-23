@@ -12,19 +12,6 @@
     parseTags,
   } from "../util.js";
 
-  let renderer = new marked.Renderer();
-  renderer.link = (href, title, text) => {
-    return href.startsWith("#")
-      ? `<a href="${href}" onclick="event.stopPropagation()">${text}</a>`
-      : `<a target="_blank" href="${href}" onclick="event.stopPropagation()">${text}</a>`;
-  };
-  // marked.use({ renderer });
-  marked.setOptions({
-    renderer: renderer,
-    highlight: highlight,
-    langPrefix: "",
-  });
-
   import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
   export let editing = false;
@@ -161,6 +148,13 @@
     ) => {
       e.stopPropagation();
       onTagClick(id, tag, reltag, e);
+    };
+
+  export let onLinkClick = (id: string, href: string, e: MouseEvent) => {};
+  if (!window["handleLinkClick"])
+    window["handleLinkClick"] = (id: string, href: string, e: MouseEvent) => {
+      e.stopPropagation();
+      onLinkClick(id, href, e);
     };
 
   export let onLogSummaryClick = (id: string) => {};
@@ -515,6 +509,18 @@
     });
 
     // convert markdown to html
+    let renderer = new marked.Renderer();
+    renderer.link = (href, title, text) => {
+      const target = href.startsWith("#") ? "" : `target="_blank"`;
+      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
+      return `<a ${target} href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+    };
+    // marked.use({ renderer });
+    marked.setOptions({
+      renderer: renderer,
+      highlight: highlight,
+      langPrefix: "",
+    });
     text = marked(text);
 
     // replace _math blocks, preserving whitespace
@@ -1502,7 +1508,8 @@
     position: absolute;
     left: 0;
     right: 0;
-    padding: 0 3px; /* aligns best with code block left border on iOS Safari */
+    /* 3px left padding aligns best with code block left border on iOS Safari */
+    padding: 0 3px;
     bottom: -7px; /* 3px remaining */
     margin-left: auto;
     margin-right: auto;
@@ -1513,8 +1520,13 @@
     user-select: none;
   }
 
-  :global(.item .log-dot) {
-    margin: 0 1px;
+  /* increase left/right padding on non-iOS mac due to ~1px less padding of monospace characters */
+  @supports not (-webkit-touch-callout: none) {
+    :global(.item .log-summary),
+    :global(.item .deps-summary),
+    :global(.item .dependents-summary) {
+      padding: 0 4px;
+    }
   }
 
   :global(.item .deps-summary) {
@@ -1525,16 +1537,6 @@
     padding-right: 0;
     margin: 0;
   }
-
-  :global(.item .deps-dot) {
-    margin-right: 2px;
-    color: #666;
-  }
-
-  :global(.item .deps-dot.async) {
-    color: #999;
-  }
-
   :global(.item .dependents-summary) {
     display: flex;
     justify-content: flex-end;
@@ -1544,13 +1546,34 @@
     margin: 0;
   }
 
+  :global(.item .deps-dot) {
+    color: #666;
+  }
+  :global(.item .deps-dot.async) {
+    color: #999;
+  }
   :global(.item .dependents-dot) {
-    margin-left: 1px;
     color: #555;
   }
-
   :global(.item .dependents-dot.visible) {
     color: #999;
+  }
+
+  :global(.item .deps-dot) {
+    margin-right: 1px;
+  }
+
+  /* increase dot margins on non-iOS due to ~1px less padding of monospace characters */
+  @supports not (-webkit-touch-callout: none) {
+    :global(.item .deps-dot) {
+      margin-right: 2px;
+    }
+    :global(.item .log-dot) {
+      margin: 0 1px;
+    }
+    :global(.item .dependents-dot) {
+      margin-left: 1px;
+    }
   }
 
   :global(.item .deps) {
@@ -1560,6 +1583,7 @@
     font-size: 80%;
     line-height: 160%;
     white-space: nowrap;
+    padding-bottom: 6px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
   :global(.item > .deps) {
@@ -1577,6 +1601,7 @@
     font-size: 80%;
     line-height: 160%;
     white-space: nowrap;
+    padding-bottom: 6px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
   :global(.item > .dependents) {
