@@ -1674,9 +1674,11 @@
 
   :global(.item .deps-and-dependents .deps-title),
   :global(.item .deps-and-dependents .dependents-title) {
-    color: #999;
-    background: #222;
-    border: 1px solid #666;
+    color: black;
+    background: #bbb;
+    font-weight: 500;
+
+    /* border: 1px solid #999; */
     padding: 0 4px;
     border-radius: 4px 0 0 4px;
     white-space: nowrap;

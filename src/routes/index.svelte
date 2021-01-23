@@ -642,12 +642,13 @@
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label) {
       // convert relative tags to absolute
-      item.tags = item.tags.map((tag) =>
-        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
-      );
-      item.tagsVisible = item.tagsVisible.map((tag) =>
-        tag.startsWith("#/") ? item.label + tag.substring(1) : tag
-      );
+      const resolveTag = (tag) =>
+        tag.startsWith("#/") ? item.label + tag.substring(1) : tag;
+      item.tags = item.tags.map(resolveTag);
+      item.tagsVisible = item.tagsVisible.map(resolveTag);
+      item.tagsHidden = item.tagsHidden.map(resolveTag);
+      item.tagsRaw = item.tagsRaw.map(resolveTag);
+      item.tagsForSearch = item.tagsForSearch.map(resolveTag);
     }
     if (item.label != prevLabel) {
       item.labelUnique = false;
