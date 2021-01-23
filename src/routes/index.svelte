@@ -575,10 +575,10 @@
           dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
         return (
           (dep.labelUnique ? dep.label : "id:" + dep.id) +
-          (async ? " async" : "")
+          (async ? "[async]" : "")
         );
       })
-      .join("\n");
+      .join(" ");
   }
 
   function itemDependentsString(item) {
@@ -587,11 +587,11 @@
         const dep = items[indexFromId.get(id)];
         return (
           (item.labelUnique && dep.tagsVisible.includes(item.label)
-            ? "visible "
+            ? "[visible]"
             : "") + (dep.labelUnique ? dep.label : "id:" + dep.id)
         );
       })
-      .join("\n");
+      .join(" ");
   }
 
   let tagCounts = new Map<string, number>();

@@ -232,23 +232,21 @@
     // append divs for dependencies and dependents
     if (depsString || dependentsString)
       text += `\n<div class="deps-separator"></div>`;
-    const depsTitle = `${depsString.split("\n").length} dependency items`;
+    const depsTitle = `${depsString.split(" ").length} dependencies`;
     if (depsString) {
       depsString = depsString.replace(
-        /(^|\n)(id:\w+)/g,
+        /(^|\s)(id:\w+)/g,
         `$1[$2](javascript:_toggle('$2'))`
       );
-      text += `\n<div class="deps">\n${depsTitle}\n${depsString}\n</div>`;
+      text += `\n<div class="deps">\n${depsTitle}: ${depsString}\n</div>`;
     }
-    const dependentsTitle = `${
-      dependentsString.split("\n").length
-    } dependent items`;
+    const dependentsTitle = `${dependentsString.split(" ").length} dependents`;
     if (dependentsString) {
       dependentsString = dependentsString.replace(
-        /(^|\n)(id:\w+)/g,
+        /(^|\s)(id:\w+)/g,
         `$1[$2](javascript:_toggle('$2'))`
       );
-      text += `\n<div class="dependents">\n${dependentsTitle}\n${dependentsString}\n</div>`;
+      text += `\n<div class="dependents">\n${dependentsTitle}: ${dependentsString}\n</div>`;
     }
     if (depsString || dependentsString)
       text += `\n<div class="clear-floats"></div>`;
@@ -605,11 +603,11 @@
     // append dependencies ("deps") summary
     if (depsString) {
       const summary = depsString
-        .split("\n")
+        .split(" ")
         .map(
           (dep) =>
             `<span class="deps-dot${
-              dep.endsWith(" async") ? " async" : ""
+              dep.endsWith("[async]") ? " async" : ""
             }">⸱</span>`
         )
         .join("");
@@ -618,11 +616,11 @@
     // append dependents ("deps") summary
     if (dependentsString) {
       const summary = dependentsString
-        .split("\n")
+        .split(" ")
         .map(
           (dep) =>
             `<span class="dependents-dot${
-              dep.startsWith("visible ") ? " visible" : ""
+              dep.startsWith("[visible]") ? " visible" : ""
             }">⸱</span>`
         )
         .join("");
@@ -1586,7 +1584,7 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
-    white-space: nowrap;
+    /* white-space: nowrap; */
     padding-bottom: 7px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
@@ -1604,7 +1602,7 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
-    white-space: nowrap;
+    /* white-space: nowrap; */
     padding-bottom: 7px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
@@ -1628,7 +1626,7 @@
     height: 1px;
     border-top: 1px dashed #333;
     margin-top: 8px;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }
 
   :global(.container.showDependents .item .deps-separator),
