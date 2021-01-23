@@ -338,7 +338,7 @@
       item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null;
     });
 
-    // Update (but not save yet) times for editing and running items to maintain ordering
+    // Update (but not save yet) times for editing and running non-log items to maintain ordering
     // among running/editing items within their sort level (see ordering logic below)
     let now = Date.now();
     items.forEach((item) => {
@@ -346,10 +346,13 @@
     });
 
     // Update time for listing item (but not save yet, a.k.a. "soft (session) touch")
-    if (listingItemIndex >= 0) items[listingItemIndex].time = Date.now();
+    if (listingItemIndex >= 0 && !items[listingItemIndex].log)
+      items[listingItemIndex].time = Date.now();
 
     // Update times for id-matching items (but not save yet, a.k.a. "soft (session) touch")
-    idMatchItemIndices.forEach((index) => (items[index].time = Date.now()));
+    idMatchItemIndices.forEach((index) => {
+      if (!items[index].log) items[index].time = Date.now();
+    });
 
     // update history, replace unless current state is final (from tag click)
     if (history.state.editorText != editorText) {
@@ -439,9 +442,13 @@
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
-    // "soft touch" item if not already newest and not pinned
+    // "soft touch" item if not already newest and not pinned and not log
     if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime && !items[index].pinned)
+    else if (
+      items[index].time < newestTime &&
+      !items[index].pinned &&
+      !items[index].log
+    )
       items[index].time = Date.now();
 
     if (tag == reltag) {
@@ -482,9 +489,13 @@
   function onLinkClick(id: string, href: string, e: MouseEvent) {
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
-    // "soft touch" item if not already newest and not pinned
+    // "soft touch" item if not already newest and not pinned and not log
     if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime) {
+    else if (
+      items[index].time < newestTime &&
+      !items[index].pinned &&
+      !items[index].log
+    ) {
       items[index].time = Date.now();
       editorBlurTime = 0; // prevent re-focus on editor
       onEditorChange((editorText = "")); // item time has changed, and editor cleared
@@ -503,13 +514,15 @@
     if (!e?.state) return; // for fragment (#id) hrefs
     // console.debug("pop", e.state);
     // restore editor text and unsaved times
-    editorText = e.state.editorText;
-    items.forEach((item) => (item.time = item.savedTime));
-    e.state.unsavedTimes.forEach((entry) => {
-      const index = indexFromId.get(entry.id);
-      if (index == undefined) return;
-      items[index].time = entry.time;
-    });
+    editorText = e.state.editorText || "";
+    if (e.state.unsavedTimes) {
+      items.forEach((item) => (item.time = item.savedTime));
+      e.state.unsavedTimes.forEach((entry) => {
+        const index = indexFromId.get(entry.id);
+        if (index == undefined) return;
+        items[index].time = entry.time;
+      });
+    }
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
@@ -615,7 +628,7 @@
     item.tagsForSearch = _.uniq(
       item.tags.concat(item.tags.map(simplifyPinTag))
     );
-    item.log = item.tags.includes("#log"); // only special tag that can be visible
+    // item.log = item.tags.includes("#log"); (must be label, see below)
     item.debug = item.tagsRaw.includes("#_debug");
     item.init = item.tagsRaw.includes("#_init");
     item.async = item.tagsRaw.includes("#_async");
@@ -669,6 +682,7 @@
       while ((pos = label.lastIndexOf("/")) >= 0)
         item.labelPrefixes.push((label = label.slice(0, pos)));
     }
+    item.log = item.label == "#log";
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
@@ -1338,9 +1352,7 @@
     let item = items[index];
 
     // update time for non-log item
-    if (!item.log) {
-      item.time = Date.now();
-    }
+    if (!item.log) item.time = Date.now();
 
     // if cancelled, restore savedText
     // NOTE: we do not restore time so item remains "soft touched"
@@ -1469,6 +1481,10 @@
   }
 
   function onItemTouch(index: number) {
+    if (items[index].log) {
+      alert("#log item can not be moved up");
+      return;
+    } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime) {
       items[index].time = Date.now();
@@ -2108,7 +2124,7 @@
           if (type == "") item.text = text;
           else item.text = appendBlock(item.text, type, text);
         }
-        item.time = Date.now();
+        if (!item.log) item.time = Date.now();
         itemTextChanged(index, item.text);
         // we dispatch onEditorChange to prevent index changes _during_ JS eval
         setTimeout(() => {

@@ -146,6 +146,7 @@
       reltag: string,
       e: MouseEvent
     ) => {
+      e.preventDefault(); // disables href on anchor tag
       e.stopPropagation();
       onTagClick(id, tag, reltag, e);
     };
@@ -239,7 +240,7 @@
           return `<span class="${spanclass}"> ${
             dep.startsWith("#")
               ? dep
-              : `<a href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)">${dep}</a>`
+              : `<a class="tag" href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)">${dep}</a>`
           } </span>`;
         })
         .join(" ");
@@ -279,6 +280,7 @@
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
+    // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is for to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
     const tagRegex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
       `(^|\\s)(${regexTags.join("|")})`,
@@ -527,9 +529,23 @@
     // convert markdown to html
     let renderer = new marked.Renderer();
     renderer.link = (href, title, text) => {
-      const target = href.startsWith("#") ? "" : `target="_blank"`;
       const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
-      return `<a ${target} href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+      const text_escaped = text.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
+      if (href.startsWith("##")) {
+        // fragment link
+        return `<a href="${href.substring(
+          1
+        )}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+      } else if (href.startsWith("#")) {
+        // tag link
+        const lctag = href.toLowerCase();
+        let classNames = "";
+        if (matchingTerms.has(lctag)) classNames += " selected";
+        else if (matchingTermsSecondary.has(lctag))
+          classNames += " secondary-selected";
+        return `<mark class="${classNames}" onclick="handleTagClick('${id}','${href_escaped}','${text_escaped}',event)">${text}</mark>`;
+      }
+      return `<a target="_blank" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
     // marked.use({ renderer });
     marked.setOptions({
@@ -777,23 +793,22 @@
         NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
         {
           acceptNode: function (node) {
+            const classList = (node as HTMLElement).classList;
             switch (node.nodeName.toLowerCase()) {
               case "mark":
-                return (node as HTMLElement).className == "selected"
+                return classList?.contains("selected") ||
+                  classList?.contains("secondary-selected")
                   ? NodeFilter.FILTER_REJECT
                   : NodeFilter.FILTER_ACCEPT;
               case "svg":
               case "script":
                 return NodeFilter.FILTER_REJECT;
               default:
-                switch ((node as HTMLElement).className) {
-                  case "math":
-                  case "math-display":
-                  case "deps-and-dependents":
-                    return NodeFilter.FILTER_REJECT;
-                  default:
-                    return NodeFilter.FILTER_ACCEPT;
-                }
+                return classList?.contains("math") ||
+                  classList?.contains("math-display") ||
+                  classList?.contains("deps-and-dependents")
+                  ? NodeFilter.FILTER_REJECT
+                  : NodeFilter.FILTER_ACCEPT;
             }
           },
         }
@@ -821,6 +836,7 @@
         let m;
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
+          const tagText = node.parentElement?.innerText;
           parent.insertBefore(document.createTextNode(m[1]), node);
           let word = parent.insertBefore(document.createElement("span"), node);
           word.appendChild(document.createTextNode(m[2]));
@@ -840,7 +856,7 @@
             // left/right margin matches span.highlight css
             word.style.paddingLeft = word.style.paddingRight = "1px";
             word.style.marginLeft = word.style.marginRight = "-1px";
-            if (m[2][0] == "#") {
+            if (tagText.lastIndexOf(m[2]) == 0) {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
               word.style.marginLeft = "-" + tagStyle.paddingLeft;
@@ -1389,11 +1405,15 @@
     border-radius: 4px;
     text-decoration: none;
   }
+  :global(.item a.tag) {
+    color: black;
+    background: #999;
+    font-weight: 500;
+  }
   :global(.item mark) {
     color: black;
     background: #999;
     font-weight: 500;
-    /* remove negative margins used to align with textarea text */
     padding: 0 4px;
     margin: 0;
   }
@@ -1457,9 +1477,14 @@
     color: black;
     background: #9f9;
     border-radius: 4px;
+    font-weight: 500;
     padding: 0 1px;
     margin: 0 -1px;
   }
+  :global(.item mark.label.unique span.highlight) {
+    font-weight: 700; /* match weight of mark.label.unique */
+  }
+
   :global(.item mark span.highlight) {
     color: black;
     background: #9b9;
@@ -1654,13 +1679,8 @@
     display: none;
   }
 
+  :global(.item .deps-and-dependents mark),
   :global(.item .deps-and-dependents a) {
-    opacity: 0.75;
-    color: black;
-    background: #999;
-    font-weight: 500;
-  }
-  :global(.item .deps-and-dependents mark) {
     opacity: 0.75;
   }
   :global(.item .deps-and-dependents span.visible mark),

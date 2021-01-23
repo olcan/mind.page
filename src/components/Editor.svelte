@@ -35,7 +35,7 @@
     const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
     const regex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
-      `(^|\\s)(${regexTags.join("|")})`,
+      `(^|\\s|\\()(${regexTags.join("|")})`,
       "g"
     );
     return text.replace(regex, "$1<mark>$2</mark>");
