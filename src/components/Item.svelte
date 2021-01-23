@@ -244,19 +244,20 @@
         })
         .join(" ");
     }
+
     let depsTitle = "";
     let dependentsTitle = "";
     if (depsString || dependentsString) {
       text += `\n<div class="deps-and-dependents">`;
       if (depsString) {
         depsTitle = `${depsString.split(" ").length} dependencies`;
-        text += `<span class="deps"><span class="deps-title">${depsTitle}:</span> ${depsStringToHtml(
+        text += `<span class="deps"><span class="deps-title" onclick="handleDepsSummaryClick('${id}',event)">${depsTitle}</span> ${depsStringToHtml(
           depsString
         )}</span> `;
       }
       if (dependentsString) {
         dependentsTitle = `${dependentsString.split(" ").length} dependents`;
-        text += `<span class="dependents"><span class="dependents-title">${dependentsTitle}:</span> ${depsStringToHtml(
+        text += `<span class="dependents"><span class="dependents-title" onclick="handleDependentsSummaryClick('${id}',event)">${dependentsTitle}</span> ${depsStringToHtml(
           dependentsString
         )}</span>`;
       }
@@ -607,7 +608,7 @@
     // append log summary div
     if (log) {
       const lines = log.split("\n");
-      let summary = "";
+      let summary = '<span class="log-triangle">▼</span>';
       lines.forEach((line) => {
         const type = line.match(/^ERROR:/)
           ? "error"
@@ -625,28 +626,32 @@
 
     // append dependencies ("deps") summary
     if (depsString) {
-      const summary = depsString
-        .split(" ")
-        .map(
-          (dep) =>
-            `<span class="deps-dot${
-              dep.endsWith("(async)") ? " async" : ""
-            }">⸱</span>`
-        )
-        .join("");
+      const summary =
+        '<span class="deps-triangle">▼</span>' +
+        depsString
+          .split(" ")
+          .map(
+            (dep) =>
+              `<span class="deps-dot${
+                dep.endsWith("(async)") ? " async" : ""
+              }">⸱</span>`
+          )
+          .join("");
       text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`;
     }
     // append dependents ("deps") summary
     if (dependentsString) {
-      const summary = dependentsString
-        .split(" ")
-        .map(
-          (dep) =>
-            `<span class="dependents-dot${
-              dep.endsWith("(visible)") ? " visible" : ""
-            }">⸱</span>`
-        )
-        .join("");
+      const summary =
+        '<span class="dependents-triangle">▼</span>' +
+        dependentsString
+          .split(" ")
+          .map(
+            (dep) =>
+              `<span class="dependents-dot${
+                dep.endsWith("(visible)") ? " visible" : ""
+              }">⸱</span>`
+          )
+          .join("");
       text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
 
@@ -1506,8 +1511,12 @@
     font-size: 80%;
     line-height: 160%;
   }
-  :global(.container.showLogs .item ._log) {
+  :global(.container.showLogs .item ._log),
+  :global(.container.showLogs .item .log-triangle) {
     display: block;
+  }
+  :global(.container.showLogs .item .log-dot) {
+    display: none;
   }
   :global(.item code:empty) {
     display: block;
@@ -1588,6 +1597,13 @@
   :global(.item .dependents-dot.visible) {
     color: #999;
   }
+  :global(.item .log-triangle),
+  :global(.item .deps-triangle),
+  :global(.item .dependents-triangle) {
+    display: none;
+    font-size: 10px;
+    color: #999;
+  }
 
   :global(.item .deps-dot) {
     margin-right: 1px;
@@ -1627,8 +1643,15 @@
     display: none;
   }
   :global(.container.showDeps .item .deps-and-dependents .deps),
-  :global(.container.showDependents .item .deps-and-dependents .dependents) {
+  :global(.container.showDeps .item .deps-triangle),
+  :global(.container.showDependents .item .deps-and-dependents .dependents),
+  :global(.container.showDependents .item .dependents-triangle) {
     display: inline;
+  }
+
+  :global(.container.showDeps .item .deps-dot),
+  :global(.container.showDependents .item .dependents-dot) {
+    display: none;
   }
 
   :global(.item .deps-and-dependents a) {
@@ -1651,10 +1674,13 @@
 
   :global(.item .deps-and-dependents .deps-title),
   :global(.item .deps-and-dependents .dependents-title) {
-    background: #333;
+    color: #999;
+    background: #222;
+    border: 1px solid #666;
     padding: 0 4px;
-    border-radius: 4px;
+    border-radius: 4px 0 0 4px;
     white-space: nowrap;
+    cursor: pointer;
   }
 
   :global(.item .MathJax) {

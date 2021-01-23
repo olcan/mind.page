@@ -248,17 +248,15 @@
     items.forEach((item, index) => {
       textLength += item.text.length;
 
-      // NOTE: any alphanumeric ordering (e.g. on pinTerm) must always be preceded with a prefix match condition
-      //       (otherwise the default "" would always be on top unless you use something like "ZZZ")
-
-      // match first query term against item label
-      item.labelMatch = item.label == terms[0];
-
       // match first query term against visible tags in item
       item.tagMatch = item.tagsVisible.includes(terms[0]);
 
-      // prefix-match first query term against item header text (excluding html preamble)
-      item.prefixMatch = item.header.startsWith(terms[0]);
+      // prefix-match first query term against item header text
+      // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
+      item.prefixMatch =
+        item.header.startsWith(terms[0]) &&
+        (!terms[0].startsWith("#") ||
+          (idsFromLabel.get(terms[0]) || []).length <= 1);
 
       // find "pinned match" term = hidden tags containing /pin with prefix match on first term
       item.pinnedMatchTerm =
@@ -266,6 +264,11 @@
           (t) => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)
         ) || "";
       item.pinnedMatch = item.pinnedMatchTerm.length > 0;
+
+      // set uniqueLabel for shortening code below
+      // NOTE: doing this here is easier than keeping these updated in itemTextChanged
+      item.uniqueLabel = item.labelUnique ? item.label : "";
+      // item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
 
       // detect "listing" item w/ unique label matching first term
       // (in reverse order w/ listing item label last so larger is better and missing=-1)
@@ -277,6 +280,7 @@
           .slice()
           .reverse()
           .concat(item.label);
+        console.debug(listing);
       }
 
       // match tags against item tagsForSearch, allowing prefix matches
@@ -409,18 +413,16 @@
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
-        // label match on first term
-        b.labelMatch - a.labelMatch ||
         // tag match on first term
         b.tagMatch - a.tagMatch ||
-        // // position of longest matching label prefix in listing item
-        // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
-        //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
+        // // // position of longest matching label prefix in listing item
+        // // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
+        // //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
         // prefix match on first term
         b.prefixMatch - a.prefixMatch ||
-        // # of matching words
+        // # of matching words/tags from query
         b.matchingTerms.length - a.matchingTerms.length ||
-        // # of matching secondary words
+        // # of matching secondary words from query
         b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
         // missing tag prefixes
         b.missingTags.length - a.missingTags.length ||
@@ -666,8 +668,6 @@
       while ((pos = label.lastIndexOf("/")) >= 0)
         item.labelPrefixes.push((label = label.slice(0, pos)));
     }
-    item.uniqueLabel = item.labelUnique ? item.label : "";
-    item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
@@ -1551,7 +1551,10 @@
     (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
     (document.querySelector(
       "span.dots"
-    ) as HTMLElement).style.visibility = showDotted ? "hidden" : "visible";
+    ) as HTMLElement).style.display = showDotted ? "none" : "block";
+    (document.querySelector(
+      "span.triangle"
+    ) as HTMLElement).style.display = showDotted ? "block" : "none";
     document.querySelectorAll(".dotted").forEach((dotted) => {
       (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
     });
@@ -1675,11 +1678,12 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
-      item.labelMatch = false;
       item.tagMatch = false;
       item.prefixMatch = false;
       item.pinnedMatch = false;
       item.pinnedMatchTerm = "";
+      item.uniqueLabel = "";
+      // item.uniqueLabelPrefixes = [];
       item.matchingTerms = [];
       item.matchingTermsSecondary = [];
       item.missingTags = [];
@@ -2904,6 +2908,7 @@
               <span class="dots">
                 {#each { length: dotCount } as _}•{/each}
               </span>
+              <span class="triangle"> ▲ </span>
               {#if items.length > 0}
                 <div class="counts">
                   {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
