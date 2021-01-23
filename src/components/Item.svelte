@@ -1526,10 +1526,11 @@
     :global(.item .deps-summary),
     :global(.item .dependents-summary) {
       padding: 0 4px;
+      bottom: -6px; /* 4px remaining */
     }
   }
 
-  :global(.item .deps-summary) {
+  :global(.item .log-summary) {
     display: flex;
     justify-content: flex-start;
     max-width: 25%;
@@ -1565,10 +1566,10 @@
 
   /* increase dot margins on non-iOS due to ~1px less padding of monospace characters */
   @supports not (-webkit-touch-callout: none) {
-    :global(.item .deps-dot) {
+    :global(.item .log-dot) {
       margin-right: 2px;
     }
-    :global(.item .log-dot) {
+    :global(.item .deps-dot) {
       margin: 0 1px;
     }
     :global(.item .dependents-dot) {
@@ -1583,7 +1584,7 @@
     font-size: 80%;
     line-height: 160%;
     white-space: nowrap;
-    padding-bottom: 6px; /* avoid overlap with summary */
+    padding-bottom: 7px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
   :global(.item > .deps) {
@@ -1601,7 +1602,7 @@
     font-size: 80%;
     line-height: 160%;
     white-space: nowrap;
-    padding-bottom: 6px; /* avoid overlap with summary */
+    padding-bottom: 7px; /* avoid overlap with summary */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
   :global(.item > .dependents) {
@@ -1624,6 +1625,7 @@
     height: 1px;
     border-top: 1px dashed #333;
     margin-top: 8px;
+    margin-bottom: 2px;
   }
 
   :global(.container.showDependents .item .deps-separator),
