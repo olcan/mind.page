@@ -1479,12 +1479,13 @@
   }
 
   :global(.item span.highlight) {
-    color: black;
-    background: #9f9;
+    /* color: black; */
+    /* background: #9f9; */
+    border: 1px solid #9b9;
     border-radius: 4px;
-    font-weight: 500;
+    /* font-weight: 500; */
     padding: 0 1px;
-    margin: 0 -1px;
+    margin: -1px -2px;
   }
   :global(.item mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */
@@ -1495,6 +1496,8 @@
     background: #9b9;
     padding-left: 0;
     padding-right: 0;
+    border: 0;
+    margin: 0 -1px;
   }
   :global(.item mark.label span.highlight) {
     background: #9f9;
