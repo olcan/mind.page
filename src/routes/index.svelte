@@ -197,8 +197,7 @@
   let matchingItemCount = 0;
   let textLength = 0;
   let editorChangePending = false;
-  let lastClickedTag = "";
-  let lastClickedTagItemId = "";
+  let finalizeStateOnEditorChange = false;
   function onEditorChange(text: string) {
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
     if (
@@ -216,6 +215,7 @@
       }
       return;
     }
+    // console.debug("onEditorChange", editorText);
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     // console.debug("onEditorChange");
     maxIndexToShow = maxIndexToShowDefault; // reset item truncation
@@ -280,7 +280,7 @@
           .slice()
           .reverse()
           .concat(item.label);
-        console.debug(listing);
+        // console.debug(listing);
       }
 
       // match tags against item tagsForSearch, allowing prefix matches
@@ -364,13 +364,13 @@
             item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null
           )
         ),
-        final: editorText.trim() == lastClickedTag, // tag clicked states are final
+        final: !editorText || finalizeStateOnEditorChange,
       };
       // console.debug(history.state.final ? "push" : "replace", state);
       if (history.state.final) history.pushState(state, editorText);
       else history.replaceState(state, editorText);
     }
-    lastClickedTag = lastClickedTagItemId = ""; // processed above
+    finalizeStateOnEditorChange = false; // processed above
 
     // returns position of minimum non-negative number, or -1 if none found
     function min_pos(xJ) {
@@ -478,10 +478,13 @@
       }
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
-    lastClickedTag = tag; // consumed in onEditorChange
-    lastClickedTagItemId = id;
+    if (editorText.trim() == tag) {
+      history.back();
+      return;
+    }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     // editorText = tag + " ";
+    finalizeStateOnEditorChange = true; // finalize state
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
@@ -498,7 +501,7 @@
     ) {
       items[index].time = Date.now();
       editorBlurTime = 0; // prevent re-focus on editor
-      onEditorChange((editorText = "")); // item time has changed, and editor cleared
+      onEditorChange(editorText); // item time has changed
     }
   }
 
@@ -1840,12 +1843,18 @@
       textArea(-1).focus();
     };
     window["_toggle"] = function (text: string) {
-      if (editorText.trim() == text) text = "";
+      // if (editorText.trim() == text) text = "";
+      // console.log("_toggle", editorText);
+      if (editorText.trim() == text.trim()) {
+        history.back();
+        return;
+      }
+      finalizeStateOnEditorChange = true; // finalize state
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange((editorText = text));
     };
     window["_toggle_edit"] = function (text: string) {
-      if (editorText.trim() == text) text = "";
-      onEditorChange((editorText = (text + " ").trimStart()));
+      window["_toggle"](text);
       textArea(-1).focus();
     };
 
