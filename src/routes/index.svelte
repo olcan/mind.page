@@ -227,11 +227,13 @@
     maxIndexToShow = maxIndexToShowDefault; // reset item truncation
 
     text = text.toLowerCase().trim();
+    const tags = parseTags(text);
     let terms = _.uniq(
       text
         .split(/\s+/)
-        .concat(parseTags(text).all)
-        .concat(parseTags(text).all.map(simplifyTag)) //.concat(text.split(/\W+/))
+        .concat(tags.all)
+        .concat(_.flatten(tags.all.map((t) => t.split(/[#/]/))))
+        .concat(tags.all.map(simplifyTag)) //.concat(text.split(/\W+/))
     ).filter((t) => t);
     // if (text.startsWith("/")) terms = [];
 
@@ -254,8 +256,8 @@
     items.forEach((item, index) => {
       textLength += item.text.length;
 
-      // match first query term against visible tags in item
-      item.tagMatch = item.tagsVisible.includes(terms[0]);
+      // match query terms against visible tags in item
+      item.tagMatches = _.intersection(item.tagsVisible, terms).length;
 
       // prefix-match first query term against item header text
       // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
@@ -422,8 +424,8 @@
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
-        // tag match on first term
-        b.tagMatch - a.tagMatch ||
+        // # of matching (visible) tags from query
+        b.tagMatches - a.tagMatches ||
         // // // position of longest matching label prefix in listing item
         // // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
         // //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
@@ -1694,7 +1696,7 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
-      item.tagMatch = false;
+      item.tagMatches = 0;
       item.prefixMatch = false;
       item.pinnedMatch = false;
       item.pinnedMatchTerm = "";
