@@ -4,14 +4,7 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import {
-    highlight,
-    extractBlock,
-    hashCode,
-    regexEscape,
-    parseTags,
-    renderTag,
-  } from "../util.js";
+  import { highlight, extractBlock, hashCode, regexEscape, parseTags, renderTag } from "../util.js";
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
@@ -50,12 +43,7 @@
   let warning = false;
   let target = false;
   let context = false;
-  export let onEditing = (
-    index: number,
-    editing: boolean,
-    cancelled: boolean = false,
-    run: boolean = false
-  ) => {};
+  export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
@@ -79,12 +67,7 @@
     });
   }
 
-  function onDone(
-    editorText: string,
-    e: KeyboardEvent,
-    cancelled: boolean,
-    run: boolean
-  ) {
+  function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
     if (run && !cancelled) invalidateCache();
     onEditing(index, (editing = false), cancelled, run);
   }
@@ -134,19 +117,9 @@
     onEditing(index, (editing = false));
   }
 
-  export let onTagClick = (
-    id: string,
-    tag: string,
-    reltag: string,
-    e: MouseEvent
-  ) => {};
+  export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {};
   if (!window["handleTagClick"])
-    window["handleTagClick"] = (
-      id: string,
-      tag: string,
-      reltag: string,
-      e: MouseEvent
-    ) => {
+    window["handleTagClick"] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
       e.preventDefault(); // disables href on anchor tag
       e.stopPropagation();
       onTagClick(id, tag, reltag, e);
@@ -196,8 +169,7 @@
     dependentsSring: string
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
-    const cache_key =
-      "html-" + hashCode(Array.from(arguments).slice(1).toString());
+    const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
     if (window["_html_cache"].hasOwnProperty(cache_key)) {
       // console.debug("toHTML skipped");
       return window["_html_cache"][cache_key];
@@ -206,9 +178,7 @@
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : "";
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
-    matchingTermsSecondary = new Set<string>(
-      matchingTermsSecondary.split(" ").filter((t) => t)
-    );
+    matchingTermsSecondary = new Set<string>(matchingTermsSecondary.split(" ").filter((t) => t));
     missingTags = new Set<string>(missingTags.split(" ").filter((t) => t));
     if (label) {
       Array.from(matchingTerms).forEach((term: string) => {
@@ -267,10 +237,7 @@
     }
 
     // remove removed sections
-    text = text.replace(
-      /<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs,
-      ""
-    );
+    text = text.replace(/<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, "");
 
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(text, "_log");
@@ -329,10 +296,7 @@
     const regexTerms = Array.from(matchingTerms)
       .map(regexEscape)
       .sort((a, b) => b.length - a.length);
-    let mathTermRegex = new RegExp(
-      `\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`,
-      "i"
-    );
+    let mathTermRegex = new RegExp(`\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`, "i");
 
     // NOTE: modifications should only happen outside of code blocks
 
@@ -367,12 +331,7 @@
         // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
         // (we also exclude /^\s*>/ to break inside blockquotes for now)
         // (also note since we process lines, \s does not match \n)
-        if (
-          !insideBlock &&
-          !str.match(
-            /^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/
-          )
-        )
+        if (!insideBlock && !str.match(/^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
           str = str + "<br>\n";
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
@@ -381,18 +340,11 @@
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
         const depline = str.startsWith('<div class="deps-and-dependents">');
-        if (
-          !insideBlock &&
-          (depline || !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</))
-        ) {
+        if (!insideBlock && (depline || !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</))) {
           // wrap math inside span.math (unless text matches search terms)
-          if (
-            matchingTerms.size == 0 ||
-            (!str.match(mathTermRegex) && !matchingTerms.has("$"))
-          )
+          if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has("$")))
             str = str.replace(/(^|[^\\])(\$?\$`.+?`\$\$?)/g, (m, pfx, math) =>
-              (math.startsWith("$`") && math.endsWith("`$")) ||
-              (math.startsWith("$$`") && math.endsWith("`$$"))
+              (math.startsWith("$`") && math.endsWith("`$")) || (math.startsWith("$$`") && math.endsWith("`$$"))
                 ? pfx + wrapMath(math)
                 : m
             );
@@ -402,13 +354,11 @@
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag) => {
               // make relative tag absolute
-              if (label && tag.startsWith("#/"))
-                tag = labelText + tag.substring(1);
+              if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (matchingTerms.has(lctag)) classNames += " selected";
-              else if (matchingTermsSecondary.has(lctag))
-                classNames += " secondary-selected";
+              else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
               if (missingTags.has(lctag)) classNames += " missing";
               if (tag.startsWith("#_")) classNames += " hidden";
               if (lctag == label) {
@@ -450,13 +400,11 @@
             });
         }
         // replace URLs (except in lines that look like a reference-style link)
-        if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/))
-          str = replaceURLs(str);
+        if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str);
 
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
-        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/))
-          str = "\n" + str;
+        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = "\n" + str;
         lastLine = line;
         return str;
       })
@@ -465,10 +413,7 @@
       .replace(/<hr(.*?)>\s*<br>/g, "<hr$1>");
 
     // remove *_removed blocks
-    text = text.replace(
-      /(^|\n)```\w*_removed\n\s*(.*?)\s*\n```/gs,
-      (m, pfx) => pfx
-    );
+    text = text.replace(/(^|\n)```\w*_removed\n\s*(.*?)\s*\n```/gs, (m, pfx) => pfx);
 
     // hide *_hidden blocks
     text = text.replace(
@@ -497,10 +442,7 @@
 
     // replace #item between style tags for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
-    text = text.replace(
-      /(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs,
-      `$1$2#item-${id}$3`
-    );
+    text = text.replace(/(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs, `$1$2#item-${id}$3`);
 
     // evaluate inline <<macros>>
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
@@ -509,10 +451,7 @@
         js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
         js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
-        js = js.replace(
-          /(^|[^\\])\$cid/g,
-          "$1" + `${id}-${deephash}-${cacheIndex}`
-        );
+        js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         let out = pfx + window["_eval"](js, id);
         // console.debug("macro output: ", out);
         // plug in $id/etc just like _html blocks
@@ -520,10 +459,7 @@
         out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
         out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
-        out = out.replace(
-          /(^|[^\\])\$cid/g,
-          "$1" + `${id}-${deephash}-${cacheIndex}`
-        );
+        out = out.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         return out;
       } catch (e) {
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
@@ -538,9 +474,7 @@
       const text_escaped = text.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
       if (href.startsWith("##")) {
         // fragment link
-        return `<a href="${href.substring(
-          1
-        )}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+        return `<a href="${href.substring(1)}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
       } else if (href.startsWith("#")) {
         // tag link
         let tag = href;
@@ -549,8 +483,7 @@
         const lctag = tag.toLowerCase();
         let classNames = "link";
         if (matchingTerms.has(lctag)) classNames += " selected";
-        else if (matchingTermsSecondary.has(lctag))
-          classNames += " secondary-selected";
+        else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
         return `<mark class="${classNames}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
@@ -566,69 +499,43 @@
     text = marked(text);
 
     // replace _math blocks, preserving whitespace
-    text = text.replace(
-      /<pre><code class="_math">(.*?)<\/code><\/pre>/gs,
-      (m, _math) => wrapMath(_math)
-    );
+    text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
 
     // wrap menu items in special .menu div, but exclude deps/dependents
     if (isMenu)
-      text =
-        '<div class="menu">' +
-        text.replace(
-          /^(.*?)($|<div class="deps-and-dependents">)/s,
-          "$1</div>$2"
-        );
+      text = '<div class="menu">' + text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, "$1</div>$2");
 
     // wrap list items in span to control spacing from bullets
-    text = text
-      .replace(/<li>/gs, '<li><span class="list-item">')
-      .replace(/<\/li>/gs, "</span></li>");
+    text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
 
     // process images to transform src and add _cache_key attribute
     text = text.replace(/<img .*?src\s*=\s*"(.+?)".*?>/gi, function (m, src) {
       if (m.match(/_cache_key/i)) {
-        console.warn(
-          "img with self-assigned _cache_key in item at index",
-          index + 1
-        );
+        console.warn("img with self-assigned _cache_key in item at index", index + 1);
         return m;
       }
       // convert dropbox image src urls to direct download
-      src = src
-        .replace("www.dropbox.com", "dl.dropboxusercontent.com")
-        .replace("?dl=0", "");
+      src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // console.debug("img src", src, m);
-      return (
-        m.substring(0, m.length - 1) +
-        ` src="${src}" _cache_key="${key}-${id}-${cacheIndex++}">`
-      );
+      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}-${id}-${cacheIndex++}">`;
     });
 
     // process divs with item-unique id to add _cache_key="<id>-$deephash-$pos" automatically
     text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
-        console.warn(
-          "div with self-assigned _cache_key in item at index",
-          index + 1
-        );
+        console.warn("div with self-assigned _cache_key in item at index", index + 1);
         return m;
       }
       if (!divid.includes(id)) {
-        console.warn(
-          "div without proper id (that includes $id) in item at index",
-          index + 1
-        );
+        console.warn("div without proper id (that includes $id) in item at index", index + 1);
         return m;
       }
       // m = m.replace(/ _cache_key=[^> ]*/, "");
       // console.debug("img src", src, m);
       const key = divid + "-" + deephash;
-      return (
-        m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`
-      );
+      return m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`;
     });
 
     // append log summary div
@@ -656,12 +563,7 @@
         '<span class="deps-triangle">▼</span>' +
         depsString
           .split(" ")
-          .map(
-            (dep) =>
-              `<span class="deps-dot${
-                dep.endsWith("(async)") ? " async" : ""
-              }">⸱</span>`
-          )
+          .map((dep) => `<span class="deps-dot${dep.endsWith("(async)") ? " async" : ""}">⸱</span>`)
           .join("");
       text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`;
     }
@@ -671,12 +573,7 @@
         '<span class="dependents-triangle">▼</span>' +
         dependentsString
           .split(" ")
-          .map(
-            (dep) =>
-              `<span class="dependents-dot${
-                dep.endsWith("(visible)") ? " visible" : ""
-              }">⸱</span>`
-          )
+          .map((dep) => `<span class="dependents-dot${dep.endsWith("(visible)") ? " visible" : ""}">⸱</span>`)
           .join("");
       text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
@@ -719,9 +616,7 @@
         const itemdiv = elems[0].closest(".item");
         if (!itemdiv) return;
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
-        itemdiv
-          .querySelectorAll(".MathJax")
-          .forEach((elem) => elem.setAttribute("tabindex", "-1"));
+        itemdiv.querySelectorAll(".MathJax").forEach((elem) => elem.setAttribute("tabindex", "-1"));
         if (done) done();
         onResized(id, container, "math rendered");
       })
@@ -798,50 +693,39 @@
       }
 
       if (terms.length == 0) return;
-      let treeWalker = document.createTreeWalker(
-        itemdiv,
-        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: function (node) {
-            const classList = (node as HTMLElement).classList;
-            switch (node.nodeName.toLowerCase()) {
-              case "mark":
-                return classList?.contains("selected") ||
-                  classList?.contains("secondary-selected")
-                  ? NodeFilter.FILTER_REJECT
-                  : NodeFilter.FILTER_ACCEPT;
-              case "svg":
-              case "script":
-                return NodeFilter.FILTER_REJECT;
-              default:
-                return classList?.contains("math") ||
-                  classList?.contains("math-display") ||
-                  classList?.contains("deps-and-dependents")
-                  ? NodeFilter.FILTER_REJECT
-                  : NodeFilter.FILTER_ACCEPT;
-            }
-          },
-        }
-      );
+      let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: function (node) {
+          const classList = (node as HTMLElement).classList;
+          switch (node.nodeName.toLowerCase()) {
+            case "mark":
+              return classList?.contains("selected") || classList?.contains("secondary-selected")
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+            case "svg":
+            case "script":
+              return NodeFilter.FILTER_REJECT;
+            default:
+              return classList?.contains("math") ||
+                classList?.contains("math-display") ||
+                classList?.contains("deps-and-dependents")
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT;
+          }
+        },
+      });
       while (treeWalker.nextNode()) {
         const node = treeWalker.currentNode;
         if (node.nodeType != Node.TEXT_NODE) continue;
         const parent = node.parentNode;
         let text = node.nodeValue;
-        let regex = new RegExp(
-          `^(.*?)(${terms.map(regexEscape).join("|")})`,
-          "si"
-        );
+        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
         // if we are highlighting inside a non-selected tag, then we expand the regex to include #… which can be used to shorten prefix-matching labels
         if (
           node.parentElement.tagName == "MARK" &&
           !node.parentElement.classList.contains("selected") &&
           !node.parentElement.classList.contains("secondary-selected")
         ) {
-          regex = new RegExp(
-            `^(.*?)(${terms.concat(["#…", "…"]).map(regexEscape).join("|")})`,
-            "si"
-          );
+          regex = new RegExp(`^(.*?)(${terms.concat(["#…", "…"]).map(regexEscape).join("|")})`, "si");
         }
         let m;
         while ((m = text.match(regex))) {
@@ -872,8 +756,7 @@
               word.style.marginLeft = "-" + tagStyle.paddingLeft;
               word.style.borderTopLeftRadius;
               word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomLeftRadius =
-                tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
 
               // insert spacer divs under .menu class where mark becomes flexible
               if (node.parentElement.closest(".menu")) {
@@ -891,11 +774,8 @@
                 spacer.style.marginTop = "-" + tagStyle.paddingTop;
                 spacer.style.marginBottom = "-" + tagStyle.paddingTop;
                 spacer.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
-                spacer.style.borderBottomLeftRadius =
-                  tagStyle.borderBottomLeftRadius;
-                let rightSpacer = node.parentElement.appendChild(
-                  document.createElement("div")
-                );
+                spacer.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
+                let rightSpacer = node.parentElement.appendChild(document.createElement("div"));
                 rightSpacer.style.flexGrow = "1";
               }
             }
@@ -904,14 +784,11 @@
               word.style.paddingRight = tagStyle.paddingRight;
               word.style.marginRight = "-" + tagStyle.paddingRight;
               word.style.borderTopRightRadius = tagStyle.borderTopLeftRadius;
-              word.style.borderBottomRightRadius =
-                tagStyle.borderBottomLeftRadius;
+              word.style.borderBottomRightRadius = tagStyle.borderBottomLeftRadius;
 
               // insert spacer divs under .menu class where mark becomes flexible
               if (node.parentElement.closest(".menu")) {
-                let spacer = node.parentElement.appendChild(
-                  document.createElement("div")
-                );
+                let spacer = node.parentElement.appendChild(document.createElement("div"));
                 spacer.style.background = "#9b9"; // .item mark span.highlight background
                 spacer.style.height = "100%";
                 spacer.style.flexGrow = "1";
@@ -921,10 +798,8 @@
                 spacer.style.marginRight = "-" + tagStyle.paddingRight;
                 spacer.style.marginTop = "-" + tagStyle.paddingTop;
                 spacer.style.marginBottom = "-" + tagStyle.paddingTop;
-                spacer.style.borderTopRightRadius =
-                  tagStyle.borderTopRightRadius;
-                spacer.style.borderBottomRightRadius =
-                  tagStyle.borderBottomRightRadius;
+                spacer.style.borderTopRightRadius = tagStyle.borderTopRightRadius;
+                spacer.style.borderBottomRightRadius = tagStyle.borderBottomRightRadius;
                 let leftSpacer = node.parentElement.insertBefore(
                   document.createElement("div"),
                   node.parentElement.firstChild
@@ -944,8 +819,7 @@
     // indicate errors in item
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
-    context =
-      itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
+    context = itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
     target = itemdiv.querySelector("mark.selected.label.unique") != null;
 
     // trigger typesetting of any math elements
@@ -953,22 +827,19 @@
     setTimeout(() => {
       if (!itemdiv) return;
       let math = [];
-      itemdiv
-        .querySelectorAll("span.math,span.math-display")
-        .forEach((elem) => {
-          if (elem.hasAttribute("_rendered")) return;
-          // console.debug("rendering math", math.innerHTML);
-          elem.setAttribute("_rendered", Date.now().toString());
-          // unwrap code blocks (should exist for both $``$ and $$``$$)
-          let code;
-          if ((code = elem.querySelector("code")))
-            code.outerHTML = code.innerHTML;
-          // insert delimiters if missing (in particular for multi-line _math blocks)
-          if (!elem.textContent.match(/^\$.+\$$/)) {
-            elem.innerHTML = "$$\n" + elem.innerHTML + "\n$$";
-          }
-          math.push(elem);
-        });
+      itemdiv.querySelectorAll("span.math,span.math-display").forEach((elem) => {
+        if (elem.hasAttribute("_rendered")) return;
+        // console.debug("rendering math", math.innerHTML);
+        elem.setAttribute("_rendered", Date.now().toString());
+        // unwrap code blocks (should exist for both $``$ and $$``$$)
+        let code;
+        if ((code = elem.querySelector("code"))) code.outerHTML = code.innerHTML;
+        // insert delimiters if missing (in particular for multi-line _math blocks)
+        if (!elem.textContent.match(/^\$.+\$$/)) {
+          elem.innerHTML = "$$\n" + elem.innerHTML + "\n$$";
+        }
+        math.push(elem);
+      });
       renderMath(math);
     });
 
@@ -1008,13 +879,8 @@
       // );
       scripts.forEach((script) => {
         // console.debug(script.parentElement);
-        if (
-          !script.hasAttribute("_uncached") &&
-          !script.parentElement.hasAttribute("_cache_key")
-        ) {
-          console.warn(
-            "script will execute at every render due to uncached parent (missing _cache_key)"
-          );
+        if (!script.hasAttribute("_uncached") && !script.parentElement.hasAttribute("_cache_key")) {
+          console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
         }
         script.remove(); // remove script to indicate execution
         let clone = document.createElement("script");
@@ -1070,38 +936,119 @@
         }
       });
       renderMath(math, function () {
-        dot
-          .querySelectorAll(".node > text > .MathJax > svg > *")
-          .forEach((elem) => {
-            let math = elem as SVGGraphicsElement;
-            let dot = elem.parentNode.parentNode.parentNode.parentNode;
-            // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
-            let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
-            let text = dot.children[dot.children.length - 1]; // text is last child
-            let shaperect = shape.getBBox();
-            let textrect = text["_bbox"]; // recover text bbox pre-mathjax
-            let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
-            elem.parentElement.parentElement.parentElement.remove(); // remove text node
-            dot.appendChild(elem);
-            let mathrect = math.getBBox();
-            let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
-            let xt0 = -mathrect.x;
-            let yt0 = -mathrect.y;
-            let xt =
-              shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
-            let yt =
-              shaperect.y +
-              shaperect.height / 2 +
-              (mathrect.height * scale) / 2;
-            elem.setAttribute(
-              "transform",
-              `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`
-            );
-          });
+        dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
+          let math = elem as SVGGraphicsElement;
+          let dot = elem.parentNode.parentNode.parentNode.parentNode;
+          // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
+          let shape = dot.children[1] as SVGGraphicsElement; // shape (e.g. ellipse) is second child
+          let text = dot.children[dot.children.length - 1]; // text is last child
+          let shaperect = shape.getBBox();
+          let textrect = text["_bbox"]; // recover text bbox pre-mathjax
+          let textscale = textrect.height / shaperect.height; // fontsize-based scaling factor
+          elem.parentElement.parentElement.parentElement.remove(); // remove text node
+          dot.appendChild(elem);
+          let mathrect = math.getBBox();
+          let scale = (0.6 * textscale * shaperect.height) / mathrect.height;
+          let xt0 = -mathrect.x;
+          let yt0 = -mathrect.y;
+          let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2;
+          let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2;
+          elem.setAttribute("transform", `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`);
+        });
       });
     };
   }
 </script>
+
+<div
+  class="super-container"
+  id={"super-container-" + id}
+  class:dotted
+  class:editing
+  class:timed={timeString.length > 0}
+>
+  {#if timeString}
+    <div class="time" class:timeOutOfOrder>{timeString}</div>
+  {/if}
+  {#if showDebugString}
+    <div class="debug">{debugString}</div>
+  {/if}
+  <div
+    bind:this={container}
+    on:click={onClick}
+    class="container"
+    class:editing
+    class:focused
+    class:saving
+    class:error
+    class:warning
+    class:context
+    class:target
+    class:running
+    class:showLogs
+    class:bordered={error || warning || running}
+    class:runnable
+    class:scripted
+    class:macroed
+    class:timeOutOfOrder
+  >
+    {#if editing}
+      <div class="edit-menu">
+        <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
+          class="cancel"
+          on:click={onCancelClick}>cancel</span
+        ><span class="delete" on:click={onDeleteClick}>delete</span><span
+          class="index"
+          class:matching={matchingTerms.length > 0}
+          on:click={onIndexClick}>{index + 1}</span
+        >
+      </div>
+
+      <Editor
+        {id}
+        bind:text
+        bind:focused
+        {onRun}
+        {onPrev}
+        {onNext}
+        onFocused={(focused) => onFocused(index, focused)}
+        {onDone}
+      />
+    {:else}
+      <div class="item-menu">
+        <span class="run" on:click={onRunClick}>run</span><span
+          class="index"
+          class:matching={matchingTerms.length > 0}
+          on:click={onIndexClick}>{index + 1}</span
+        >
+      </div>
+      <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
+      <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
+        <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
+        {@html toHTML(
+          text || placeholder,
+          id,
+          deephash,
+          labelUnique,
+          missingTags,
+          matchingTerms,
+          matchingTermsSecondary,
+          depsString,
+          dependentsString
+        )}
+      </div>
+    {/if}
+    {#if running}
+      <div class="loading">
+        <Circle2 size="40" unit="px" />
+      </div>
+    {:else if saving}
+      <div class="loading">
+        <Circle size="25" unit="px" />
+      </div>
+    {/if}
+  </div>
+</div>
 
 <style>
   .super-container {
@@ -1753,81 +1700,3 @@
     }
   }
 </style>
-
-<div
-  class="super-container"
-  id={'super-container-' + id}
-  class:dotted
-  class:editing
-  class:timed={timeString.length > 0}>
-  {#if timeString}
-    <div class="time" class:timeOutOfOrder>{timeString}</div>
-  {/if}
-  {#if showDebugString}
-    <div class="debug">{debugString}</div>
-  {/if}
-  <div
-    bind:this={container}
-    on:click={onClick}
-    class="container"
-    class:editing
-    class:focused
-    class:saving
-    class:error
-    class:warning
-    class:context
-    class:target
-    class:running
-    class:showLogs
-    class:bordered={error || warning || running}
-    class:runnable
-    class:scripted
-    class:macroed
-    class:timeOutOfOrder>
-    {#if editing}
-      <div class="edit-menu">
-        <span class="run" on:click={onRunClick}>run</span><span
-          class="save"
-          on:click={onSaveClick}>save</span><span
-          class="cancel"
-          on:click={onCancelClick}>cancel</span><span
-          class="delete"
-          on:click={onDeleteClick}>delete</span><span
-          class="index"
-          class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}>{index + 1}</span>
-      </div>
-
-      <Editor
-        {id}
-        bind:text
-        bind:focused
-        {onRun}
-        {onPrev}
-        {onNext}
-        onFocused={(focused) => onFocused(index, focused)}
-        {onDone} />
-    {:else}
-      <div class="item-menu">
-        <span class="run" on:click={onRunClick}>run</span><span
-          class="index"
-          class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}>{index + 1}</span>
-      </div>
-      <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>
-        <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(text || placeholder, id, deephash, labelUnique, missingTags, matchingTerms, matchingTermsSecondary, depsString, dependentsString)}
-      </div>
-    {/if}
-    {#if running}
-      <div class="loading">
-        <Circle2 size="40" unit="px" />
-      </div>
-    {:else if saving}
-      <div class="loading">
-        <Circle size="25" unit="px" />
-      </div>
-    {/if}
-  </div>
-</div>
