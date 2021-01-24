@@ -6,12 +6,7 @@
   export let allowCommandBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
-  export let onDone = (
-    text: string,
-    e: KeyboardEvent,
-    cancelled: boolean = false,
-    run: boolean = false
-  ) => {};
+  export let onDone = (text: string, e: KeyboardEvent, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -23,10 +18,8 @@
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
-  let escapeHTML = (t) =>
-    t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let unescapeHTML = (t) =>
-    t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
   let highlightTags = (text) => {
@@ -43,20 +36,12 @@
   let highlightOther = (text) => {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> will not highlight the second tag
     return text.replace(
-      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;style&gt;|&lt;\/?\w)(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|[\w"']&gt;(?:(?!&gt;)|$))/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;\/?\w)(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|[\w"']&gt;(?:(?!&gt;)|$))/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
-        else if (
-          (begin == "$`" && end == "`$") ||
-          (begin == "$$`" && end == "`$$")
-        )
-          return (
-            pfx +
-            `<span class="math">` +
-            highlight(unescapeHTML(begin + content + end), "latex") +
-            `</span>`
-          );
+        else if ((begin == "$`" && end == "`$") || (begin == "$$`" && end == "`$$"))
+          return pfx + `<span class="math">` + highlight(unescapeHTML(begin + content + end), "latex") + `</span>`;
         else if (begin == "&lt;&lt;" && end == "&gt;&gt;")
           return (
             pfx +
@@ -64,10 +49,7 @@
             highlight(unescapeHTML(content), "js") +
             `<span class="macro-delimiter">${end}</span></span>`
           );
-        else if (
-          begin.match(/&lt;script.*?&gt;/) &&
-          end.match(/&lt;\/script&gt;/)
-        )
+        else if (begin.match(/&lt;script.*?&gt;/) && end.match(/&lt;\/script&gt;/))
           return (
             pfx +
             highlight(unescapeHTML(begin), "html") +
@@ -135,18 +117,10 @@
   }
 
   function highlightOpen(text, pos, type) {
-    return (
-      text.substring(0, pos) +
-      `${text[pos]}%%_highlight_open_${type}_%%` +
-      text.substring(pos + 1)
-    );
+    return text.substring(0, pos) + `${text[pos]}%%_highlight_open_${type}_%%` + text.substring(pos + 1);
   }
   function highlightClose(text, pos, type) {
-    return (
-      text.substring(0, pos) +
-      `%%_highlight_close_${type}_%%${text[pos]}` +
-      text.substring(pos + 1)
-    );
+    return text.substring(0, pos) + `%%_highlight_close_${type}_%%${text[pos]}` + text.substring(pos + 1);
   }
 
   function updateTextDivs() {
@@ -173,10 +147,7 @@
       textarea.selectionStart < text.length &&
       "([{".includes(text[textarea.selectionStart - 1])
     ) {
-      let matchpos = findMatchingCloseParenthesis(
-        text,
-        textarea.selectionStart - 1
-      );
+      let matchpos = findMatchingCloseParenthesis(text, textarea.selectionStart - 1);
       if (matchpos < text.length) {
         text = highlightClose(text, matchpos, "matched");
         text = highlightOpen(text, textarea.selectionStart - 1, "matched");
@@ -226,20 +197,11 @@
       '$1<div class="section removed">$2</div>'
     );
     // indicate section delimiters
-    html = html.replace(
-      /(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g,
-      '<span class="section-delimiter">$1</span>'
-    );
+    html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>');
     // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
-    html = html.replace(
-      /%%_highlight_close_(\w+?)_%%(.*?)([)}\]])/g,
-      '<span class="highlight $1">$3</span>$2'
-    );
-    html = html.replace(
-      /([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g,
-      '<span class="highlight $3">$1</span>$2'
-    );
+    html = html.replace(/%%_highlight_close_(\w+?)_%%(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
+    html = html.replace(/([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g, '<span class="highlight $3">$1</span>$2');
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
@@ -250,11 +212,7 @@
     // console.debug(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
-    if (
-      !allowCommandBracket &&
-      (e.code == "BracketLeft" || e.code == "BracketRight") &&
-      e.metaKey
-    ) {
+    if (!allowCommandBracket && (e.code == "BracketLeft" || e.code == "BracketRight") && e.metaKey) {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -280,27 +238,17 @@
       let oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
       // move selection to line start
-      let lineStart = textarea.value
-        .substring(0, textarea.selectionStart)
-        .replace(/[^\n]*$/, "").length;
-      if (
-        textarea.selectionStart == textarea.selectionEnd &&
-        e.code == "BracketRight"
-      ) {
+      let lineStart = textarea.value.substring(0, textarea.selectionStart).replace(/[^\n]*$/, "").length;
+      if (textarea.selectionStart == textarea.selectionEnd && e.code == "BracketRight") {
         textarea.selectionStart = textarea.selectionEnd = lineStart;
       } else {
         textarea.selectionStart = lineStart;
       }
       // expand selection to end of last line
       // if selection ends right after a new line, exclude the last line
-      if (
-        textarea.selectionEnd > textarea.selectionStart &&
-        textarea.value[textarea.selectionEnd - 1] == "\n"
-      )
+      if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == "\n")
         textarea.selectionEnd--;
-      let lastLineStart = textarea.value
-        .substring(0, textarea.selectionEnd)
-        .replace(/[^\n]*$/, "").length;
+      let lastLineStart = textarea.value.substring(0, textarea.selectionEnd).replace(/[^\n]*$/, "").length;
       let lineEnd =
         lastLineStart +
         textarea.value
@@ -310,10 +258,7 @@
       textarea.selectionEnd = lineEnd;
 
       // NOTE: execCommand maintains undo/redo history
-      let selectedText = textarea.value.substring(
-        textarea.selectionStart,
-        textarea.selectionEnd
-      );
+      let selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
       document.execCommand(
         "insertText",
         false,
@@ -345,35 +290,23 @@
 
     // create line on Enter, maintain indentation
     // NOTE: to prevent delay on caret update, we do the actual indentation in onKeyUp
-    if (
-      e.code == "Enter" &&
-      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
-    ) {
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
       if (enterStart < 0) {
         enterStart = textarea.selectionStart;
-        enterIndentation =
-          textarea.value
-            .substring(0, textarea.selectionStart)
-            .match(/(?:^|\n)( *).*?$/)[1] || "";
+        enterIndentation = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/)[1] || "";
       }
       return;
     }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      if (
-        (e.code == "ArrowUp" || e.code == "ArrowLeft") &&
-        textarea.selectionStart == 0
-      ) {
+      if ((e.code == "ArrowUp" || e.code == "ArrowLeft") && textarea.selectionStart == 0) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
-      if (
-        (e.code == "ArrowDown" || e.code == "ArrowRight") &&
-        textarea.selectionStart == textarea.value.length
-      ) {
+      if ((e.code == "ArrowDown" || e.code == "ArrowRight") && textarea.selectionStart == textarea.value.length) {
         e.stopPropagation();
         e.preventDefault();
         onNext();
@@ -400,11 +333,7 @@
     }
 
     // delete empty item with backspace
-    if (
-      e.code == "Backspace" &&
-      textarea.value.trim() == "" &&
-      textarea.selectionStart == 0
-    ) {
+    if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
       onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
@@ -442,10 +371,7 @@
         document.execCommand("insertText", false, "  ");
       } else if (
         textarea.selectionStart >= 2 &&
-        textarea.value.substring(
-          textarea.selectionStart - 2,
-          textarea.selectionStart
-        ) == "  "
+        textarea.value.substring(textarea.selectionStart - 2, textarea.selectionStart) == "  "
       ) {
         textarea.selectionStart = textarea.selectionStart - 2;
         document.execCommand("forwardDelete");
@@ -459,15 +385,10 @@
     // console.debug(e);
     if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
     // indent lines created by Enter (based on state recorded in onKeyDown above)
-    if (
-      e.code == "Enter" &&
-      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
-    ) {
+    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
       if (enterStart >= 0) {
         // extend bullet points to new lines
-        const bullet = textarea.value
-          .substring(0, enterStart)
-          .match(/(?:^|\n) *([-*+] ).*$/);
+        const bullet = textarea.value.substring(0, enterStart).match(/(?:^|\n) *([-*+] ).*$/);
         if (bullet) enterIndentation += bullet[1];
         if (enterIndentation) {
           let offset = textarea.value
@@ -475,10 +396,7 @@
             .match(/^[^\n]*/)[0]
             .trimEnd().length;
           textarea.selectionEnd += offset;
-          let newlines = textarea.value.substring(
-            enterStart,
-            textarea.selectionEnd
-          );
+          let newlines = textarea.value.substring(enterStart, textarea.selectionEnd);
           newlines = newlines.replace(/\n([^\n]*)/g, (m, sfx) => {
             let trimmed_sfx = bullet ? sfx.replace(/^[-*+\s]*/, "") : sfx;
             offset -= sfx.length - trimmed_sfx.length;
@@ -486,8 +404,7 @@
           });
           textarea.selectionStart = enterStart;
           document.execCommand("insertText", false, newlines);
-          textarea.selectionStart = textarea.selectionEnd =
-            textarea.selectionStart - offset;
+          textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart - offset;
           onInput();
         }
         enterStart = -1;
@@ -500,11 +417,7 @@
     let content = e.clipboardData.getData("text");
     // copy bullet and indentation to subsequent lines
     let bullet;
-    if (
-      (bullet = textarea.value
-        .substring(0, textarea.selectionStart)
-        .match(/(?:^|\n)( *)([-*+] +)$/))
-    )
+    if ((bullet = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *)([-*+] +)$/)))
       content = content.replace(/(\n\s*)/g, "$1" + bullet[1] + bullet[2]);
     // replace tabs with double-space
     content = content.replace(/\t/g, "  ");
@@ -523,12 +436,7 @@
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      onDone(
-        (text = textarea.value),
-        e,
-        false,
-        e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/
-      );
+      onDone((text = textarea.value), e, false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
       return;
     }
     // run item with Alt/Option+Enter
@@ -580,13 +488,34 @@
       }
     }, selectionUpdateDebounceTime);
   }
-  onMount(() =>
-    document.addEventListener("selectionchange", onSelectionChange)
-  );
-  onDestroy(() =>
-    document.removeEventListener("selectionchange", onSelectionChange)
-  );
+  onMount(() => document.addEventListener("selectionchange", onSelectionChange));
+  onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>
+
+<!-- (TODO: remove when svelte plugin is fixed and doesn't break closing textarea tag) -->
+<!-- prettier-ignore -->
+<div bind:this={editor} class="editor">
+  <div class="backdrop" class:focused bind:this={backdrop}>
+    <div id="highlights" bind:this={highlights}>{placeholder}</div>
+  </div>
+  <textarea
+    id={"textarea-" + id}
+    bind:this={textarea}
+    {placeholder}
+    on:input={onInput}
+    on:click={onInput}
+    on:keydown={onKeyDown}
+    on:keyup={onKeyUp}
+    on:keypress={onKeyPress}
+    on:paste={onPaste}
+    on:focus={() => onFocused((focused = true))}
+    on:blur={() => onFocused((focused = false))}
+    spellcheck={false}
+    autocapitalize="off">{text}</textarea>
+</div>
+
+<!-- update editor on window resize (height changes due to text reflow) -->
+<svelte:window on:resize={updateTextDivs} />
 
 <style>
   .editor {
@@ -695,26 +624,3 @@
     }
   }
 </style>
-
-<div bind:this={editor} class="editor">
-  <div class="backdrop" class:focused bind:this={backdrop}>
-    <div id="highlights" bind:this={highlights}>{placeholder}</div>
-  </div>
-  <textarea
-    spellcheck={false}
-    id={'textarea-' + id}
-    bind:this={textarea}
-    {placeholder}
-    on:input={onInput}
-    on:click={onInput}
-    on:keydown={onKeyDown}
-    on:keyup={onKeyUp}
-    on:keypress={onKeyPress}
-    on:paste={onPaste}
-    on:focus={() => onFocused((focused = true))}
-    on:blur={() => onFocused((focused = false))}
-    autocapitalize="off">{text}</textarea>
-</div>
-
-<!-- update editor on window resize (height changes due to text reflow) -->
-<svelte:window on:resize={updateTextDivs} />
