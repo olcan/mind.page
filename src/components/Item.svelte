@@ -547,10 +547,12 @@
         // make relative tag absolute
         if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
         const lctag = tag.toLowerCase();
-        let classNames = "";
+        let classNames = "link";
         if (matchingTerms.has(lctag)) classNames += " selected";
         else if (matchingTermsSecondary.has(lctag))
           classNames += " secondary-selected";
+        if (missingTags.has(lctag)) classNames += " missing";
+        classNames = classNames.trim();
         return `<mark class="${classNames}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
       }
       return `<a target="_blank" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;

@@ -514,7 +514,8 @@
         console.warn("got null range for tag click: ", tag, e);
       }
     } else {
-      console.warn("could not find matching suffix", tag, rendered);
+      // NOTE: this can happen for link tags where rendered text is arbitrary, and without a common suffix we just take the full tag
+      // console.warn("could not find matching suffix", tag, rendered);
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
     // if (editorText.trim() == tag) {
