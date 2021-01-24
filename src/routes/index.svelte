@@ -507,10 +507,10 @@
       console.warn("could not find matching suffix", tag, rendered);
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
-    if (editorText.trim() == tag) {
-      history.back();
-      return;
-    }
+    // if (editorText.trim() == tag) {
+    //   history.back();
+    //   return;
+    // }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     // editorText = tag + " ";
     finalizeStateOnEditorChange = true; // finalize state
@@ -1862,10 +1862,10 @@
     };
     window["_toggle"] = function (text: string) {
       // console.log("_toggle", editorText);
-      if (editorText.trim() == text.trim()) {
-        history.back();
-        return;
-      }
+      // if (editorText.trim() == text.trim()) {
+      //   history.back();
+      //   return;
+      // }
       if (editorText.trim() == text) text = "";
       finalizeStateOnEditorChange = true; // finalize state
       lastEditorChangeTime = 0; // disable debounce even if editor focused
