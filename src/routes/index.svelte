@@ -46,6 +46,10 @@
   let newestTime = 0;
   let oldestTime = Infinity;
   let oldestTimeString = "";
+  let defaultHeaderHeight = 0;
+  let defaultItemHeight = 0; // if zero, initial layout will be single-column
+  let totalItemHeight = 0;
+
   function updateItemLayout() {
     // console.debug("updateItemLayout");
     editingItems = [];
@@ -59,7 +63,7 @@
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(-1);
-    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : 0; // first column includes header
+    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
     let lastTimeString = "";
     let topMovedIndex = items.length;
     newestTime = 0;
@@ -94,11 +98,17 @@
       }
       lastTimeString = timeString;
 
+      // calculate item height (zero if dotted, or not yet calculated and default is zero)
+      item.outerHeight = item.dotted ? 0 : item.height || defaultItemHeight;
+      // add item margins + time string height
+      if (item.outerHeight > 0)
+        item.outerHeight += 8 + (item.timeString ? 24 : 0);
+      totalItemHeight += item.height; // used to hide items until height available
+
       // determine item column
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
-      item.outerHeight = (item.height || 100) + 8 + (item.timeString ? 24 : 0); // item + margins + time string
-      if (item.dotted) item.outerHeight = 0; // ignore height of dotted items
+
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
@@ -120,12 +130,12 @@
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
-      // if item is first in column and missing time string, add it now (unless dotted)
-      if (columnHeights[item.column] == 0 && !item.timeString && !item.dotted) {
+      // if non-dotted item is first in its column and missing time string, add it now
+      if (!item.dotted && columnItems[item.column] < 0 && !item.timeString) {
         item.timeString = timeString;
-        item.outerHeight += 24;
+        // add time string height now, assuming we are not ignoring item height
+        if (item.outerHeight > 0) item.outerHeight += 24;
       }
-
       columnHeights[item.column] += item.outerHeight;
       if (columnItems[item.column] >= 0) {
         items[columnItems[item.column]].nextItemInColumn = index;
@@ -1129,10 +1139,14 @@
     ) {
       if (!layoutPending) {
         layoutPending = true;
-        setTimeout(() => {
-          updateItemLayout();
-          layoutPending = false;
-        }, 250);
+        setTimeout(
+          () => {
+            updateItemLayout();
+            layoutPending = false;
+          },
+          // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
+          totalItemHeight > 0 ? 250 : 50
+        );
       }
     }
   }
@@ -1820,6 +1834,7 @@
         );
         items = [];
       } else {
+        // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
         initialize();
       }
     }
@@ -2415,9 +2430,8 @@
     };
 
     // Visual viewport resize/scroll handlers ...
-    // NOTE: we use document width because it is invariant to zoom scale
-    //       window.outerWidth is also invariant but can be stale after device rotation in iOS Safari
-    // NOTE: font resizing does not trigger resize events and is handled in a periodic task, see onMount below
+    // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
+    //       (also window.outerWidth can be stale after device rotation in iOS Safari)
     let lastDocumentWidth = 0;
     let resizePending = false;
     function tryResize() {
@@ -2634,17 +2648,9 @@
       if (initTime)
         console.debug(`${items.length} items initialized at ${initTime}ms`);
 
-      // NOTE: dispatching onEditorChange allows item heights to be available for initial layout
-      setTimeout(() => {
-        // console.debug(
-        //   `onEditorChange invoked at ${Math.round(
-        //     window.performance.now()
-        //   )}ms w/ ${items.length} items`
-        // );
-        onEditorChange("");
-      });
-      setInterval(tryResize, 250); // no need to destroy since page-level
+      // update dotted items and start periodic resize checks
       updateDotted();
+      setInterval(tryResize, 250); // no need to destroy since page-level
       // console.debug(
       //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
       //     items.length
@@ -2713,6 +2719,8 @@
     min-height: -webkit-fill-available;
     justify-content: center;
     align-items: center;
+    /* NOTE: if you add transparency, initial zero-height layout will be visible */
+    background: rgba(17, 17, 17, 1);
   }
   #header {
     max-width: 100%;
@@ -2909,142 +2917,142 @@
   }
 </style>
 
-{#if !user || !initTime}
-  <div id="loading">
-    <Circle2 size="60" unit="px" />
-  </div>
-{:else}
-  <div class="items" class:multi-column={columnCount > 1}>
-    {#each { length: columnCount } as _, column}
-      <div class="column">
-        {#if column == 0}
-          <div
-            id="header"
-            bind:this={headerdiv}
-            on:click={() => textArea(-1).focus()}>
-            <div id="header-container" class:focused>
-              <div id="editor">
-                <Editor
-                  bind:text={editorText}
-                  bind:focused
-                  cancelOnDelete={true}
-                  allowCommandBracket={true}
-                  onFocused={onEditorFocused}
-                  onChange={onEditorChange}
-                  onDone={onEditorDone}
-                  onPrev={onPrevItem}
-                  onNext={onNextItem} />
-              </div>
-              <div class="spacer" />
-              {#if user}
-                <img
-                  id="user"
-                  class:anonymous
-                  class:readonly
-                  src={user.photoURL}
-                  alt={user.displayName || user.email}
-                  title={user.displayName || user.email}
-                  on:click={() => (!user.email ? signIn() : signOut())} />
-              {/if}
+<div class="items" class:multi-column={columnCount > 1}>
+  {#each { length: columnCount } as _, column}
+    <div class="column">
+      {#if column == 0}
+        <div
+          id="header"
+          bind:this={headerdiv}
+          on:click={() => textArea(-1).focus()}>
+          <div id="header-container" class:focused>
+            <div id="editor">
+              <Editor
+                bind:text={editorText}
+                bind:focused
+                cancelOnDelete={true}
+                allowCommandBracket={true}
+                onFocused={onEditorFocused}
+                onChange={onEditorChange}
+                onDone={onEditorDone}
+                onPrev={onPrevItem}
+                onNext={onNextItem} />
             </div>
-            <div id="status" on:click={onStatusClick}>
-              <span id="console-summary" on:click={onConsoleSummaryClick} />
-              <span class="dots">
-                {#each { length: dotCount } as _}•{/each}
-              </span>
-              <span class="triangle"> ▲ </span>
-              {#if items.length > 0}
-                <div class="counts">
-                  {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
-                  {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
-                  {items.length}
-                  {#if matchingItemCount > 0}
-                    &nbsp;<span class="matching">{matchingItemCount}</span>
-                  {/if}
-                </div>
-              {/if}
-              <div
-                id="console"
-                bind:this={consolediv}
-                on:click={onConsoleClick} />
-            </div>
+            <div class="spacer" />
+            {#if user}
+              <img
+                id="user"
+                class:anonymous
+                class:readonly
+                src={user.photoURL}
+                alt={user.displayName || user.email}
+                title={user.displayName || user.email}
+                on:click={() => (!user.email ? signIn() : signOut())} />
+            {/if}
           </div>
-          <!-- auto-focus on the editor unless on iPhone -->
-          <script>
-            // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-            //       programmatic focus except in click handlers, when returning to app, etc
-            setTimeout(() => {
-              if (
-                document.activeElement.tagName.toLowerCase() != "textarea" &&
-                !navigator.platform.startsWith("iPhone")
-              )
-                document.getElementById("textarea-editor").focus();
-            });
-          </script>
-        {/if}
-
-        {#each items as item (item.id)}
-          {#if item.column == column && item.index < maxIndexToShow}
-            <Item
-              onEditing={onItemEditing}
-              onFocused={onItemFocused}
-              onRun={onItemRun}
-              onTouch={onItemTouch}
-              onResized={onItemResized}
-              {onTagClick}
-              {onLinkClick}
-              {onLogSummaryClick}
-              onPrev={onPrevItem}
-              onNext={onNextItem}
-              bind:text={item.text}
-              bind:editing={item.editing}
-              bind:focused={item.focused}
-              bind:saving={item.saving}
-              bind:running={item.running}
-              bind:showLogs={item.showLogs}
-              bind:height={item.height}
-              bind:time={item.time}
-              index={item.index}
-              id={item.id}
-              label={item.label}
-              labelUnique={item.labelUnique}
-              labelText={item.labelText}
-              hash={item.hash}
-              deephash={item.deephash}
-              missingTags={item.missingTags.join(' ')}
-              matchingTerms={item.matchingTerms.join(' ')}
-              matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
-              timeString={item.timeString}
-              timeOutOfOrder={item.timeOutOfOrder}
-              updateTime={item.updateTime}
-              createTime={item.createTime}
-              depsString={item.depsString}
-              dependentsString={item.dependentsString}
-              dotted={item.dotted}
-              runnable={item.runnable}
-              scripted={item.scripted}
-              macroed={item.macroed} />
-            {#if item.nextColumn >= 0}
-              <div class="section-separator">
-                <hr />
-                {item.index + 2}<span
-                  class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
-                  &nbsp;
-                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+          <div id="status" on:click={onStatusClick}>
+            <span id="console-summary" on:click={onConsoleSummaryClick} />
+            <span class="dots">
+              {#each { length: dotCount } as _}•{/each}
+            </span>
+            <span class="triangle"> ▲ </span>
+            {#if items.length > 0}
+              <div class="counts">
+                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
+                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') + '<span class="unit">B</span>'}&nbsp;
+                {items.length}
+                {#if matchingItemCount > 0}
+                  &nbsp;<span class="matching">{matchingItemCount}</span>
                 {/if}
-                <hr />
               </div>
             {/if}
-          {:else if item.column == column && item.index == maxIndexToShow}
-            <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
-              show all
-              {items.length}
-              items
+            <div
+              id="console"
+              bind:this={consolediv}
+              on:click={onConsoleClick} />
+          </div>
+        </div>
+        <!-- auto-focus on the editor unless on iPhone -->
+        <script>
+          // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+          //       programmatic focus except in click handlers, when returning to app, etc
+          setTimeout(() => {
+            if (
+              document.activeElement.tagName.toLowerCase() != "textarea" &&
+              !navigator.platform.startsWith("iPhone")
+            )
+              document.getElementById("textarea-editor").focus();
+          });
+        </script>
+      {/if}
+
+      {#each items as item (item.id)}
+        {#if item.column == column && item.index < maxIndexToShow}
+          <Item
+            onEditing={onItemEditing}
+            onFocused={onItemFocused}
+            onRun={onItemRun}
+            onTouch={onItemTouch}
+            onResized={onItemResized}
+            {onTagClick}
+            {onLinkClick}
+            {onLogSummaryClick}
+            onPrev={onPrevItem}
+            onNext={onNextItem}
+            bind:text={item.text}
+            bind:editing={item.editing}
+            bind:focused={item.focused}
+            bind:saving={item.saving}
+            bind:running={item.running}
+            bind:showLogs={item.showLogs}
+            bind:height={item.height}
+            bind:time={item.time}
+            index={item.index}
+            id={item.id}
+            label={item.label}
+            labelUnique={item.labelUnique}
+            labelText={item.labelText}
+            hash={item.hash}
+            deephash={item.deephash}
+            missingTags={item.missingTags.join(' ')}
+            matchingTerms={item.matchingTerms.join(' ')}
+            matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+            timeString={item.timeString}
+            timeOutOfOrder={item.timeOutOfOrder}
+            updateTime={item.updateTime}
+            createTime={item.createTime}
+            depsString={item.depsString}
+            dependentsString={item.dependentsString}
+            dotted={item.dotted}
+            runnable={item.runnable}
+            scripted={item.scripted}
+            macroed={item.macroed} />
+          {#if item.nextColumn >= 0}
+            <div class="section-separator">
+              <hr />
+              {item.index + 2}<span
+                class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
+                &nbsp;
+                {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+              {/if}
+              <hr />
             </div>
           {/if}
-        {/each}
-      </div>
-    {/each}
+        {:else if item.column == column && item.index == maxIndexToShow}
+          <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
+            show all
+            {items.length}
+            items
+          </div>
+        {/if}
+      {/each}
+    </div>
+  {/each}
+</div>
+
+{#if !user || !initTime || totalItemHeight == 0}
+  <div id="loading">
+    <Circle2 size="60" unit="px" />
   </div>
 {/if}
 
