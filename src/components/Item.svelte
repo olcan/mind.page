@@ -543,12 +543,15 @@
         )}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
       } else if (href.startsWith("#")) {
         // tag link
-        const lctag = href.toLowerCase();
+        let tag = href;
+        // make relative tag absolute
+        if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
+        const lctag = tag.toLowerCase();
         let classNames = "";
         if (matchingTerms.has(lctag)) classNames += " selected";
         else if (matchingTermsSecondary.has(lctag))
           classNames += " secondary-selected";
-        return `<mark class="${classNames}" onclick="handleTagClick('${id}','${href_escaped}','${text_escaped}',event)">${text}</mark>`;
+        return `<mark class="${classNames}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
       }
       return `<a target="_blank" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
