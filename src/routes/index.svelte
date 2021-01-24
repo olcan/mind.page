@@ -183,6 +183,12 @@
     );
   }
 
+  // simplifies tags for search and for dependency listing
+  function simplifyTag(tag) {
+    if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return "#pin";
+    return tag;
+  }
+
   function stableSort(array, compare) {
     return array
       .map((item, index) => ({ item, index }))
@@ -225,7 +231,7 @@
       text
         .split(/\s+/)
         .concat(parseTags(text).all)
-        .concat(parseTags(text).all.map(simplifyPinTag)) //.concat(text.split(/\W+/))
+        .concat(parseTags(text).all.map(simplifyTag)) //.concat(text.split(/\W+/))
     ).filter((t) => t);
     // if (text.startsWith("/")) terms = [];
 
@@ -550,14 +556,6 @@
       .catch(console.error);
   }
 
-  function simplifyPinTag(tag) {
-    if (tag.match(/^#pin$/)) return "#pin";
-    else if (tag.match(/^#pin\/dot(?:\/|$)/)) return "#pin/dotting";
-    else if (tag.match(/^#pin\//)) return "#pin/ordering";
-    else if (tag.match(/\/pin(?:\/|$)/)) return "#pin/context";
-    return tag;
-  }
-
   let idsFromLabel = new Map<string, string[]>();
   function itemDeps(index, deps = []) {
     let item = items[index];
@@ -567,7 +565,7 @@
     item.tagsRaw.forEach((tag) => {
       if (!tag.startsWith("#_")) return; // only _hidden tags are used as dependencies
       tag = tag.replace(/^#_/, "#"); // remove underscore prefix
-      tag = simplifyPinTag(tag);
+      tag = simplifyTag(tag);
       if (tag == item.label) return;
       // NOTE: we allow special tags as dependencies, providing visibility for the hidden tags and allowing the linked item to provide helpful information AND code/macros that would be available to all items with that special tag; this is a nice incentive to create these items, unless we prefer some special tags to remain hidden, which we can do by creating these items under different labels
       // if (isSpecialTag(tag)) return;
@@ -628,9 +626,7 @@
     item.tagsVisible = tags.visible;
     item.tagsHidden = tags.hidden;
     item.tagsRaw = tags.raw;
-    item.tagsForSearch = _.uniq(
-      item.tags.concat(item.tags.map(simplifyPinTag))
-    );
+    item.tagsForSearch = _.uniq(item.tags.concat(item.tags.map(simplifyTag)));
     // item.log = item.tags.includes("#log"); (must be label, see below)
     item.debug = item.tagsRaw.includes("#_debug");
     item.init = item.tagsRaw.includes("#_init");
