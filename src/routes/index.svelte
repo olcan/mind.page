@@ -189,6 +189,14 @@
     return tag;
   }
 
+  function tagPrefixes(tag) {
+    let pos;
+    let prefixes = [];
+    while ((pos = tag.lastIndexOf("/")) >= 0)
+      prefixes.push((tag = tag.slice(0, pos)));
+    return prefixes;
+  }
+
   function stableSort(array, compare) {
     return array
       .map((item, index) => ({ item, index }))
@@ -232,8 +240,12 @@
       text
         .split(/\s+/)
         .concat(tags.all)
-        .concat(_.flatten(tags.all.map((t) => t.split(/[#/]/))))
         .concat(tags.all.map(simplifyTag)) //.concat(text.split(/\W+/))
+        // NOTE: once we turn tags in the regular terms, we can try many variations
+        // since we already treat tag matches and tag prefix (secondary) matches separately
+        .concat(tags.all.map((t) => t.substring(1)))
+        .concat(_.flatten(tags.all.map((t) => tagPrefixes(t.substring(1)))))
+        .concat(_.flatten(tags.all.map((t) => t.split(/[#/]/))))
     ).filter((t) => t);
     // if (text.startsWith("/")) terms = [];
 
@@ -241,10 +253,7 @@
     let termsSecondary = [];
     terms.forEach((term) => {
       if (term[0] != "#") return;
-      let pos;
-      let tag = term;
-      while ((pos = tag.lastIndexOf("/")) >= 0)
-        termsSecondary.push((tag = tag.slice(0, pos)));
+      termsSecondary = termsSecondary.concat(tagPrefixes(term));
     });
 
     matchingItemCount = 0;
@@ -459,7 +468,11 @@
     )
       items[index].time = Date.now();
 
-    if (tag == reltag) {
+    // NOTE: Rendered form of tag should be renderTag(reltag). We use common suffix to map click position.
+    const rendered = renderTag(reltag);
+    let suffix = rendered;
+    while (!tag.endsWith(suffix)) suffix = suffix.substring(1);
+    if (suffix) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
         e.pageX - document.documentElement.scrollLeft,
@@ -477,6 +490,12 @@
           if (child.contains(range.startContainer)) break;
           pos += child.textContent.length;
         }
+        // adjust pos from rendered to full tag ...
+        pos = Math.max(pos, rendered.length - suffix.length);
+        pos =
+          tag.length -
+          suffix.length +
+          (pos - (rendered.length - suffix.length));
         // we only take partial tag if the current tag is "selected" (i.e. full exact match)
         // (makes it easier to click on tags without accidentally getting a partial tag)
         // if ((tagNode as HTMLElement).classList.contains("selected"))
@@ -484,6 +503,8 @@
       } else {
         console.warn("got null range for tag click: ", tag, e);
       }
+    } else {
+      console.warn("could not find matching suffix", tag, rendered);
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
     if (editorText.trim() == tag) {
@@ -689,9 +710,7 @@
     const prevTagsExpanded = item.tagsExpanded || [];
     item.tagsExpanded = item.tags.slice();
     item.tags.forEach((tag) => {
-      let pos;
-      while ((pos = tag.lastIndexOf("/")) >= 0)
-        item.tagsExpanded.push((tag = tag.slice(0, pos)));
+      item.tagsExpanded = item.tagsExpanded.concat(tagPrefixes(tag));
     });
     item.tagsExpanded = _.uniq(item.tagsExpanded);
     if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
@@ -1679,6 +1698,7 @@
     numberWithCommas,
     extractBlock,
     parseTags,
+    renderTag,
   } from "../util.js";
 
   let consoleLog = [];
@@ -1841,12 +1861,12 @@
       textArea(-1).focus();
     };
     window["_toggle"] = function (text: string) {
-      // if (editorText.trim() == text) text = "";
       // console.log("_toggle", editorText);
       if (editorText.trim() == text.trim()) {
         history.back();
         return;
       }
+      if (editorText.trim() == text) text = "";
       finalizeStateOnEditorChange = true; // finalize state
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange((editorText = text));

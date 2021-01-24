@@ -10,6 +10,7 @@
     hashCode,
     regexEscape,
     parseTags,
+    renderTag,
   } from "../util.js";
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
@@ -441,7 +442,11 @@
                 label.substring(0, firstTerm.length) == firstTerm
               )
                 reltag = "#…" + tag.substring(firstTerm.length);
-              return `${pfx}<mark${classNames} title="${tag}" onclick="handleTagClick('${id}','${tag}','${reltag}',event)">${reltag}</mark>`;
+              return (
+                `${pfx}<mark${classNames} title="${tag}" onclick=` +
+                `"handleTagClick('${id}','${tag}','${reltag}',event)">` +
+                `${renderTag(reltag)}</mark>`
+              );
             });
         }
         // replace URLs (except in lines that look like a reference-style link)
@@ -829,7 +834,7 @@
           !node.parentElement.classList.contains("secondary-selected")
         ) {
           regex = new RegExp(
-            `^(.*?)(${terms.concat("#…").map(regexEscape).join("|")})`,
+            `^(.*?)(${terms.concat(["#…", "…"]).map(regexEscape).join("|")})`,
             "si"
           );
         }
