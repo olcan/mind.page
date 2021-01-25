@@ -211,7 +211,7 @@
           return `<span class="${spanclass}"> ${
             dep.startsWith("#")
               ? dep
-              : `<a class="tag" href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)">${dep}</a>`
+              : `<a class="tag" href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</a>`
           } </span>`;
         })
         .join(" ");
@@ -474,7 +474,8 @@
       const text_escaped = text.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
       if (href.startsWith("##")) {
         // fragment link
-        return `<a href="${href.substring(1)}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+        const fragment = href.substring(1);
+        return `<a href="${fragment}" title="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
       } else if (href.startsWith("#")) {
         // tag link
         let tag = href;
@@ -486,9 +487,9 @@
         else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
-        return `<mark class="${classNames}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
+        return `<mark class="${classNames}" title="${tag}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
       }
-      return `<a target="_blank" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+      return `<a target="_blank" title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
     // marked.use({ renderer });
     marked.setOptions({

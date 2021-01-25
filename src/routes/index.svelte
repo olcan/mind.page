@@ -285,11 +285,12 @@
             _.intersection(ctxitem.tagsVisible, context).length > 0
           ) {
             context.push(ctxitem.label);
-            termsSecondary.push(ctxitem.label);
+            if (ctxitem.labelPrefixes.length > 0) context = _.uniq(context.concat(ctxitem.labelPrefixes));
           }
         });
         if (context.length == lastContextLength) break;
       }
+      termsSecondary = _.uniq(termsSecondary.concat(context));
 
       listing = item.tagsVisible
         .filter((t) => t != item.label)
