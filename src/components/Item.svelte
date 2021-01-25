@@ -1322,6 +1322,9 @@
     border-collapse: separate;
     margin-left: -10px;
   }
+  :global(.item table td) {
+    vertical-align: top;
+  }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
