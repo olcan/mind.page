@@ -49,6 +49,7 @@
   let defaultHeaderHeight = 0;
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
+  let lastLayoutTime = 0;
 
   function updateItemLayout() {
     // console.debug("updateItemLayout");
@@ -69,6 +70,8 @@
     newestTime = 0;
     oldestTime = Infinity;
     oldestTimeString = "";
+    totalItemHeight = 0;
+    lastLayoutTime = Date.now();
 
     items.forEach((item, index) => {
       if (index < item.index && index < topMovedIndex) topMovedIndex = index;
@@ -177,9 +180,10 @@
     return (
       tag == "#log" ||
       tag == "#menu" ||
-      tag == "#debug" ||
+      tag == "#context" ||
       tag == "#init" ||
       tag == "#async" ||
+      tag == "#debug" ||
       tag.match(/^#pin(?:\/|$)/) ||
       tag.match(/\/pin(?:\/|$)/)
     );
@@ -258,9 +262,43 @@
     matchingItemCount = 0;
     textLength = 0;
     let listing = [];
-    let listingLabelPrefixes = [];
+    let context = [];
     let listingItemIndex = -1;
     let idMatchItemIndices = [];
+
+    // determine "listing" item w/ unique label matching first term
+    // (in reverse order w/ listing item label last so larger is better and missing=-1)
+    if (idsFromLabel.get(terms[0])?.length == 1) {
+      listingItemIndex = indexFromId.get(idsFromLabel.get(terms[0])[0]);
+      let item = items[listingItemIndex];
+      context = [item.label].concat(item.labelPrefixes);
+      // expand context to include "context" items that visibly tag the top item in context
+      // (also add their label to secondary terms so they are highlighted as context as well)
+      while (true) {
+        const lastContextLength = context.length;
+        items.forEach((ctxitem) => {
+          if (ctxitem.id == item.id) return;
+          if (
+            ctxitem.context &&
+            ctxitem.labelUnique &&
+            !context.includes(ctxitem.label) &&
+            _.intersection(ctxitem.tagsVisible, context).length > 0
+          ) {
+            context.push(ctxitem.label);
+            termsSecondary.push(ctxitem.label);
+          }
+        });
+        if (context.length == lastContextLength) break;
+      }
+
+      listing = item.tagsVisible
+        .filter((t) => t != item.label)
+        .slice()
+        .reverse()
+        .concat(item.label);
+      // console.debug(listing);
+    }
+
     items.forEach((item, index) => {
       textLength += item.text.length;
 
@@ -280,19 +318,6 @@
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       item.uniqueLabel = item.labelUnique ? item.label : "";
       // item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
-
-      // detect "listing" item w/ unique label matching first term
-      // (in reverse order w/ listing item label last so larger is better and missing=-1)
-      if (item.uniqueLabel == terms[0]) {
-        listingItemIndex = index;
-        listingLabelPrefixes = item.labelPrefixes;
-        listing = item.tagsVisible
-          .filter((t) => t != item.label)
-          .slice()
-          .reverse()
-          .concat(item.label);
-        // console.debug(listing);
-      }
 
       // match tags against item tagsForSearch, allowing prefix matches
       item.matchingTerms = terms.filter(
@@ -397,8 +422,8 @@
           numeric: true,
           sensitivity: "base",
         }) ||
-        // listing item (unique) label prefix match length (for context for listing item)
-        listingLabelPrefixes.indexOf(b.uniqueLabel) - listingLabelPrefixes.indexOf(a.uniqueLabel) ||
+        // listing item context position (includes labelPrefixes)
+        context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
         // position of (unique) label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
@@ -604,9 +629,10 @@
     item.tagsRaw = tags.raw;
     item.tagsForSearch = _.uniq(item.tags.concat(item.tags.map(simplifyTag)));
     // item.log = item.tags.includes("#log"); (must be label, see below)
-    item.debug = item.tagsRaw.includes("#_debug");
+    item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
     item.async = item.tagsRaw.includes("#_async");
+    item.debug = item.tagsRaw.includes("#_debug");
     const pintags = item.tagsRaw.filter((t) => t.match(/^#_pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -2154,28 +2180,28 @@
     // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
     //       (also window.outerWidth can be stale after device rotation in iOS Safari)
     let lastDocumentWidth = 0;
-    let resizePending = false;
-    function tryResize() {
-      if (Date.now() - lastScrollTime > 250) {
-        const documentWidth = document.documentElement.clientWidth;
-        if (documentWidth != lastDocumentWidth) {
-          // console.debug(
-          //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
-          // );
-          updateItemLayout();
-          // resize of all elements w/ _resize attribute (and property)
-          document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
-          lastDocumentWidth = documentWidth;
-        }
-      } else if (!resizePending) {
-        resizePending = true;
-        setTimeout(() => {
-          resizePending = false;
-          tryResize();
-        }, 250);
+    function checkLayout() {
+      if (Date.now() - lastScrollTime < 250) return; // will be invoked again via setInterval
+      const documentWidth = document.documentElement.clientWidth;
+      if (documentWidth != lastDocumentWidth) {
+        // console.debug(
+        //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
+        // );
+        updateItemLayout();
+        // resize of all elements w/ _resize attribute (and property)
+        document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
+        lastDocumentWidth = documentWidth;
+        return;
+      }
+      if (Date.now() - lastLayoutTime > 60000) {
+        // console.debug(
+        //   `updating layout after more than a minute since last layout`
+        // );
+        updateItemLayout();
+        return;
       }
     }
-    visualViewport.addEventListener("resize", tryResize);
+    visualViewport.addEventListener("resize", checkLayout);
     visualViewport.addEventListener("scroll", onScroll);
 
     let firstSnapshot = true;
@@ -2342,9 +2368,9 @@
       if (anonymous) console.log("user is anonymous");
       if (initTime) console.debug(`${items.length} items initialized at ${initTime}ms`);
 
-      // update dotted items and start periodic resize checks
-      updateDotted();
-      setInterval(tryResize, 250); // no need to destroy since page-level
+      updateDotted(); // update dotted items
+      setInterval(checkLayout, 250); // check layout every 250ms
+
       // console.debug(
       //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
       //     items.length

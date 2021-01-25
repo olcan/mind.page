@@ -816,7 +816,7 @@
     if (itemdiv.querySelector(".menu")) highlightClosure();
     else setTimeout(highlightClosure, 0);
 
-    // indicate errors in item
+    // indicate errors/warnings and context/target items
     error = itemdiv.querySelector(".console-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
     context = itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
