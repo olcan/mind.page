@@ -3,7 +3,7 @@
   export let text = "";
   export let focused = false;
   export let cancelOnDelete = false;
-  export let allowCommandBracket = false;
+  export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onChange = (text) => {};
   export let onDone = (text: string, e: KeyboardEvent, cancelled: boolean = false, run: boolean = false) => {};
@@ -212,7 +212,8 @@
     // console.debug(e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
-    if (!allowCommandBracket && (e.code == "BracketLeft" || e.code == "BracketRight") && e.metaKey) {
+    // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
+    if (!allowCommandCtrlBracket && (e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -227,11 +228,7 @@
     //   textarea.value.substring(0, textarea.selectionStart).match(/[-*+] $/)) ||
     //   textarea.selectionEnd > textarea.selectionStart;
     const tabShouldIndent = true; // always indent
-    if (
-      ((e.code == "BracketLeft" || e.code == "BracketRight") && e.ctrlKey) ||
-      (e.code == "Tab" && tabShouldIndent) ||
-      (e.code == "Slash" && (e.metaKey || e.ctrlKey))
-    ) {
+    if ((e.code == "Tab" && tabShouldIndent) || (e.code == "Slash" && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       const oldStart = textarea.selectionStart;
@@ -239,11 +236,7 @@
       let oldLength = textarea.value.length;
       // move selection to line start
       let lineStart = textarea.value.substring(0, textarea.selectionStart).replace(/[^\n]*$/, "").length;
-      if (textarea.selectionStart == textarea.selectionEnd && e.code == "BracketRight") {
-        textarea.selectionStart = textarea.selectionEnd = lineStart;
-      } else {
-        textarea.selectionStart = lineStart;
-      }
+      textarea.selectionStart = lineStart;
       // expand selection to end of last line
       // if selection ends right after a new line, exclude the last line
       if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == "\n")
@@ -266,7 +259,7 @@
           ? selectedText.match(/^\s*\/\//) // match(/(^|\n)\s*\/\//)
             ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, "$1")
             : selectedText.replace(/((?:^|\n)\s*)(.*)/g, "$1// $2")
-          : e.code == "BracketLeft" || (e.code == "Tab" && e.shiftKey)
+          : e.code == "Tab" && e.shiftKey
           ? selectedText.replace(/(^|\n)  /g, "$1")
           : selectedText.replace(/(^|\n)/g, "$1  ")
       );
@@ -300,13 +293,13 @@
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      if ((e.code == "ArrowUp" || e.code == "ArrowLeft") && textarea.selectionStart == 0) {
+      if (e.code == "ArrowUp" && textarea.selectionStart == 0) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
-      if ((e.code == "ArrowDown" || e.code == "ArrowRight") && textarea.selectionStart == textarea.value.length) {
+      if (e.code == "ArrowDown" && textarea.selectionStart == textarea.value.length) {
         e.stopPropagation();
         e.preventDefault();
         onNext();

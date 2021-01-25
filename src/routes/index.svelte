@@ -2402,7 +2402,6 @@
     if (
       (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      ((e.code == "BracketLeft" || e.code == "BracketRight") && e.ctrlKey) ||
       (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
       e.code == "Tab" ||
       e.code == "Escape"
@@ -2436,7 +2435,7 @@
                 bind:text={editorText}
                 bind:focused
                 cancelOnDelete={true}
-                allowCommandBracket={true}
+                allowCommandCtrlBracket={true}
                 onFocused={onEditorFocused}
                 onChange={onEditorChange}
                 onDone={onEditorDone}

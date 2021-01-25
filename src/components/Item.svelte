@@ -263,7 +263,7 @@
         const lctag = tag.toLowerCase().replace(/^#_/, "#");
         return missingTags.has(lctag) || matchingTerms.has(lctag) // || matchingTermsSecondary.has(lctag)
           ? pfx + tag
-          : "";
+          : pfx;
       })
       .trim();
 
@@ -1315,6 +1315,13 @@
   /* :global(.item li) {
     break-inside: avoid;
   } */
+
+  /* column spacing for tables */
+  :global(.item table) {
+    border-spacing: 10px 0;
+    border-collapse: separate;
+    margin-left: -10px;
+  }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
   :global(.item blockquote) {
