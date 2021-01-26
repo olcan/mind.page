@@ -782,15 +782,15 @@
     let clearLabel = false; // force clear, even if text starts with tag
 
     switch (text.trim()) {
-      case "/signout": {
+      case "/_signout": {
         signOut();
         return;
       }
-      case "/count": {
+      case "/_count": {
         text = `${editingItems.length} items are selected`;
         break;
       }
-      case "/times": {
+      case "/_times": {
         if (editingItems.length == 0) {
           alert("/times: no item selected");
           return;
@@ -799,51 +799,51 @@
         text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
       }
-      case "/dependencies": {
+      case "/_dependencies": {
         if (editingItems.length == 0) {
-          alert("/dependencies: no item selected");
+          alert("/_dependencies: no item selected");
           return;
         }
         if (editingItems.length > 1) {
-          alert("/dependencies: too many items selected");
+          alert("/_dependencies: too many items selected");
           return;
         }
         text = items[editingItems[0]].depsString;
         clearLabel = true;
         break;
       }
-      case "/dependents": {
+      case "/_dependents": {
         if (editingItems.length == 0) {
-          alert("/dependents: no item selected");
+          alert("/_dependents: no item selected");
           return;
         }
         if (editingItems.length > 1) {
-          alert("/dependents: too many items selected");
+          alert("/_dependents: too many items selected");
           return;
         }
         text = items[editingItems[0]].dependentsString;
         clearLabel = true;
         break;
       }
-      case "/debug": {
+      case "/_debug": {
         if (!lastRunText) {
-          alert(`/debug: no runs (in this session)`);
+          alert(`/_debug: no runs (in this session)`);
           return;
         }
         text = "#_debug " + lastRunText;
         editing = true;
         break;
       }
-      case "/debug_eval": {
+      case "/_debug_eval": {
         if (!lastEvalText) {
-          alert(`/debug: no _eval calls (in this session)`);
+          alert(`/_debug_eval: no _eval calls (in this session)`);
           return;
         }
         text = "#_debug " + lastEvalText;
         editing = true;
         break;
       }
-      case "/backup": {
+      case "/_backup": {
         if (readonly) return;
         let added = 0;
         items.forEach((item) => {
@@ -862,26 +862,26 @@
         });
         return;
       }
-      case "/tweet": {
+      case "/_tweet": {
         if (editingItems.length == 0) {
-          alert("/tweet: no item selected");
+          alert("/_tweet: no item selected");
           return;
         }
         if (editingItems.length > 1) {
-          alert("/tweet: too many items selected");
+          alert("/_tweet: too many items selected");
           return;
         }
         let item = items[editingItems[0]];
         location.href = "twitter://post?message=" + encodeURIComponent(item.text);
         return;
       }
-      case "/duplicate": {
+      case "/_duplicate": {
         if (editingItems.length == 0) {
-          alert("/duplicate: no item selected");
+          alert("/_duplicate: no item selected");
           return;
         }
         if (editingItems.length > 1) {
-          alert("/duplicate: too many items selected");
+          alert("/_duplicate: too many items selected");
           return;
         }
         let item = items[editingItems[0]];
@@ -890,9 +890,9 @@
         editing = true;
         break;
       }
-      case "/undelete": {
+      case "/_undelete": {
         if (deletedItems.length == 0) {
-          alert("/undelete: nothing to undelete (in this session)");
+          alert("/_undelete: nothing to undelete (in this session)");
           return;
         }
         time = deletedItems[0].time;
@@ -2621,8 +2621,7 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
-{:else}
-  <script>
+{:else}<script>
     setTimeout(() => {
       // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
       //       programmatic focus except in click handlers, when returning to app, etc
