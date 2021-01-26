@@ -254,7 +254,8 @@
           )
         )
     ).filter((t) => t);
-    // if (text.startsWith("/")) terms = [];
+    // disable search for text starting with '/', to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
+    if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsSecondary
     let termsSecondary = _.flatten(tags.all.map(tagPrefixes));
@@ -742,6 +743,7 @@
       .join("\n");
   }
 
+  let sessionCounter = 0; // to ensure unique increasing temporary ids for this session
   let tempIdFromSavedId = new Map<string, string>();
   let blurOnNextCancel = false;
   let editorText = "";
@@ -884,24 +886,32 @@
         break;
       }
       default: {
-        if (text.match(/\/js(\s|$)/)) {
-          text = "```js_input\n" + text.replace(/\/js(\s|$)/s, "").trim() + "\n```";
-        } else if (text.match(/^\/\w+/)) {
+        if (text.match(/^\/\w+/)) {
           let cmd = text.match(/^\/\w+/)[0];
           let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
           if (idsFromLabel.has("#command" + cmd)) {
             try {
-              window["_eval"](`run('${args}')`, "#command" + cmd);
+              const obj = window["_eval"](`run('${args}')`, "#command" + cmd);
+              if (!obj) return;
+              if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
+                alert(
+                  `#command${cmd}: run('${args}') returned invalid value; must be of the form {text:"...", editing:true|false}`
+                );
+                return;
+              }
+              text = obj.text;
+              editing = obj.editing == true; // default is false
             } catch (e) {
-              alert("#command" + cmd + ": " + e);
+              alert(`#command${cmd}: ${e}`);
               throw e;
             }
-            return;
           } else {
             alert(`unknown command ${cmd}`);
             return;
           }
         } else if (text.match(/^\/\s+/s)) {
+          // clear /(space) as a mechanism to disable search
+          // (onEditorChange already ignores text starting with /)
           text = text.replace(/^\/\s+/s, "");
         }
         // editing = text.trim().length == 0; // if text is empty, continue editing
@@ -915,10 +925,9 @@
     };
     let item = {
       ...itemToSave,
-      id: Date.now().toString(), // temporary id for this session only
+      id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
       savedId: null, // filled in below after save
       editing: editing,
-      // saving: true,
       saving: !editing,
       savedTime: time,
       savedText: "", // so cancel = delete
@@ -926,23 +935,34 @@
     items = [item, ...items];
     // update indices as needed by itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
-    itemTextChanged(0, text, false); // dependencies updated with permanent id below
+    itemTextChanged(0, text);
     lastEditorChangeTime = 0; // disable debounce even if editor focused
-    // NOTE: we keep the starting tag if it is a non-unique label
-    //       (useful for adding items, e.g. todo items, without losing context)
-    editorText =
-      !clearLabel && items[0].label && !items[0].labelUnique && items[0].labelText ? items[0].labelText + " " : "";
-    onEditorChange(editorText); // integrate new item at index 0
-    // NOTE: if not editing, append JS output and trigger another layout if necessary
-    if (!editing) {
-      appendJSOutput(indexFromId.get(item.id));
-      if (item.text != text) {
-        itemToSave.text = item.text;
-        // invoke onEditorChange again due to text change
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange(editorText);
-      }
+
+    // if command, just clear the arguments, keep the command
+    // (useful for repeated commands of the same type)
+    if (editorText.match(/^\/\w+ ?/)) {
+      editorText = editorText.replace(/(^\/\w+ ?).*$/s, "$1");
+    } else {
+      // if not command, but starts with a tag, keep if non-unique label
+      // (useful for adding labeled items, e.g. todo items, without losing context)
+      editorText =
+        !clearLabel &&
+        items[0].label &&
+        !items[0].labelUnique &&
+        items[0].labelText &&
+        editorText.startsWith(items[0].labelText + " ")
+          ? items[0].labelText + " "
+          : "";
     }
+
+    onEditorChange(editorText); // integrate new item at index 0
+
+    if (run) {
+      // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skip due to saveId being null
+      appendJSOutput(indexFromId.get(item.id));
+      text = itemToSave.text = item.text; // no need to update editorText
+    }
+
     let textarea = textArea(-1);
     textarea.focus(); // refocus (necessary on iOS for shifting focus to another item)
     if (editing) {
@@ -975,7 +995,7 @@
         let selectionStart = textarea ? textarea.selectionStart : 0;
         let selectionEnd = textarea ? textarea.selectionEnd : 0;
         item.savedId = doc.id;
-        // if editing, we do not call onItemSaved so save is postponed to post-edit
+        // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
         if (!item.editing) onItemSaved(item.id, itemToSave);
         else items[index] = item; // trigger dom update
 
@@ -1214,6 +1234,11 @@
       item.saveClosure = saveItem;
       return;
     }
+    if (!item.savedId) {
+      // NOTE: this can happen due to appendJSOutput for new item on onEditorDone()
+      // console.error("item is not being saved but also does not have its permanent id");
+      return;
+    }
     item.saving = true;
     let itemToSave = {
       time: item.time,
@@ -1273,6 +1298,7 @@
   }
 
   function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
+    // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
     let item = items[index];
 
     // update time for non-log item
@@ -1316,7 +1342,7 @@
           text: item.savedText,
         }); // for /undelete
         // we can skip delete if read-only and item not created under items-tmp
-        if (!readonly || tempIdFromSavedId.get(item.savedId)) {
+        if (item.savedId && (!readonly || tempIdFromSavedId.get(item.savedId))) {
           firestore()
             .collection(readonly ? "items-tmp" : "items")
             .doc(item.savedId)
@@ -1364,8 +1390,6 @@
         });
       }
     }
-
-    // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
   }
 
   // WARNING: onItemFocused may NOT be invoked when editor is destroyed
@@ -1814,7 +1838,8 @@
       indices.map((index) => {
         ids.push(items[index].id);
       });
-      if (multiple) return ids; // return as array
+      // if multiple allowed, return as array, most recent first
+      if (multiple) return _.sortBy(ids, (id) => -items[indexFromId.get(id)].time);
       if (ids.length > 1) console.warn(`multiple items matched _id(${item}), returning first`);
       return ids[0];
     };
@@ -1915,12 +1940,19 @@
           out = eval(evaljs);
         } catch (e) {
           console.error(e);
+          throw e;
         } finally {
           evalItemId = null;
           return out;
         }
+      } else {
+        try {
+          return eval(evaljs);
+        } catch (e) {
+          console.error(e);
+          throw e;
+        }
       }
-      return eval(evaljs);
     };
 
     window["_write"] = function (item: string, text: string, type: string = "_output") {
