@@ -1118,17 +1118,18 @@
     }
   }
 
-  const itemShowLogsTime = 15000;
-  function itemShowLogs(id: string) {
+  function itemShowLogs(id: string, autohide_after: number = 15000) {
     let index = indexFromId.get(id);
     if (index == undefined) return;
     items[index].showLogs = true;
     const dispatchTime = (items[index].showLogsTime = Date.now());
-    setTimeout(() => {
-      let index = indexFromId.get(id);
-      if (index == undefined) return;
-      if (dispatchTime == items[index].showLogsTime) items[index].showLogs = false;
-    }, itemShowLogsTime);
+    if (autohide_after > 0) {
+      setTimeout(() => {
+        let index = indexFromId.get(id);
+        if (index == undefined) return;
+        if (dispatchTime == items[index].showLogsTime) items[index].showLogs = false;
+      }, autohide_after);
+    }
   }
 
   function itemUpdateRunning(id: string, running: boolean) {
@@ -1142,7 +1143,6 @@
         items[index].runEndTime = 0;
       } else {
         items[index].runEndTime = Date.now();
-        itemShowLogs(id);
       }
     }
     items[index] = items[index]; // trigger dom update
@@ -1186,7 +1186,6 @@
       evalItemId = null;
       // automatically _write_log into item
       window["_write_log"](item.id, start);
-      itemShowLogs(item.id);
       return out;
     } catch (e) {
       evalItemId = null;
@@ -1196,7 +1195,6 @@
       else alert(msg);
       // automatically _write_log into item
       window["_write_log"](item.id, start);
-      itemShowLogs(item.id);
       return undefined;
     }
   }
@@ -2052,6 +2050,11 @@
     window["_write_log"] = function (item: string, since: number = -1, level: number = 1, type: string = "_log") {
       const log = window["_read_log"](since, level);
       window["_write"](item, log, type);
+      if (type == "_log") window["_show_logs"](item);
+    };
+
+    window["_show_logs"] = function (item: string, autohide_after: number = 15000) {
+      indicesForItem(item).map((index) => itemShowLogs(items[index].id, autohide_after));
     };
 
     window["_task"] = function (interval: number, task: Function, item: string = "") {
