@@ -292,16 +292,37 @@
     }
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
-    if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
+    if ((e.code == "ArrowUp" || e.code == "ArrowDown") && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+      // determine if we are on first or last line
+      let onFirstLine = false;
+      let onLastLine = false;
+      if (e.code == "ArrowUp" || e.code == "ArrowDown") {
+        const clone = backdrop.cloneNode(true) as HTMLDivElement;
+        clone.style.visibility = "hidden";
+        backdrop.parentElement.insertBefore(clone, backdrop);
+        (clone.firstChild as HTMLElement).innerHTML =
+          escapeHTML(textarea.value.substring(0, textarea.selectionStart)) +
+          `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
+        const span = clone.querySelector("span");
+        const backdropStyle = window.getComputedStyle(backdrop);
+        const lineHeight = parseFloat(backdropStyle.lineHeight);
+        const verticalPadding = parseFloat(backdropStyle.paddingTop) + parseFloat(backdropStyle.paddingBottom);
+        const lines = (backdrop.scrollHeight - verticalPadding) / lineHeight;
+        const line = Math.ceil((span.offsetTop - parseFloat(backdropStyle.paddingTop)) / lineHeight);
+        // console.debug(line, lines, span.offsetTop, backdrop.scrollHeight);
+        onFirstLine = line == 1;
+        onLastLine = line == lines;
+        clone.remove();
+      }
       // if (e.code == "ArrowUp" && textarea.selectionStart == 0) {
-      if (e.code == "ArrowUp" && !textarea.value.substring(0, textarea.selectionStart).includes("\n")) {
+      if (e.code == "ArrowUp" && onFirstLine) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
       //if (e.code == "ArrowDown" && textarea.selectionStart == textarea.value.length) {
-      if (e.code == "ArrowDown" && !textarea.value.substring(textarea.selectionStart).includes("\n")) {
+      if (e.code == "ArrowDown" && onLastLine) {
         e.stopPropagation();
         e.preventDefault();
         onNext();
@@ -580,8 +601,8 @@
   }
   :global(.editor .code, .editor .math) {
     background: rgba(0, 0, 0, 0.5);
-    padding: 2px 4px;
-    margin: -2px -4px;
+    padding: 2px 0; /* no overhang since delimited anyway */
+    margin: -2px 0;
     border-radius: 4px;
   }
   :global(.editor .macro) {
