@@ -218,6 +218,13 @@
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
   function onEditorChange(text: string) {
+    // keep history entry 0 updated, reset index on changes
+    if (text != sessionHistory[sessionHistoryIndex]) {
+      sessionHistoryIndex = 0;
+      if (sessionHistory.length == 0) sessionHistory = [text];
+      else sessionHistory[0] = text;
+    }
+
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
     if (text && document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
       lastEditorChangeTime = Date.now(); // reset timer at each postponed change
@@ -232,7 +239,6 @@
     }
     // console.debug("onEditorChange", editorText);
     lastEditorChangeTime = Infinity; // force minimum wait for next change
-    // console.debug("onEditorChange");
     maxIndexToShow = maxIndexToShowDefault; // reset item truncation
 
     text = text.toLowerCase().trim();
@@ -744,6 +750,8 @@
   }
 
   let sessionCounter = 0; // to ensure unique increasing temporary ids for this session
+  let sessionHistory = [];
+  let sessionHistoryIndex = 0;
   let tempIdFromSavedId = new Map<string, string>();
   let blurOnNextCancel = false;
   let editorText = "";
@@ -760,9 +768,17 @@
     }
     blurOnNextCancel = false;
 
+    // reset history index, update entry 0 and unshift duplicate entry
+    // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
+    sessionHistoryIndex = 0;
+    if (sessionHistory[0] != text.trim())
+      if (sessionHistory.length == 0) sessionHistory = [text.trim()];
+      else sessionHistory[0] = text.trim();
+    sessionHistory.unshift(sessionHistory[0]);
+
     let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
-    let origText = text;
+    let origText = text.trim();
     let clearLabel = false; // force clear, even if text starts with tag
 
     switch (text.trim()) {
@@ -887,15 +903,18 @@
       }
       default: {
         if (text.match(/^\/\w+/)) {
-          let cmd = text.match(/^\/\w+/)[0];
-          let args = text.replace(/^\/\w+\s*/, "").replace(/'/g, "\\'");
+          const cmd = text.match(/^\/\w+/)[0];
+          const args = text
+            .replace(/^\/\w+/, "")
+            .trim()
+            .replace(/`/g, "\\`");
           if (idsFromLabel.has("#command" + cmd)) {
             try {
-              const obj = window["_eval"](`run('${args}')`, "#command" + cmd);
+              const obj = window["_eval"](`run(\`${args}\`)`, "#command" + cmd);
               if (!obj) return;
               if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
-                  `#command${cmd}: run('${args}') returned invalid value; must be of the form {text:"...", editing:true|false}`
+                  `#command${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", editing:true|false}`
                 );
                 return;
               }
@@ -933,10 +952,10 @@
       savedText: "", // so cancel = delete
     };
     items = [item, ...items];
+
     // update indices as needed by itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     itemTextChanged(0, text);
-    lastEditorChangeTime = 0; // disable debounce even if editor focused
 
     // if command, just clear the arguments, keep the command
     // (useful for repeated commands of the same type)
@@ -955,6 +974,7 @@
           : "";
     }
 
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
 
     if (run) {
@@ -1461,9 +1481,19 @@
   }
 
   function onPrevItem(inc = -1) {
-    if (focusedItem + inc < -1) return;
+    if (sessionHistoryIndex > 0 || focusedItem + inc < -1) {
+      if (sessionHistoryIndex + 1 < sessionHistory.length) {
+        sessionHistoryIndex++;
+        // console.debug("sessionHistoryIndex", sessionHistoryIndex);
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = sessionHistory[sessionHistoryIndex]));
+        setTimeout(() => {
+          textArea(-1).selectionStart = textArea(-1).selectionEnd = editorText.length;
+        });
+      }
+      return;
+    }
     const index = focusedItem;
-    const textarea = textArea(index);
     if (index + inc == -1) textArea(-1).focus();
     else {
       if (!items[index + inc].editing) {
@@ -1478,9 +1508,19 @@
   }
 
   function onNextItem(inc = 1) {
+    if (sessionHistoryIndex > 0) {
+      sessionHistoryIndex--;
+      // console.debug("sessionHistoryIndex", sessionHistoryIndex);
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange((editorText = sessionHistory[sessionHistoryIndex]));
+      setTimeout(() => {
+        const endOfFirstLine = editorText.match(/^[^\n]*/)[0].length;
+        textArea(-1).selectionStart = textArea(-1).selectionEnd = endOfFirstLine;
+      });
+      return;
+    }
     if (focusedItem + inc >= Math.min(maxIndexToShow, items.length)) return;
     const index = focusedItem;
-    const textarea = textArea(index);
     if (!items[index + inc].editing) {
       if (items[index + inc].pinned || items[index + inc].saving || items[index + inc].running) {
         onNextItem(inc + 1);
@@ -2272,7 +2312,7 @@
               if (firstSnapshot) {
                 if (change.type != "added") console.warn("unexpected change type: ", change.type);
                 if (!initTime) {
-                  // NOTE: snapshot items do not have update/createTime available
+                  // NOTE: snapshot items do not have updateTime/createTime available
                   items.push(Object.assign(doc.data(), { id: doc.id }));
                 }
                 return;

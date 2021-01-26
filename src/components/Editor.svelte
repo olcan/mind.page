@@ -293,13 +293,15 @@
 
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      if (e.code == "ArrowUp" && textarea.selectionStart == 0) {
+      // if (e.code == "ArrowUp" && textarea.selectionStart == 0) {
+      if (e.code == "ArrowUp" && !textarea.value.substring(0, textarea.selectionStart).includes("\n")) {
         e.stopPropagation();
         e.preventDefault();
         onPrev();
         return;
       }
-      if (e.code == "ArrowDown" && textarea.selectionStart == textarea.value.length) {
+      //if (e.code == "ArrowDown" && textarea.selectionStart == textarea.value.length) {
+      if (e.code == "ArrowDown" && !textarea.value.substring(textarea.selectionStart).includes("\n")) {
         e.stopPropagation();
         e.preventDefault();
         onNext();
