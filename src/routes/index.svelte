@@ -2551,14 +2551,7 @@
             <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
           </div>
         </div>
-        <!-- auto-focus on the editor unless on iPhone --><script>
-          // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-          //       programmatic focus except in click handlers, when returning to app, etc
-          setTimeout(() => {
-            if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone"))
-              document.getElementById("textarea-editor").focus();
-          });
-        </script>{/if}
+      {/if}
 
       {#each items as item (item.id)}
         {#if item.column == column && item.index < maxIndexToShow}
@@ -2628,7 +2621,15 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
-{/if}
+{:else}
+  <script>
+    setTimeout(() => {
+      // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+      //       programmatic focus except in click handlers, when returning to app, etc
+      if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone"))
+        document.getElementById("textarea-editor").focus();
+    });
+  </script>{/if}
 
 <svelte:window
   on:keypress={onKeyPress}
