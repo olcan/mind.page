@@ -914,12 +914,12 @@
               if (!obj) return;
               if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
-                  `#command${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", editing:true|false}`
+                  `#command${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...",edit:true|false}`
                 );
                 return;
               }
               text = obj.text;
-              editing = obj.editing == true; // default is false
+              editing = obj.edit == true; // default is false
             } catch (e) {
               alert(`#command${cmd}: ${e}`);
               throw e;
