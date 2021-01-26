@@ -502,6 +502,11 @@
     // replace _math blocks, preserving whitespace
     text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
 
+    // allow escaping of math and macro delimiters in inline code blocks, used in documenting syntax
+    text = text.replace(/(<code>.*?)\\\$`(.*?<\/code>)/g, "$1$$`$2"); // \$`
+    text = text.replace(/(<code>.*?)\\\$\$`(.*?<\/code>)/g, "$1$$$$`$2"); // \$$`
+    text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, "$1&lt;&lt;$2"); // \<<
+
     // wrap menu items in special .menu div, but exclude deps/dependents
     if (isMenu)
       text = '<div class="menu">' + text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, "$1</div>$2");
