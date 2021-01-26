@@ -908,20 +908,20 @@
             .replace(/^\/\w+/, "")
             .trim()
             .replace(/`/g, "\\`");
-          if (idsFromLabel.has("#command" + cmd)) {
+          if (idsFromLabel.has("#commands" + cmd)) {
             try {
-              const obj = window["_eval"](`run(\`${args}\`)`, "#command" + cmd);
+              const obj = window["_eval"](`run(\`${args}\`)`, "#commands" + cmd);
               if (!obj) return;
               if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
-                  `#command${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...",edit:true|false}`
+                  `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...",edit:true|false}`
                 );
                 return;
               }
               text = obj.text;
               editing = obj.edit == true; // default is false
             } catch (e) {
-              alert(`#command${cmd}: ${e}`);
+              alert(`#commands${cmd}: ${e}`);
               throw e;
             }
           } else {
