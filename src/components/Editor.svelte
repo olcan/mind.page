@@ -459,8 +459,10 @@
     let content = e.clipboardData.getData("text");
     // copy bullet and indentation to subsequent lines
     let bullet;
-    if ((bullet = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *)([-*+] +)$/)))
+    if ((bullet = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *)([-*+] +)$/))) {
+      content = content.replace(/(^|\n)( *[-*+] +)/g, "$1"); // remove existing bullets
       content = content.replace(/(\n\s*)/g, "$1" + bullet[1] + bullet[2]);
+    }
     // replace tabs with double-space
     content = content.replace(/\t/g, "  ");
     document.execCommand("insertText", false, content);
