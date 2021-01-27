@@ -291,43 +291,57 @@
       return;
     }
 
+    // NOTE: line-based prev/next works _almost_ always, but there is an edge case which seems virtually impossible to eliminate, which is when the user does a Cmd-RightArrow (vs just RightArrow) to go to the end of a line, in which case the caret remains at the end of the previous line even though it is technically at the start of the next line (based on what happens on next input). In any case, it seems that requiring a modifier key has other benefits: it does not require going to top/bottom to switch items, and it maintains the caret position in each item.
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
-    if ((e.code == "ArrowUp" || e.code == "ArrowDown") && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-      // determine if we are on first or last line
-      let onFirstLine = false;
-      let onLastLine = false;
-      if (e.code == "ArrowUp" || e.code == "ArrowDown") {
-        const clone = backdrop.cloneNode(true) as HTMLDivElement;
-        clone.style.visibility = "hidden";
-        backdrop.parentElement.insertBefore(clone, backdrop);
-        (clone.firstChild as HTMLElement).innerHTML =
-          escapeHTML(textarea.value.substring(0, textarea.selectionStart)) +
-          `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
-        const span = clone.querySelector("span");
-        const backdropStyle = window.getComputedStyle(backdrop);
-        const lineHeight = parseFloat(backdropStyle.lineHeight);
-        const verticalPadding = parseFloat(backdropStyle.paddingTop) + parseFloat(backdropStyle.paddingBottom);
-        const lines = (backdrop.scrollHeight - verticalPadding) / lineHeight;
-        const line = Math.ceil((span.offsetTop - parseFloat(backdropStyle.paddingTop)) / lineHeight);
-        // console.debug(line, lines, span.offsetTop, backdrop.scrollHeight);
-        onFirstLine = line == 1;
-        onLastLine = line == lines;
-        clone.remove();
-      }
-      // if (e.code == "ArrowUp" && textarea.selectionStart == 0) {
-      if (e.code == "ArrowUp" && onFirstLine) {
-        e.stopPropagation();
-        e.preventDefault();
-        onPrev();
-        return;
-      }
-      //if (e.code == "ArrowDown" && textarea.selectionStart == textarea.value.length) {
-      if (e.code == "ArrowDown" && onLastLine) {
-        e.stopPropagation();
-        e.preventDefault();
-        onNext();
-        return;
-      }
+    // if ((e.code == "ArrowUp" || e.code == "ArrowDown") && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
+    //   // determine if we are on first or last line
+    //   let onFirstLine = false;
+    //   let onLastLine = false;
+    //   if (e.code == "ArrowUp" || e.code == "ArrowDown") {
+    //     // if (e.code == "ArrowUp") textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart + 1;
+    //     // else textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart - 1;
+    //     const clone = backdrop.cloneNode(true) as HTMLDivElement;
+    //     clone.style.visibility = "hidden";
+    //     backdrop.parentElement.insertBefore(clone, backdrop);
+    //     (clone.firstChild as HTMLElement).innerHTML =
+    //       escapeHTML(textarea.value.substring(0, textarea.selectionStart)) +
+    //       `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
+    //     const span = clone.querySelector("span");
+    //     const backdropStyle = window.getComputedStyle(backdrop);
+    //     const lineHeight = parseFloat(backdropStyle.lineHeight);
+    //     const verticalPadding = parseFloat(backdropStyle.paddingTop) + parseFloat(backdropStyle.paddingBottom);
+    //     const lines = (backdrop.scrollHeight - verticalPadding) / lineHeight;
+    //     const line = Math.ceil((span.offsetTop - parseFloat(backdropStyle.paddingTop)) / lineHeight);
+    //     // console.debug(line, lines, span.offsetTop, backdrop.scrollHeight);
+    //     onFirstLine = line == 1;
+    //     onLastLine = line == lines;
+    //     clone.remove();
+    //   }
+    //   if (e.code == "ArrowUp") {
+    //     e.stopPropagation();
+    //     e.preventDefault();
+    //     onPrev();
+    //     return;
+    //   }
+    //   if (e.code == "ArrowDown") {
+    //     e.stopPropagation();
+    //     e.preventDefault();
+    //     onNext();
+    //     return;
+    //   }
+    // }
+
+    if (e.code == "ArrowUp" && e.metaKey) {
+      e.stopPropagation();
+      e.preventDefault();
+      onPrev();
+      return;
+    }
+    if (e.code == "ArrowDown" && e.metaKey) {
+      e.stopPropagation();
+      e.preventDefault();
+      onNext();
+      return;
     }
 
     // remove spaced tabs (and optional bullet) with backspace
