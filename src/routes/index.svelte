@@ -1838,6 +1838,9 @@
     window["_text"] = function () {
       return editorText.trim();
     };
+    window["_encoded_text"] = function () {
+      return encodeURIComponent(editorText.trim());
+    };
     window["_append_clipboard"] = function () {
       navigator.clipboard.readText().then(window["_append"]).catch(alert);
     };
@@ -1859,9 +1862,6 @@
           }
         })
         .catch(alert);
-    };
-    window["_encoded_text"] = function () {
-      return encodeURIComponent(editorText.trim());
     };
     window["_google"] = function () {
       let query = editorText.replace(/^\/\s+/s, "").trim();
@@ -2097,14 +2097,6 @@
         task(); //  also execute immediately
       });
     };
-
-    // recursive version of Object.assign that does a deep merge
-    function recursiveAssign(a, b) {
-      if (a == undefined || typeof b !== "object") return b;
-      if (typeof a !== "object") a = {};
-      for (let key in b) a[key] = recursiveAssign(a[key], b[key]);
-      return a;
-    }
 
     window["_histogram"] = function (
       numbers: any,
