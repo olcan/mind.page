@@ -333,13 +333,13 @@
     //   }
     // }
 
-    if (e.code == "ArrowUp" && e.metaKey) {
+    if (e.code == "ArrowUp" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
       e.stopPropagation();
       e.preventDefault();
       onPrev();
       return;
     }
-    if (e.code == "ArrowDown" && e.metaKey) {
+    if (e.code == "ArrowDown" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
       e.stopPropagation();
       e.preventDefault();
       onNext();
