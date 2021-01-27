@@ -733,7 +733,7 @@
           !node.parentElement.classList.contains("secondary-selected")
         ) {
           let tagTerms = terms.concat("#…").map(regexEscape);
-          tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#/, "^")));
+          tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#(.+)$/, "^$1")));
           regex = new RegExp(`(^.*?)(${tagTerms.join("|")})`, "si");
         }
         let m;

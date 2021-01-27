@@ -352,9 +352,16 @@
       item.matchingTermsSecondary = _.uniq(
         _.concat(
           termsContext.filter(
-            (t) => item.tagsExpanded.includes(t) || item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
+            (t) =>
+              item.tagsExpanded.includes(t) ||
+              item.depsString.toLowerCase().includes(t) ||
+              item.dependentsString.toLowerCase().includes(t)
           ),
-          terms.filter((t) => t[0] != "#" && (item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)))
+          terms.filter(
+            (t) =>
+              t[0] != "#" &&
+              (item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t))
+          )
         )
       );
 
