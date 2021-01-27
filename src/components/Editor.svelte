@@ -348,12 +348,13 @@
       return;
     }
 
-    // delete empty item with backspace
-    if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
-      onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
-      e.preventDefault();
-      return;
-    }
+    // NOTE: this was a bit too loose of a shortcut... it was triggering onEditorDone unexpectedly (e.g. just holding backspace to clear the search bar), and it was not worth making it configurable, because it seems being able to hold backspace should be doable without worrying about deleting an item completely, especially since the edits could be "cancelled". also, deleting an item does not need to be easier than creating one, which requires a modifier key
+    // // delete empty item with backspace
+    // if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
+    //   onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
+    //   e.preventDefault();
+    //   return;
+    // }
 
     // cancel edit with escape
     if (e.code == "Escape") {
