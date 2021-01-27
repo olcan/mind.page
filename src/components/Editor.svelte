@@ -356,6 +356,14 @@
     //   return;
     // }
 
+    // NOTE: this is an alternative we could consider if keyboard based deletion is necessary on mobile, although this would require item to be cleared first, and it is much faster to siply use the delete button
+    // // delete empty item with shift-backspace
+    // if (e.code == "Backspace" && e.shiftKey && textarea.value.trim() == "" && textarea.selectionStart == 0) {
+    //   onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
+    //   e.preventDefault();
+    //   return;
+    // }
+
     // cancel edit with escape
     if (e.code == "Escape") {
       onDone(text /* maintain text */, e, true /* cancelled */);
