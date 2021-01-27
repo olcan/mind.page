@@ -295,6 +295,8 @@
     // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
     // if ((e.code == "ArrowUp" || e.code == "ArrowDown") && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
     //   // determine if we are on first or last line
+    //   // see https://stackoverflow.com/a/22446703
+    //   // see https://github.com/component/textarea-caret-position/blob/master/index.js
     //   let onFirstLine = false;
     //   let onLastLine = false;
     //   if (e.code == "ArrowUp" || e.code == "ArrowDown") {
