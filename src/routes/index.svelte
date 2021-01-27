@@ -1084,6 +1084,7 @@
     }
   }
 
+  let lastEditTime = 0; // updated in onItemEdited
   let layoutPending = false;
   function onItemResized(id, container, trigger: string) {
     if (!container) return;
@@ -1123,10 +1124,14 @@
     ) {
       if (!layoutPending) {
         layoutPending = true;
-        setTimeout(
+        const layoutInterval = setInterval(
           () => {
-            updateItemLayout();
-            layoutPending = false;
+            // TODO: if this does not prevent the edit issues, consider waiting until no item editor has focus
+            if (Date.now() - lastEditTime >= 500) {
+              updateItemLayout();
+              layoutPending = false;
+              clearInterval(layoutInterval);
+            }
           },
           // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
           totalItemHeight > 0 ? 250 : 50
@@ -1436,6 +1441,10 @@
     // );
   }
 
+  function onItemEdited(index: number, text: string) {
+    lastEditTime = Date.now();
+  }
+
   function onItemRun(index: number = -1) {
     if (index < 0) index = focusedItem;
     let item = items[index];
@@ -1450,6 +1459,7 @@
     item.time = Date.now();
     if (!item.editing) saveItem(item.id);
     editorBlurTime = 0; // prevent re-focus on editor
+    lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText); // item time/text has changed
   }
 
@@ -1463,7 +1473,9 @@
       items[index].time = Date.now();
       saveItem(items[index].id);
       editorBlurTime = 0; // prevent re-focus on editor
-      onEditorChange((editorText = "")); // item time has changed, and editor cleared
+      lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
+      onEditorChange(editorText); // item time has changed
+      // onEditorChange((editorText = "")); // item time has changed, and editor cleared
     }
   }
 
@@ -2529,7 +2541,7 @@
                 cancelOnDelete={true}
                 allowCommandCtrlBracket={true}
                 onFocused={onEditorFocused}
-                onChange={onEditorChange}
+                onEdited={onEditorChange}
                 onDone={onEditorDone}
                 onPrev={onPrevItem}
                 onNext={onNextItem}
@@ -2575,6 +2587,7 @@
           <Item
             onEditing={onItemEditing}
             onFocused={onItemFocused}
+            onEdited={onItemEdited}
             onRun={onItemRun}
             onTouch={onItemTouch}
             onResized={onItemResized}

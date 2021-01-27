@@ -5,7 +5,7 @@
   export let cancelOnDelete = false;
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
-  export let onChange = (text) => {};
+  export let onEdited = (text) => {};
   export let onDone = (text: string, e: KeyboardEvent, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
@@ -362,14 +362,15 @@
       return;
     }
 
-    // clear item (from current position to start) with shift-backspace
-    if (e.code == "Backspace" && e.shiftKey) {
-      textarea.selectionStart = 0;
-      document.execCommand("forwardDelete");
-      e.preventDefault();
-      onInput();
-      return;
-    }
+    // NOTE: this was too easy to trigger accidentally on mobile
+    // // clear item (from current position to start) with shift-backspace
+    // if (e.code == "Backspace" && e.shiftKey) {
+    //   textarea.selectionStart = 0;
+    //   document.execCommand("forwardDelete");
+    //   e.preventDefault();
+    //   onInput();
+    //   return;
+    // }
 
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
@@ -475,7 +476,7 @@
   function onInput() {
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
-    onChange(textarea.value);
+    onEdited(textarea.value);
   }
 
   import { afterUpdate, onMount, onDestroy } from "svelte";
