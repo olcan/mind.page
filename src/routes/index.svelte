@@ -230,8 +230,8 @@
       else sessionHistory[0] = text;
     }
 
-    // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
-    if (text && document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
+    // if editor has focus, and it is too soon since last change/return, debounce
+    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
       lastEditorChangeTime = Date.now(); // reset timer at each postponed change
       if (!editorChangePending) {
         editorChangePending = true;
