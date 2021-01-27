@@ -211,7 +211,7 @@
           return `<span class="${spanclass}"> ${
             dep.startsWith("#")
               ? dep
-              : `<a class="tag" href="javascript:_toggle('${dep}')" onclick="handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</a>`
+              : `<mark onclick="_toggle('${dep}');handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
           } </span>`;
         })
         .join(" ");
@@ -366,7 +366,7 @@
                 if (labelUnique) classNames += " unique";
               }
               classNames = classNames.trim();
-              if (depline) classNames = ""; // disable styling for deps/dependents
+              // if (depline) classNames = ""; // disable styling for deps/dependents
               if (classNames) classNames = ` class="${classNames}"`;
               let reltag =
                 label &&
@@ -657,9 +657,11 @@
       itemdiv.insertBefore(div, itemdiv.firstElementChild);
     }
 
+    // we highlight both primary and secondary matching terms
+    const highlightTerms = matchingTerms + " " + matchingTermsSecondary;
     if (
       hash == itemdiv.firstElementChild.getAttribute("_hash") &&
-      matchingTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
+      highlightTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       // console.debug("afterUpdate skipped");
       // update all children w/ _update attribute (and property)
@@ -667,17 +669,17 @@
       return;
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
-    itemdiv.firstElementChild.setAttribute("_highlightTerms", matchingTerms);
+    itemdiv.firstElementChild.setAttribute("_highlightTerms", highlightTerms);
     // console.debug("afterUpdate");
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();
 
     // highlight matching terms in item text
-    const matchingTermsAtDispatch = matchingTerms;
+    const highlightTermsAtDispatch = highlightTerms;
     let highlightClosure = () => {
       if (!itemdiv) return;
-      if (matchingTerms != matchingTermsAtDispatch) return;
+      if (highlightTerms != highlightTermsAtDispatch) return;
       itemdiv.querySelectorAll("span.highlight").forEach((span) => {
         // span.replaceWith(span.firstChild);
         span.outerHTML = span.innerHTML;
@@ -685,7 +687,7 @@
       itemdiv.querySelectorAll("mark div").forEach((spacer) => {
         spacer.remove();
       });
-      let terms = matchingTerms.split(" ").filter((t) => t);
+      let terms = highlightTerms.split(" ").filter((t) => t);
       if (label) {
         terms.slice().forEach((term: string) => {
           if (
@@ -711,10 +713,9 @@
             case "script":
               return NodeFilter.FILTER_REJECT;
             default:
-              return classList?.contains("math") ||
-                classList?.contains("math-display") ||
-                classList?.contains("deps-and-dependents")
-                ? NodeFilter.FILTER_REJECT
+              return classList?.contains("math") || classList?.contains("math-display")
+                ? // || classList?.contains("deps-and-dependents")
+                  NodeFilter.FILTER_REJECT
                 : NodeFilter.FILTER_ACCEPT;
           }
         },
@@ -725,13 +726,15 @@
         const parent = node.parentNode;
         let text = node.nodeValue;
         let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
-        // if we are highlighting inside a non-selected tag, then we expand the regex to include #… which can be used to shorten prefix-matching labels
+        // if we are highlighting inside a non-selected tag, then we expand the regex to allow shortening and rendering adjustments ...
         if (
           node.parentElement.tagName == "MARK" &&
           !node.parentElement.classList.contains("selected") &&
           !node.parentElement.classList.contains("secondary-selected")
         ) {
-          regex = new RegExp(`^(.*?)(${terms.concat(["#…", "…"]).map(regexEscape).join("|")})`, "si");
+          let tagTerms = terms.concat("#…").map(regexEscape);
+          tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#/, "^")));
+          regex = new RegExp(`(^.*?)(${tagTerms.join("|")})`, "si");
         }
         let m;
         while ((m = text.match(regex))) {
@@ -754,8 +757,8 @@
             word.style.paddingBottom = tagStyle.paddingBottom;
             word.style.marginBottom = "-" + word.style.paddingBottom;
             // left/right margin matches span.highlight css
-            word.style.paddingLeft = word.style.paddingRight = "1px";
-            word.style.marginLeft = word.style.marginRight = "-1px";
+            // word.style.paddingLeft = word.style.paddingRight = "1px";
+            // word.style.marginLeft = word.style.marginRight = "-1px";
             if (tagText.lastIndexOf(m[2]) == 0) {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
@@ -1378,11 +1381,6 @@
     border-radius: 4px;
     text-decoration: none;
   }
-  :global(.item a.tag) {
-    color: black;
-    background: #999;
-    font-weight: 500;
-  }
   :global(.item mark) {
     color: black;
     background: #999;
@@ -1452,8 +1450,8 @@
     border: 1px solid #9b9;
     border-radius: 4px;
     /* font-weight: 500; */
-    padding: 0 1px;
-    margin: -1px -2px;
+    /* NOTE: we do not pad highlights as it can overlap non-highlighted text */
+    margin: -1px;
   }
   :global(.item mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */
@@ -1462,10 +1460,8 @@
   :global(.item mark span.highlight) {
     color: black;
     background: #9b9;
-    padding-left: 0;
-    padding-right: 0;
     border: 0;
-    margin: 0 -1px;
+    margin: 0;
   }
   :global(.item mark.label span.highlight) {
     background: #9f9;

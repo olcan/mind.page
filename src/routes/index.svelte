@@ -189,10 +189,15 @@
     );
   }
 
-  // simplifies tags for search and for dependency listing
-  function simplifyTag(tag) {
-    if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return "#pin";
-    return tag;
+  // returns "alternative tags" for dependency analysis and tag search/highlights
+  function altTags(tag) {
+    if (tag == "#log") return ["#features/log"];
+    else if (tag == "#menu") return ["#features/_menu"];
+    else if (tag == "#context") return ["#features/_context"];
+    else if (tag == "#init") return ["#features/_init"];
+    else if (tag == "#async") return ["#features/_async"];
+    else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ["#features/_pin"];
+    else return [];
   }
 
   function tagPrefixes(tag) {
@@ -247,7 +252,7 @@
       text
         .split(/\s+/)
         .concat(tags.all)
-        .concat(tags.all.map(simplifyTag))
+        .concat(_.flattenDeep(tags.all.map(altTags)))
         // .concat(_.flatten(tags.all.map(tagPrefixes)))
         // NOTE: for tags that do not match (or not sufficiently), we allow matching tag as non-tag with many variations, but we still prioritize/highlight tag matches and tag prefix (secondary) matches
         .concat(
@@ -263,8 +268,8 @@
     // disable search for text starting with '/', to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
     if (text.startsWith("/")) terms = [];
 
-    // expand tag prefixes into termsSecondary
-    let termsSecondary = _.flatten(tags.all.map(tagPrefixes));
+    // expand tag prefixes into termsContext
+    let termsContext = _.flatten(tags.all.map(tagPrefixes));
 
     matchingItemCount = 0;
     textLength = 0;
@@ -280,7 +285,7 @@
       let item = items[listingItemIndex];
       context = [item.label].concat(item.labelPrefixes);
       // expand context to include "context" items that visibly tag the top item in context
-      // (also add their label to secondary terms so they are highlighted as context as well)
+      // (also add their label to context terms so they are highlighted as context as well)
       while (true) {
         const lastContextLength = context.length;
         items.forEach((ctxitem) => {
@@ -297,7 +302,7 @@
         });
         if (context.length == lastContextLength) break;
       }
-      termsSecondary = _.uniq(termsSecondary.concat(context));
+      termsContext = _.uniq(termsContext.concat(context));
 
       listing = item.tagsVisible
         .filter((t) => t != item.label)
@@ -327,24 +332,31 @@
       item.uniqueLabel = item.labelUnique ? item.label : "";
       // item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
 
-      // match tags against item tagsForSearch, allowing prefix matches
-      item.matchingTerms = terms.filter(
-        (t) => t[0] == "#" && item.tagsForSearch.findIndex((tag) => tag.startsWith(t)) >= 0
-      );
+      // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
+      item.matchingTerms = terms.filter((t) => t[0] == "#" && item.tagsAlt.findIndex((tag) => tag.startsWith(t)) >= 0);
+
       // match non-tag terms (anywhere in text)
       item.matchingTerms = item.matchingTerms.concat(terms.filter((t) => t[0] != "#" && item.lctext.includes(t)));
 
-      // match regex:* terms
+      // match regex:* terms as regex
       item.matchingTerms = item.matchingTerms.concat(
         terms.filter((t) => t.match(/^regex:\S+/) && item.lctext.match(new RegExp(t.substring(6))))
       );
-      // match id:* terms
+      // match id:* terms against id
       const idMatchTerms = terms.filter((t) => t.match(/^id:\w+/) && item.id.toLowerCase() == t.substring(3));
       item.matchingTerms = item.matchingTerms.concat(idMatchTerms);
       if (idMatchTerms.length > 0) idMatchItemIndices.push(index);
+      item.matchingTerms = _.uniq(item.matchingTerms); // can have duplicates (e.g. regex:*, id:*, ...)
 
-      // match secondary terms (tag prefixes)
-      item.matchingTermsSecondary = termsSecondary.filter((t) => item.tagsExpanded.includes(t));
+      // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
+      item.matchingTermsSecondary = _.uniq(
+        _.concat(
+          termsContext.filter(
+            (t) => item.tagsExpanded.includes(t) || item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
+          ),
+          terms.filter((t) => t[0] != "#" && (item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)))
+        )
+      );
 
       // item is considered matching if primary terms match
       // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
@@ -579,12 +591,8 @@
     if (deps.includes(item.id)) return deps;
     // NOTE: dependency order matters for hashing and potentially for code import
     deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
-    item.tagsRaw.forEach((tag) => {
-      if (!tag.startsWith("#_")) return; // only _hidden tags are used as dependencies
-      tag = tag.replace(/^#_/, "#"); // remove underscore prefix
-      tag = simplifyTag(tag);
-      if (tag == item.label) return;
-      // NOTE: we allow special tags as dependencies, providing visibility for the hidden tags and allowing the linked item to provide helpful information AND code/macros that would be available to all items with that special tag; this is a nice incentive to create these items, unless we prefer some special tags to remain hidden, which we can do by creating these items under different labels
+    item.tagsHiddenAlt.forEach((tag) => {
+      // NOTE: we allow special tags as dependents if corresponding uniquely named items exist
       // if (isSpecialTag(tag)) return;
       if (!idsFromLabel.has(tag)) return;
       const ids = idsFromLabel.get(tag);
@@ -636,7 +644,8 @@
     item.tagsVisible = tags.visible;
     item.tagsHidden = tags.hidden;
     item.tagsRaw = tags.raw;
-    item.tagsForSearch = _.uniq(item.tags.concat(item.tags.map(simplifyTag)));
+    item.tagsAlt = _.uniq(_.flattenDeep(item.tags.concat(item.tags.map(altTags))));
+    item.tagsHiddenAlt = _.uniq(_.flattenDeep(item.tagsHidden.concat(item.tagsHidden.map(altTags))));
     // item.log = item.tags.includes("#log"); (must be label, see below)
     item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
@@ -663,7 +672,8 @@
       item.tagsVisible = item.tagsVisible.map(resolveTag);
       item.tagsHidden = item.tagsHidden.map(resolveTag);
       item.tagsRaw = item.tagsRaw.map(resolveTag);
-      item.tagsForSearch = item.tagsForSearch.map(resolveTag);
+      item.tagsAlt = item.tagsAlt.map(resolveTag);
+      item.tagsHiddenAlt = item.tagsHiddenAlt.map(resolveTag);
     }
     if (item.label != prevLabel) {
       item.labelUnique = false;
