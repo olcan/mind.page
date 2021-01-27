@@ -573,7 +573,7 @@
   }
 
   function resetUser() {
-    window["_user"] = user = null;
+    user = null;
     localStorage.removeItem("user");
     window.sessionStorage.removeItem("signin_pending");
     document.cookie = "__session=;max-age=0"; // delete cookie for server
@@ -800,7 +800,15 @@
 
     switch (text.trim()) {
       case "/_signout": {
+        if (!firebase().auth().currentUser) {
+          alert("already signed out")
+          return;
+        }
         signOut();
+        return;
+      }
+      case "/_signin": {
+        signIn();
         return;
       }
       case "/_count": {
@@ -1742,13 +1750,13 @@
     // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
     // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
     if (!user && localStorage.getItem("user")) {
-      window["_user"] = user = JSON.parse(localStorage.getItem("user"));
+      user = JSON.parse(localStorage.getItem("user"));
       console.debug("restored user from local storage");
     } else if (window.sessionStorage.getItem("signin_pending")) {
-      window["_user"] = user = null;
+      user = null;
     } else {
       document.cookie = "__session=;max-age=0"; // clear just in case
-      window["_user"] = user = {
+      user = {
         photoURL: "/incognito.png",
         displayName: "Anonymous",
         uid: "anonymous",
@@ -1781,7 +1789,7 @@
           // console.debug("onAuthStateChanged", user, authUser);
           resetUser(); // clean up first
           if (!authUser) return;
-          window["_user"] = user = authUser;
+          user = authUser;
           console.log("signed in", user.email);
           localStorage.setItem("user", JSON.stringify(user));
           anonymous = readonly = false; // just in case (should already be false)
@@ -1800,6 +1808,11 @@
           initFirebaseRealtime();
         });
     }
+
+    window["_user"] = function () {
+      if (!user) return null;
+      return _.pick(user, ["email", "displayName", "photoURL", "uid"]);
+    };
 
     // Set up global helper functions for javascript:... shortcuts
     window["_replace"] = function (text: string) {
@@ -2511,7 +2524,6 @@
   // redirect error to alert or console._window_error if it exists
   function onError(e) {
     if (!consolediv) return; // can happen during login process
-    // NOTE: if this is from onunhandledrejection, then we need to use e.reason
     let msg = errorMessage(e);
     if (console["_window_error"]) console["_window_error"](msg);
     else alert(msg);
