@@ -257,7 +257,7 @@
     );
     const isMenu = tags.includes("#_menu");
 
-    // remove hidden tags (unless missing or matching) and trim
+    // remove hidden tags (unless missing or matching) and trim (up to deps-and-dependents)
     text = text
       .replace(tagRegex, (m, pfx, tag) => {
         if (!tag.startsWith("#_")) return m;
@@ -266,7 +266,8 @@
           ? pfx + tag
           : pfx;
       })
-      .trim();
+      .trimStart()
+      .replace(/\s+($|\n<div class="deps-and-dependents">)/, "$1");
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = (text) =>
@@ -543,6 +544,13 @@
       // console.debug("img src", src, m);
       const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`;
+    });
+
+    // add onclick handler to html links
+    text = text.replace(/<a .*?href\s*=\s*"(.+?)".*?>/gi, function (m, href) {
+      if (m.match(/onclick/i)) return m; // link has custom onclick handler
+      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
+      return m.substring(0, m.length - 1) + ` onclick="handleLinkClick('${id}','${href_escaped}',event)">`;
     });
 
     // append log summary div

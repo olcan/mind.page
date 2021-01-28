@@ -609,7 +609,7 @@
       .map((id) => {
         const dep = items[indexFromId.get(id)];
         const async = dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
-        return (dep.labelUnique ? dep.label : "id:" + dep.id) + (async ? "(async)" : "");
+        return (dep.labelUnique ? dep.labelText : "id:" + dep.id) + (async ? "(async)" : "");
       })
       .join(" ");
   }
@@ -619,7 +619,7 @@
       .map((id) => {
         const dep = items[indexFromId.get(id)];
         return (
-          (dep.labelUnique ? dep.label : "id:" + dep.id) +
+          (dep.labelUnique ? dep.labelText : "id:" + dep.id) +
           (item.labelUnique && dep.tagsVisible.includes(item.label) ? "(visible)" : "")
         );
       })
@@ -783,8 +783,10 @@
     let time = Date.now(); // default time is current, can be past if undeleting
     let origText = text.trim();
     let clearLabel = false; // force clear, even if text starts with tag
-    // NOTE: default is to create item in editing mode, unless BOTH Ctrl+Cmd are held
-    let editing = !e.ctrlKey || !e.metaKey;
+    // NOTE: default is to create item in editing mode, unless any 2+ modifiers are held
+    //       (or edit:true|false is specified by custom command function)
+    //       (some modifier combinations, e.g. Ctrl+Alt, may be blocked by browsers)
+    let editing = (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
 
     switch (text.trim()) {
       case "/_signout": {
@@ -932,7 +934,9 @@
                 return;
               }
               text = obj.text;
-              editing = obj.edit == true; // default is false
+              if (obj.edit != undefined)
+                // if undefined use key-based default
+                editing = obj.edit == true;
             } catch (e) {
               alert(`#commands${cmd}: ${e}`);
               throw e;
