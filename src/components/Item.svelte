@@ -904,29 +904,24 @@
           console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
         }
         script.remove(); // remove script to indicate execution
-        let clone = document.createElement("script");
-        clone.type = script.type || "text/javascript";
-        // NOTE: we only support sync embedded scripts for now for simplicity in error handling; if async scripts are needed again in the future, then we need to see if element.onerror works; if so, then we just need to have onload and onerror to invoke the completion logic below (_script_item_id and _errors can be skipped)
-        clone.innerHTML = `(function(){\n ${script.innerHTML} \n})()`;
-
-        // NOTE: we track script id which helps with logging and some helper functions, but this only works for sychronous execution; for async scripts tracking requires a context object to be passed around which does not seem worth the trouble for now
-        window["_script_item_id"] = id;
-        window["_errors"] = [];
-        document.head.appendChild(clone);
-        document.head.removeChild(clone);
-        window["_script_item_id"] = "";
-        scriptErrors = scriptErrors.concat(window["_errors"]);
+        // NOTE: we do not support .src yet, when we do we need to fetch the script using AJAX, prefix w/ __id, and ensure proper completion/error handling via script.onerror assuming that works.
+        if (script.hasAttribute("src")) {
+          console.error("script src not supported yet");
+        } else {
+          try {
+            window["_eval"](`(function(){\n${script.innerHTML}\n})()`, id);
+          } catch (e) {
+            console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
+            scriptErrors.push(e);
+          }
+        }
 
         pendingScripts--;
         if (pendingScripts > 0) return;
         // console.debug(`all scripts done in item ${index + 1}`);
-        // if (itemdiv.querySelector("script")) console.warn("item still contains script(s)!");
         setTimeout(() => onResized(id, container, "scripts done"), 0);
-
         // if no errors, cache elems with _cache_key that had scripts in them
-        if (scriptErrors.length > 0) return;
-        cacheElems();
-
+        if (scriptErrors.length == 0) cacheElems();
         // if element contains dot graphs, they may trigger window._dot_rendered, defined below
       });
     });

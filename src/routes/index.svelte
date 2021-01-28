@@ -1206,6 +1206,7 @@
         "})",
       ].join("\n");
     }
+    if (!item.debug) evaljs = `const __id='${item.id}';\n` + evaljs;
     if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
     const start = Date.now();
     try {
@@ -1819,12 +1820,10 @@
         if (indexFromId.has(item)) return [indexFromId.get(item)];
         else return undefined;
       }
-      // TODO: "id inference" is ugly and complicated due to possible recursion, e.g. a script calling _eval on another item, which may call _eval on another item, which can happen through a macro.
       if (item == "auto" || item == "self" || item == "this") item = "";
       if (!item && evalItemId.length > 0) {
-        return [indexFromId.get(_.last(evalItemId))];
-      } else if (!item && window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
-        return [indexFromId.get(window["_script_item_id"])];
+        // return [indexFromId.get(_.last(evalItemId))];
+        return [indexFromId.get(evalItemId[0])]; // return top level caller, e.g. <script> item or run item
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
       } else {
@@ -1932,14 +1931,19 @@
         item,
         Object.assign({ replace_ids: true, exclude_async_deps: true }, options)
       );
+      let caller = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
+      let indices = indicesForItem(item); // index of specified (eval) item
+      if (indices.length > 1) console.warn("multiple items for _eval");
+      let index = indices[0];
+
       let evaljs = prefix + "\n" + code;
-      let index = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
+      if (index != undefined) evaljs = `const __id='${items[index].id}';\n` + evaljs;
+
       lastEvalText = appendBlock(
-        index != undefined ? `\`_eval\` invoked from ${items[index].label || "id:" + items[index].id}` : "",
+        caller != undefined ? `\`_eval\` invoked from ${items[caller].label || "id:" + items[caller].id}` : "",
         "js_input",
         addLineNumbers(evaljs)
       );
-      index = indicesForItem(item)[0]; // index of specified (eval) item or undefined
       if (index != undefined) evalItemId.push(items[index].id);
       try {
         const out = eval(evaljs);
@@ -2341,11 +2345,7 @@
             if (verb.endsWith("error")) verb = "error";
             elem.classList.add("console-" + verb);
             let item; // if the source is an item (and the logging is done _synchronously_)
-            if (evalItemId.length > 0) {
-              item = items[indexFromId.get(_.last(evalItemId))];
-            } else if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
-              item = items[indexFromId.get(window["_script_item_id"])];
-            }
+            if (evalItemId.length > 0) item = items[indexFromId.get(_.last(evalItemId))];
             let prefix = item ? (item.labelText || item.id) + ": " : "";
             let text = "";
             if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
@@ -2436,8 +2436,6 @@
     let msg = errorMessage(e);
     if (console["_window_error"]) console["_window_error"](msg);
     else alert(msg);
-    if (!window["_errors"]) window["_errors"] = [];
-    window["_errors"].push(e);
   }
 </script>
 
