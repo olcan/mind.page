@@ -926,8 +926,13 @@
           if (idsFromLabel.has("#commands" + cmd)) {
             try {
               const obj = window["_eval"](`run(\`${args}\`)`, "#commands" + cmd);
-              if (!obj) return;
-              if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
+              if (!obj) {
+                onEditorChange((editorText = ""));
+                return;
+              } else if (typeof obj == "string") {
+                onEditorChange((editorText = obj));
+                return;
+              } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
                   `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...",edit:true|false}`
                 );
@@ -974,22 +979,23 @@
     items.forEach((item, index) => indexFromId.set(item.id, index));
     itemTextChanged(0, text);
 
+    // NOTE: command can do this if indeed useful
     // if command, just clear the arguments, keep the command
     // (useful for repeated commands of the same type)
-    if (editorText.match(/^\/\w+ ?/)) {
-      editorText = editorText.replace(/(^\/\w+ ?).*$/s, "$1");
-    } else {
-      // if not command, but starts with a tag, keep if non-unique label
-      // (useful for adding labeled items, e.g. todo items, without losing context)
-      editorText =
-        !clearLabel &&
-        items[0].label &&
-        !items[0].labelUnique &&
-        items[0].labelText &&
-        editorText.startsWith(items[0].labelText + " ")
-          ? items[0].labelText + " "
-          : "";
-    }
+    // if (editorText.match(/^\/\w+ ?/)) {
+    //   editorText = editorText.replace(/(^\/\w+ ?).*$/s, "$1");
+    // } else {
+    // if not command, but starts with a tag, keep if non-unique label
+    // (useful for adding labeled items, e.g. todo items, without losing context)
+    editorText =
+      !clearLabel &&
+      items[0].label &&
+      !items[0].labelUnique &&
+      items[0].labelText &&
+      editorText.startsWith(items[0].labelText + " ")
+        ? items[0].labelText + " "
+        : "";
+    // }
 
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
@@ -1803,61 +1809,6 @@
     window["_user"] = function () {
       if (!user) return null;
       return _.pick(user, ["email", "displayName", "photoURL", "uid"]);
-    };
-
-    // Set up global helper functions for javascript:... shortcuts
-    window["_replace"] = function (text: string) {
-      onEditorChange((editorText = text));
-    };
-    window["_replace_edit"] = function (text: string) {
-      onEditorChange((editorText = (text + " ").trimStart()));
-      textArea(-1).focus();
-    };
-    window["_toggle"] = function (text: string) {
-      // console.log("_toggle", editorText);
-      // if (editorText.trim() == text.trim()) {
-      //   history.back();
-      //   return;
-      // }
-      if (editorText.trim() == text) text = "";
-      finalizeStateOnEditorChange = true; // finalize state
-      lastEditorChangeTime = 0; // disable debounce even if editor focused
-      onEditorChange((editorText = text));
-    };
-    window["_toggle_edit"] = function (text: string) {
-      window["_toggle"](text);
-      textArea(-1).focus();
-    };
-
-    window["_append"] = function (text: string) {
-      onEditorChange((editorText = (editorText.trim() + " " + text).trimStart()));
-    };
-    window["_append_edit"] = function (text: string) {
-      onEditorChange((editorText = (editorText.trim() + " " + text).trim() + " "));
-      textArea(-1).focus();
-    };
-    window["_enter"] = function (text: string) {
-      onEditorDone(text || editorText);
-    };
-    window["_text"] = function () {
-      return editorText.trim();
-    };
-    window["_encoded_text"] = function () {
-      return encodeURIComponent(editorText.trim());
-    };
-    window["_google"] = function () {
-      let query = editorText.replace(/^\/\s+/s, "").trim();
-      onEditorChange((editorText = ""));
-      window.open("https://google.com/search?q=" + encodeURIComponent(query));
-    };
-    window["_tweet"] = function () {
-      let tweet = editorText.replace(/^\/\s+/s, "").trim();
-      onEditorChange((editorText = ""));
-      if (tweet == "") {
-        onEditorDone("/tweet", null);
-      } else {
-        location.href = "twitter://post?message=" + encodeURIComponent(tweet);
-      }
     };
 
     function indicesForItem(item: string) {

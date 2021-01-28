@@ -333,7 +333,10 @@
         // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
         // (we also exclude /^\s*>/ to break inside blockquotes for now)
         // (also note since we process lines, \s does not match \n)
-        if (!insideBlock && !str.match(/^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
+        if (
+          !insideBlock &&
+          (str.match(/\\$/) || !str.match(/^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
+        )
           str = str + "<br>\n";
         // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
