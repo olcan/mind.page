@@ -26,7 +26,6 @@
 
   function onEditorFocused(focused: boolean) {
     if (!focused) editorBlurTime = Date.now();
-    else blurOnNextCancel = editorText == ""; // blur on next cancel (e.g. escape) if empty
   }
 
   function itemTimeString(delta: number) {
@@ -770,20 +769,18 @@
   let sessionHistory = [];
   let sessionHistoryIndex = 0;
   let tempIdFromSavedId = new Map<string, string>();
-  let blurOnNextCancel = false;
   let editorText = "";
   function onEditorDone(text: string, e: KeyboardEvent = null, cancelled: boolean = false, run: boolean = false) {
     if (cancelled) {
-      // just clear and return, also blur on double-cancel
-      if (blurOnNextCancel && e?.code == "Escape") {
-        setTimeout(() => textArea(-1).blur());
-        blurOnNextCancel = false;
-      } else blurOnNextCancel = true;
-      lastEditorChangeTime = 0; // disable debounce even if editor focused
-      onEditorChange((editorText = ""));
+      if (e?.code == "Escape") {
+        textArea(-1).blur();
+        editorBlurTime = 0; // do not refocus
+      } else {
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = ""));
+      }
       return;
     }
-    blurOnNextCancel = false;
 
     // reset history index, update entry 0 and unshift duplicate entry
     // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
@@ -801,7 +798,7 @@
     switch (text.trim()) {
       case "/_signout": {
         if (!firebase().auth().currentUser) {
-          alert("already signed out")
+          alert("already signed out");
           return;
         }
         signOut();
