@@ -780,10 +780,11 @@
       else sessionHistory[0] = text.trim();
     sessionHistory.unshift(sessionHistory[0]);
 
-    let editing = true; // created item can be editing or not
     let time = Date.now(); // default time is current, can be past if undeleting
     let origText = text.trim();
     let clearLabel = false; // force clear, even if text starts with tag
+    // NOTE: default is to create item in editing mode, unless BOTH Ctrl+Cmd are held
+    let editing = !e.ctrlKey || !e.metaKey;
 
     switch (text.trim()) {
       case "/_signout": {
@@ -1058,7 +1059,7 @@
     let near = Math.min(...editingItems.filter((i) => i > index && i < maxIndexToShow));
     if (near == Infinity) near = Math.max(...[-1, ...editingItems.filter((i) => i < maxIndexToShow)]);
     focusedItem = near;
-    if (near == -1) return; // do not auto-focus on editor
+    // if (near == -1) return; // do not auto-focus on editor
     setTimeout(() => {
       textArea(near).focus();
       // console.debug("focused on item", near);
