@@ -1822,6 +1822,7 @@
       }
       if (item == "auto" || item == "self" || item == "this") item = "";
       if (!item && evalItemId.length > 0) {
+        // NOTE: there is ambiguity when there are multiple items in the stack; we currently resolve by returning the top-most item: could be rendered item with <script> or macro or run item with input block or via command
         // return [indexFromId.get(_.last(evalItemId))];
         return [indexFromId.get(evalItemId[0])]; // return top level caller, e.g. <script> item or run item
       } else if (indexFromId.has(item)) {
@@ -2344,9 +2345,14 @@
             var elem = document.createElement("div");
             if (verb.endsWith("error")) verb = "error";
             elem.classList.add("console-" + verb);
-            let item; // if the source is an item (and the logging is done _synchronously_)
-            if (evalItemId.length > 0) item = items[indexFromId.get(_.last(evalItemId))];
-            let prefix = item ? (item.labelText || item.id) + ": " : "";
+            // NOTE: we indicate full eval stack as prefix
+            let prefix = evalItemId
+              .map((id) => {
+                const item = items[indexFromId.get(id)];
+                return item.labelText || item.id;
+              })
+              .join(">");
+            if (prefix) prefix += ": ";
             let text = "";
             if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
             else text = args.join(" ") + "\n";
