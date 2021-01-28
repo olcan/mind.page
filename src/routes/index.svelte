@@ -1177,7 +1177,7 @@
     items[index] = items[index]; // trigger dom update
   }
 
-  let evalItemId;
+  let evalItemId = [];
   function evalJSInput(text: string, text_nodeps: string, label: string = "", index: number): any {
     let jsin = extractBlock(text, "js_input");
     let jsin_nodeps = extractBlock(text_nodeps, "js_input");
@@ -1209,15 +1209,15 @@
     if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
     const start = Date.now();
     try {
-      evalItemId = item.id;
+      evalItemId.push(item.id);
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
       let out = eval(evaljs);
-      evalItemId = null;
+      evalItemId.pop();
       // automatically _write_log into item
       window["_write_log"](item.id, start);
       return out;
     } catch (e) {
-      evalItemId = null;
+      evalItemId.pop();
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
       if (console["_eval_error"]) console["_eval_error"](msg);
@@ -1639,6 +1639,8 @@
 
   function errorMessage(e) {
     // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
+    // NOTE: we log url for "error" Events that do not have message/reason
+    //       (see https://www.w3schools.com/jsref/event_onerror.asp)
     if (!e.message && (e.type == "error" || (e.reason && e.reason.type == "error"))) {
       if (e.reason) e = e.reason;
       let url = e.target && (e.target["url"] || e.target["src"]) ? e.target["url"] || e.target["src"] : "(unknown url)";
@@ -1812,9 +1814,15 @@
     };
 
     function indicesForItem(item: string) {
+      if (item.startsWith("id:")) {
+        item = item.substring(3);
+        if (indexFromId.has(item)) return [indexFromId.get(item)];
+        else return undefined;
+      }
+      // TODO: "id inference" is ugly and complicated due to possible recursion, e.g. a script calling _eval on another item, which may call _eval on another item, which can happen through a macro.
       if (item == "auto" || item == "self" || item == "this") item = "";
-      if (!item && evalItemId) {
-        return [indexFromId.get(evalItemId)];
+      if (!item && evalItemId.length > 0) {
+        return [indexFromId.get(_.last(evalItemId))];
       } else if (!item && window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
         return [indexFromId.get(window["_script_item_id"])];
       } else if (indexFromId.has(item)) {
@@ -1931,27 +1939,16 @@
         "js_input",
         addLineNumbers(evaljs)
       );
-      // set up evalItemId if possible (not a recursive call from script or js_input)
       index = indicesForItem(item)[0]; // index of specified (eval) item or undefined
-      if (!evalItemId && !window["_script_item_id"] && index != undefined) {
-        evalItemId = items[index].id;
-        let out;
-        try {
-          out = eval(evaljs);
-        } catch (e) {
-          console.error(e);
-          throw e;
-        } finally {
-          evalItemId = null;
-          return out;
-        }
-      } else {
-        try {
-          return eval(evaljs);
-        } catch (e) {
-          console.error(e);
-          throw e;
-        }
+      if (index != undefined) evalItemId.push(items[index].id);
+      try {
+        const out = eval(evaljs);
+        if (index != undefined) evalItemId.pop();
+        return out;
+      } catch (e) {
+        console.error(e);
+        if (index != undefined) evalItemId.pop();
+        throw e;
       }
     };
 
@@ -2001,9 +1998,7 @@
         if (entry.level < level) continue;
         let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
-        // remove item index/label prefix since redundant (assuming writing to item itself)
-        const text = entry.text.replace(/^\[\d+?\]\s*/, "").replace(/^#.+?:\s*/, "");
-        log.push(prefix + text);
+        log.push(prefix + entry.text); // exclude prefix assuming redundant
       }
       log = log.reverse();
       return log.join("\n");
@@ -2166,11 +2161,11 @@
 
     window["_running"] = function (id: string = "", running: boolean = true) {
       if (!id) {
-        if (!evalItemId) {
+        if (evalItemId.length == 0) {
           console.error("_running() invoked from async javascript or macro");
           return;
         }
-        id = evalItemId;
+        id = _.last(evalItemId);
       }
       const index = indexFromId.get(id);
       if (index == undefined) return Promise.resolve(); // ignore missing
@@ -2346,29 +2341,23 @@
             if (verb.endsWith("error")) verb = "error";
             elem.classList.add("console-" + verb);
             let item; // if the source is an item (and the logging is done _synchronously_)
-            if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
+            if (evalItemId.length > 0) {
+              item = items[indexFromId.get(_.last(evalItemId))];
+            } else if (window["_script_item_id"] && indexFromId.has(window["_script_item_id"])) {
               item = items[indexFromId.get(window["_script_item_id"])];
-            } else if (evalItemId) {
-              item = items[indexFromId.get(evalItemId)];
             }
-            if (item) {
-              // prepend item index, label (if any)
-              if (item.label) args.unshift(item.label + ":");
-              args.unshift(`[${item.index + 1}]`);
-            }
-            // log url for "error" Events that do not have message/reason
-            // see https://www.w3schools.com/jsref/event_onerror.asp
-            if (args.length == 1 && errorMessage(args[0])) {
-              elem.textContent = errorMessage(args[0]);
-            } else {
-              elem.textContent = args.join(" ") + "\n";
-            }
+            let prefix = item ? (item.labelText || item.id) + ": " : "";
+            let text = "";
+            if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
+            else text = args.join(" ") + "\n";
+            elem.textContent = prefix + text;
             elem.setAttribute("_time", Date.now().toString());
             elem.setAttribute("_level", levels.indexOf(verb).toString());
             consolediv.appendChild(elem);
             consoleLog.push({
               type: verb,
-              text: elem.textContent.trim(),
+              prefix: prefix,
+              text: text.trim(),
               time: Date.now(),
               level: levels.indexOf(verb),
             });
