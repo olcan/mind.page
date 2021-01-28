@@ -20,13 +20,8 @@
   let editingItems = [];
   let focusedItem = -1;
   let focused = false;
-  let editorBlurTime = 0;
   let anonymous = false;
   let readonly = false;
-
-  function onEditorFocused(focused: boolean) {
-    if (!focused) editorBlurTime = Date.now();
-  }
 
   function itemTimeString(delta: number) {
     if (delta < 60) return "<1m";
@@ -156,9 +151,6 @@
           textarea.selectionEnd = selectionEnd;
         }); // allow dom update before refocus
       }
-    } else if (Date.now() - editorBlurTime < 250) {
-      // refocus on editor if it was unfocused within last .25 seconds
-      textArea(-1).focus();
     }
     // scroll up to top moved item if necessary
     if (topMovedIndex < items.length) {
@@ -541,7 +533,6 @@
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log) {
       items[index].time = Date.now();
-      editorBlurTime = 0; // prevent re-focus on editor
       onEditorChange(editorText); // item time has changed
     }
   }
@@ -774,7 +765,6 @@
     if (cancelled) {
       if (e?.code == "Escape") {
         textArea(-1).blur();
-        editorBlurTime = 0; // do not refocus
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange((editorText = ""));
@@ -1068,6 +1058,7 @@
     let near = Math.min(...editingItems.filter((i) => i > index && i < maxIndexToShow));
     if (near == Infinity) near = Math.max(...[-1, ...editingItems.filter((i) => i < maxIndexToShow)]);
     focusedItem = near;
+    if (near == -1) return; // do not auto-focus on editor
     setTimeout(() => {
       textArea(near).focus();
       // console.debug("focused on item", near);
@@ -1463,7 +1454,6 @@
     appendJSOutput(index);
     item.time = Date.now();
     if (!item.editing) saveItem(item.id);
-    editorBlurTime = 0; // prevent re-focus on editor
     lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText); // item time/text has changed
   }
@@ -1477,7 +1467,6 @@
     else if (items[index].time < newestTime) {
       items[index].time = Date.now();
       saveItem(items[index].id);
-      editorBlurTime = 0; // prevent re-focus on editor
       lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
       onEditorChange(editorText); // item time has changed
       // onEditorChange((editorText = "")); // item time has changed, and editor cleared
@@ -1509,7 +1498,7 @@
   }
 
   function textArea(index: number): HTMLTextAreaElement {
-    return document.getElementById("textarea-" + (index < 0 ? "editor" : items[index].id)) as HTMLTextAreaElement;
+    return document.getElementById("textarea-" + (index < 0 ? "mindbox" : items[index].id)) as HTMLTextAreaElement;
   }
 
   function onPrevItem(inc = -1) {
@@ -1596,7 +1585,7 @@
       (document.querySelector("span.dots") as HTMLElement).style.visibility = "visible";
       (document.querySelector("span.dots") as HTMLElement).style.opacity = "0.5";
       // attempt focus on editor (may not work on iOS)
-      // document.getElementById("textarea-editor").focus();
+      // document.getElementById("textarea-mindbox").focus();
     } else if (window.scrollY >= -25) {
       scrollToggleLocked = false;
       if (window.scrollY >= 0) {
@@ -1850,28 +1839,6 @@
     };
     window["_encoded_text"] = function () {
       return encodeURIComponent(editorText.trim());
-    };
-    window["_append_clipboard"] = function () {
-      navigator.clipboard.readText().then(window["_append"]).catch(alert);
-    };
-    window["_append_clipboard_link"] = function (
-      prefix: string,
-      title: string,
-      suffix: string,
-      enter: boolean = false
-    ) {
-      navigator.clipboard
-        .readText()
-        .then((urlstr) => {
-          try {
-            let url = new URL(urlstr);
-            window["_append_edit"](`${prefix}[${title || url.host}](${urlstr})${suffix}`);
-            if (enter) window["_enter"]();
-          } catch (_) {
-            alert("clipboard content is not a URL");
-          }
-        })
-        .catch(alert);
     };
     window["_google"] = function () {
       let query = editorText.replace(/^\/\s+/s, "").trim();
@@ -2537,11 +2504,11 @@
           <div id="header-container" class:focused>
             <div id="editor">
               <Editor
+                id="mindbox"
                 bind:text={editorText}
                 bind:focused
                 cancelOnDelete={true}
                 allowCommandCtrlBracket={true}
-                onFocused={onEditorFocused}
                 onEdited={onEditorChange}
                 onDone={onEditorDone}
                 onPrev={onPrevItem}
@@ -2657,7 +2624,7 @@
       // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
       //       programmatic focus except in click handlers, when returning to app, etc
       if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone"))
-        document.getElementById("textarea-editor").focus();
+        document.getElementById("textarea-mindbox").focus();
     });
   </script>{/if}
 
