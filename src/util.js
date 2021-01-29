@@ -16,15 +16,6 @@ export function numberWithCommas(x) {
   return parts.join(".");
 }
 
-// Promise.delay from https://stackoverflow.com/a/39538518
-export function delay(t, v) {
-  return new Promise((resolve) => setTimeout(resolve.bind(null, v), t));
-}
-if (typeof window != "undefined") window.delay = delay;
-Promise.prototype.delay = function (t) {
-  return this.then((v) => delay(t, v));
-};
-
 export function extractBlock(text, type) {
   // NOTE: this logic is consistent with onInput() in Editor.svelte
   let insideBlock = false;

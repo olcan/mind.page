@@ -212,7 +212,7 @@
           return `<span class="${spanclass}"> ${
             dep.startsWith("#")
               ? dep
-              : `<mark onclick="_toggle('${dep}');handleLinkClick('${id}','javascript:_toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
+              : `<mark onclick="MindBox.toggle('${dep}');handleLinkClick('${id}','javascript:MindBox.toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
           } </span>`;
         })
         .join(" ");

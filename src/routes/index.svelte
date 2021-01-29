@@ -587,7 +587,8 @@
     let item = items[index];
     if (deps.includes(item.id)) return deps;
     // NOTE: dependency order matters for hashing and potentially for code import
-    deps = [item.id, ...deps]; // prepend temporarily to avoid cycles, moved to back below
+    deps = [item.id].concat(deps); // prepend temporarily to avoid cycles, moved to back below
+    const root = deps.length == 1;
     item.tagsHiddenAlt.forEach((tag) => {
       // NOTE: we allow special tags as dependents if corresponding uniquely named items exist
       // if (isSpecialTag(tag)) return;
@@ -600,16 +601,15 @@
         deps = itemDeps(dep, deps);
       });
     });
-    return deps.slice(1).concat(item.id);
+    return root ? deps.slice(1) : deps.slice(1).concat(item.id);
   }
 
   function itemDepsString(item) {
     return item.deps
-      .filter((id) => id != item.id)
       .map((id) => {
         const dep = items[indexFromId.get(id)];
         const async = dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
-        return (dep.labelUnique ? dep.labelText : "id:" + dep.id) + (async ? "(async)" : "");
+        return dep.name + (async ? "(async)" : "");
       })
       .join(" ");
   }
@@ -618,10 +618,8 @@
     return item.dependents
       .map((id) => {
         const dep = items[indexFromId.get(id)];
-        return (
-          (dep.labelUnique ? dep.labelText : "id:" + dep.id) +
-          (item.labelUnique && dep.tagsVisible.includes(item.label) ? "(visible)" : "")
-        );
+        const visible = item.labelUnique && dep.tagsVisible.includes(item.label);
+        return dep.name + (visible ? "(visible)" : "");
       })
       .join(" ");
   }
@@ -662,6 +660,8 @@
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0] : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
+    // name is always unique and either unique label or id:<id>
+    item.name = item.labelUnique ? item.labelText : "id:" + item.id;
     if (item.label) {
       // convert relative tags to absolute
       const resolveTag = (tag) => (tag.startsWith("#/") ? item.label + tag.substring(1) : tag);
@@ -711,7 +711,12 @@
       // console.debug("updated dependencies:", item.deps);
 
       const prevDeepHash = item.deephash;
-      item.deephash = hashCode(item.deps.map((id) => items[indexFromId.get(id)].hash).join(","));
+      item.deephash = hashCode(
+        item.deps
+          .map((id) => items[indexFromId.get(id)].hash)
+          .concat(item.hash)
+          .join(",")
+      );
       if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
       // we have to update deps/deephash for all dependent items
       // NOTE: changes to deephash trigger re-rendering and cache invalidation
@@ -721,8 +726,12 @@
         items.forEach((depitem, depindex) => {
           if (depindex == index) return; // skip self
           depitem.deps = itemDeps(depindex);
-          const prevDeepHash = depitem.deephash;
-          depitem.deephash = hashCode(depitem.deps.map((id) => items[indexFromId.get(id)].hash).join(","));
+          depitem.deephash = hashCode(
+            depitem.deps
+              .map((id) => items[indexFromId.get(id)].hash)
+              .concat(item.hash)
+              .join(",")
+          );
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
         });
         // console.debug("updated dependents:", item.dependents);
@@ -731,7 +740,6 @@
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
       _.uniq(item.deps.concat(prevDeps)).forEach((id) => {
-        if (id == item.id) return;
         const dep = items[indexFromId.get(id)];
         if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id)) dep.dependents.push(item.id);
         else if (!item.deps.includes(dep.id) && dep.dependents.includes(item.id))
@@ -1177,7 +1185,7 @@
     items[index] = items[index]; // trigger dom update
   }
 
-  let evalItemId = [];
+  let evalStack = [];
   function evalJSInput(text: string, text_nodeps: string, label: string = "", index: number): any {
     let jsin = extractBlock(text, "js_input");
     let jsin_nodeps = extractBlock(text_nodeps, "js_input");
@@ -1197,32 +1205,29 @@
         return undefined;
       }
       evaljs = [
-        "(async function(done) {",
-        `await _running('${item.id}')`,
+        "const done = (output) => { _write(__id, output); _done(__id) }",
+        "_running(__id)",
+        "_do(__id, async () => {",
         jsin,
-        "})(function(output) {",
-        `  if (output) _write('${item.id}', output)`,
-        `  _done('${item.id}')`,
-        "})",
+        "}) // _do",
       ].join("\n");
     }
     if (!item.debug) evaljs = `const __id='${item.id}';\n` + evaljs;
     if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
     const start = Date.now();
     try {
-      evalItemId.push(item.id);
+      evalStack.push(item.id);
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
-      let out = eval(evaljs);
-      evalItemId.pop();
+      let out = eval.call(window, evaljs);
+      evalStack.pop();
       // automatically _write_log into item
       window["_write_log"](item.id, start);
       return out;
     } catch (e) {
-      evalItemId.pop();
+      evalStack.pop();
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
-      if (console["_eval_error"]) console["_eval_error"](msg);
-      else alert(msg);
+      console.error(msg);
       // automatically _write_log into item
       window["_write_log"](item.id, start);
       return undefined;
@@ -1262,8 +1267,7 @@
       if (jsout instanceof Promise) jsout = undefined;
       const outputConfirmLength = 16 * 1024;
       if (jsout && jsout.length >= outputConfirmLength) {
-        if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.label || `item ${item.index + 1}`}?`))
-          jsout = undefined;
+        if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined;
       }
       if (jsout) item.text = appendBlock(item.text, "_output", jsout);
       // NOTE: index can change during JS eval due to _writes
@@ -1670,6 +1674,15 @@
   const consoleLogMaxSize = 10000;
   const statusLogExpiration = 15000;
 
+  let itemInitTime = 0;
+  function initItems() {
+    if (itemInitTime) return; // already initialized items
+    itemInitTime = Date.now();
+    items.forEach((item) => {
+      if (item.init) window["_eval"]("_init()", item.id, { include_deps: false });
+    })
+  }
+
   let initTime = 0;
   function initialize() {
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
@@ -1702,23 +1715,25 @@
       item.outerHeight = 0;
       // dependents (filled below)
       item.dependents = [];
-      item.dependentsString = "";
+      item.dependentsString = "";      
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
       // initialize deps, deephash, missing tags/labels
       item.deps = itemDeps(index);
-      item.deephash = hashCode(item.deps.map((id) => items[indexFromId.get(id)].hash).join());
-      item.deps.forEach((id) => {
-        if (id != item.id) items[indexFromId.get(id)].dependents.push(item.id);
-      });
+      item.deephash = hashCode(
+        item.deps
+          .map((id) => items[indexFromId.get(id)].hash)
+          .concat(item.hash)
+          .join()
+      );
+      item.deps.forEach((id) => items[indexFromId.get(id)].dependents.push(item.id));
     });
     items.forEach((item) => {
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
-      // dispatch evaluation of _init() on #_init items, excluding dependencies
-      if (item.init) setTimeout(() => window["_eval"]("_init()", item.id, { include_deps: false }));
     });
+    setTimeout(initItems) // need to dispatch as it needs window._eval
 
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
@@ -1744,6 +1759,11 @@
   }
 
   if (isClient) {
+    // redirect console.error to save errors until #console is set up in onMount
+    let errors = [];
+    console["_error"] = console.error;
+    console.error = (...args) => errors.push(args);
+
     // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
     if (error) console.warn(error); // log server-side error
 
@@ -1809,10 +1829,130 @@
         });
     }
 
-    window["_user"] = function () {
-      if (!user) return null;
-      return _.pick(user, ["email", "displayName", "photoURL", "uid"]);
+    // _do calls given function, updating stack before/after
+    // NOTE: _do returns a Promise can be invoked from BOTH sync and async functions
+    async function _do(id, func) {
+      try {
+        evalStack.push(id);
+        await func();
+      } finally {
+        evalStack.pop();
+      }
+    }
+
+    // _resume wraps a function for async evaluation, managing stack and cancelling if deleted
+    function _resume(id, func) {
+      return function (...args) {
+        if (!indexFromId.has(id)) {
+          console.error(`_resume item ${id} deleted`);
+          return;
+        } // item deleted
+        _do(id, () => func(...args));
+      };
+    }
+
+    // _dispatch wraps setTimeout to manage stack and cancel if item is deleted
+    function _dispatch(func, ...args) {
+      const id = _.last(evalStack);
+      if (!id) {
+        console.error("_dispatch failed to determine item");
+        return;
+      }
+      setTimeout(_resume(id, func), ...args);
+    }
+
+    // _promise wraps executor function to manage stack and reject if item is deleted
+    function _promise(exec) {
+      const id = _.last(evalStack);
+      if (!id) {
+        console.error("_promise failed to determine item");
+        return;
+      }
+      return new Promise((resolve, reject) => {
+        if (!indexFromId.has(id)) {
+          reject(new Error(`_promise item ${id} deleted`));
+          return;
+        }
+        _do(id, () => exec(resolve, reject));
+      });
+    }
+
+    // Promise._delay from https://stackoverflow.com/a/39538518
+    function _delay(t, v) {
+      return _promise((resolve) => setTimeout(resolve.bind(null, v), t));
+    }
+    Promise.prototype["_delay"] = function (t) {
+      return this.then((v) => _delay(t, v));
     };
+
+    function _item(name: string) {
+      if (!name) return null;
+      let item;
+      if (name.startsWith("#")) {
+        // item is specified by unique label (i.e. name)
+        const ids = idsFromLabel.get(name);
+        if (!ids || ids.length == 0) {
+          console.error(`_item '${name}' not found`);
+          return null;
+        } else if (ids.length > 1) {
+          console.error(`_item '${name}' is ambiguous (${ids.length} items)`);
+          return null;
+        }
+        item = items[indexFromId.get(ids[0])];
+      } else {
+        // item is specified by id
+        const index = indexFromId.get(name);
+        if (index == undefined) {
+          console.error(`_item '${name}' not found`);
+          return null;
+        }
+        item = items[index];
+      }
+      const _item = {
+        name: item.name,
+        id: item.id,
+        label: item.labelText,
+        tags: item.tags,
+        tags_raw: item.tagsRaw,
+        tags_visible: item.tagsVisible,
+        tags_hidden: item.tagsHidden,
+        dependencies: item.deps,
+        dependents: item.dependents,
+        length: item.text.length,
+        hash: item.hash,
+        deephash: item.deephash,
+      };
+      // bind _item methods (see below)
+      _item["read"] = _read.bind(_item);
+      return _item;
+    }
+
+    function _items(label: string) {
+      return (idsFromLabel.get(label) || []).map(_item);
+    }
+
+    // define window properties and functions
+    Object.defineProperty(window, "_user", {
+      get: () => (user ? _.pick(user, ["email", "displayName", "photoURL", "uid"]) : null),
+    });
+    Object.defineProperty(window, "_stack", { get: () => evalStack });
+    Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
+    Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
+    window["_do"] = _do;
+    window["_resume"] = _resume;
+    window["_dispatch"] = _dispatch;
+    window["_promise"] = _promise;
+    window["_delay"] = _delay;
+    window["_item"] = _item;
+    window["_items"] = _items;
+
+    // define _item methods ...
+    function _read() {
+      return this.name;
+    }
+
+    // TODO: implement "_item/_items" and deprecate all functions that take in "item"
+    //       (only exception is _read_log, but we need to change that)
 
     function indicesForItem(item: string) {
       if (item.startsWith("id:")) {
@@ -1821,10 +1961,10 @@
         else return undefined;
       }
       if (item == "auto" || item == "self" || item == "this") item = "";
-      if (!item && evalItemId.length > 0) {
+      if (!item && evalStack.length > 0) {
         // NOTE: there is ambiguity when there are multiple items in the stack; we currently resolve by returning the top-most item: could be rendered item with <script> or macro or run item with input block or via command
-        // return [indexFromId.get(_.last(evalItemId))];
-        return [indexFromId.get(evalItemId[0])]; // return top level caller, e.g. <script> item or run item
+        // return [indexFromId.get(_.last(evalStack))];
+        return [indexFromId.get(evalStack[0])]; // return top level caller, e.g. <script> item or run item
       } else if (indexFromId.has(item)) {
         return [indexFromId.get(item)];
       } else {
@@ -1887,23 +2027,22 @@
       let indices = indicesForItem(item);
       indices.map((index) => {
         let item = items[index];
-        if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.label || "id:" + item.id} */`);
-        else if (type == "html") content.push(`<!-- ${type} @ ${item.label || "id:" + item.id} -->`);
+        // indicate item name in comments
+        if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
+        else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
         // NOTE: by convention, dependencies are included _before_ item itself
         if (options["include_deps"]) {
           options["include_deps"] = false; // deps are recursive already
-          item.deps
-            .filter((id) => id != item.id)
-            .forEach((id) => {
-              const index = indexFromId.get(id);
-              if (index == undefined) return;
-              if (
-                options["exclude_async_deps"] &&
-                (items[index].async || items[index].deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-              )
-                return; // exclude async dependency chain
-              content.push(window["_read"](options["dep_type"] || type, id, options));
-            });
+          item.deps.forEach((id) => {
+            const index = indexFromId.get(id);
+            if (index == undefined) return;
+            if (
+              options["exclude_async_deps"] &&
+              (items[index].async || items[index].deps.map((id) => items[indexFromId.get(id)].async).includes(true))
+            )
+              return; // exclude async dependency chain
+            content.push(window["_read"](options["dep_type"] || type, id, options));
+          });
         }
         let text = type ? extractBlock(item.text, type) : item.text;
         // console.debug("_read", item.label, item.text, text);
@@ -1927,6 +2066,7 @@
     };
 
     window["_eval"] = function (code: string = "", item: string = "", options: object = {}) {
+      initItems(); // initialize items if not already done, e.g. because of macros at initial render
       let prefix = window["_read_deep"](
         "js",
         item,
@@ -1945,19 +2085,20 @@
         "js_input",
         addLineNumbers(evaljs)
       );
-      if (index != undefined) evalItemId.push(items[index].id);
+      if (index != undefined) evalStack.push(items[index].id);
       try {
-        const out = eval(evaljs);
-        if (index != undefined) evalItemId.pop();
+        const out = eval.call(window, evaljs);
+        if (index != undefined) evalStack.pop();
         return out;
       } catch (e) {
         console.error(e);
-        if (index != undefined) evalItemId.pop();
+        if (index != undefined) evalStack.pop();
         throw e;
       }
     };
 
     window["_write"] = function (item: string, text: string, type: string = "_output") {
+      if (text == undefined) return; // skip silently for undefined input
       let ids = indicesForItem(item).map((index) => items[index].id);
       if (ids.length == 0) {
         console.error(`could not determine item(s) for _write to '${item}'`);
@@ -1970,7 +2111,7 @@
         // confirm if write is too big
         const writeConfirmLength = 16 * 1024;
         if (text && text.length >= writeConfirmLength) {
-          if (!confirm(`Write ${text.length} bytes (${type}) into ${item.label || `item ${item.index + 1}`}?`)) return; // cancel write
+          if (!confirm(`Write ${text.length} bytes (${type}) into ${item.name}?`)) return; // cancel write
         }
         // if writing *_log, clear any existing *_log blocks
         // (and skip write if block is empty)
@@ -2003,7 +2144,7 @@
         if (entry.level < level) continue;
         let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
-        log.push(prefix + entry.text); // exclude prefix assuming redundant
+        log.push(prefix + entry.text); // exclude stack assuming redundant
       }
       log = log.reverse();
       return log.join("\n");
@@ -2166,17 +2307,17 @@
 
     window["_running"] = function (id: string = "", running: boolean = true) {
       if (!id) {
-        if (evalItemId.length == 0) {
+        if (evalStack.length == 0) {
           console.error("_running() invoked from async javascript or macro");
           return;
         }
-        id = _.last(evalItemId);
+        id = _.last(evalStack);
       }
       const index = indexFromId.get(id);
       if (index == undefined) return Promise.resolve(); // ignore missing
       if (items[index].running == running) return Promise.resolve(); // no change
       itemUpdateRunning(id, running);
-      return new Promise<void>((resolve) => {
+      return _promise((resolve) => {
         const index = indexFromId.get(id);
         if (index == undefined) return;
         // NOTE: tick() did not work to ensure the spinner is visible for cpu-intensive javascript. even polling for loading indicator did not work reliably, so we are forced to leave it to calling code to introduce a delay() as needed before expensive compute
@@ -2190,7 +2331,7 @@
       if (!items[index].running) return Promise.resolve(); // ignore not running
       if (items[index].donePending) return Promise.resolve(); // duplicate _done
       items[index].donePending = true;
-      return new Promise<void>((resolve) => {
+      return _promise((resolve) => {
         window["_running"](id, false).then(() => {
           const index = indexFromId.get(id);
           if (index == undefined) return;
@@ -2333,10 +2474,9 @@
 
     onMount(() => {
       // copy console into #console (if it exists)
+      console.error = console["_error"]; // restore console.error for redirect
       // NOTE: some errors do not go through console.error but are reported via window.onerror
-      console["_window_error"] = () => {}; // no-op, used to redirect window.onerror
-      console["_eval_error"] = () => {}; // no-op, used to redirect error during evalJSInput()
-      const levels = ["debug", "info", "log", "warn", "error", "_window_error", "_eval_error"];
+      const levels = ["debug", "info", "log", "warn", "error"];
       levels.forEach(function (verb) {
         console[verb] = (function (method, verb, div) {
           return function (...args) {
@@ -2346,13 +2486,8 @@
             if (verb.endsWith("error")) verb = "error";
             elem.classList.add("console-" + verb);
             // NOTE: we indicate full eval stack as prefix
-            let prefix = evalItemId
-              .map((id) => {
-                const item = items[indexFromId.get(id)];
-                return item.labelText || item.id;
-              })
-              .join(">");
-            if (prefix) prefix += ": ";
+            let prefix = evalStack.map((id) => items[indexFromId.get(id)].name).join(" ");
+            if (prefix) prefix = "[" + prefix + "] ";
             let text = "";
             if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
             else text = args.join(" ") + "\n";
@@ -2362,7 +2497,7 @@
             consolediv.appendChild(elem);
             consoleLog.push({
               type: verb,
-              prefix: prefix,
+              stack: evalStack,
               text: text.trim(),
               time: Date.now(),
               level: levels.indexOf(verb),
@@ -2391,6 +2526,9 @@
           };
         })(console[verb].bind(console), verb);
       });
+      // replay any errors during init
+      errors.forEach((args) => console.error(...args));
+
       if (anonymous) console.log("user is anonymous");
       if (initTime) console.debug(`${items.length} items initialized at ${initTime}ms`);
 
@@ -2436,12 +2574,11 @@
     }
   }
 
-  // redirect error to alert or console._window_error if it exists
+  // redirect window.onerror to console.error (or alert if #console not set up yet)
   function onError(e) {
     if (!consolediv) return; // can happen during login process
     let msg = errorMessage(e);
-    if (console["_window_error"]) console["_window_error"](msg);
-    else alert(msg);
+    console.error(msg);
   }
 </script>
 
