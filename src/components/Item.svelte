@@ -179,6 +179,7 @@
 
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
+    let hasMacroErrors = false;
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
       try {
         js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
@@ -190,6 +191,7 @@
         // console.debug("macro output: ", out);
         return pfx + out;
       } catch (e) {
+        hasMacroErrors = true;
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
         return pfx + "undefined";
       }
@@ -589,6 +591,8 @@
       text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
 
+    // do not cache with macro errors
+    if (hasMacroErrors) return text;
     return (window["_html_cache"][cache_key] = text);
   }
 
