@@ -660,8 +660,6 @@
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0] : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
-    // name is always unique and either unique label or id:<id>
-    item.name = item.labelUnique ? item.labelText : "id:" + item.id;
     if (item.label) {
       // convert relative tags to absolute
       const resolveTag = (tag) => (tag.startsWith("#/") ? item.label + tag.substring(1) : tag);
@@ -691,6 +689,8 @@
       while ((pos = label.lastIndexOf("/")) >= 0) item.labelPrefixes.push((label = label.slice(0, pos)));
     }
     item.log = item.label == "#log";
+    // name is always unique and either unique label or id:<id>
+    item.name = item.labelUnique ? item.labelText : "id:" + item.id;
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
@@ -1680,7 +1680,7 @@
     itemInitTime = Date.now();
     items.forEach((item) => {
       if (item.init) window["_eval"]("_init()", item.id, { include_deps: false });
-    })
+    });
   }
 
   let initTime = 0;
@@ -1715,7 +1715,7 @@
       item.outerHeight = 0;
       // dependents (filled below)
       item.dependents = [];
-      item.dependentsString = "";      
+      item.dependentsString = "";
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
@@ -1733,7 +1733,7 @@
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
     });
-    setTimeout(initItems) // need to dispatch as it needs window._eval
+    setTimeout(initItems); // need to dispatch as it needs window._eval
 
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
@@ -1928,7 +1928,7 @@
     }
 
     function _items(label: string) {
-      return (idsFromLabel.get(label) || []).map(_item);
+      return (idsFromLabel.get(label.toLowerCase()) || []).map(_item);
     }
 
     // define window properties and functions
@@ -1970,7 +1970,7 @@
       } else {
         // NOTE: for multiple items, ordering is by label, empty labels come first, and ordering is arbitrary within labels
         return _.sortBy(
-          (idsFromLabel.get(item) || []).map((id) => indexFromId.get(id)),
+          (idsFromLabel.get(item.toLowerCase()) || []).map((id) => indexFromId.get(id)),
           (index) => items[index].label
         );
       }
