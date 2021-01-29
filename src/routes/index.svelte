@@ -718,24 +718,28 @@
           .join(",")
       );
       if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
-      // we have to update deps/deephash for all dependent items
-      // NOTE: changes to deephash trigger re-rendering and cache invalidation
-      // NOTE: we only need to update dependencies on first update_deps or if item label has changed
-      if (!item.dependents || prevLabel != item.label) {
+
+      // update deps and deephash as needed for all dependent items
+      // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
+      if (!item.dependents || item.label != prevLabel || item.deephash != prevDeepHash) {
         item.dependents = [];
         items.forEach((depitem, depindex) => {
           if (depindex == index) return; // skip self
-          depitem.deps = itemDeps(depindex);
-          depitem.deephash = hashCode(
-            depitem.deps
-              .map((id) => items[indexFromId.get(id)].hash)
-              .concat(item.hash)
-              .join(",")
-          );
+          // NOTE: we only need to update dependencies on first update_deps or if item label has changed
+          if (item.label != prevLabel) depitem.deps = itemDeps(depindex);
+          // NOTE: changes to deephash trigger re-rendering and cache invalidation
+          if (item.deephash != prevDeepHash)
+            depitem.deephash = hashCode(
+              depitem.deps
+                .map((id) => items[indexFromId.get(id)].hash)
+                .concat(item.hash)
+                .join(",")
+            );
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
         });
         // console.debug("updated dependents:", item.dependents);
       }
+
       // update deps/dependents strings
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
@@ -2074,7 +2078,7 @@
       );
       let caller = indicesForItem("")[0]; // index of invoking item (_id()) or undefined
       let indices = indicesForItem(item); // index of specified (eval) item
-      if (indices.length > 1) console.warn("multiple items for _eval");
+      if (indices.length > 1) console.warn(`multiple items for _eval on '${item}'`);
       let index = indices[0];
 
       let evaljs = prefix + "\n" + code;

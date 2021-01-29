@@ -177,6 +177,30 @@
     }
     // console.debug("toHTML");
 
+    // evaluate inline <<macros>> first to ensure treatment just like non-macro content
+    let cacheIndex = 0; // counter to distinguish positions of identical cached elements
+    text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
+      try {
+        js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
+        js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
+        js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
+        js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
+        let out = window["_eval"](js, id);
+        // console.debug("macro output: ", out);
+        // plug in $id/etc just like _html blocks
+        out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
+        out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
+        out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
+        out = out.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
+        return pfx + out;
+      } catch (e) {
+        console.error(`macro error in item ${label || "id:" + id}: ${e}`);
+        return pfx + "undefined";
+      }
+    });
+
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : "";
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
     matchingTermsSecondary = new Set<string>(matchingTermsSecondary.split(" ").filter((t) => t));
@@ -300,11 +324,8 @@
       .sort((a, b) => b.length - a.length);
     let mathTermRegex = new RegExp(`\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`, "i");
 
-    // NOTE: modifications should only happen outside of code blocks
-
     let insideBlock = false;
     let lastLine = "";
-    let cacheIndex = 0;
     let wrapMath = (m) =>
       `<span class="${
         m.startsWith("$$") || !m.startsWith("$") ? "math-display" : "math"
@@ -338,14 +359,15 @@
           (str.match(/\\$/) || !str.match(/^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
         )
           str = str + "<br>\n";
-        // NOTE: sometimes we don't want <br> but we still need an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+
+        // NOTE: html tag lines require an extra \n for markdown parser
+        if (!insideBlock && str.match(/^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
         const depline = str.startsWith('<div class="deps-and-dependents">');
-        if (!insideBlock && (depline || !str.match(/^\s*```|^    \s*[^\-\*]|^\s*</))) {
+        if (!insideBlock && (depline || !str.match(/^\s*```|^    \s*[^\-\*]/))) {
           // wrap math inside span.math (unless text matches search terms)
           if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has("$")))
             str = str.replace(/(^|[^\\])(\$?\$`.+?`\$\$?)/g, (m, pfx, math) =>
@@ -449,29 +471,6 @@
     // (#$id could also be used inside _html blocks but will break css highlighting)
     text = text.replace(/(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs, `$1$2#item-${id}$3`);
 
-    // evaluate inline <<macros>>
-    text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
-      try {
-        js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
-        js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
-        js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
-        js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        let out = pfx + window["_eval"](js, id);
-        // console.debug("macro output: ", out);
-        // plug in $id/etc just like _html blocks
-        out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
-        out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
-        out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
-        out = out.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        return out;
-      } catch (e) {
-        console.error(`macro error in item ${label || "id:" + id}: ${e}`);
-        return pfx + "undefined";
-      }
-    });
-
     // convert markdown to html
     let renderer = new marked.Renderer();
     renderer.link = (href, title, text) => {
@@ -520,7 +519,7 @@
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
 
     // process images to transform src and add _cache_key attribute
-    text = text.replace(/<img .*?src\s*=\s*"(.+?)".*?>/gi, function (m, src) {
+    text = text.replace(/<img .*?src\s*=\s*"(.*?)".*?>/gi, function (m, src) {
       if (m.match(/_cache_key/i)) {
         console.warn("img with self-assigned _cache_key in item at index", index + 1);
         return m;
@@ -534,7 +533,7 @@
     });
 
     // process divs with item-unique id to add _cache_key="<id>-$deephash-$pos" automatically
-    text = text.replace(/<div .*?id\s*=\s*"(.+?)".*?>/gi, function (m, divid) {
+    text = text.replace(/<div .*?id\s*=\s*"(.*?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
         console.warn("div with self-assigned _cache_key in item at index", index + 1);
         return m;
@@ -550,7 +549,7 @@
     });
 
     // add onclick handler to html links
-    text = text.replace(/<a .*?href\s*=\s*"(.+?)".*?>/gi, function (m, href) {
+    text = text.replace(/<a .*?href\s*=\s*"(.*?)".*?>/gi, function (m, href) {
       if (m.match(/onclick/i)) return m; // link has custom onclick handler
       const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
       return m.substring(0, m.length - 1) + ` onclick="handleLinkClick('${id}','${href_escaped}',event)">`;
