@@ -3,6 +3,7 @@
   export let text = "";
   export let focused = false;
   export let cancelOnDelete = false;
+  export let clearOnShiftBackspace = false;
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
@@ -181,7 +182,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^-*+]/)) html += line + "\n";
+        if (line.match(/^    \s*[^-*+]/)) html += escapeHTML(line) + "\n";
         else html += highlightOther(highlightTags(escapeHTML(line))) + "\n";
       }
     });
@@ -388,15 +389,17 @@
       return;
     }
 
-    // NOTE: this was too easy to trigger accidentally on mobile
-    // // clear item (from current position to start) with shift-backspace
-    // if (e.code == "Backspace" && e.shiftKey) {
-    //   textarea.selectionStart = 0;
-    //   document.execCommand("forwardDelete");
-    //   e.preventDefault();
-    //   onInput();
-    //   return;
-    // }
+    // NOTE: this was too easy to trigger accidentally on mobile, so we limit it to search box
+    // clear item (from current position to start) with shift-backspace
+    if (e.code == "Backspace" && e.shiftKey) {
+      e.preventDefault();
+      if (clearOnShiftBackspace) {
+        textarea.selectionStart = 0;
+        document.execCommand("forwardDelete");
+        onInput();
+      }
+      return;
+    }
 
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down

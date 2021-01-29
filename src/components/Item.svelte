@@ -188,12 +188,6 @@
         js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         let out = window["_eval"](js, id);
         // console.debug("macro output: ", out);
-        // plug in $id/etc just like _html blocks
-        out = out.replace(/(^|[^\\])\$id/g, "$1" + id);
-        out = out.replace(/(^|[^\\])\$hash/g, "$1" + hash);
-        out = out.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        out = out.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
-        out = out.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         return pfx + out;
       } catch (e) {
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
@@ -361,7 +355,7 @@
           str = str + "<br>\n";
 
         // NOTE: html tag lines require an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*</)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";

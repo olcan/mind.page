@@ -2598,6 +2598,7 @@
                 bind:text={editorText}
                 bind:focused
                 cancelOnDelete={true}
+                clearOnShiftBackspace={true}
                 allowCommandCtrlBracket={true}
                 onEdited={onEditorChange}
                 onDone={onEditorDone}
