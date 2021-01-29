@@ -1889,12 +1889,12 @@
       return this.then((v) => _delay(t, v));
     };
 
-    function _item(name: string) {
+    function _item(name: string): any {
       if (!name) return null;
       let item;
       if (name.startsWith("#")) {
         // item is specified by unique label (i.e. name)
-        const ids = idsFromLabel.get(name);
+        const ids = idsFromLabel.get(name.toLowerCase());
         if (!ids || ids.length == 0) {
           console.error(`_item '${name}' not found`);
           return null;
@@ -1925,9 +1925,12 @@
         length: item.text.length,
         hash: item.hash,
         deephash: item.deephash,
+        position: item.index + 1,
       };
       // bind _item methods (see below)
-      _item["read"] = _read.bind(_item);
+      _item["read"] = read.bind(item);
+      _item["read_deep"] = read_deep.bind(item);
+      _item["read_input"] = read_input.bind(item);
       return _item;
     }
 
@@ -1950,9 +1953,43 @@
     window["_item"] = _item;
     window["_items"] = _items;
 
-    // define _item methods ...
-    function _read() {
-      return this.name;
+    function /*_item(…).*/ read(type: string = "", options: object = {}) {
+      const item = this;
+      let content = [];
+      // include dependencies in order, _before_ item itself
+      if (options["include_deps"]) {
+        options["include_deps"] = false; // deps are recursive already
+        item.deps.forEach((id) => {
+          const dep = items[indexFromId.get(id)];
+          if (
+            options["exclude_async_deps"] &&
+            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
+          )
+            return; // exclude async dependency chain
+          content.push(read.call(dep, options["dep_type"] || type, options));
+        });
+      }
+      // indicate item name in comments for certain types of reads
+      if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
+      else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
+      let text = type ? extractBlock(item.text, type) : item.text;
+      if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
+      content.push(text);
+      console.debug(content);
+      return content.filter((s) => s).join("\n");
+    }
+
+    // "deep read" function with include_deps=true as default
+    function /*_item(…).*/ read_deep(type: string, options: object = {}) {
+      return read.call(this, type, Object.assign({ include_deps: true }, options));
+    }
+
+    // read function intended for reading *_input blocks with code prefix
+    function /*_item(…).*/ read_input(type: string, options: object = {}) {
+      return [
+        read_deep.call(this, type, Object.assign({ replace_ids: true }, options)),
+        read.call(this, type + "_input", options),
+      ].join("\n");
     }
 
     // TODO: implement "_item/_items" and deprecate all functions that take in "item"

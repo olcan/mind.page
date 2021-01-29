@@ -1217,7 +1217,7 @@
   .item {
     color: #ddd;
     width: 100%;
-    /* min-height: 42px; */
+    min-height: 48px; /* single line height */
     padding: 10px;
     box-sizing: border-box;
     /* white-space: pre-wrap; */
@@ -1706,6 +1706,7 @@
     .item {
       font-size: 16px;
       line-height: 25px;
+      min-height: 45px; /* single line height */
     }
     .time {
       font-size: 14px;
