@@ -102,28 +102,7 @@
       }
       item = items[index];
     }
-    const _item = {
-      name: item.name,
-      id: item.id,
-      label: item.labelText,
-      time: item.time,
-      length: item.text.length,
-      hash: item.hash,
-      deephash: item.deephash,
-      position: item.index + 1,
-      tags: item.tags,
-      tags_raw: item.tagsRaw,
-      tags_visible: item.tagsVisible,
-      tags_hidden: item.tagsHidden,
-      dependencies: item.deps,
-      dependents: item.dependents,
-    };
-    // bind _item methods (see below)
-    _item["read"] = read.bind(item);
-    _item["read_deep"] = read_deep.bind(item);
-    _item["read_input"] = read_input.bind(item);
-    _item["console_log"] = console_log.bind(item);
-    return _item;
+    return new _Item(item); // defined below
   }
 
   // _items returns any number of matches, most recent first
@@ -148,61 +127,133 @@
     window["_items"] = _items;
   }
 
-  // define _item methods
-  function /*_item(…).*/ read(type: string = "", options: object = {}) {
-    const item = this;
-    let content = [];
-    // include dependencies in order, _before_ item itself
-    if (options["include_deps"]) {
-      options["include_deps"] = false; // deps are recursive already
-      item.deps.forEach((id) => {
-        const dep = items[indexFromId.get(id)];
-        if (
-          options["exclude_async_deps"] &&
-          (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-        )
-          return; // exclude async dependency chain
-        content.push(read.call(dep, options["dep_type"] || type, options));
+  class _Item {
+    name: string;
+    id: string;
+    label: string;
+    time: number;
+    length: number;
+    hash: number;
+    deephash: number;
+    index: number;
+    position: number;
+    tags: Array<string>;
+    tags_raw: Array<string>;
+    tags_visible: Array<string>;
+    tags_hidden: Array<string>;
+    dependencies: Array<string>;
+    dependents: Array<string>;
+
+    constructor(item) {
+      this.name = item.name;
+      this.id = item.id;
+      this.label = item.labelText;
+      this.time = item.time;
+      this.length = item.text.length;
+      this.hash = item.hash;
+      this.deephash = item.deephash;
+      this.index = item.index;
+      this.position = item.index + 1;
+      this.tags = item.tags;
+      this.tags_raw = item.tagsRaw;
+      this.tags_visible = item.tagsVisible;
+      this.tags_hidden = item.tagsHidden;
+      this.dependencies = item.deps;
+      this.dependents = item.dependents;
+    }
+
+    read(type: string = "", options: object = {}) {
+      const item = items[this.index];
+      let content = [];
+      // include dependencies in order, _before_ item itself
+      if (options["include_deps"]) {
+        options["include_deps"] = false; // deps are recursive already
+        item.deps.forEach((id) => {
+          const dep = items[indexFromId.get(id)];
+          if (
+            options["exclude_async_deps"] &&
+            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
+          )
+            return; // exclude async dependency chain
+          content.push(_item(id).read(options["dep_type"] || type, options));
+        });
+      }
+      // indicate item name in comments for certain types of reads
+      if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
+      else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
+      let text = type ? extractBlock(item.text, type) : item.text;
+      if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
+      content.push(text);
+      // console.debug(content);
+      return content.filter((s) => s).join("\n");
+    }
+
+    // "deep read" function with include_deps=true as default
+    read_deep(type: string, options: object = {}) {
+      return this.read(type, Object.assign({ include_deps: true }, options));
+    }
+
+    // read function intended for reading *_input blocks with code prefix
+    read_input(type: string, options: object = {}) {
+      return [
+        this.read_deep(type, Object.assign({ replace_ids: true }, options)),
+        this.read(type + "_input", options),
+      ].join("\n");
+    }
+
+    // accessor for console log associated with item
+    // default level (1) excludes debug messages, and default since (-1) is lastEvalTime for item
+    console_log(since: number = -1, level: number = 1) {
+      const item = items[this.index];
+      let log = [];
+      if (since < 0) since = item.lastEvalTime;
+      for (let i = consoleLog.length - 1; i >= 0; --i) {
+        const entry = consoleLog[i];
+        if (entry.time < since) break;
+        if (entry.level < level) continue;
+        if (!entry.stack.includes(this.id)) continue;
+        let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
+        if (prefix == "WARN: ") prefix = "WARNING: ";
+        log.push(prefix + entry.text);
+      }
+      return log.reverse();
+    }
+
+    write(text: string, type: string = "_output") {
+      if (text == undefined) return; // return silently for undefined text
+      const item = items[this.index];
+      // confirm if write is too big
+      const writeConfirmLength = 16 * 1024;
+      if (text && text.length >= writeConfirmLength) {
+        if (!confirm(`Write ${text.length} bytes (${type}) into ${item.name}?`)) return; // cancel write
+      }
+      // if writing *_log, clear any existing *_log blocks
+      // (and skip write if block is empty)
+      if (type.endsWith("_log")) {
+        item.text = item.text.replace(/(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$3");
+        if (text) item.text = appendBlock(item.text, type, text);
+      } else {
+        if (type == "") item.text = text;
+        else item.text = appendBlock(item.text, type, text);
+      }
+      if (!item.log) item.time = Date.now();
+      itemTextChanged(item.index, item.text);
+      // dispatch onEditorChange to prevent index changes during eval
+      setTimeout(() => {
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange(editorText); // item time/text has changed
+        saveItem(item.id);
       });
     }
-    // indicate item name in comments for certain types of reads
-    if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
-    else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
-    let text = type ? extractBlock(item.text, type) : item.text;
-    if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
-    content.push(text);
-    // console.debug(content);
-    return content.filter((s) => s).join("\n");
-  }
 
-  // "deep read" function with include_deps=true as default
-  function /*_item(…).*/ read_deep(type: string, options: object = {}) {
-    return read.call(this, type, Object.assign({ include_deps: true }, options));
-  }
-
-  // read function intended for reading *_input blocks with code prefix
-  function /*_item(…).*/ read_input(type: string, options: object = {}) {
-    return [
-      read_deep.call(this, type, Object.assign({ replace_ids: true }, options)),
-      read.call(this, type + "_input", options),
-    ].join("\n");
-  }
-
-  // accessor for console log associated with item
-  // default level (1) excludes debug messages, and default since (-1) is lastEvalTime for item
-  function /*_item(…).*/ console_log(since: number = -1, level: number = 1) {
-    let log = [];
-    if (since < 0) since = this.lastEvalTime;
-    for (let i = consoleLog.length - 1; i >= 0; --i) {
-      const entry = consoleLog[i];
-      if (entry.time < since) break;
-      if (entry.level < level) continue;
-      if (!entry.stack.includes(this.id)) continue;
-      let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
-      if (prefix == "WARN: ") prefix = "WARNING: ";
-      log.push(prefix + entry.text);
+    write_log(since: number = -1, level: number = 1, type: string = "_log") {
+      this.write(this.console_log(since, level).join("\n"), type);
+      if (type == "_log") this.show_logs();
     }
-    return log.reverse();
+
+    show_logs(autohide_after: number = 15000) {
+      itemShowLogs(this.id, autohide_after);
+    }
   }
 
   function itemTimeString(delta: number) {
@@ -1450,7 +1501,7 @@
       // NOTE: js_input blocks are assumed "local", i.e. not intended for export
       let prefix = item.debug
         ? "" // #_debug items are assumed self-contained if they are run
-        : read_deep.call(item, "js", { replace_ids: true });
+        : _item(item.id).read_deep("js", { replace_ids: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       let jsout = evalJSInput(prefix + item.text, item.text, item.label, index) || "";
       // ignore output if Promise
