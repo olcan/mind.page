@@ -188,6 +188,11 @@
         js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
         js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         let out = window["_eval"](js, id);
+        // out = out?.replace(/(^|[^\\])\$id/g, "$1" + id);
+        // out = out?.replace(/(^|[^\\])\$hash/g, "$1" + hash);
+        // out = out?.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
+        // out = out?.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
+        // out = out?.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
         // console.debug("macro output: ", out);
         return pfx + out;
       } catch (e) {
@@ -277,7 +282,9 @@
     );
     const isMenu = tags.includes("#_menu");
 
-    // remove hidden tags (unless missing or matching) and trim (up to deps-and-dependents)
+    // remove hidden tags (unless missing or matching) and trim
+    // NOTE: we trim all whitespace before deps-and-dependents div and before any *_log blocks
+    //       (since *_log blocks are auto-removed and re-appended at the end, then auto-hidden if _log)
     text = text
       .replace(tagRegex, (m, pfx, tag) => {
         if (!tag.startsWith("#_")) return m;
@@ -287,7 +294,7 @@
           : pfx;
       })
       .trimStart()
-      .replace(/\s+($|\n<div class="deps-and-dependents">)/, "$1");
+      .replace(/\s+($|\n<div class="deps-and-dependents">|\n```\w*?_log\n)/g, "$1");
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = (text) =>

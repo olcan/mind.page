@@ -23,6 +23,186 @@
   let anonymous = false;
   let readonly = false;
 
+  // _resume calls given function, updating stack before/after
+  // NOTE: _resume returns a Promise and can be invoked from BOTH sync and async functions
+  async function _resume(id, func) {
+    try {
+      evalStack.push(id);
+      await func();
+    } finally {
+      evalStack.pop();
+    }
+  }
+
+  // _async wraps a function for async evaluation, managing stack and cancelling if deleted
+  function _async(id, func) {
+    return function (...args) {
+      if (!indexFromId.has(id)) {
+        console.error(`_async item ${id} deleted`);
+        return;
+      } // item deleted
+      _resume(id, () => func(...args));
+    };
+  }
+
+  // _dispatch wraps setTimeout to manage stack and cancel if item is deleted
+  function _dispatch(func, ...args) {
+    const id = _.last(evalStack);
+    if (!id) {
+      console.error("_dispatch failed to determine item");
+      return;
+    }
+    setTimeout(_async(id, func), ...args);
+  }
+
+  // _promise wraps executor function to manage stack and reject if item is deleted
+  function _promise(exec) {
+    const id = _.last(evalStack);
+    if (!id) {
+      console.error("_promise failed to determine item");
+      return;
+    }
+    return new Promise((resolve, reject) => {
+      if (!indexFromId.has(id)) {
+        reject(new Error(`_promise item ${id} deleted`));
+        return;
+      }
+      _resume(id, () => exec(resolve, reject));
+    });
+  }
+
+  // Promise._delay from https://stackoverflow.com/a/39538518
+  function _delay(t, v) {
+    return _promise((resolve) => setTimeout(resolve.bind(null, v), t));
+  }
+  Promise.prototype["_delay"] = function (t) {
+    return this.then((v) => _delay(t, v));
+  };
+
+  function _item(name: string): any {
+    if (!name) return null;
+    let item;
+    if (name.startsWith("#")) {
+      // item is specified by unique label (i.e. name)
+      const ids = idsFromLabel.get(name.toLowerCase());
+      if (!ids || ids.length == 0) {
+        console.error(`_item '${name}' not found`);
+        return null;
+      } else if (ids.length > 1) {
+        console.error(`_item '${name}' is ambiguous (${ids.length} items)`);
+        return null;
+      }
+      item = items[indexFromId.get(ids[0])];
+    } else {
+      // item is specified by id
+      const index = indexFromId.get(name);
+      if (index == undefined) {
+        console.error(`_item '${name}' not found`);
+        return null;
+      }
+      item = items[index];
+    }
+    const _item = {
+      name: item.name,
+      id: item.id,
+      label: item.labelText,
+      tags: item.tags,
+      tags_raw: item.tagsRaw,
+      tags_visible: item.tagsVisible,
+      tags_hidden: item.tagsHidden,
+      dependencies: item.deps,
+      dependents: item.dependents,
+      length: item.text.length,
+      hash: item.hash,
+      deephash: item.deephash,
+      position: item.index + 1,
+    };
+    // bind _item methods (see below)
+    _item["read"] = read.bind(item);
+    _item["read_deep"] = read_deep.bind(item);
+    _item["read_input"] = read_input.bind(item);
+    _item["console_log"] = console_log.bind(item);
+    return _item;
+  }
+
+  function _items(label: string) {
+    return (idsFromLabel.get(label.toLowerCase()) || []).map(_item);
+  }
+
+  // define window properties and functions
+  if (isClient) {
+    Object.defineProperty(window, "_user", {
+      get: () => (user ? _.pick(user, ["email", "displayName", "photoURL", "uid"]) : null),
+    });
+    Object.defineProperty(window, "_stack", { get: () => evalStack });
+    Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
+    Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
+    window["_resume"] = _resume;
+    window["_async"] = _async;
+    window["_dispatch"] = _dispatch;
+    window["_promise"] = _promise;
+    window["_delay"] = _delay;
+    window["_item"] = _item;
+    window["_items"] = _items;
+  }
+
+  // define _item methods
+  function /*_item(…).*/ read(type: string = "", options: object = {}) {
+    const item = this;
+    let content = [];
+    // include dependencies in order, _before_ item itself
+    if (options["include_deps"]) {
+      options["include_deps"] = false; // deps are recursive already
+      item.deps.forEach((id) => {
+        const dep = items[indexFromId.get(id)];
+        if (
+          options["exclude_async_deps"] &&
+          (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
+        )
+          return; // exclude async dependency chain
+        content.push(read.call(dep, options["dep_type"] || type, options));
+      });
+    }
+    // indicate item name in comments for certain types of reads
+    if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
+    else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
+    let text = type ? extractBlock(item.text, type) : item.text;
+    if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
+    content.push(text);
+    // console.debug(content);
+    return content.filter((s) => s).join("\n");
+  }
+
+  // "deep read" function with include_deps=true as default
+  function /*_item(…).*/ read_deep(type: string, options: object = {}) {
+    return read.call(this, type, Object.assign({ include_deps: true }, options));
+  }
+
+  // read function intended for reading *_input blocks with code prefix
+  function /*_item(…).*/ read_input(type: string, options: object = {}) {
+    return [
+      read_deep.call(this, type, Object.assign({ replace_ids: true }, options)),
+      read.call(this, type + "_input", options),
+    ].join("\n");
+  }
+
+  // accessor for console log associated with item
+  // default level (1) excludes debug messages, and default since (-1) is lastEvalTime for item
+  function /*_item(…).*/ console_log(since: number = -1, level: number = 1) {
+    let log = [];
+    if (since < 0) since = this.lastEvalTime;
+    for (let i = consoleLog.length - 1; i >= 0; --i) {
+      const entry = consoleLog[i];
+      if (entry.time < since) break;
+      if (entry.level < level) continue;
+      if (!entry.stack.includes(this.id)) continue;
+      let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
+      if (prefix == "WARN: ") prefix = "WARNING: ";
+      log.push(prefix + entry.text);
+    }
+    return log.reverse();
+  }
+
   function itemTimeString(delta: number) {
     if (delta < 60) return "<1m";
     if (delta < 3600) return Math.floor(delta / 60).toString() + "m";
@@ -727,14 +907,15 @@
           if (depindex == index) return; // skip self
           // NOTE: we only need to update dependencies on first update_deps or if item label has changed
           if (item.label != prevLabel) depitem.deps = itemDeps(depindex);
-          // NOTE: changes to deephash trigger re-rendering and cache invalidation
-          if (item.deephash != prevDeepHash)
+          if (item.label != prevLabel || (depitem.deps.includes(item.id) && item.deephash != prevDeepHash)) {
+            // NOTE: changes to deephash trigger re-rendering and cache invalidation
             depitem.deephash = hashCode(
               depitem.deps
                 .map((id) => items[indexFromId.get(id)].hash)
-                .concat(item.hash)
+                .concat(depitem.hash)
                 .join(",")
             );
+          }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
         });
         // console.debug("updated dependents:", item.dependents);
@@ -935,7 +1116,7 @@
             .replace(/^\/\w+/, "")
             .trim()
             .replace(/`/g, "\\`");
-          if (idsFromLabel.has("#commands" + cmd)) {
+          if (_item("#commands" + cmd)) {
             try {
               const obj = window["_eval"](`run(\`${args}\`)`, "#commands" + cmd);
               if (!obj) {
@@ -955,7 +1136,9 @@
                 // if undefined use key-based default
                 editing = obj.edit == true;
             } catch (e) {
-              alert(`#commands${cmd}: ${e}`);
+              const log = _item("#commands" + cmd).console_log(-1 /*lastEvalTime*/, 4 /*errors*/);
+              let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
+              alert(msg);
               throw e;
             }
           } else {
@@ -1211,9 +1394,10 @@
       evaljs = [
         "const done = (output) => { _write(__id, output); _done(__id) }",
         "_running(__id)",
-        "_do(__id, async () => {",
+        "_resume(__id, async () => {",
+        // wrapAsyncJS(jsin),
         jsin,
-        "}) // _do",
+        "}) // _resume",
       ].join("\n");
     }
     if (!item.debug) evaljs = `const __id='${item.id}';\n` + evaljs;
@@ -1264,7 +1448,7 @@
       // NOTE: js_input blocks are assumed "local", i.e. not intended for export
       let prefix = item.debug
         ? "" // #_debug items are assumed self-contained if they are run
-        : window["_read_deep"]("js", item.id, { replace_ids: true });
+        : read_deep.call(item, "js", { replace_ids: true });
       if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
       let jsout = evalJSInput(prefix + item.text, item.text, item.label, index) || "";
       // ignore output if Promise
@@ -1720,6 +1904,10 @@
       // dependents (filled below)
       item.dependents = [];
       item.dependentsString = "";
+      // other state
+      item.runStartTime = 0; // used for _running/_done
+      item.runEndTime = 0; // used for _running/_done
+      item.lastEvalTime = 0; // used for _item.console_log
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
@@ -1831,165 +2019,6 @@
 
           initFirebaseRealtime();
         });
-    }
-
-    // _do calls given function, updating stack before/after
-    // NOTE: _do returns a Promise can be invoked from BOTH sync and async functions
-    async function _do(id, func) {
-      try {
-        evalStack.push(id);
-        await func();
-      } finally {
-        evalStack.pop();
-      }
-    }
-
-    // _resume wraps a function for async evaluation, managing stack and cancelling if deleted
-    function _resume(id, func) {
-      return function (...args) {
-        if (!indexFromId.has(id)) {
-          console.error(`_resume item ${id} deleted`);
-          return;
-        } // item deleted
-        _do(id, () => func(...args));
-      };
-    }
-
-    // _dispatch wraps setTimeout to manage stack and cancel if item is deleted
-    function _dispatch(func, ...args) {
-      const id = _.last(evalStack);
-      if (!id) {
-        console.error("_dispatch failed to determine item");
-        return;
-      }
-      setTimeout(_resume(id, func), ...args);
-    }
-
-    // _promise wraps executor function to manage stack and reject if item is deleted
-    function _promise(exec) {
-      const id = _.last(evalStack);
-      if (!id) {
-        console.error("_promise failed to determine item");
-        return;
-      }
-      return new Promise((resolve, reject) => {
-        if (!indexFromId.has(id)) {
-          reject(new Error(`_promise item ${id} deleted`));
-          return;
-        }
-        _do(id, () => exec(resolve, reject));
-      });
-    }
-
-    // Promise._delay from https://stackoverflow.com/a/39538518
-    function _delay(t, v) {
-      return _promise((resolve) => setTimeout(resolve.bind(null, v), t));
-    }
-    Promise.prototype["_delay"] = function (t) {
-      return this.then((v) => _delay(t, v));
-    };
-
-    function _item(name: string): any {
-      if (!name) return null;
-      let item;
-      if (name.startsWith("#")) {
-        // item is specified by unique label (i.e. name)
-        const ids = idsFromLabel.get(name.toLowerCase());
-        if (!ids || ids.length == 0) {
-          console.error(`_item '${name}' not found`);
-          return null;
-        } else if (ids.length > 1) {
-          console.error(`_item '${name}' is ambiguous (${ids.length} items)`);
-          return null;
-        }
-        item = items[indexFromId.get(ids[0])];
-      } else {
-        // item is specified by id
-        const index = indexFromId.get(name);
-        if (index == undefined) {
-          console.error(`_item '${name}' not found`);
-          return null;
-        }
-        item = items[index];
-      }
-      const _item = {
-        name: item.name,
-        id: item.id,
-        label: item.labelText,
-        tags: item.tags,
-        tags_raw: item.tagsRaw,
-        tags_visible: item.tagsVisible,
-        tags_hidden: item.tagsHidden,
-        dependencies: item.deps,
-        dependents: item.dependents,
-        length: item.text.length,
-        hash: item.hash,
-        deephash: item.deephash,
-        position: item.index + 1,
-      };
-      // bind _item methods (see below)
-      _item["read"] = read.bind(item);
-      _item["read_deep"] = read_deep.bind(item);
-      _item["read_input"] = read_input.bind(item);
-      return _item;
-    }
-
-    function _items(label: string) {
-      return (idsFromLabel.get(label.toLowerCase()) || []).map(_item);
-    }
-
-    // define window properties and functions
-    Object.defineProperty(window, "_user", {
-      get: () => (user ? _.pick(user, ["email", "displayName", "photoURL", "uid"]) : null),
-    });
-    Object.defineProperty(window, "_stack", { get: () => evalStack });
-    Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
-    Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
-    window["_do"] = _do;
-    window["_resume"] = _resume;
-    window["_dispatch"] = _dispatch;
-    window["_promise"] = _promise;
-    window["_delay"] = _delay;
-    window["_item"] = _item;
-    window["_items"] = _items;
-
-    function /*_item(…).*/ read(type: string = "", options: object = {}) {
-      const item = this;
-      let content = [];
-      // include dependencies in order, _before_ item itself
-      if (options["include_deps"]) {
-        options["include_deps"] = false; // deps are recursive already
-        item.deps.forEach((id) => {
-          const dep = items[indexFromId.get(id)];
-          if (
-            options["exclude_async_deps"] &&
-            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-          )
-            return; // exclude async dependency chain
-          content.push(read.call(dep, options["dep_type"] || type, options));
-        });
-      }
-      // indicate item name in comments for certain types of reads
-      if (type == "js" || type == "webppl") content.push(`/* ${type} @ ${item.name} */`);
-      else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
-      let text = type ? extractBlock(item.text, type) : item.text;
-      if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
-      content.push(text);
-      console.debug(content);
-      return content.filter((s) => s).join("\n");
-    }
-
-    // "deep read" function with include_deps=true as default
-    function /*_item(…).*/ read_deep(type: string, options: object = {}) {
-      return read.call(this, type, Object.assign({ include_deps: true }, options));
-    }
-
-    // read function intended for reading *_input blocks with code prefix
-    function /*_item(…).*/ read_input(type: string, options: object = {}) {
-      return [
-        read_deep.call(this, type, Object.assign({ replace_ids: true }, options)),
-        read.call(this, type + "_input", options),
-      ].join("\n");
     }
 
     // TODO: implement "_item/_items" and deprecate all functions that take in "item"
@@ -2126,7 +2155,10 @@
         "js_input",
         addLineNumbers(evaljs)
       );
-      if (index != undefined) evalStack.push(items[index].id);
+      if (index != undefined) {
+        evalStack.push(items[index].id);
+        items[index].lastEvalTime = Date.now();
+      }
       try {
         const out = eval.call(window, evaljs);
         if (index != undefined) evalStack.pop();
@@ -2358,7 +2390,7 @@
       if (index == undefined) return Promise.resolve(); // ignore missing
       if (items[index].running == running) return Promise.resolve(); // no change
       itemUpdateRunning(id, running);
-      return _promise((resolve) => {
+      return new Promise<void>((resolve) => {
         const index = indexFromId.get(id);
         if (index == undefined) return;
         // NOTE: tick() did not work to ensure the spinner is visible for cpu-intensive javascript. even polling for loading indicator did not work reliably, so we are forced to leave it to calling code to introduce a delay() as needed before expensive compute
@@ -2372,7 +2404,7 @@
       if (!items[index].running) return Promise.resolve(); // ignore not running
       if (items[index].donePending) return Promise.resolve(); // duplicate _done
       items[index].donePending = true;
-      return _promise((resolve) => {
+      return new Promise<void>((resolve) => {
         window["_running"](id, false).then(() => {
           const index = indexFromId.get(id);
           if (index == undefined) return;
@@ -2538,7 +2570,7 @@
             consolediv.appendChild(elem);
             consoleLog.push({
               type: verb,
-              stack: evalStack,
+              stack: evalStack.slice(),
               text: text.trim(),
               time: Date.now(),
               level: levels.indexOf(verb),
