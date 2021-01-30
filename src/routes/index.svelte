@@ -1456,22 +1456,19 @@
     if (!item.debug) evaljs = `const __id='${item.id}';\n` + evaljs;
     if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
     const start = Date.now();
+    let out;
     try {
       evalStack.push(item.id);
       // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
-      let out = eval.call(window, evaljs);
-      evalStack.pop();
-      // automatically _write_log into item
-      window["_write_log"](item.id, start);
-      return out;
+      out = eval.call(window, evaljs);
     } catch (e) {
-      evalStack.pop();
       let msg = e.toString();
       if (label) msg = label + ": " + msg;
       console.error(msg);
-      // automatically _write_log into item
-      window["_write_log"](item.id, start);
-      return undefined;
+    } finally {
+      evalStack.pop();
+      _item(item.id).write_log(start); // auto-write log
+      return out;
     }
   }
 
