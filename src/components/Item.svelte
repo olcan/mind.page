@@ -187,7 +187,7 @@
         js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
         js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
         js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        let out = window["_eval"](js, id);
+        let out = window["_item"](id).eval(js);
         // out = out?.replace(/(^|[^\\])\$id/g, "$1" + id);
         // out = out?.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         // out = out?.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
@@ -913,7 +913,7 @@
           console.error("script src not supported yet");
         } else {
           try {
-            window["_eval"](`(function(){\n${script.innerHTML}\n})()`, id);
+            window["_item"](id).eval(`(function(){\n${script.innerHTML}\n})()`);
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
             scriptErrors.push(e);

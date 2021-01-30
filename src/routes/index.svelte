@@ -254,6 +254,28 @@
     show_logs(autohide_after: number = 15000) {
       itemShowLogs(this.id, autohide_after);
     }
+
+    eval(js: string = "", options: object = {}) {
+      initItems(); // initialize items if not already done, usually due to macros at first render
+      let prefix = this.read_deep("js", Object.assign({ replace_ids: true, exclude_async_deps: true }, options));
+      let evaljs = [`const __id='${this.id}';`, prefix, js].join("\n").trim();
+      let stack = evalStack
+        .map((id) => _item(id).name)
+        .reverse()
+        .join(" < ");
+      lastEvalText = appendBlock(`\`eval(…)\` on ${this.name} from ${stack}`, "js_input", addLineNumbers(evaljs));
+      items[this.index].lastEvalTime = Date.now();
+      evalStack.push(this.id);
+      try {
+        const out = eval.call(window, evaljs);
+        evalStack.pop();
+        return out;
+      } catch (e) {
+        console.error(e);
+        evalStack.pop();
+        throw e;
+      }
+    }
   }
 
   function itemTimeString(delta: number) {
@@ -1171,7 +1193,7 @@
             .replace(/`/g, "\\`");
           if (_item("#commands" + cmd)) {
             try {
-              const obj = window["_eval"](`run(\`${args}\`)`, "#commands" + cmd);
+              const obj = _item("#commands" + cmd).eval(`run(\`${args}\`)`);
               if (!obj) {
                 onEditorChange((editorText = ""));
                 return;
@@ -1382,6 +1404,7 @@
         const layoutInterval = setInterval(
           () => {
             // TODO: if this does not prevent the edit issues, consider waiting until no item editor has focus
+            // (also make sure it is related to item resizing, because sometimes it seems to happen w/o resizing and in that case would be more related to keyboard event handling in Editor)
             if (Date.now() - lastEditTime >= 500) {
               updateItemLayout();
               layoutPending = false;
@@ -1917,7 +1940,7 @@
     if (itemInitTime) return; // already initialized items
     itemInitTime = Date.now();
     items.forEach((item) => {
-      if (item.init) window["_eval"]("_init()", item.id, { include_deps: false });
+      if (item.init) _item(item.id).eval("_init()", { include_deps: false });
     });
   }
 
