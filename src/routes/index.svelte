@@ -106,16 +106,17 @@
       name: item.name,
       id: item.id,
       label: item.labelText,
+      time: item.time,
+      length: item.text.length,
+      hash: item.hash,
+      deephash: item.deephash,
+      position: item.index + 1,
       tags: item.tags,
       tags_raw: item.tagsRaw,
       tags_visible: item.tagsVisible,
       tags_hidden: item.tagsHidden,
       dependencies: item.deps,
       dependents: item.dependents,
-      length: item.text.length,
-      hash: item.hash,
-      deephash: item.deephash,
-      position: item.index + 1,
     };
     // bind _item methods (see below)
     _item["read"] = read.bind(item);
@@ -125,8 +126,9 @@
     return _item;
   }
 
+  // _items returns any number of matches, most recent first
   function _items(label: string) {
-    return (idsFromLabel.get(label.toLowerCase()) || []).map(_item);
+    return _.sortBy((idsFromLabel.get(label.toLowerCase()) || []).map(_item), (item) => -item.time);
   }
 
   // define window properties and functions
