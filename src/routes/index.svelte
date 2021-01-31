@@ -159,8 +159,10 @@
         options["include_deps"] = false; // deps are recursive already
         item.deps.forEach((id) => {
           const dep = items[indexFromId.get(id)];
-          if (options["exclude_async_deps"] && 
-            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true)))
+          if (
+            options["exclude_async_deps"] &&
+            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
+          )
             return; // exclude async dependency chain
           content.push(_item(id).read(type, options));
         });
@@ -244,12 +246,15 @@
     // evaluates given code in context of this item
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
-      let prefix = this.read_deep("js", Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options));
+      let prefix = this.read_deep(
+        "js",
+        Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
+      );
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
-        if (options["async"]) evaljs = ["__this.start(async (done) => {", evaljs, "}) // __this.start"].join("\n");
+        if (options["async"]) evaljs = ["_this.start(async (done) => {", evaljs, "}) // _this.start"].join("\n");
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
-        evaljs = ["'use strict';", `const __id = '${this.id}';`, "const __this = _item(__id);", evaljs].join("\n");
+        evaljs = ["'use strict';", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
       }
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
@@ -271,11 +276,13 @@
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
-        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         return out;
       } catch (e) {
         console.error(e);
-        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
+        // invalidate element cache for <script> tags
+        if (options["trigger"].startsWith("script_")) invalidateElemCache(this.id);
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
     }
@@ -304,19 +311,22 @@
       });
     }
 
-    // invokes function immediately (w/ await if async), returns promise
-    // manages stack, logs errors, and invalidates element cache on errors
-    // (invalidating element cache is important for items w/ cached <script> tags)
+    // resumes async task by calling (async) function after restoring stack
+    // NOTE: stack should be either [this.id] or [], because we do not allow nested eval of start/resume/etc
+    // NOTE: for the stack to remain valid, we can NOT await on an async function since that would give up control while item is still on the stack, causing misattribution and potential corruption (with multiple async tasks popping each other off the stack); instead we allow item to popped off and leave it up to item code to ensure that _this.resume() is invoked to restore stack as needed -- note that _this remains valid when stack is empty because it is defined within lexical scope in eval()
     async resume(func) {
+      // console.debug(evalStack.map((id) => item(id).name));
+      if (evalStack.length > 1 || (evalStack.length == 1 && evalStack[0] != this.id)) {
+        console.error(`unexpected eval stack [${evalStack.map((id) => item(id).name)}] at resume()`);
+      }
       evalStack.push(this.id);
       try {
-        await func(); // TODO: this await is problematic since it gives up control with item on stack
-        // if (evalStack.pop() != this.id) console.error("invalid stack");
-        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
+        const out = func();
+        if (evalStack.pop() != this.id) console.error("invalid stack");
+        return out;
       } catch (e) {
         console.error(e);
-        invalidateElemCache(this.id);
-        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
     }
@@ -345,10 +355,6 @@
       return this.promise((resolve) => setTimeout(resolve, ms));
     }
   }
-
-  // TODO: evalStack system breaks down with async eval, where items stay on the stack even when they are not being evaluated. Ideal solution seems to be to replace "done" with a Task object and move finish/resume/defer/dispatch/promise/etc functions to that object so that it can maintain its own stack, but the problem is that we still have the problem of central logging, unless items log into the Task object instead of the console. So you keep the global evalStack ONLY for sync evals, and all async evals use a separate stack on some Task object, and also log into a task object. Now we still have the problem of eval chaining, where we may have to add task.eval() that passes task as an option and eval uses its separate stack. This is really nice in that it separates state/code (item) from execution (task), which are currently quite confused due to the concept of lexical context, or "eval ON item", which is separate from the (also perfectly valid) concept of "eval ON task"; so for each eval we could have both __item (lexical environment) and __task (execution context). IMPORTANT: it seems to make sense to have both item.eval() and task.eval(): the former creates a new task with a clean stack, while the latter pushes an item onto an existing task stack. We also need both item.log() and task.log() which can also be copied into console log but could otherwise be separate, the former being associated with a specific item, the latter being associated with a stack of items, and specifically the item at the top of the stack. This can be easily managed by logging the association as a separate object recognized by the console.
-
-  // TODO: there are still questions about how to do chaining and logging/etc but this does feel right, so might as well bite the bullet and get it done. First step though seems to be to centralize all eval().
 
   function itemTimeString(delta: number) {
     if (delta < 60) return "<1m";
