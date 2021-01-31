@@ -1,6 +1,4 @@
 <script context="module" lang="ts">
-  import _ from "lodash";
-  import { isClient, firebase, firestore } from "../../firebase.js";
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading
   export async function preload(page, session) {
@@ -9,6 +7,8 @@
 </script>
 
 <script lang="ts">
+  import _ from "lodash";
+  import { isClient, firebase, firestore } from "../../firebase.js";
   import { Circle2 } from "svelte-loading-spinners";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
@@ -22,6 +22,15 @@
   let focused = false;
   let anonymous = false;
   let readonly = false;
+
+  let evalStack = [];
+  function addLineNumbers(code) {
+    let lineno = 1;
+    return code
+      .split("\n")
+      .map((line) => `/*${lineno++}*/ ${line}`)
+      .join("\n");
+  }
 
   function _item(name: string): any {
     if (!name) return null;
@@ -59,7 +68,7 @@
     Object.defineProperty(window, "_user", {
       get: () => (user ? _.pick(user, ["email", "displayName", "photoURL", "uid"]) : null),
     });
-    Object.defineProperty(window, "_stack", { get: () => evalStack });
+    Object.defineProperty(window, "_stack", { get: () => evalStack.slice() }); // return copy not reference
     Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
     window["_item"] = _item;
@@ -135,7 +144,7 @@
     get elem(): HTMLElement {
       return document.getElementById("super-container-" + this.id);
     }
-    // key-value store with session/item lifetime
+    // general-purpose key-value store with session/item lifetime
     get store(): object {
       let _item = item(this.id);
       if (!_item.store) _item.store = {};
@@ -150,12 +159,10 @@
         options["include_deps"] = false; // deps are recursive already
         item.deps.forEach((id) => {
           const dep = items[indexFromId.get(id)];
-          if (
-            options["exclude_async_deps"] &&
-            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-          )
+          if (options["exclude_async_deps"] && 
+            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true)))
             return; // exclude async dependency chain
-          content.push(_item(id).read(options["dep_type"] || type, options));
+          content.push(_item(id).read(type, options));
         });
       }
       // indicate item name in comments for certain types of reads
@@ -237,24 +244,38 @@
     // evaluates given code in context of this item
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
-      let prefix = this.read_deep("js", Object.assign({ replace_ids: true, exclude_async_deps: true }, options));
-      let evaljs = ["'use strict';", `const __id = '${this.id}';`, "const __this = _item(__id);", prefix, js]
-        .join("\n")
-        .trim();
+      let prefix = this.read_deep("js", Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options));
+      let evaljs = [prefix, js].join("\n").trim();
+      if (!options["debug"]) {
+        if (options["async"]) evaljs = ["__this.start(async (done) => {", evaljs, "}) // __this.start"].join("\n");
+        if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
+        evaljs = ["'use strict';", `const __id = '${this.id}';`, "const __this = _item(__id);", evaljs].join("\n");
+      }
+      // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
+      evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
+      evaljs = evaljs.replace(/(^|[^\\])\$hash/g, "$1" + this.hash);
+      evaljs = evaljs.replace(/(^|[^\\])\$deephash/g, "$1" + this.deephash);
+      // store eval text under item.store[debug_trigger] for debugging, including a reverse stack string
       let stack = evalStack
         .map((id) => item(id).name)
+        .concat(this.name)
         .reverse()
         .join(" < ");
-      lastEvalText = appendBlock(`\`eval(…)\` on ${this.name} from ${stack}`, "js_input", addLineNumbers(evaljs));
+      this.store["debug_" + (options["trigger"] || "other")] = appendBlock(
+        `\`eval(…)\` on ${stack}`,
+        "js_input",
+        addLineNumbers(evaljs)
+      );
+      // run eval within try/catch block
       item(this.id).lastEvalTime = Date.now();
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
-        if (evalStack.pop() != this.id) console.error("invalid stack");
+        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
         return out;
       } catch (e) {
         console.error(e);
-        if (evalStack.pop() != this.id) console.error("invalid stack");
+        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
         throw e;
       }
     }
@@ -287,14 +308,15 @@
     // manages stack, logs errors, and invalidates element cache on errors
     // (invalidating element cache is important for items w/ cached <script> tags)
     async resume(func) {
+      evalStack.push(this.id);
       try {
-        evalStack.push(this.id);
-        await func();      
-        if (evalStack.pop() != this.id) console.error("invalid stack");
+        await func(); // TODO: this await is problematic since it gives up control with item on stack
+        // if (evalStack.pop() != this.id) console.error("invalid stack");
+        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
       } catch (e) {
         console.error(e);
         invalidateElemCache(this.id);
-        if (evalStack.pop() != this.id) console.error("invalid stack");
+        evalStack.splice(evalStack.indexOf(this.id), 1); // fifo
         throw e;
       }
     }
@@ -323,6 +345,10 @@
       return this.promise((resolve) => setTimeout(resolve, ms));
     }
   }
+
+  // TODO: evalStack system breaks down with async eval, where items stay on the stack even when they are not being evaluated. Ideal solution seems to be to replace "done" with a Task object and move finish/resume/defer/dispatch/promise/etc functions to that object so that it can maintain its own stack, but the problem is that we still have the problem of central logging, unless items log into the Task object instead of the console. So you keep the global evalStack ONLY for sync evals, and all async evals use a separate stack on some Task object, and also log into a task object. Now we still have the problem of eval chaining, where we may have to add task.eval() that passes task as an option and eval uses its separate stack. This is really nice in that it separates state/code (item) from execution (task), which are currently quite confused due to the concept of lexical context, or "eval ON item", which is separate from the (also perfectly valid) concept of "eval ON task"; so for each eval we could have both __item (lexical environment) and __task (execution context). IMPORTANT: it seems to make sense to have both item.eval() and task.eval(): the former creates a new task with a clean stack, while the latter pushes an item onto an existing task stack. We also need both item.log() and task.log() which can also be copied into console log but could otherwise be separate, the former being associated with a specific item, the latter being associated with a stack of items, and specifically the item at the top of the stack. This can be easily managed by logging the association as a separate object recognized by the console.
+
+  // TODO: there are still questions about how to do chaining and logging/etc but this does feel right, so might as well bite the bullet and get it done. First step though seems to be to centralize all eval().
 
   function itemTimeString(delta: number) {
     if (delta < 60) return "<1m";
@@ -1060,16 +1086,6 @@
     }
   }
 
-  let lastEvalText; // filled in _eval()
-  let lastRunText; // filled in appendJSOutput() and _webppl_run
-  function addLineNumbers(code) {
-    let lineno = 1;
-    return code
-      .split("\n")
-      .map((line) => `/*${lineno++}*/ ${line}`)
-      .join("\n");
-  }
-
   let sessionCounter = 0; // to ensure unique increasing temporary ids for this session
   let sessionHistory = [];
   let sessionHistoryIndex = 0;
@@ -1154,24 +1170,6 @@
         clearLabel = true;
         break;
       }
-      case "/_debug": {
-        if (!lastRunText) {
-          alert(`/_debug: no runs (in this session)`);
-          return;
-        }
-        text = "#_debug " + lastRunText;
-        editing = true;
-        break;
-      }
-      case "/_debug_eval": {
-        if (!lastEvalText) {
-          alert(`/_debug_eval: no _eval calls (in this session)`);
-          return;
-        }
-        text = "#_debug " + lastEvalText;
-        editing = true;
-        break;
-      }
       case "/_backup": {
         if (readonly) return;
         let added = 0;
@@ -1239,7 +1237,7 @@
             .replace(/`/g, "\\`");
           if (_item("#commands" + cmd)) {
             try {
-              const obj = _item("#commands" + cmd).eval(`run(\`${args}\`)`);
+              const obj = _item("#commands" + cmd).eval(`run(\`${args}\`)`, { trigger: "command" });
               if (!obj) {
                 onEditorChange((editorText = ""));
                 return;
@@ -1478,46 +1476,6 @@
     }
   }
 
-  let evalStack = [];
-  function evalJSInput(text: string, text_nodeps: string, label: string = "", index: number): any {
-    let jsin = extractBlock(text, "js_input");
-    let jsin_nodeps = extractBlock(text_nodeps, "js_input");
-    if (jsin.length == 0) return undefined;
-    let item = items[index];
-    jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
-    jsin = jsin.replace(/(^|[^\\])\$hash/g, "$1" + item.hash);
-    jsin = jsin.replace(/(^|[^\\])\$deephash/g, "$1" + item.deephash);
-    let evaljs = jsin;
-    if (!item.debug && (item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true))) {
-      if (!jsin_nodeps.match(/\bdone\b/)) {
-        let msg = "can not run async code block without any reference to completion callback function 'done'";
-        if (label) msg = label + ": " + msg;
-        alert(msg);
-        return undefined;
-      }
-      evaljs = ["__this.start(async (done) => {", jsin, "}) // __this.start"].join("\n");
-    }
-    if (!item.debug) {
-      evaljs = ["'use strict';", `const __id = '${item.id}';`, "const __this = _item(__id);", evaljs].join("\n");
-    }
-    if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
-    const start = Date.now();
-    let out;
-    try {
-      evalStack.push(item.id);
-      // NOTE: we do not set item.running for sync eval since dom state could not change, and since the eval could trigger an async chain that also sets item.running and would be disrupted if we set it to false here.
-      out = eval.call(window, evaljs);
-    } catch (e) {
-      let msg = e.toString();
-      if (label) msg = label + ": " + msg;
-      console.error(msg);
-    } finally {
-      if (evalStack.pop() != item.id) console.error("invalid stack");
-      _item(item.id).write_log(start); // auto-write log
-      return out;
-    }
-  }
-
   function appendBlock(text: string, type: string, block) {
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
@@ -1533,30 +1491,28 @@
     return text;
   }
 
-  let lastRunTime = 0;
   function appendJSOutput(index: number): string {
     let item = items[index];
-    // eval js_input blocks
-    if (item.text.match(/\s*```js_input\s/)) {
-      lastRunTime = Date.now(); // used in _write_log, see below
-      lastRunText = item.text;
-      // execute JS code, including any 'js' blocks from this and any tag-referenced items
-      // NOTE: js_input blocks are assumed "local", i.e. not intended for export
-      let prefix = item.debug
-        ? "" // #_debug items are assumed self-contained if they are run
-        : _item(item.id).read_deep("js", { replace_ids: true });
-      if (prefix) prefix = "```js_input\n" + prefix + "\n```\n";
-      let jsout = evalJSInput(prefix + item.text, item.text, item.label, index) || "";
-      // ignore output if Promise
-      if (jsout instanceof Promise) jsout = undefined;
-      const outputConfirmLength = 16 * 1024;
-      if (jsout && jsout.length >= outputConfirmLength) {
-        if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined;
-      }
-      if (jsout) item.text = appendBlock(item.text, "_output", jsout);
-      // NOTE: index can change during JS eval due to _writes
-      itemTextChanged(indexFromId.get(item.id), item.text);
+    // check js_input, must mention 'done' if async mode
+    const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
+    let jsin = extractBlock(item.text, "js_input");
+    if (!jsin) return item.text; // missing or empty, ignore
+    if (async && !jsin.match(/\bdone\b/)) {
+      alert(`${item.name}: can not run async js_input without any reference to 'done'`);
+      return item.text;
     }
+    let jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
+    // ignore output if Promise
+    if (jsout instanceof Promise) jsout = undefined;
+    const outputConfirmLength = 16 * 1024;
+    if (jsout && jsout.length >= outputConfirmLength) {
+      if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined;
+    }
+    // append _output and _log and update for changes
+    if (jsout) item.text = appendBlock(item.text, "_output", jsout);
+    _item(item.id).write_log(); // auto-write log
+    // NOTE: index can change during JS eval due to _writes
+    itemTextChanged(indexFromId.get(item.id), item.text);
     return item.text;
   }
 
@@ -1867,34 +1823,10 @@
   }
 
   let lastScrollTime = 0;
-  let lastScrolledDownTime = 0;
-  let scrollToggleLocked = false; // prevent repeated toggle
   let showDotted = false;
-  let showDottedPending = false;
   function onScroll() {
     lastScrollTime = Date.now();
-    return; // pull menu disabled for now, not as useful due to forced wait until end of bounce animation, and triggered accidentally many times on iPhone and iPad
-    if (window.scrollY > 0) lastScrolledDownTime = lastScrollTime;
-    if (window.scrollY == 0) lastScrolledDownTime = 0;
-    if (window.scrollY <= -100 && !scrollToggleLocked && Date.now() - lastScrolledDownTime > 1000) {
-      scrollToggleLocked = true;
-      showDotted = !showDotted;
-      // NOTE: display:none on any elements (even spans) while bouncing breaks the bounce animation on iOS
-      // (playing around with visibility/height/position/etc did not work either)
-      showDottedPending = true;
-      (document.querySelector("span.dots") as HTMLElement).style.visibility = "visible";
-      (document.querySelector("span.dots") as HTMLElement).style.opacity = "0.5";
-      // attempt focus on editor (may not work on iOS)
-      // document.getElementById("textarea-mindbox").focus();
-    } else if (window.scrollY >= -25) {
-      scrollToggleLocked = false;
-      if (window.scrollY >= 0) {
-        if (showDottedPending) {
-          updateDotted();
-          showDottedPending = false;
-        }
-      }
-    }
+    return;
   }
 
   function onStatusClick(e) {
@@ -1927,6 +1859,7 @@
   }
 
   function errorMessage(e) {
+    if (!e) return undefined;
     // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
     // NOTE: we log url for "error" Events that do not have message/reason
     //       (see https://www.w3schools.com/jsref/event_onerror.asp)
@@ -1963,7 +1896,7 @@
     if (itemInitTime) return; // already initialized items
     itemInitTime = Date.now();
     items.forEach((item) => {
-      if (item.init) _item(item.id).eval("_init()", { include_deps: false });
+      if (item.init) _item(item.id).eval("_init()", { include_deps: false, trigger: "init" });
     });
   }
 

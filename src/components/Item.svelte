@@ -169,6 +169,7 @@
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
     let hasMacroErrors = false;
+    let macroIndex = 0;
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
       try {
         js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
@@ -176,7 +177,7 @@
         js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
         js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
         js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        let out = window["_item"](id).eval(js);
+        let out = window["_item"](id).eval(js, {trigger:"macro_"+(macroIndex++)});
         // out = out?.replace(/(^|[^\\])\$id/g, "$1" + id);
         // out = out?.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         // out = out?.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
@@ -893,7 +894,7 @@
       // console.debug(
       //   `executing ${pendingScripts} scripts in item ${index + 1} ...`
       // );
-      scripts.forEach((script) => {
+      scripts.forEach((script, scriptIndex) => {
         // console.debug(script.parentElement);
         if (!script.hasAttribute("_uncached") && !script.parentElement.hasAttribute("_cache_key")) {
           console.warn("script will execute at every render due to uncached parent (missing _cache_key)");
@@ -904,7 +905,7 @@
           console.error("script src not supported yet");
         } else {
           try {
-            window["_item"](id).eval(script.innerHTML);
+            window["_item"](id).eval(script.innerHTML, {trigger:"script_"+scriptIndex});
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
             scriptErrors.push(e);
