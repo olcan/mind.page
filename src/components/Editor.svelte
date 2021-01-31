@@ -12,21 +12,27 @@
   export let onPrev = () => {};
   export let onNext = () => {};
 
-  import { highlight, parseTags, regexEscape } from "../util.js";
+  import _ from "lodash";
+  // import he from "he";
+  import { highlight, parseTags } from "../util.js";
 
   const placeholder = " ";
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
-  let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  // let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  // let escapeHTML = (t) => he.encode(t);
+  // let unescapeHTML = (t) => he.decode(t);
+  let escapeHTML = (t) => _.escape(t);
+  let unescapeHTML = (t) => _.unescape(t);
 
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
   let highlightTags = (text) => {
     const tags = parseTags(unescapeHTML(text)).raw;
     if (tags.length == 0) return text;
-    const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
+    const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length);
     const regex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
       `(^|\\s|\\()(${regexTags.join("|")})`,
@@ -172,7 +178,8 @@
         html += "</span>\n";
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
-        if (language.startsWith("_math")) language = "math"; // editor-only highlighting
+        if (language.match(/^_math(_|$)/)) language = "math"; // editor-only
+        if (language.match(/^_html(_|$)/)) language = "html"; // editor-only
         html += highlight(code, language);
         html += "</div>";
         insideBlock = false;

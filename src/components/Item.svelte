@@ -1,10 +1,10 @@
 <script lang="ts">
-  // import _ from "lodash"
+  import _ from "lodash";
 
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import { highlight, extractBlock, hashCode, regexEscape, parseTags, renderTag } from "../util.js";
+  import { highlight, extractBlock, hashCode, parseTags, renderTag, invalidateElemCache } from "../util.js";
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
@@ -57,19 +57,8 @@
   // NOTE: the debugString also helps get rid of the "unused property" warning
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
-  // cache invalidation function triggered whenever item is run below; this is important since runnable items can have dependencies not included in their cache key (even with deephash)
-  function invalidateCache() {
-    Object.values(window["_elem_cache"]).filter((elem: HTMLElement) => {
-      if (elem.getAttribute("_item") == id) {
-        delete window["_elem_cache"][elem.getAttribute("_cache_key")];
-        // destroy all children w/ _destroy attribute (and property)
-        elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
-      }
-    });
-  }
-
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
-    if (run && !cancelled) invalidateCache();
+    if (run && !cancelled) invalidateElemCache(id);
     onEditing(index, (editing = false), cancelled, run);
   }
   function onClick(e) {
@@ -89,7 +78,7 @@
     if (saving || running) return;
     e.stopPropagation();
     e.preventDefault();
-    invalidateCache();
+    invalidateElemCache(id);
     onRun(index);
   }
 
@@ -273,7 +262,7 @@
 
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw;
-    const regexTags = tags.map(regexEscape).sort((a, b) => b.length - a.length);
+    const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length);
     // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is for to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
     const tagRegex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
@@ -323,7 +312,7 @@
       });
 
     const regexTerms = Array.from(matchingTerms)
-      .map(regexEscape)
+      .map(_.escapeRegExp)
       .sort((a, b) => b.length - a.length);
     let mathTermRegex = new RegExp(`\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`, "i");
 
@@ -451,19 +440,6 @@
       (m, pfx) => "<!--hidden-->\n" + m + "\n<!--/hidden-->"
     );
 
-    // replace _html_* blocks
-    text = text.replace(
-      /(^|\n)```_html(?:_\w+)?\n\s*(.*?)\s*\n```/gs,
-      (m, pfx, html) =>
-        (pfx + html)
-          .replace(/(^|[^\\])\$id/g, "$1" + id)
-          .replace(/(^|[^\\])\$hash/g, "$1" + hash)
-          .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
-          .replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex) // same cacheIndex for whole _html block
-          .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`)
-          .replace(/\n+/g, "\n") // prevents insertion of <br> by marked(text) below
-    );
-
     // hide hidden sections
     text = text.replace(
       /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
@@ -501,10 +477,24 @@
     // marked.use({ renderer });
     marked.setOptions({
       renderer: renderer,
-      highlight: highlight,
+      highlight: (code, language) => {
+        // leave _html(_*) block as is so we don't have to he.decode below
+        if (language.match(/^_html(_|$)/)) {
+          return code
+            .replace(/(^|[^\\])\$id/g, "$1" + id)
+            .replace(/(^|[^\\])\$hash/g, "$1" + hash)
+            .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
+            .replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex) // same cacheIndex for whole _html block
+            .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
+        }
+        return highlight(code, language);
+      },
       langPrefix: "",
     });
     text = marked(text);
+
+    // unwrap _html(_*) blocks
+    text = text.replace(/<pre><code class="_html_?.*?">(.*?)<\/code><\/pre>/gs, (m, _html) => _html);
 
     // replace _math blocks, preserving whitespace
     text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
@@ -741,14 +731,14 @@
         if (node.nodeType != Node.TEXT_NODE) continue;
         const parent = node.parentNode;
         let text = node.nodeValue;
-        let regex = new RegExp(`^(.*?)(${terms.map(regexEscape).join("|")})`, "si");
+        let regex = new RegExp(`^(.*?)(${terms.map(_.escapeRegExp).join("|")})`, "si");
         // if we are highlighting inside a non-selected tag, then we expand the regex to allow shortening and rendering adjustments ...
         if (
           node.parentElement.tagName == "MARK" &&
           !node.parentElement.classList.contains("selected") &&
           !node.parentElement.classList.contains("secondary-selected")
         ) {
-          let tagTerms = terms.concat("#…").map(regexEscape);
+          let tagTerms = terms.concat("#…").map(_.escapeRegExp);
           tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#(.+)$/, "^$1")));
           regex = new RegExp(`(^.*?)(${tagTerms.join("|")})`, "si");
         }
@@ -895,7 +885,7 @@
 
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
       // since dependencies are not always fully captured in the cache key (even with deephash)
-      invalidateCache();
+      invalidateElemCache(id);
 
       let pendingScripts = scripts.length;
       let scriptErrors = [];
@@ -913,7 +903,7 @@
           console.error("script src not supported yet");
         } else {
           try {
-            window["_item"](id).eval(`(function(){\n${script.innerHTML}\n})()`);
+            window["_item"](id).eval(script.innerHTML);
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
             scriptErrors.push(e);
@@ -926,6 +916,7 @@
         setTimeout(() => onResized(id, container, "scripts done"), 0);
         // if no errors, cache elems with _cache_key that had scripts in them
         if (scriptErrors.length == 0) cacheElems();
+
         // if element contains dot graphs, they may trigger window._dot_rendered, defined below
       });
     });

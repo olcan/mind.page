@@ -23,62 +23,6 @@
   let anonymous = false;
   let readonly = false;
 
-  // _resume calls given function, updating stack before/after
-  // NOTE: _resume returns a Promise and can be invoked from BOTH sync and async functions
-  async function _resume(id, func) {
-    try {
-      evalStack.push(id);
-      await func();
-    } finally {
-      evalStack.pop();
-    }
-  }
-
-  // _async wraps a function for async evaluation, managing stack and cancelling if deleted
-  function _async(id, func) {
-    return function (...args) {
-      if (!indexFromId.has(id)) {
-        console.error(`_async item ${id} deleted`);
-        return;
-      } // item deleted
-      _resume(id, () => func(...args));
-    };
-  }
-
-  // _dispatch wraps setTimeout to manage stack and cancel if item is deleted
-  function _dispatch(func, ...args) {
-    const id = _.last(evalStack);
-    if (!id) {
-      console.error("_dispatch failed to determine item");
-      return;
-    }
-    setTimeout(_async(id, func), ...args);
-  }
-
-  // _promise wraps executor function to manage stack and reject if item is deleted
-  function _promise(exec) {
-    const id = _.last(evalStack);
-    if (!id) {
-      console.error("_promise failed to determine item");
-      return;
-    }
-    return new Promise((resolve, reject) => {
-      if (!indexFromId.has(id)) {
-        reject(new Error(`_promise item ${id} deleted`));
-        return;
-      }
-      _resume(id, () => exec(resolve, reject));
-    });
-  }
-
-  // Promise._delay from https://stackoverflow.com/a/39538518
-  function _delay(t, v) {
-    return _promise((resolve) => setTimeout(resolve.bind(null, v), t));
-  }
-  Promise.prototype["_delay"] = function (t) {
-    return this.then((v) => _delay(t, v));
-  };
-
   function _item(name: string): any {
     if (!name) return null;
     let item;
@@ -102,7 +46,7 @@
       }
       item = items[index];
     }
-    return new _Item(item); // defined below
+    return Object.freeze(new _Item(item.id)); // defined below
   }
 
   // _items returns any number of matches, most recent first
@@ -118,48 +62,84 @@
     Object.defineProperty(window, "_stack", { get: () => evalStack });
     Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
-    window["_resume"] = _resume;
-    window["_async"] = _async;
-    window["_dispatch"] = _dispatch;
-    window["_promise"] = _promise;
-    window["_delay"] = _delay;
     window["_item"] = _item;
     window["_items"] = _items;
   }
 
-  class _Item {
-    name: string;
-    id: string;
-    label: string;
-    time: number;
-    length: number;
-    hash: number;
-    deephash: number;
-    index: number;
-    position: number;
-    tags: Array<string>;
-    tags_raw: Array<string>;
-    tags_visible: Array<string>;
-    tags_hidden: Array<string>;
-    dependencies: Array<string>;
-    dependents: Array<string>;
+  // private function for looking up item given its id
+  // (throws "deleted" error if item has been deleted)
+  function item(id: string) {
+    const index = indexFromId.get(id);
+    if (index == undefined) throw new Error(`item ${id} deleted`);
+    return items[index];
+  }
 
-    constructor(item) {
-      this.name = item.name;
-      this.id = item.id;
-      this.label = item.labelText;
-      this.time = item.time;
-      this.length = item.text.length;
-      this.hash = item.hash;
-      this.deephash = item.deephash;
-      this.index = item.index;
-      this.position = item.index + 1;
-      this.tags = item.tags;
-      this.tags_raw = item.tagsRaw;
-      this.tags_visible = item.tagsVisible;
-      this.tags_hidden = item.tagsHidden;
-      this.dependencies = item.deps;
-      this.dependents = item.dependents;
+  class _Item {
+    id: string;
+    constructor(id) {
+      this.id = id;
+      // define _own_ _enumerable_ properties (e.g. for JSON.stringify)
+      // https://stackoverflow.com/a/57179513
+      for (const property of ["name"]) {
+        const descriptor = Object.getOwnPropertyDescriptor(_Item.prototype, property);
+        const modified_descriptor = Object.assign(descriptor, { enumerable: true });
+        Object.defineProperty(this, property, modified_descriptor);
+      }
+    }
+    // getters
+    get name(): string {
+      return item(this.id).name;
+    }
+    get label(): string {
+      return item(this.id).labelText; // case-sensitive label
+    }
+    get time(): number {
+      return item(this.id).time;
+    }
+    get text(): string {
+      return item(this.id).text;
+    }
+    get length(): number {
+      return item(this.id).text.length;
+    }
+    get hash(): number {
+      return item(this.id).hash;
+    }
+    get deephash(): number {
+      return item(this.id).deephash;
+    }
+    get index(): number {
+      return item(this.id).index;
+    }
+    get position(): number {
+      return item(this.id).index + 1;
+    }
+    get tags(): Array<string> {
+      return item(this.id).tags;
+    }
+    get tags_raw(): Array<string> {
+      return item(this.id).tagsRaw;
+    }
+    get tags_visible(): Array<string> {
+      return item(this.id).tagsVisible;
+    }
+    get tags_hidden(): Array<string> {
+      return item(this.id).tagsHidden;
+    }
+    get dependencies(): Array<string> {
+      return item(this.id).deps;
+    }
+    get dependents(): Array<string> {
+      return item(this.id).dependents;
+    }
+    get elem(): HTMLElement {
+      return document.getElementById("super-container-" + this.id);
+    }
+    // key-value store with session/item lifetime
+    get store(): object {
+      let _item = item(this.id);
+      if (!_item.store) _item.store = {};
+      return _item.store;
     }
 
     read(type: string = "", options: object = {}) {
@@ -204,9 +184,8 @@
     // accessor for console log associated with item
     // default level (1) excludes debug messages, and default since (-1) is lastEvalTime for item
     console_log(since: number = -1, level: number = 1) {
-      const item = items[this.index];
       let log = [];
-      if (since < 0) since = item.lastEvalTime;
+      if (since < 0) since = item(this.id).lastEvalTime;
       for (let i = consoleLog.length - 1; i >= 0; --i) {
         const entry = consoleLog[i];
         if (entry.time < since) break;
@@ -220,29 +199,28 @@
     }
 
     write(text: string, type: string = "_output") {
-      if (text == undefined) return; // return silently for undefined text
-      const item = items[this.index];
       // confirm if write is too big
       const writeConfirmLength = 16 * 1024;
       if (text && text.length >= writeConfirmLength) {
-        if (!confirm(`Write ${text.length} bytes (${type}) into ${item.name}?`)) return; // cancel write
+        if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return; // cancel write
       }
       // if writing *_log, clear any existing *_log blocks
       // (and skip write if block is empty)
+      let __item = item(this.id); // writeable item
       if (type.endsWith("_log")) {
-        item.text = item.text.replace(/(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$3");
-        if (text) item.text = appendBlock(item.text, type, text);
+        __item.text = this.text.replace(/(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$3");
+        if (text) __item.text = appendBlock(this.text, type, text);
       } else {
-        if (type == "") item.text = text;
-        else item.text = appendBlock(item.text, type, text);
+        if (type == "") __item.text = text;
+        else __item.text = appendBlock(this.text, type, text);
       }
-      if (!item.log) item.time = Date.now();
-      itemTextChanged(item.index, item.text);
+      if (!__item.log) __item.time = Date.now();
+      itemTextChanged(this.index, this.text);
       // dispatch onEditorChange to prevent index changes during eval
       setTimeout(() => {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(editorText); // item time/text has changed
-        saveItem(item.id);
+        saveItem(this.id);
       });
     }
 
@@ -255,16 +233,19 @@
       itemShowLogs(this.id, autohide_after);
     }
 
+    // evaluates given code in context of this item
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
       let prefix = this.read_deep("js", Object.assign({ replace_ids: true, exclude_async_deps: true }, options));
-      let evaljs = [`const __id='${this.id}';`, prefix, js].join("\n").trim();
+      let evaljs = ["'use strict';", `const __id = '${this.id}';`, "const __this = _item(__id);", prefix, js]
+        .join("\n")
+        .trim();
       let stack = evalStack
-        .map((id) => _item(id).name)
+        .map((id) => item(id).name)
         .reverse()
         .join(" < ");
       lastEvalText = appendBlock(`\`eval(…)\` on ${this.name} from ${stack}`, "js_input", addLineNumbers(evaljs));
-      items[this.index].lastEvalTime = Date.now();
+      item(this.id).lastEvalTime = Date.now();
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
@@ -275,6 +256,70 @@
         evalStack.pop();
         throw e;
       }
+    }
+
+    // starts an async task in context of this item
+    // if no function is given, returns 'done' function to be invoked later by caller
+    // if function is given (can be async), passes done into that and returns promise
+    start(func = null) {
+      const done = (output) => {
+        item(this.id).running = false;
+        if (output) this.write(output);
+        this.write_log();
+      };
+      if (!func) {
+        // start is invoked sync, caller will invoke done() async later
+        item(this.id).running = true;
+        return done;
+      }
+      return this.resume(async () => {
+        item(this.id).running = true;
+        // ensure spinner is visible in case function blocks updates for extended period
+        // NOTE: turns out tick() is not sufficient, and even polling for DOM state did not work without a _delay(50)
+        await tick();
+        await this.delay(50); // ensure spinner is visible
+        await func(done);
+      });
+    }
+
+    // invokes function immediately (w/ await if async), returns promise
+    // manages stack, logs errors, and invalidates element cache on errors
+    // (invalidating element cache is important for items w/ cached <script> tags)
+    async resume(func) {
+      try {
+        evalStack.push(this.id);
+        await func();
+        evalStack.pop();
+      } catch (e) {
+        console.error(e);
+        invalidateElemCache(this.id);
+        evalStack.pop();
+        throw e;
+      }
+    }
+
+    // like resume, but returns "deferred" function to be invoked by caller
+    // useful for passing into Promise.then()
+    defer(func) {
+      const _item = this; // capture for deferred function
+      return function (...args) {
+        _item.resume(() => func(...args));
+      };
+    }
+
+    // dispatch = setTimeout on deferred function
+    dispatch(func, ms, ...args) {
+      setTimeout(this.defer(func), ms, ...args);
+    }
+
+    // promise = new Promise on deferred executor function
+    promise(func) {
+      return new Promise(this.defer(func));
+    }
+
+    // delay = promise that resolves on a timeout
+    delay(ms) {
+      return this.promise((resolve) => setTimeout(resolve, ms));
     }
   }
 
@@ -1457,8 +1502,6 @@
     jsin = jsin.replace(/(^|[^\\])\$id/g, "$1" + item.id);
     jsin = jsin.replace(/(^|[^\\])\$hash/g, "$1" + item.hash);
     jsin = jsin.replace(/(^|[^\\])\$deephash/g, "$1" + item.deephash);
-    // const evaljs = jsin;
-    // const evaljs = "(function(){\n" + jsin + "\n})()";
     let evaljs = jsin;
     if (!item.debug && (item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true))) {
       if (!jsin_nodeps.match(/\bdone\b/)) {
@@ -1467,16 +1510,11 @@
         alert(msg);
         return undefined;
       }
-      evaljs = [
-        "const done = (output) => { _write(__id, output); _done(__id) }",
-        "_running(__id)",
-        "_resume(__id, async () => {",
-        // wrapAsyncJS(jsin),
-        jsin,
-        "}) // _resume",
-      ].join("\n");
+      evaljs = ["__this.start(async (done) => {", jsin, "}) // __this.start"].join("\n");
     }
-    if (!item.debug) evaljs = `const __id='${item.id}';\n` + evaljs;
+    if (!item.debug) {
+      evaljs = ["'use strict';", `const __id = '${item.id}';`, "const __this = _item(__id);", evaljs].join("\n");
+    }
     if (lastRunText) lastRunText = appendBlock(lastRunText, "js_input", addLineNumbers(evaljs));
     const start = Date.now();
     let out;
@@ -1929,7 +1967,7 @@
   }
 
   import { onMount } from "svelte";
-  import { hashCode, numberWithCommas, extractBlock, parseTags, renderTag } from "../util.js";
+  import { hashCode, numberWithCommas, extractBlock, parseTags, renderTag, invalidateElemCache } from "../util.js";
 
   let consoleLog = [];
   const consoleLogMaxSize = 10000;
@@ -1978,8 +2016,6 @@
       item.dependents = [];
       item.dependentsString = "";
       // other state
-      item.runStartTime = 0; // used for _running/_done
-      item.runEndTime = 0; // used for _running/_done
       item.lastEvalTime = 0; // used for _item.console_log
     });
     onEditorChange(""); // initial sorting
@@ -2221,7 +2257,10 @@
       let index = indices[0];
 
       let evaljs = prefix + "\n" + code;
-      if (index != undefined) evaljs = `const __id='${items[index].id}';\n` + evaljs;
+      if (index != undefined)
+        evaljs = ["'use strict';", `const __id = '${items[index].id}';`, "const __this = _item(__id);", evaljs].join(
+          "\n"
+        );
 
       lastEvalText = appendBlock(
         caller != undefined ? `\`_eval\` invoked from ${items[caller].label || "id:" + items[caller].id}` : "",
@@ -2451,43 +2490,6 @@
       return pmf;
     };
 
-    window["_running"] = function (id: string = "", running: boolean = true) {
-      if (!id) {
-        if (evalStack.length == 0) {
-          console.error("_running() invoked from async javascript or macro");
-          return;
-        }
-        id = _.last(evalStack);
-      }
-      const index = indexFromId.get(id);
-      if (index == undefined) return Promise.resolve(); // ignore missing
-      if (items[index].running == running) return Promise.resolve(); // no change
-      itemUpdateRunning(id, running);
-      return new Promise<void>((resolve) => {
-        const index = indexFromId.get(id);
-        if (index == undefined) return;
-        // NOTE: tick() did not work to ensure the spinner is visible for cpu-intensive javascript. even polling for loading indicator did not work reliably, so we are forced to leave it to calling code to introduce a delay() as needed before expensive compute
-        tick().then(() => resolve());
-      });
-    };
-
-    window["_done"] = function (id: string, log_type: string = "_log", log_level: number = 1) {
-      const index = indexFromId.get(id);
-      if (index == undefined) return Promise.resolve(); // ignore missing
-      if (!items[index].running) return Promise.resolve(); // ignore not running
-      if (items[index].donePending) return Promise.resolve(); // duplicate _done
-      items[index].donePending = true;
-      return new Promise<void>((resolve) => {
-        window["_running"](id, false).then(() => {
-          const index = indexFromId.get(id);
-          if (index == undefined) return;
-          delete items[index].donePending;
-          if (log_type) window["_write_log"](id, items[index].runStartTime, log_level, log_type);
-          resolve();
-        });
-      });
-    };
-
     window["_array"] = function (length: number, func) {
       let array = new Array(length);
       for (let i = 0; i < length; ++i) array[i] = func(i);
@@ -2650,7 +2652,6 @@
             });
             if (consoleLog.length > consoleLogMaxSize) consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
 
-            document.getElementById("console-summary").style.visibility = showDotted ? "hidden" : "visible";
             const summarydiv = document.getElementById("console-summary");
             const summaryelem = document.createElement("span");
             summaryelem.innerText = "·";

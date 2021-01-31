@@ -81,9 +81,10 @@ export function highlight(code, language) {
       )
       .join("\n");
   }
-  if (language.match(/^_?html(_|$)/)) language = "html";
+  if (language.match(/^html(_|$)/)) language = "html";
   if (language.match(/^_?js(_|$)/)) language = "js";
-  // if (language.startsWith("_math")) language = "math"; // editor-only
+  // if (language.match(/^_html(_|$)/)) language = "html"; // editor-only
+  // if (language.match(/^_math(_|$)/)) language = "math"; // editor-only
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
 }
@@ -118,6 +119,17 @@ export function renderTag(tag) {
   return tag.replace(/^#\/?/, "");
 }
 
-export function regexEscape(str) {
-  return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+// export function regexEscape(str) {
+//   return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+// }
+
+// NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
+export function invalidateElemCache(id) {
+  Object.values(window["_elem_cache"]).filter((elem) => {
+    if (elem.getAttribute("_item") == id) {
+      delete window["_elem_cache"][elem.getAttribute("_cache_key")];
+      // destroy all children w/ _destroy attribute (and property)
+      elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
+    }
+  });
 }
