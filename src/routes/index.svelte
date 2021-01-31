@@ -191,15 +191,31 @@
     }
 
     // accessor for console log associated with item
-    // default level (1) excludes debug messages, and default since (-1) is lastEvalTime for item
-    console_log(since: number = -1, level: number = 1) {
+    // default level (1) excludes debug messages
+    // since can be "run" (default), "eval", or any epoch time (same as Date.now)
+    // item can be "self" (default), specific item name (label or id), or "any"
+    console_log(options = {}) {
+      let since = options["since"] || "run";
+      const level = options["level"] || 1;
+      const name = options["item"] || "self";
+      if (since == "run") since = item(this.id).lastRunTime;
+      else if (since == "eval") since = item(this.id).lastEvalTime;
+      else if (typeof since != "number") {
+        console.error(`console_log: invalid since='${since}', should be "run", "eval", or number (ms since epoch)`);
+        return [];
+      }
+      if (name != "self" && name != "any" && !item(name)) {
+        console.error(`console_log: item '${name}' not found`);
+        return [];
+      }
       let log = [];
-      if (since < 0) since = item(this.id).lastEvalTime;
+      const filter_id = name == "self" ? this.id : name == "any" ? "" : item(name).id;
+      console.debug(name, filter_id);
       for (let i = consoleLog.length - 1; i >= 0; --i) {
         const entry = consoleLog[i];
         if (entry.time < since) break;
         if (entry.level < level) continue;
-        if (!entry.stack.includes(this.id)) continue;
+        if (filter_id && !entry.stack.includes(filter_id)) continue;
         let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
         log.push(prefix + entry.text);
@@ -234,9 +250,18 @@
       });
     }
 
-    write_log(since: number = -1, level: number = 1, type: string = "_log") {
-      this.write(this.console_log(since, level).join("\n"), type);
-      if (type == "_log") this.show_logs();
+    write_log(options = {}) {
+      options = _.merge(
+        {
+          since: "run",
+          level: 1,
+          type: "_log",
+          item: "self",
+        },
+        options
+      );
+      this.write(this.console_log(options).join("\n"), options["type"]);
+      if (options["type"] == "_log" || options["show_logs"]) this.show_logs();
     }
 
     show_logs(autohide_after: number = 15000) {
@@ -273,6 +298,7 @@
       );
       // run eval within try/catch block
       item(this.id).lastEvalTime = Date.now();
+      if (options["trigger"] == "run") item(this.id).lastRunTime = Date.now();
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
@@ -1941,6 +1967,7 @@
       item.dependentsString = "";
       // other state
       item.lastEvalTime = 0; // used for _item.console_log
+      item.lastRunTime = 0; // used for _item.console_log
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
