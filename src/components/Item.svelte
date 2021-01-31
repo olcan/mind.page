@@ -274,6 +274,7 @@
     // remove hidden tags (unless missing or matching) and trim
     // NOTE: we trim all whitespace before deps-and-dependents div and before any *_log blocks
     //       (since *_log blocks are auto-removed and re-appended at the end, then auto-hidden if _log)
+    //       (for other blocks, a trailing backslash can be used to eliminate the line break)
     text = text
       .replace(tagRegex, (m, pfx, tag) => {
         if (!tag.startsWith("#_")) return m;

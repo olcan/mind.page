@@ -250,11 +250,11 @@
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
-        evalStack.pop();
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         return out;
       } catch (e) {
         console.error(e);
-        evalStack.pop();
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
     }
@@ -264,9 +264,9 @@
     // if function is given (can be async), passes done into that and returns promise
     start(func = null) {
       const done = (output) => {
-        item(this.id).running = false;
         if (output) this.write(output);
         this.write_log();
+        item(this.id).running = false;
       };
       if (!func) {
         // start is invoked sync, caller will invoke done() async later
@@ -289,18 +289,18 @@
     async resume(func) {
       try {
         evalStack.push(this.id);
-        await func();
-        evalStack.pop();
+        await func();      
+        if (evalStack.pop() != this.id) console.error("invalid stack");
       } catch (e) {
         console.error(e);
         invalidateElemCache(this.id);
-        evalStack.pop();
+        if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
     }
 
     // like resume, but returns "deferred" function to be invoked by caller
-    // useful for passing into Promise.then()
+    // useful for passing callback functions, e.g. into Promise.then()
     defer(func) {
       const _item = this; // capture for deferred function
       return function (...args) {
@@ -1478,22 +1478,6 @@
     }
   }
 
-  function itemUpdateRunning(id: string, running: boolean) {
-    let index = indexFromId.get(id);
-    if (index == undefined) return;
-    // console.debug("itemUpdateRunning", id, running);
-    if (items[index].running != running) {
-      items[index].running = running;
-      if (running) {
-        items[index].runStartTime = Date.now();
-        items[index].runEndTime = 0;
-      } else {
-        items[index].runEndTime = Date.now();
-      }
-    }
-    items[index] = items[index]; // trigger dom update
-  }
-
   let evalStack = [];
   function evalJSInput(text: string, text_nodeps: string, label: string = "", index: number): any {
     let jsin = extractBlock(text, "js_input");
@@ -1528,7 +1512,7 @@
       if (label) msg = label + ": " + msg;
       console.error(msg);
     } finally {
-      evalStack.pop();
+      if (evalStack.pop() != item.id) console.error("invalid stack");
       _item(item.id).write_log(start); // auto-write log
       return out;
     }
