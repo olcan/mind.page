@@ -188,7 +188,7 @@
       } catch (e) {
         hasMacroErrors = true;
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
-        return pfx + "undefined";
+        return pfx + `<span class="macro-error">MACRO ERROR: ${e}</span>`;
       }
     });
 
@@ -834,7 +834,7 @@
     else setTimeout(highlightClosure, 0);
 
     // indicate errors/warnings and context/target items
-    error = itemdiv.querySelector(".console-error,mark.missing") != null;
+    error = itemdiv.querySelector(".console-error,.macro-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
     context = itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
     target = itemdiv.querySelector("mark.selected.label.unique") != null;
@@ -1681,6 +1681,14 @@
     border-radius: 4px 0 0 4px;
     white-space: nowrap;
     cursor: pointer;
+  }
+
+  :global(.item span.macro-error) {
+    color: black;
+    background: #f55;
+    border-radius: 4px;
+    font-weight: 500;
+    padding: 0 4px;
   }
 
   :global(.item .MathJax) {
