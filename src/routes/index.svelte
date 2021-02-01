@@ -1756,13 +1756,25 @@
       return;
     } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime) {
+    if (!shiftKey && metaKey) {
+      if (index == 0 || items[index].time > items[index - 1].time) {
+        alert("can not move item up");
+        return;
+      }
+      items[index].time = items[index - 1].time + 1;
+    } else if (shiftKey && metaKey) {
+      if (index == items.length - 1 || items[index].time < items[index + 1].time) {
+        alert("can not move item down");
+        return;
+      }
+      items[index].time = items[index + 1].time - 1;
+    } else {
       items[index].time = Date.now();
-      saveItem(items[index].id);
-      lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
-      onEditorChange(editorText); // item time has changed
-      // onEditorChange((editorText = "")); // item time has changed, and editor cleared
     }
+    saveItem(items[index].id);
+    lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
+    onEditorChange(editorText); // item time has changed
+    // onEditorChange((editorText = "")); // item time has changed, and editor cleared
   }
 
   function editItem(index: number) {
@@ -2310,6 +2322,18 @@
     }
   }
 
+  // track modifier keys for special shortcuts (e.g. in onItemTouch)
+  let metaKey = false;
+  let shiftKey = false;
+  function onKeyDown(e: KeyboardEvent) {
+    metaKey = e.metaKey;
+    shiftKey = e.shiftKey;
+  }
+  function onKeyUp(e: KeyboardEvent) {
+    metaKey = e.metaKey;
+    shiftKey = e.shiftKey;
+  }
+
   // redirect window.onerror to console.error (or alert if #console not set up yet)
   function onError(e) {
     if (!consolediv) return; // can happen during login process
@@ -2453,6 +2477,8 @@
 
 <svelte:window
   on:keypress={onKeyPress}
+  on:keydown={onKeyDown}
+  on:keyup={onKeyUp}
   on:error={onError}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
