@@ -1763,18 +1763,21 @@
       return;
     } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
-    if (!shiftKey && metaKey) {
-      if (index == 0 || items[index].time > items[index - 1].time) {
-        alert("can not move item up");
-        return;
-      }
-      items[index].time = items[index - 1].time + 1;
-    } else if (shiftKey && metaKey) {
+    if (altKey && metaKey) {
+      // move item time back 1 day
+      items[index].time = items[index].time - 24 * 3600 * 1000;
+    } else if (altKey) {
       if (index == items.length - 1 || items[index].time < items[index + 1].time) {
         alert("can not move item down");
         return;
       }
       items[index].time = items[index + 1].time - 1;
+    } else if (metaKey) {
+      if (index == 0 || items[index].time > items[index - 1].time) {
+        alert("can not move item up");
+        return;
+      }
+      items[index].time = items[index - 1].time + 1;
     } else {
       items[index].time = Date.now();
     }
@@ -2316,9 +2319,13 @@
   }
 
   let metaKey = false;
-  let shiftKey = false;
+  let ctrlKey = false; // NOTE: can cause left click
+  let altKey = false;
+  let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
     metaKey = e.metaKey;
+    ctrlKey = e.ctrlKey;
+    altKey = e.altKey;
     shiftKey = e.shiftKey;
 
     // resume-edit items on Shift-(save shortcut)
@@ -2347,6 +2354,8 @@
   }
   function onKeyUp(e: KeyboardEvent) {
     metaKey = e.metaKey;
+    ctrlKey = e.ctrlKey;
+    altKey = e.altKey;
     shiftKey = e.shiftKey;
   }
 
