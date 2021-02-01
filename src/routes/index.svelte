@@ -833,7 +833,7 @@
     );
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
-    if (items.length > 0) setTimeout(updateDotted, 0); // show/hide dotted/undotted items
+    setTimeout(updateDotted, 0); // show/hide dotted/undotted items
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -2298,8 +2298,8 @@
       if (anonymous) console.log("user is anonymous");
       if (initTime) console.debug(`${items.length} items initialized at ${initTime}ms`);
 
-      updateDotted(); // update dotted items
       setInterval(checkLayout, 250); // check layout every 250ms
+      updateDotted(); // update dotted items
 
       // console.debug(
       //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
@@ -2474,7 +2474,7 @@
   {/each}
 </div>
 
-{#if !user || !initTime || totalItemHeight == 0}
+{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
