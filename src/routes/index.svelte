@@ -263,6 +263,10 @@
       if (options["type"] == "_log" || options["show_logs"]) this.show_logs();
     }
 
+    write_log_any(options = {}) {
+      return this.write_log(Object.assign({ item: "any" }, options));
+    }
+
     show_logs(autohide_after: number = 15000) {
       itemShowLogs(this.id, autohide_after);
     }
@@ -316,9 +320,9 @@
     // if no function is given, returns 'done' function to be invoked later by caller
     // if function is given (can be async), passes done into that and returns promise
     start(func = null) {
-      const done = (output) => {
+      const done = (output, log_options = {}) => {
         if (output) this.write(output);
-        this.write_log();
+        this.write_log(log_options);
         item(this.id).running = false;
       };
       if (!func) {
@@ -2080,139 +2084,6 @@
           initFirebaseRealtime();
         });
     }
-
-    window["_histogram"] = function (
-      numbers: any,
-      bins: number = 10,
-      min: number = Infinity,
-      max: number = -Infinity,
-      digits: number = 2
-    ) {
-      let weights;
-      // if numbers is a distribution, extract samples or distribution
-      if (numbers["samples"]) {
-        let samples = numbers["samples"];
-        numbers = samples.map((s) => s["value"]);
-        weights = new Array(numbers.length).fill(1);
-        // weights = samples.map((s) => Math.exp(s["score"]));
-        // let sum = weights.reduce((a, b) => a + b, 0);
-        // weights = weights.map((w) => w / sum);
-      } else if (numbers["getDist"]) {
-        let dist = numbers["getDist"]();
-        numbers = Object.keys(dist).map(parseFloat);
-        weights = Object.values(dist).map((v) => v["prob"]);
-      } else {
-        // assume unit weights to display counts
-        weights = new Array(numbers.length).fill(1);
-      }
-      if (min > max) {
-        // determine range using data
-        numbers.forEach((num) => {
-          if (num < min) min = num;
-          else if (num > max) max = num;
-        });
-      }
-      const size = (max - min) / bins;
-      const counts = new Array(bins).fill(0);
-      numbers.forEach((num, index) => {
-        if (num < min || num > max) return;
-        counts[num == max ? bins - 1 : Math.floor((num - min) / size)] += weights[index];
-      });
-      let histogram = {};
-      const sample_max = Math.max(...numbers);
-      counts.forEach((count, index) => {
-        const lower = (min + index * size).toFixed(digits);
-        const upper = index == bins - 1 ? max.toFixed(digits) : (min + (index + 1) * size).toFixed(digits);
-        let key = `[${lower}, ${upper}` + (index == bins - 1 && sample_max == max ? "]" : ")");
-        if (
-          key[key.length - 1] == ")" &&
-          Number.isInteger(parseFloat(lower)) &&
-          parseFloat(upper) == parseInt(lower) + 1
-        ) {
-          key = parseInt(lower).toString();
-        }
-        histogram[key] = count > 0 ? count.toFixed(2) : 0;
-      });
-      return histogram;
-    };
-
-    window["_compare_histograms"] = function (
-      numbers: any,
-      baseline: any,
-      bins: number = 10,
-      min: number = Infinity,
-      max: number = -Infinity,
-      digits: number = 2
-    ) {
-      if (min > max) {
-        numbers.concat(baseline).forEach((num) => {
-          if (num < min) min = num;
-          else if (num > max) max = num;
-        });
-      }
-      const hist1 = window["_histogram"](numbers, bins, min, max, digits);
-      const hist2 = window["_histogram"](baseline, bins, min, max, digits);
-      return {
-        keys: _.keys(hist1),
-        values: window["_normalize"](_.values(hist1)),
-        baseline: window["_normalize"](_.values(hist2)),
-      };
-    };
-
-    window["_normalize"] = function (numbers: any, digits: number = 3) {
-      const sum = _.sum(numbers.map(parseFloat));
-      return numbers.map((x) => (parseFloat(x) / sum).toFixed(digits));
-    };
-
-    window["_samples"] = function (dist: any) {
-      return dist.samples.map((s) => s["value"]);
-    };
-
-    // NOTE: this sorts by decreasing counts unless keys are integers or specified as array
-    window["_counts"] = function (list, range: any = 10) {
-      let counts = {};
-      list.forEach((x) => {
-        if (typeof x != "string") x = JSON.stringify(x);
-        counts[x] = (counts[x] || 0) + 1;
-      });
-      if (typeof range == "object") {
-        let out = {};
-        range.forEach((k) => (out[k] = counts[k] || 0));
-        return out;
-      }
-      let keys = Object.keys(counts);
-      let values = Object.values(counts) as Array<number>;
-      let indices = _.range(values.length);
-      indices = stableSort(indices, (i, j) => values[j] - values[i]);
-      indices = indices.filter((i) => values[i] > 0);
-      indices.length = Math.min(indices.length, range);
-      let out = {};
-      indices.forEach((i) => (out[keys[i]] = values[i]));
-      return out;
-    };
-
-    window["_pmf"] = function (dist, limit: number = 10, digits: number = 2, keydigits: number = 2) {
-      dist = dist.getDist();
-      let keys = Object.keys(dist).map((k) => k.toString());
-      let probs = Object.values(dist).map((v) => v["prob"]);
-      let indices = _.range(probs.length);
-      indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
-      if (keydigits >= 0 && keys.length > 0 && parseFloat(keys[0])) {
-        keys = keys.map((k) => parseFloat(k).toFixed(keydigits));
-        let pmf = {};
-        indices.forEach((i) => (pmf[keys[i]] = (pmf[keys[i]] || 0) + probs[i]));
-        keys = Object.keys(pmf);
-        probs = Object.values(pmf);
-        indices = _.range(probs.length);
-        indices = stableSort(indices, (i, j) => probs[j] - probs[i]);
-      }
-      if (digits >= 0) probs = probs.map((v) => v.toFixed(digits));
-      indices = indices.filter((i) => probs[i] > 0);
-      indices.length = Math.min(indices.length, limit);
-      let pmf = {};
-      indices.forEach((i) => (pmf[keys[i]] = probs[i]));
-      return pmf;
-    };
 
     // Visual viewport resize/scroll handlers ...
     // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
