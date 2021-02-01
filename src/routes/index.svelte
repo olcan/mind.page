@@ -670,7 +670,8 @@
       // prefix-match first query term against item header text
       // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
       item.prefixMatch =
-        item.header.startsWith(terms[0]) && (!terms[0].startsWith("#") || idsFromLabel.get(terms[0])?.length <= 1);
+        item.header.startsWith(terms[0]) &&
+        (!terms[0].startsWith("#") || (idsFromLabel.get(terms[0]) || []).length <= 1);
 
       // find "pinned match" term = hidden tags containing /pin with prefix match on first term
       item.pinnedMatchTerm = item.tagsHidden.find((t) => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)) || "";
@@ -2211,12 +2212,6 @@
       let pmf = {};
       indices.forEach((i) => (pmf[keys[i]] = probs[i]));
       return pmf;
-    };
-
-    window["_array"] = function (length: number, func) {
-      let array = new Array(length);
-      for (let i = 0; i < length; ++i) array[i] = func(i);
-      return array;
     };
 
     // Visual viewport resize/scroll handlers ...
