@@ -1328,6 +1328,7 @@
     items = [item, ...items];
 
     // update indices as needed by itemTextChanged
+    indexFromId = new Map<string, number>();
     items.forEach((item, index) => indexFromId.set(item.id, index));
     itemTextChanged(0, text);
 
@@ -1665,7 +1666,9 @@
         // delete
         itemTextChanged(index, ""); // clears label, deps, etc
         items.splice(index, 1);
-        // updateItemLayout();
+        // update indices as needed by onEditorChange
+        indexFromId = new Map<string, number>();
+        items.forEach((item, index) => indexFromId.set(item.id, index));
         onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
         deletedItems.unshift({
           time: item.savedTime,
