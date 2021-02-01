@@ -218,7 +218,7 @@
   let enterStart = -1;
   let enterIndentation = "";
   function onKeyDown(e: KeyboardEvent) {
-    // console.debug(e);
+    // console.debug("Editor.onKeyDown:", e);
     // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
@@ -288,59 +288,45 @@
       return;
     }
 
-    if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
+    // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
+    if (
+      (e.code == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
+      (e.code == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
+    ) {
+      e.preventDefault();
+      e.stopPropagation(); // do not propagate to window
+      onDone((text = textarea.value), e, false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
+      return;
+    }
+
+    // run item with Alt/Option+Enter
+    if (e.code == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      e.stopPropagation(); // do not propagate to window
+      let selectionStart = textarea.selectionStart;
+      let selectionEnd = textarea.selectionEnd;
+      onRun();
+      setTimeout(() => {
+        textarea.selectionStart = selectionStart;
+        textarea.selectionEnd = selectionEnd;
+      }, 0);
+      return;
+    }
 
     // create line on Enter, maintain indentation
     // NOTE: to prevent delay on caret update, we do the actual indentation in onKeyUp
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+    if (
+      e.code == "Enter" &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
+      textarea.selectionStart == textarea.selectionEnd
+    ) {
       if (enterStart < 0) {
         enterStart = textarea.selectionStart;
         enterIndentation = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *).*?$/)[1] || "";
       }
       return;
     }
-
-    // NOTE: line-based prev/next works _almost_ always, but there is an edge case which seems virtually impossible to eliminate, which is when the user does a Cmd-RightArrow (vs just RightArrow) to go to the end of a line, in which case the caret remains at the end of the previous line even though it is technically at the start of the next line (based on what happens on next input). In any case, it seems that requiring a modifier key has other benefits: it does not require going to top/bottom to switch items, and it maintains the caret position in each item.
-    // navigate to prev/next item by handling arrow keys (without modifiers) that go out of bounds
-    // if ((e.code == "ArrowUp" || e.code == "ArrowDown") && !(e.shiftKey || e.metaKey || e.ctrlKey)) {
-    //   // determine if we are on first or last line
-    //   // see https://stackoverflow.com/a/22446703
-    //   // see https://github.com/component/textarea-caret-position/blob/master/index.js
-    //   let onFirstLine = false;
-    //   let onLastLine = false;
-    //   if (e.code == "ArrowUp" || e.code == "ArrowDown") {
-    //     // if (e.code == "ArrowUp") textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart + 1;
-    //     // else textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart - 1;
-    //     const clone = backdrop.cloneNode(true) as HTMLDivElement;
-    //     clone.style.visibility = "hidden";
-    //     backdrop.parentElement.insertBefore(clone, backdrop);
-    //     (clone.firstChild as HTMLElement).innerHTML =
-    //       escapeHTML(textarea.value.substring(0, textarea.selectionStart)) +
-    //       `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
-    //     const span = clone.querySelector("span");
-    //     const backdropStyle = window.getComputedStyle(backdrop);
-    //     const lineHeight = parseFloat(backdropStyle.lineHeight);
-    //     const verticalPadding = parseFloat(backdropStyle.paddingTop) + parseFloat(backdropStyle.paddingBottom);
-    //     const lines = (backdrop.scrollHeight - verticalPadding) / lineHeight;
-    //     const line = Math.ceil((span.offsetTop - parseFloat(backdropStyle.paddingTop)) / lineHeight);
-    //     // console.debug(line, lines, span.offsetTop, backdrop.scrollHeight);
-    //     onFirstLine = line == 1;
-    //     onLastLine = line == lines;
-    //     clone.remove();
-    //   }
-    //   if (e.code == "ArrowUp") {
-    //     e.stopPropagation();
-    //     e.preventDefault();
-    //     onPrev();
-    //     return;
-    //   }
-    //   if (e.code == "ArrowDown") {
-    //     e.stopPropagation();
-    //     e.preventDefault();
-    //     onNext();
-    //     return;
-    //   }
-    // }
 
     if (e.code == "ArrowUp" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
       e.stopPropagation();
@@ -361,6 +347,7 @@
     if (
       e.code == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
+      textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart >= 2 &&
       prefix.match(/(?:^|\s)[-*+ ] $/) &&
       prefix.match(/ *[-*+ ] $/)[0].length % 2 == 0
@@ -373,22 +360,6 @@
       return;
     }
 
-    // NOTE: this was a bit too loose of a shortcut... it was triggering onEditorDone unexpectedly (e.g. just holding backspace to clear the search bar), and it was not worth making it configurable, because it seems being able to hold backspace should be doable without worrying about deleting an item completely, especially since the edits could be "cancelled". also, deleting an item does not need to be easier than creating one, which requires a modifier key
-    // // delete empty item with backspace
-    // if (e.code == "Backspace" && textarea.value.trim() == "" && textarea.selectionStart == 0) {
-    //   onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
-    //   e.preventDefault();
-    //   return;
-    // }
-
-    // NOTE: this is an alternative we could consider if keyboard based deletion is necessary on mobile, although this would require item to be cleared first, and it is much faster to siply use the delete button
-    // // delete empty item with shift-backspace
-    // if (e.code == "Backspace" && e.shiftKey && textarea.value.trim() == "" && textarea.selectionStart == 0) {
-    //   onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
-    //   e.preventDefault();
-    //   return;
-    // }
-
     // cancel edit with escape
     if (e.code == "Escape") {
       onDone(text /* maintain text */, e, true /* cancelled */);
@@ -398,7 +369,7 @@
 
     // NOTE: this was too easy to trigger accidentally on mobile, so we limit it to search box
     // clear item (from current position to start) with shift-backspace
-    if (e.code == "Backspace" && e.shiftKey) {
+    if (e.code == "Backspace" && e.shiftKey && textarea.selectionStart == textarea.selectionEnd) {
       e.preventDefault();
       if (clearOnShiftBackspace) {
         textarea.selectionStart = 0;
@@ -417,7 +388,7 @@
     }
 
     // insert spaces on Tab
-    if (e.code == "Tab") {
+    if (e.code == "Tab" && textarea.selectionStart == textarea.selectionEnd) {
       e.preventDefault();
       if (!e.shiftKey) {
         // forward tab
@@ -435,10 +406,13 @@
   }
 
   function onKeyUp(e: KeyboardEvent) {
-    // console.debug(e);
-    if (textarea.selectionStart != textarea.selectionEnd) return; // we do not handle selection below here
+    // console.debug("Editor.onKeyUp", e);
     // indent lines created by Enter (based on state recorded in onKeyDown above)
-    if (e.code == "Enter" && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+    if (
+      e.code == "Enter" &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
+      textarea.selectionStart == textarea.selectionEnd
+    ) {
       if (enterStart >= 0) {
         // extend bullet points to new lines
         const bullet = textarea.value.substring(0, enterStart).match(/(?:^|\n) *([-*+] ).*$/);
@@ -479,36 +453,6 @@
     document.execCommand("insertText", false, content);
     e.preventDefault();
     e.stopPropagation();
-  }
-
-  function onKeyPress(e: KeyboardEvent) {
-    // console.debug(e);
-    // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
-    if (
-      (e.code == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
-      (e.code == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
-    ) {
-      e.preventDefault();
-      e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value), e, false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
-      return;
-    }
-    // run item with Alt/Option+Enter
-    if (e.code == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      e.stopPropagation(); // do not propagate to window
-      let selection = {
-        start: textarea.selectionStart,
-        end: textarea.selectionEnd,
-      };
-      onRun();
-      setTimeout(() => {
-        textarea.selectionStart = selection.start;
-        textarea.selectionEnd = selection.end;
-      }, 0);
-      return;
-    }
   }
 
   function onInput() {
@@ -561,7 +505,6 @@
     on:click={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
-    on:keypress={onKeyPress}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}

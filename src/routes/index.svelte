@@ -1132,7 +1132,7 @@
   function onEditorDone(text: string, e: KeyboardEvent = null, cancelled: boolean = false, run: boolean = false) {
     if (cancelled) {
       if (e?.code == "Escape") {
-        textArea(-1).blur();
+        setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange((editorText = ""));
@@ -1148,8 +1148,8 @@
       else sessionHistory[0] = text.trim();
     sessionHistory.unshift(sessionHistory[0]);
 
+    let origText = text; // if text is modified, caret position will be lost
     let time = Date.now(); // default time is current, can be past if undeleting
-    let origText = text.trim();
     let clearLabel = false; // force clear, even if text starts with tag
     // NOTE: default is to create item in editing mode, unless any 2+ modifiers are held
     //       (or edit:true|false is specified by custom command function)
@@ -1696,7 +1696,8 @@
         if (!cancelled) {
           let textarea = textArea(item.index);
           lastEditItem = item.id;
-          lastEditPosition = textarea.selectionStart;
+          lastEditSelectionStart = textarea.selectionStart;
+          lastEditSelectionEnd = textarea.selectionEnd;
         }
         if (!cancelled && (item.time != item.savedTime || item.text != item.savedText)) saveItem(item.id);
         onEditorChange(editorText); // item time and/or text may have changed
@@ -1785,7 +1786,8 @@
   }
 
   let lastEditItem;
-  let lastEditPosition;
+  let lastEditSelectionStart;
+  let lastEditSelectionEnd;
   function resumeLastEdit() {
     if (!lastEditItem) return;
     let index = indexFromId.get(lastEditItem);
@@ -1799,7 +1801,8 @@
       let index = indexFromId.get(lastEditItem);
       if (index == undefined) return;
       textArea(index).focus();
-      textArea(index).selectionStart = lastEditPosition;
+      textArea(index).selectionStart = lastEditSelectionStart;
+      textArea(index).selectionEnd = lastEditSelectionEnd;
     });
   }
 
@@ -2305,9 +2308,11 @@
     console.debug(`index.js executed at ${Math.round(window.performance.now())}ms w/ ${items.length} items`);
   }
 
-  // disable editor shortcuts
-  function onKeyPress(e: KeyboardEvent) {
-    // console.debug(e);
+  let metaKey = false;
+  let shiftKey = false;
+  function onKeyDown(e: KeyboardEvent) {
+    metaKey = e.metaKey;
+    shiftKey = e.shiftKey;
 
     // resume-edit items on Shift-(save shortcut)
     if (
@@ -2332,14 +2337,6 @@
       textArea(-1).focus();
       window.top.scrollTo(0, 0);
     }
-  }
-
-  // track modifier keys for special shortcuts (e.g. in onItemTouch)
-  let metaKey = false;
-  let shiftKey = false;
-  function onKeyDown(e: KeyboardEvent) {
-    metaKey = e.metaKey;
-    shiftKey = e.shiftKey;
   }
   function onKeyUp(e: KeyboardEvent) {
     metaKey = e.metaKey;
@@ -2484,14 +2481,13 @@
       //       programmatic focus except in click handlers, when returning to app, etc
       if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone")) {
         let mindbox = document.getElementById("textarea-mindbox");
-        mindbox.selectionStart = mindbox.value.length;
+        mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
         mindbox.focus();
       }
     });
   </script>{/if}
 
 <svelte:window
-  on:keypress={onKeyPress}
   on:keydown={onKeyDown}
   on:keyup={onKeyUp}
   on:error={onError}
