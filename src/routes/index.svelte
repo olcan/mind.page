@@ -545,7 +545,8 @@
 
   // returns "alternative tags" for dependency analysis and tag search/highlights
   function altTags(tag) {
-    if (tag == "#log") return ["#features/log"];
+    if (tag == "#log") return [];
+    // ["#features/log"]; // visible tag does not need an alt
     else if (tag == "#menu") return ["#features/_menu"];
     else if (tag == "#context") return ["#features/_context"];
     else if (tag == "#init") return ["#features/_init"];
@@ -2070,6 +2071,16 @@
       }
     }
 
+    // if fragment corresponds to an item tag or id, focus on that item immediately ...
+    if (items.length > 0 && location.href.match(/#.+$/)) {
+      const tag = location.href.match(/#.+$/)[0];
+      // if it is a valid item id, then we convert it to name
+      const index = indexFromId.get(tag.substring(1));
+      if (index != undefined) {
+        onEditorChange((editorText = items[index].name));
+      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) onEditorChange((editorText = tag));
+    }
+
     // listen for auth state change if we are not anonymous ...
     if (!anonymous) {
       firebase()
@@ -2471,8 +2482,11 @@
     setTimeout(() => {
       // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
       //       programmatic focus except in click handlers, when returning to app, etc
-      if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone"))
-        document.getElementById("textarea-mindbox").focus();
+      if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone")) {
+        let mindbox = document.getElementById("textarea-mindbox");
+        mindbox.selectionStart = mindbox.value.length;
+        mindbox.focus();
+      }
     });
   </script>{/if}
 

@@ -177,7 +177,7 @@
         js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
         js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
         js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        let out = window["_item"](id).eval(js, {trigger:"macro_"+(macroIndex++)});
+        let out = window["_item"](id).eval(js, { trigger: "macro_" + macroIndex++ });
         // out = out?.replace(/(^|[^\\])\$id/g, "$1" + id);
         // out = out?.replace(/(^|[^\\])\$hash/g, "$1" + hash);
         // out = out?.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
@@ -905,7 +905,7 @@
           console.error("script src not supported yet");
         } else {
           try {
-            window["_item"](id).eval(script.innerHTML, {trigger:"script_"+scriptIndex});
+            window["_item"](id).eval(script.innerHTML, { trigger: "script_" + scriptIndex });
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
             scriptErrors.push(e);
@@ -1236,7 +1236,8 @@
     border-left: 1px solid #242;
   }
   .target {
-    border-left: 1px solid #484;
+    /* border-left: 1px solid #484; */
+    border: 1px solid #484;
   }
   .context,
   .target {
