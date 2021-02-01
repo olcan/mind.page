@@ -451,8 +451,8 @@
         item.timeString = timeString;
         item.timeOutOfOrder =
           index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString;
+        lastTimeString = timeString; // for grouping of subsequent items
       }
-      lastTimeString = timeString;
 
       // calculate item height (zero if dotted, or not yet calculated and default is zero)
       item.outerHeight = item.dotted ? 0 : item.height || defaultItemHeight;
@@ -487,6 +487,7 @@
       // if non-dotted item is first in its column and missing time string, add it now
       if (!item.dotted && columnItems[item.column] < 0 && !item.timeString) {
         item.timeString = timeString;
+        lastTimeString = timeString; // for grouping of subsequent items
         // add time string height now, assuming we are not ignoring item height
         if (item.outerHeight > 0) item.outerHeight += 24;
       }
