@@ -1669,6 +1669,7 @@
         // update indices as needed by onEditorChange
         indexFromId = new Map<string, number>();
         items.forEach((item, index) => indexFromId.set(item.id, index));
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
         deletedItems.unshift({
           time: item.savedTime,
@@ -2207,6 +2208,9 @@
                 let item = items[index];
                 itemTextChanged(index, ""); // clears label, deps, etc
                 items.splice(index, 1);
+                // update indices as needed by onEditorChange
+                indexFromId = new Map<string, number>();
+                items.forEach((item, index) => indexFromId.set(item.id, index));
                 lastEditorChangeTime = 0; // disable debounce even if editor focused
                 onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
                 deletedItems.unshift({
