@@ -2007,15 +2007,18 @@
   }
 
   let initTime = 0;
-  let hiddenItems = ["QbtH06q6y6GY4ONPzq8N" /* welcome item*/];
+  let hiddenItems = new Set([
+    "QbtH06q6y6GY4ONPzq8N" /* welcome item */
+  ]);
   function initialize() {
     // filter hidden items on readonly account
-    if (readonly) items = items.filter((item) => !hiddenItems.includes(item.id));
+    if (readonly) items = items.filter((item) => !hiddenItems.has(item.id));
 
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
+      item.hidden = hiddenItems.has(item.id)
       item.savedId = item.id;
       item.savedText = item.text;
       item.savedTime = item.time;
@@ -2508,6 +2511,7 @@
             bind:focused={item.focused}
             bind:saving={item.saving}
             bind:running={item.running}
+            bind:hidden={item.hidden}
             bind:showLogs={item.showLogs}
             bind:height={item.height}
             bind:time={item.time}

@@ -12,6 +12,7 @@
   export let focused = false;
   export let saving = false;
   export let running = false;
+  export let hidden = false;
   export let showLogs = false;
   // NOTE: required props should not have default values
   export let index: number;
@@ -998,6 +999,7 @@
     class:context
     class:target
     class:running
+    class:hidden
     class:showLogs
     class:bordered={error || warning || running}
     class:runnable
@@ -1078,6 +1080,10 @@
     background: #111;
     border: 1px solid #111;
     box-sizing: border-box;
+  }
+  /* svelte ensures this does not conflict with mark.hidden */
+  .hidden {
+    border: 1px dashed #444;
   }
   .item-menu {
     display: flex;
@@ -1233,11 +1239,11 @@
   }
 
   .context {
-    border-left: 1px solid #242;
+    border-left-color: #242;
   }
   .target {
-    /* border-left: 1px solid #484; */
-    border: 1px solid #484;
+    /* border-left-color: #484; */
+    border-color: #484;
   }
   .context,
   .target {
@@ -1248,14 +1254,14 @@
     border-radius: 5px;
   }
   .warning {
-    border: 1px solid #663;
+    border-color: #663;
   }
   .error {
-    border: 1px solid #633;
+    border-color: #633;
   }
   .running {
-    /* border: 1px solid #246; */
-    border: 1px solid #4af; /* dimmed by .loading */
+    /* border-color: #246; */
+    border-color: #4af; /* dimmed by .loading */
   }
   /* .item.saving {
     opacity: 0.5;
@@ -1425,14 +1431,14 @@
   :global(.item mark.label.unique) {
     font-weight: 700;
   }
+  :global(.item mark.missing) {
+    background: #f88;
+  }
   :global(.item mark.selected) {
     background: #9f9;
   }
   :global(.item mark.secondary-selected) {
     background: #9b9;
-  }
-  :global(.item mark.missing) {
-    background: #f88;
   }
 
   :global(.item mark.hidden) {
@@ -1440,14 +1446,14 @@
     background: #222;
     border: 1px dashed #ddd;
   }
+  :global(.item mark.hidden.missing) {
+    border-color: #f88;
+  }
   :global(.item mark.hidden.selected) {
-    border: 1px dashed #9f9;
+    border-color: #9f9;
   }
   :global(.item mark.hidden.secondary-selected) {
-    border: 1px dashed #9b9;
-  }
-  :global(.item mark.hidden.missing) {
-    border: 1px dashed #f88;
+    border-color: #9b9;
   }
 
   :global(.item span.highlight) {
