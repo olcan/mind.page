@@ -20,6 +20,7 @@
   let editingItems = [];
   let focusedItem = -1;
   let focused = false;
+  let signedin = false;
   let anonymous = false;
   let readonly = false;
 
@@ -910,7 +911,7 @@
   }
 
   function onPopState(e) {
-    readonly = anonymous && !location.href.endsWith("#__anonymous");
+    readonly = anonymous && !location.href.match(/user=anonymous/);
     if (!e?.state) return; // for fragment (#id) hrefs
     // console.debug("pop", e.state);
     // restore editor text and unsaved times
@@ -1158,7 +1159,7 @@
 
     switch (text.trim()) {
       case "/_signout": {
-        if (!firebase().auth().currentUser) {
+        if (!signedin) {
           alert("already signed out");
           return;
         }
@@ -1166,6 +1167,10 @@
         return;
       }
       case "/_signin": {
+        if (signedin) {
+          alert("already signed in");
+          return;
+        }
         signIn();
         return;
       }
@@ -2038,6 +2043,16 @@
     //   .catch(console.error);
   }
 
+  function useAnonymousAccount() {
+    console.log("using anonymous account");
+    user = {
+      photoURL: "/incognito.png",
+      displayName: "Anonymous",
+      uid: "anonymous",
+    };
+    anonymous = true;
+  }
+
   if (isClient) {
     // redirect console.error to save errors until #console is set up in onMount
     let errors = [];
@@ -2051,19 +2066,16 @@
     // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
     if (!user && localStorage.getItem("user")) {
       user = JSON.parse(localStorage.getItem("user"));
-      console.debug("restored user from local storage");
+      console.debug(`restored user ${user.email} from local storage`);
+      if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("signin_pending")) {
       user = null;
     } else {
+      useAnonymousAccount();
       document.cookie = "__session=;max-age=0"; // clear just in case
-      user = {
-        photoURL: "/incognito.png",
-        displayName: "Anonymous",
-        uid: "anonymous",
-      };
     }
     anonymous = user?.uid == "anonymous";
-    readonly = anonymous && !location.href.endsWith("#__anonymous");
+    readonly = anonymous && !location.href.match(/user=anonymous/);
 
     // if items were returned from server, confirm user, then initialize if valid
     if (items.length > 0) {
@@ -2091,33 +2103,36 @@
       } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) onEditorChange((editorText = tag));
     }
 
-    // listen for auth state change if we are not anonymous ...
-    if (!anonymous) {
-      firebase()
-        .auth()
-        .onAuthStateChanged((authUser) => {
-          // console.debug("onAuthStateChanged", user, authUser);
-          resetUser(); // clean up first
-          if (!authUser) return;
-          user = authUser;
-          console.log("signed in", user.email);
-          localStorage.setItem("user", JSON.stringify(user));
-          anonymous = readonly = false; // just in case (should already be false)
+    // listen for auth state change ...
+    firebase()
+      .auth()
+      .onAuthStateChanged((authUser) => {
+        // console.debug("onAuthStateChanged", user, authUser);
+        if (!authUser) return;
+        resetUser(); // clean up first
+        user = authUser;
+        console.log("signed in", user.email);
+        localStorage.setItem("user", JSON.stringify(user));
+        anonymous = readonly = false; // just in case (should already be false)
+        signedin = true;
 
-          // set up server-side session cookie
-          // store user's ID token as a 1-hour __session cookie to send to server for preload
-          // NOTE: __session is the only cookie allowed by firebase for efficient caching
-          //       (see https://stackoverflow.com/a/44935288)
-          user
-            .getIdToken(false /*force refresh*/)
-            .then((token) => {
-              document.cookie = "__session=" + token + ";max-age=3600";
-            })
-            .catch(console.error);
+        // set up server-side session cookie
+        // store user's ID token as a 1-hour __session cookie to send to server for preload
+        // NOTE: __session is the only cookie allowed by firebase for efficient caching
+        //       (see https://stackoverflow.com/a/44935288)
+        user
+          .getIdToken(false /*force refresh*/)
+          .then((token) => {
+            document.cookie = "__session=" + token + ";max-age=3600";
+          })
+          .catch(console.error);
 
-          initFirebaseRealtime();
-        });
-    }
+        // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+        //       (this is the only case where user != firebase().auth().currentUser)
+        if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
+
+        initFirebaseRealtime();
+      });
 
     // Visual viewport resize/scroll handlers ...
     // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
@@ -2149,7 +2164,7 @@
 
     let firstSnapshot = true;
     function initFirebaseRealtime() {
-      if (!user || user.uid == "anonymous") return; // should not be invoked for anonymous
+      if (!user || !firebase().auth().currentUser) return; // need user object and auth
 
       // start listening for remote changes
       // (also initialize if items were not returned by server)
@@ -2393,10 +2408,11 @@
                 id="user"
                 class:anonymous
                 class:readonly
+                class:signedin
                 src={user.photoURL}
                 alt={user.displayName || user.email}
                 title={user.displayName || user.email}
-                on:click={() => (!user.email ? signIn() : signOut())}
+                on:click={() => (!signedin ? signIn() : signOut())}
               />
             {/if}
           </div>
@@ -2565,6 +2581,9 @@
   }
   #user.anonymous:not(.readonly) {
     background: red;
+  }
+  #user.anonymous:not(.readonly).signedin {
+    background: green;
   }
   #console {
     display: none;

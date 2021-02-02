@@ -38,7 +38,7 @@ process["server-preload"] = async (page, session) => {
   let user = null;
   if (session.cookie == "signin_pending") {
     return {}; // do not waste time retrieving data
-  } else if (!session.cookie) {
+  } else if (!session.cookie || page.query.user == "anonymous") {
     user = { uid: "anonymous" };
   } else {
     // uncomment this to disable server-side init for non-anonymous accounts
