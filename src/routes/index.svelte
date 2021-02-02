@@ -2004,7 +2004,11 @@
   }
 
   let initTime = 0;
+  let hiddenItems = ["QbtH06q6y6GY4ONPzq8N" /* welcome item*/];
   function initialize() {
+    // filter hidden items on readonly account
+    if (readonly) items = items.filter((item)=>!hiddenItems.includes(item.id))
+
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
