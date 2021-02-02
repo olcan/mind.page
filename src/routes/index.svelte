@@ -74,7 +74,8 @@
               email: user.email,
               name: user.displayName?.match(/^\S*/)[0] || user.email,
               full_name: user.displayName || user.email,
-              photo_url: user.photoURL,
+              image_url: user.photoURL,
+              image: `<img src="${user.photoURL}" style="width:20px;height:20px;border-radius:50%">`,
               uid: user.uid,
             },
     });
@@ -2007,9 +2008,7 @@
   }
 
   let initTime = 0;
-  let hiddenItems = new Set([
-    "QbtH06q6y6GY4ONPzq8N" /* welcome item */
-  ]);
+  let hiddenItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   function initialize() {
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !hiddenItems.has(item.id));
@@ -2018,7 +2017,7 @@
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
-      item.hidden = hiddenItems.has(item.id)
+      item.hidden = hiddenItems.has(item.id);
       item.savedId = item.id;
       item.savedText = item.text;
       item.savedTime = item.time;
