@@ -67,7 +67,16 @@
   // define window properties and functions
   if (isClient) {
     Object.defineProperty(window, "_user", {
-      get: () => (user ? _.pick(user, ["email", "displayName", "photoURL", "uid"]) : null),
+      get: () =>
+        !user
+          ? null
+          : {
+              email: user.email,
+              name: user.displayName?.match(/^\S*/)[0] || user.email,
+              full_name: user.displayName || user.email,
+              photo_url: user.photoURL,
+              uid: user.uid,
+            },
     });
     Object.defineProperty(window, "_stack", { get: () => evalStack.slice() }); // return copy not reference
     Object.defineProperty(window, "_this", { get: () => _item(evalStack[evalStack.length - 1]) });
@@ -622,7 +631,7 @@
         )
     ).filter((t) => t);
     // disable search for text starting with '/', to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
-    if (text.startsWith("/")) terms = [];
+    // if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsContext
     let termsContext = _.flatten(tags.all.map(tagPrefixes));
@@ -1143,11 +1152,14 @@
 
     // reset history index, update entry 0 and unshift duplicate entry
     // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
-    sessionHistoryIndex = 0;
-    if (sessionHistory[0] != text.trim())
-      if (sessionHistory.length == 0) sessionHistory = [text.trim()];
-      else sessionHistory[0] = text.trim();
-    sessionHistory.unshift(sessionHistory[0]);
+    if (e) {
+      // otherwise it is a "synthetic" call that is not added to history
+      sessionHistoryIndex = 0;
+      if (sessionHistory[0] != text.trim())
+        if (sessionHistory.length == 0) sessionHistory = [text.trim()];
+        else sessionHistory[0] = text.trim();
+      sessionHistory.unshift(sessionHistory[0]);
+    }
 
     let origText = text; // if text is modified, caret position will be lost
     let time = Date.now(); // default time is current, can be past if undeleting
@@ -1155,7 +1167,7 @@
     // NOTE: default is to create item in editing mode, unless any 2+ modifiers are held
     //       (or edit:true|false is specified by custom command function)
     //       (some modifier combinations, e.g. Ctrl+Alt, may be blocked by browsers)
-    let editing = (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
+    let editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
 
     switch (text.trim()) {
       case "/_signout": {
@@ -1232,6 +1244,21 @@
         });
         return;
       }
+      case "/_welcome": {
+        firestore()
+          .collection("items")
+          .doc("QbtH06q6y6GY4ONPzq8N")
+          .get()
+          .then((doc) => {
+            // _item("#Welcome").write(doc.data().text, "" /*whole item*/);
+            onEditorDone(doc.data().text);
+          })
+          .catch(console.error);
+        // text = "#Welcome";
+        // editing = false;
+        // break;
+        return;
+      }
       case "/_tweet": {
         if (editingItems.length == 0) {
           alert("/_tweet: no item selected");
@@ -1278,7 +1305,18 @@
             .replace(/^\/\w+/, "")
             .trim()
             .replace(/`/g, "\\`");
-          if (_item("#commands" + cmd)) {
+          if (cmd == "/_example") {
+            firestore()
+              .collection("items")
+              .where("user", "==", "anonymous")
+              .orderBy("time", "desc")
+              .get()
+              .then((examples) => {
+                alert(`retrieved ${examples.docs.length} example items`);
+              })
+              .catch(console.error);
+            return;
+          } else if (_item("#commands" + cmd)) {
             try {
               const obj = _item("#commands" + cmd).eval(`run(\`${args}\`)`, { trigger: "command" });
               if (!obj) {
@@ -1310,7 +1348,7 @@
         } else if (text.match(/^\/\s+/s)) {
           // clear /(space) as a mechanism to disable search
           // (onEditorChange already ignores text starting with /)
-          text = text.replace(/^\/\s+/s, "");
+          // text = text.replace(/^\/\s+/s, "");
         }
         // editing = text.trim().length == 0; // if text is empty, continue editing
       }
@@ -2182,9 +2220,11 @@
               //   )}ms w/ ${items.length} items`
               // );
               setTimeout(() => {
-                console.debug(`${items.length} items synchronized at ${Math.round(window.performance.now())}ms`);
+                console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
                 if (!initTime) initialize();
                 firstSnapshot = false;
+                // if account is empty, fetch the welcome item from the anonymous account ...
+                if (items.length == 0) onEditorDone("/_welcome");
               });
             }
             snapshot.docChanges().forEach(function (change) {
