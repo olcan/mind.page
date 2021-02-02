@@ -946,6 +946,9 @@
 
   function signOut() {
     if (!firebase().auth().currentUser) return; // not logged in yet, so ignore click for now
+    // blur active element as caret can show through loading div
+    // (can require dispatch on chrome if triggered from active element)
+    setTimeout(() => (document.activeElement as HTMLElement).blur());
     resetUser();
     firebase()
       .auth()
@@ -2007,7 +2010,7 @@
   let hiddenItems = ["QbtH06q6y6GY4ONPzq8N" /* welcome item*/];
   function initialize() {
     // filter hidden items on readonly account
-    if (readonly) items = items.filter((item)=>!hiddenItems.includes(item.id))
+    if (readonly) items = items.filter((item) => !hiddenItems.includes(item.id));
 
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
@@ -2067,6 +2070,10 @@
   }
 
   function signIn() {
+    if (firebase().auth().currentUser) return; // already signed in, must sign out first
+    // blur active element as caret can show through loading div
+    // (can require dispatch on chrome if triggered from active element)
+    setTimeout(() => (document.activeElement as HTMLElement).blur());
     resetUser();
     let provider = new window.firebase.auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
