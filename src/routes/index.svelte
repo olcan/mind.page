@@ -2604,18 +2604,18 @@
             </div>
           {/if}
         {:else if item.column == column && item.index == hideIndex}
-          {#each tailIndices as tail, count}
+          {#each tailIndices as tail}
             {#if hideIndex < tail.index}
               <div class="show-more" on:click={() => (hideIndex = tail.index)}>
                 <span class="show-time">{tail.timeString}</span>
-                ▾
+                show older items
                 <span class="show-count">{tail.index}</span>
               </div>
             {/if}
           {/each}
           <div class="show-more" on:click={() => (hideIndex = Infinity)}>
             <span class="show-time">{oldestTimeString}</span>
-            ◾︎
+            show all items
             <span class="show-count">{items.length}</span>
           </div>
         {/if}
@@ -2843,10 +2843,13 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    color: #999;
+    /* color: #999; */
+    /* background: #222; */
+    color: black;
+    background: #999;
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
-    background: #222;
+    font-weight: 500;
     border-radius: 4px;
     cursor: pointer;
     margin: 4px 0;
@@ -2859,6 +2862,10 @@
   .show-more .show-count {
     position: absolute;
     right: 10px;
+  }
+
+  .show-more + .show-more {
+    display: none;
   }
 
   /* override italic comment style of sunburst */
