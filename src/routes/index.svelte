@@ -2624,9 +2624,9 @@
     flex-grow: 1;
   }
   #user {
-    height: 44px; /* must match height of single-line editor (also see @media query below) */
-    width: 44px;
-    min-width: 44px; /* seems necessary to ensure full width inside flex */
+    height: 46px; /* match focused height of single-line editor (also see @media query below) */
+    width: 46px;
+    min-width: 46px; /* seems necessary to ensure full width inside flex */
     margin-right: 4px;
     border-radius: 50%;
     background: #222;
@@ -2723,9 +2723,15 @@
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
     /* fill full height of page even if no items are shown */
-    height: 100%;
+    /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
+    min-height: 100%;
     min-height: -webkit-fill-available;
   }
+  :global(#sapper) {
+    min-height: 100%;
+    min-height: -webkit-fill-available;
+  }
+
   .column {
     flex: 1;
     /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
@@ -2787,9 +2793,9 @@
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     #user {
-      height: 41px; /* must match height of single-line editor (on narrow window) */
-      width: 41px;
-      min-width: 41px;
+      height: 45px; /* must match height of single-line editor (on narrow window) */
+      width: 45px;
+      min-width: 45px;
     }
   }
 </style>

@@ -9,3 +9,12 @@ body {
   /* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
   touch-action: manipulation;
 }
+/* this fixes odd initial scroll on opening new tab, see https://stackoverflow.com/a/35675094 */
+/* not completely, on a small page we still have initial render behind safari translucent header */
+/* before it scrolls up, but there appears to be no way to fix or even detect this behavior */
+html,
+body {
+  -webkit-overflow-scrolling: touch !important;
+  overflow: auto !important;
+  height: 100% !important;
+}
