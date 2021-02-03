@@ -585,6 +585,7 @@
   let textLength = 0;
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
+  let replaceStateOnEditorChange = false;
   function onEditorChange(text: string) {
     // keep history entry 0 updated, reset index on changes
     if (text != sessionHistory[sessionHistoryIndex]) {
@@ -677,8 +678,8 @@
     items.forEach((item, index) => {
       textLength += item.text.length;
 
-      // match query terms against visible tags in item
-      item.tagMatches = _.intersection(item.tagsVisible, terms).length;
+      // match query terms against visible tags (+prefixes) in item
+      item.tagMatches = _.intersection(item.tagsVisibleExpanded, terms).length;
 
       // prefix-match first query term against item header text
       // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
@@ -773,10 +774,11 @@
         final: !editorText || finalizeStateOnEditorChange,
       };
       // console.debug(history.state.final ? "push" : "replace", state);
-      if (history.state.final) history.pushState(state, editorText);
+      if (history.state.final && !replaceStateOnEditorChange) history.pushState(state, editorText);
       else history.replaceState(state, editorText);
     }
     finalizeStateOnEditorChange = false; // processed above
+    replaceStateOnEditorChange = false; // processed above
 
     // insert dummy item with time=now to determine (below) index after which items are ranked purely by time
     items.push({
@@ -1140,6 +1142,10 @@
       prevTagsExpanded.forEach((tag) => tagCounts.set(tag, tagCounts.get(tag) - 1));
       item.tagsExpanded.forEach((tag) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
     }
+    item.tagsVisibleExpanded = item.tagsVisible;
+    item.tagsVisible.forEach((tag) => {
+      item.tagsVisibleExpanded = item.tagsVisibleExpanded.concat(tagPrefixes(tag));
+    });
 
     if (update_deps) {
       const prevDeps = item.deps || [];
@@ -2208,8 +2214,14 @@
       // if it is a valid item id, then we convert it to name
       const index = indexFromId.get(tag.substring(1));
       if (index != undefined) {
+        replaceStateOnEditorChange = true; // replace state
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange((editorText = items[index].name));
-      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) onEditorChange((editorText = tag));
+      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
+        replaceStateOnEditorChange = true; // replace state
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = tag));
+      }
     }
 
     // listen for auth state change ...
@@ -2793,6 +2805,8 @@
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
     min-height: 100%;
     min-height: -webkit-fill-available;
+    /* bottom padding for easier tapping on last item */
+    padding-bottom: 200px;
   }
   :global(#sapper) {
     min-height: 100%;
