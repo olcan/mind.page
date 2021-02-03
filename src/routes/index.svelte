@@ -864,10 +864,9 @@
     // determine "tail" index after which items are ordered purely by time
     let tailIndex = items.findIndex((item) => item.id === null);
     items.splice(tailIndex, 1);
+    tailIndex = Math.max(1, tailIndex);
     let tailTime = items[tailIndex]?.time || 0;
-    // console.debug("tail index", tailIndex, "time",
-    //   (Date.now() - tailTime / (3600 * 1000));
-    hideIndex = Math.max(1, tailIndex);
+    hideIndex = tailIndex;
 
     // determine other non-trivial "tail times" <= tailTime but > oldestTime
     const tailTime24h = Date.now() - 24 * 3600 * 1000;
@@ -875,17 +874,17 @@
     const tailTime30d = Date.now() - 30 * 24 * 3600 * 1000;
     tailIndices = [];
     if (tailTime24h <= tailTime) {
-      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
+      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
+      // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
+      if (matchingItemCount == 0) hideIndex = extendedTailIndex;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
         tailIndices.push({ index: extendedTailIndex, timeString: "24h", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
-        // if no matching items, show last 24h
-        if (matchingItemCount == 0) hideIndex = tailIndex;
       }
     }
     if (tailTime7d <= tailTime) {
-      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
+      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
         tailIndices.push({ index: extendedTailIndex, timeString: "7d", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
@@ -893,7 +892,7 @@
       }
     }
     if (tailTime30d <= tailTime) {
-      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
+      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
         tailIndices.push({ index: extendedTailIndex, timeString: "30d", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
