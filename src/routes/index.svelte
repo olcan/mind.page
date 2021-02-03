@@ -533,10 +533,8 @@
         const div = document.querySelector("#super-container-" + items[topMovedIndex].id);
         if (!div) return; // item hidden
         const itemTop = (div as HTMLElement).offsetTop;
-        if (itemTop < window.scrollY) {
-          // console.debug("scrolling up", itemTop, window.scrollY);
-          window.top.scrollTo(0, itemTop);
-        }
+        console.debug(itemTop, window.scrollY);
+        if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
       });
     }
   }
