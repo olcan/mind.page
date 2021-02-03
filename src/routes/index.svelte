@@ -408,8 +408,8 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
-  let maxIndexToShowDefault = 50;
-  let maxIndexToShow = maxIndexToShowDefault;
+  let hideIndex = Infinity;
+  let tailIndices = [];
   let newestTime = 0;
   let oldestTime = Infinity;
   let oldestTimeString = "";
@@ -533,7 +533,6 @@
         const div = document.querySelector("#super-container-" + items[topMovedIndex].id);
         if (!div) return; // item hidden
         const itemTop = (div as HTMLElement).offsetTop;
-        console.debug(itemTop, window.scrollY);
         if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
       });
     }
@@ -608,7 +607,6 @@
     }
     // console.debug("onEditorChange", editorText);
     lastEditorChangeTime = Infinity; // force minimum wait for next change
-    maxIndexToShow = maxIndexToShowDefault; // reset item truncation
 
     text = text.toLowerCase().trim();
     const tags = parseTags(text);
@@ -780,6 +778,26 @@
     }
     finalizeStateOnEditorChange = false; // processed above
 
+    // insert dummy item with time=now to determine (below) index after which items are ranked purely by time
+    items.push({
+      dotted: false,
+      dotTerm: "",
+      pinned: false,
+      pinTerm: "",
+      pinnedMatch: false,
+      pinnedMatchTerm: "",
+      uniqueLabel: "",
+      editing: false,
+      tagMatches: 0,
+      prefixMatch: false,
+      matchingTerms: [],
+      matchingTermsSecondary: [],
+      missingTags: [],
+      hasError: false,
+      time: Date.now(),
+      id: null,
+    });
+
     // returns position of minimum non-negative number, or -1 if none found
     function min_pos(xJ) {
       let jmin = -1;
@@ -840,6 +858,48 @@
         // time (most recent first)
         b.time - a.time
     );
+
+    // determine "tail" index after which items are ordered purely by time
+    let tailIndex = items.findIndex((item) => item.id === null);
+    items.splice(tailIndex, 1);
+    let tailTime = items[tailIndex]?.time || 0;
+    // console.debug("tail index", tailIndex, "time",
+    //   (Date.now() - tailTime / (3600 * 1000));
+    hideIndex = Math.max(1, tailIndex);
+
+    // determine other non-trivial "tail times" <= tailTime but > oldestTime
+    const tailTime24h = Date.now() - 24 * 3600 * 1000;
+    const tailTime7d = Date.now() - 7 * 24 * 3600 * 1000;
+    const tailTime30d = Date.now() - 30 * 24 * 3600 * 1000;
+    tailIndices = [];
+    if (tailTime24h <= tailTime) {
+      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
+      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
+        tailIndices.push({ index: extendedTailIndex, timeString: "24h", time: items[extendedTailIndex].time });
+        tailIndex = extendedTailIndex;
+        tailTime = items[extendedTailIndex].time;
+        // if no matching items, show last 24h
+        if (matchingItemCount == 0) hideIndex = tailIndex;
+      }
+    }
+    if (tailTime7d <= tailTime) {
+      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
+      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
+        tailIndices.push({ index: extendedTailIndex, timeString: "7d", time: items[extendedTailIndex].time });
+        tailIndex = extendedTailIndex;
+        tailTime = items[extendedTailIndex].time;
+      }
+    }
+    if (tailTime30d <= tailTime) {
+      const extendedTailIndex = hideIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
+      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
+        tailIndices.push({ index: extendedTailIndex, timeString: "30d", time: items[extendedTailIndex].time });
+        tailIndex = extendedTailIndex;
+        tailTime = items[extendedTailIndex].time;
+      }
+    }
+    // console.debug(tailIndices);
+
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     setTimeout(updateDotted, 0); // show/hide dotted/undotted items
@@ -1464,8 +1524,8 @@
 
   function focusOnNearestEditingItem(index: number) {
     // console.debug("focusOnNearestEditingItem", index, editingItems);
-    let near = Math.min(...editingItems.filter((i) => i > index && i < maxIndexToShow));
-    if (near == Infinity) near = Math.max(...[-1, ...editingItems.filter((i) => i < maxIndexToShow)]);
+    let near = Math.min(...editingItems.filter((i) => i > index && i < hideIndex));
+    if (near == Infinity) near = Math.max(...[-1, ...editingItems.filter((i) => i < hideIndex)]);
     focusedItem = near;
     // if (near == -1) return; // do not auto-focus on editor
     setTimeout(() => {
@@ -1844,7 +1904,7 @@
     if (!lastEditItem) return;
     let index = indexFromId.get(lastEditItem);
     if (index == undefined) return;
-    if (index >= maxIndexToShow) return;
+    if (index >= hideIndex) return;
     if (items[index].editing) return;
     editItem(index);
     lastEditorChangeTime = 0; // force immediate update
@@ -1901,7 +1961,7 @@
       });
       return;
     }
-    if (focusedItem + inc >= Math.min(maxIndexToShow, items.length)) return;
+    if (focusedItem + inc >= Math.min(hideIndex, items.length)) return;
     const index = focusedItem;
     if (!items[index + inc].editing) {
       if (items[index + inc].pinned || items[index + inc].saving || items[index + inc].running) {
@@ -2490,7 +2550,7 @@
       {/if}
 
       {#each items as item (item.id)}
-        {#if item.column == column && item.index < maxIndexToShow}
+        {#if item.column == column && item.index < hideIndex}
           <Item
             onEditing={onItemEditing}
             onFocused={onItemFocused}
@@ -2543,11 +2603,20 @@
               <hr />
             </div>
           {/if}
-        {:else if item.column == column && item.index == maxIndexToShow}
-          <div class="show-all" on:click={() => (maxIndexToShow = Infinity)}>
-            show all
-            {items.length}
-            items
+        {:else if item.column == column && item.index == hideIndex}
+          {#each tailIndices as tail, count}
+            {#if hideIndex < tail.index}
+              <div class="show-more" on:click={() => (hideIndex = tail.index)}>
+                <span class="show-time">{tail.timeString}</span>
+                ▾
+                <span class="show-count">{tail.index}</span>
+              </div>
+            {/if}
+          {/each}
+          <div class="show-more" on:click={() => (hideIndex = Infinity)}>
+            <span class="show-time">{oldestTimeString}</span>
+            ◾︎
+            <span class="show-count">{items.length}</span>
           </div>
         {/if}
       {/each}
@@ -2769,18 +2838,27 @@
     margin-top: -24px;
   }
 
-  .show-all {
+  .show-more {
+    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
     color: #999;
-    height: 40px;
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
     background: #222;
     border-radius: 4px;
     cursor: pointer;
     margin: 4px 0;
+    height: 40px;
+  }
+  .show-more .show-time {
+    position: absolute;
+    left: 10px;
+  }
+  .show-more .show-count {
+    position: absolute;
+    right: 10px;
   }
 
   /* override italic comment style of sunburst */
