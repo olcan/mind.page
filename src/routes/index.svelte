@@ -614,7 +614,8 @@
     let terms = _.uniq(
       text
         .split(/\s+/)
-        .concat(tags.all)
+        .concat(tags.raw)
+        .concat(tags.all) // include visible version of hidden tags
         .concat(_.flattenDeep(tags.all.map(altTags)))
         // .concat(_.flatten(tags.all.map(tagPrefixes)))
         // NOTE: for tags that do not match (or not sufficiently), we allow matching tag as non-tag with many variations, but we still prioritize/highlight tag matches and tag prefix (secondary) matches
@@ -699,8 +700,8 @@
       // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
       item.matchingTerms = terms.filter((t) => t[0] == "#" && item.tagsAlt.findIndex((tag) => tag.startsWith(t)) >= 0);
 
-      // match non-tag terms (anywhere in text)
-      item.matchingTerms = item.matchingTerms.concat(terms.filter((t) => t[0] != "#" && item.lctext.includes(t)));
+      // match all terms (tag or non-tag) anywhere in text
+      item.matchingTerms = item.matchingTerms.concat(terms.filter((t) => item.lctext.includes(t)));
 
       // match regex:* terms as regex
       item.matchingTerms = item.matchingTerms.concat(
@@ -724,10 +725,9 @@
           ),
           terms.filter(
             (t) =>
-              t[0] != "#" &&
-              (item.depsString.toLowerCase().includes(t) ||
-                item.dependentsString.toLowerCase().includes(t) ||
-                item.label.includes(t)) // to prevent deps/dependent matches dominating labeled item
+              item.depsString.toLowerCase().includes(t) ||
+              item.dependentsString.toLowerCase().includes(t) ||
+              item.label.includes(t) // to prevent deps/dependent matches dominating labeled item
           )
         )
       );
