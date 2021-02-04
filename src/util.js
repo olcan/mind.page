@@ -116,7 +116,7 @@ export function parseTags(text) {
 }
 
 export function renderTag(tag) {
-  return tag.replace(/^#\/?/, "");
+  return tag.replace(/^#_?\/?/, "");
 }
 
 // export function regexEscape(str) {

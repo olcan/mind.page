@@ -273,21 +273,6 @@
     );
     const isMenu = tags.includes("#_menu");
 
-    // remove hidden tags (unless missing or matching) and trim
-    // NOTE: we trim all whitespace before deps-and-dependents div and before any *_log blocks
-    //       (since *_log blocks are auto-removed and re-appended at the end, then auto-hidden if _log)
-    //       (for other blocks, a trailing backslash can be used to eliminate the line break)
-    text = text
-      .replace(tagRegex, (m, pfx, tag) => {
-        if (!tag.startsWith("#_")) return m;
-        const lctag = tag.toLowerCase().replace(/^#_/, "#");
-        return missingTags.has(lctag) || matchingTerms.has(lctag) // || matchingTermsSecondary.has(lctag)
-          ? pfx + tag
-          : pfx;
-      })
-      .trimStart()
-      .replace(/\s+($|\n<div class="deps-and-dependents">|\n```\w*?_log\n)/g, "$1");
-
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = (text) =>
       text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
@@ -689,6 +674,7 @@
     let highlightClosure = () => {
       if (!itemdiv) return;
       if (highlightTerms != highlightTermsAtDispatch) return;
+      // remove previous highlights or related elements
       itemdiv.querySelectorAll("span.highlight").forEach((span) => {
         // span.replaceWith(span.firstChild);
         span.outerHTML = span.innerHTML;
@@ -696,6 +682,10 @@
       itemdiv.querySelectorAll("mark div").forEach((spacer) => {
         spacer.remove();
       });
+      itemdiv.querySelectorAll("mark.matching").forEach((mark) => {
+        mark.classList.remove("matching");
+      });
+
       let terms = highlightTerms.split(" ").filter((t) => t);
       if (label) {
         terms.slice().forEach((term: string) => {
@@ -754,6 +744,8 @@
           word.appendChild(document.createTextNode(m[2]));
           word.className = "highlight";
           if (node.parentElement.tagName == "MARK") {
+            // ensure tag visible
+            node.parentElement.classList.add("matching");
             // NOTE: this becomes stale when the match goes away
             // node.parentElement.style.background = "white";
             // adjust margin/padding and border radius for in-tag (in-mark) matches
@@ -768,7 +760,10 @@
             // left/right margin matches span.highlight css
             // word.style.paddingLeft = word.style.paddingRight = "1px";
             // word.style.marginLeft = word.style.marginRight = "-1px";
-            if (tagText.lastIndexOf(m[2]) == 0) {
+            const prefixMatch = tagText.lastIndexOf(m[2]) == 0;
+            const suffixMatch = text.length == 0;
+
+            if (prefixMatch) {
               // prefix match (rounded on left)
               word.style.paddingLeft = tagStyle.paddingLeft;
               word.style.marginLeft = "-" + tagStyle.paddingLeft;
@@ -793,11 +788,13 @@
                 spacer.style.marginBottom = "-" + tagStyle.paddingTop;
                 spacer.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
                 spacer.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
-                let rightSpacer = node.parentElement.appendChild(document.createElement("div"));
-                rightSpacer.style.flexGrow = "1";
+                if (!suffixMatch) {
+                  let rightSpacer = node.parentElement.appendChild(document.createElement("div"));
+                  rightSpacer.style.flexGrow = "1";
+                }
               }
             }
-            if (text.length == 0) {
+            if (suffixMatch) {
               // suffix match (rounded on right)
               word.style.paddingRight = tagStyle.paddingRight;
               word.style.marginRight = "-" + tagStyle.paddingRight;
@@ -818,11 +815,13 @@
                 spacer.style.marginBottom = "-" + tagStyle.paddingTop;
                 spacer.style.borderTopRightRadius = tagStyle.borderTopRightRadius;
                 spacer.style.borderBottomRightRadius = tagStyle.borderBottomRightRadius;
-                let leftSpacer = node.parentElement.insertBefore(
-                  document.createElement("div"),
-                  node.parentElement.firstChild
-                );
-                leftSpacer.style.flexGrow = "1";
+                if (!prefixMatch) {
+                  let leftSpacer = node.parentElement.insertBefore(
+                    document.createElement("div"),
+                    node.parentElement.firstChild
+                  );
+                  leftSpacer.style.flexGrow = "1";
+                }
               }
             }
           }
@@ -1446,6 +1445,13 @@
     background: #222;
     border: 1px dashed #ddd;
   }
+  :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) {
+    display: none;
+  }
+  :global(.item br:last-child) {
+    display: none;
+  }
+
   :global(.item mark.hidden.missing) {
     border-color: #f88;
   }

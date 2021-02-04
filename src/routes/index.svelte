@@ -719,12 +719,15 @@
             (t) =>
               item.tagsExpanded.includes(t) ||
               item.depsString.toLowerCase().includes(t) ||
-              item.dependentsString.toLowerCase().includes(t)
+              item.dependentsString.toLowerCase().includes(t) ||
+              item.label.includes(t) // to prevent deps/dependent matches dominating labeled item
           ),
           terms.filter(
             (t) =>
               t[0] != "#" &&
-              (item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t))
+              (item.depsString.toLowerCase().includes(t) ||
+                item.dependentsString.toLowerCase().includes(t) ||
+                item.label.includes(t)) // to prevent deps/dependent matches dominating labeled item
           )
         )
       );
@@ -1079,7 +1082,7 @@
     item.tagsRaw = tags.raw;
     item.tagsAlt = _.uniq(_.flattenDeep(item.tags.concat(item.tags.map(altTags))));
     item.tagsHiddenAlt = _.uniq(_.flattenDeep(item.tagsHidden.concat(item.tagsHidden.map(altTags))));
-    // item.log = item.tags.includes("#log"); (must be label, see below)
+    item.log = item.tags.includes("#log"); // can be visible or hidden
     item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
     item.async = item.tagsRaw.includes("#_async");
@@ -1090,11 +1093,16 @@
     item.dotted = pintags.findIndex((t) => t.match(/^#_pin\/dot(?:\/|$)/)) >= 0;
     item.dotTerm = pintags.filter((t) => t.match(/^#_pin\/dot(?:\/|$)/))[0] || "";
 
-    // if item stats with a visible tag, it is taken as a "label" for the item
-    // (we allow some tags/macros to precede the label tag for styling purposes)
+    // if item stats with #tag or #_tag, it is taken as a "label" for the item
+    // (we allow some html tags/macros to precede the label tag for styling purposes)
+    // (we make starting #_label visible as #label in header to allow prefix matching)
     const prevLabel = item.label;
-    item.header = item.lctext.replace(/^<.*>\s+#/, "#").match(/^.*?(?:\n|$)/)[0];
-    item.label = item.header.startsWith(item.tagsVisible[0]) ? item.tagsVisible[0] : "";
+    item.header = item.lctext
+      .replace(/^<.*>\s+#/, "#")
+      .replace(/^#_/, "#")
+      .match(/^.*?(?:\n|$)/)[0];
+    item.label = item.header.startsWith(item.tags[0]) ? item.tags[0] : "";
+    // if (item.label && item.label != item.tagsVisible[0]) console.warn("hidden label", item.label);
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0] : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
@@ -1126,7 +1134,6 @@
       let pos;
       while ((pos = label.lastIndexOf("/")) >= 0) item.labelPrefixes.push((label = label.slice(0, pos)));
     }
-    item.log = item.label == "#log";
     // name is always unique and either unique label or id:<id>
     item.name = item.labelUnique ? item.labelText : "id:" + item.id;
 
@@ -1869,7 +1876,7 @@
 
   function onItemTouch(index: number) {
     if (items[index].log) {
-      alert("#log item can not be moved up");
+      alert("#log item can not be moved");
       return;
     } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
@@ -2087,6 +2094,7 @@
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
       item.tagMatches = 0;
+      item.labelMatch = false;
       item.prefixMatch = false;
       item.pinnedMatch = false;
       item.pinnedMatchTerm = "";
