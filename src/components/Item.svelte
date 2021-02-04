@@ -1241,15 +1241,12 @@
     border-left-color: #242;
   }
   .target {
-    /* border-left-color: #484; */
     border-color: #484;
   }
-  .context,
-  .target {
+  .context {
     border-radius: 0 5px 5px 0;
   }
-  .context.editing,
-  .target.editing {
+  .context.editing {
     border-radius: 5px;
   }
   .warning {
