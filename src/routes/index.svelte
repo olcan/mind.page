@@ -2607,7 +2607,8 @@
           {#if item.nextColumn >= 0}
             <div class="section-separator">
               <hr />
-              {item.index + 2}<span class="arrows">{item.arrows}</span>{#if item.nextItemInColumn >= 0}
+              {item.index + 2}<span class="arrows">{item.arrows}</span
+              >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
                 &nbsp;
                 {item.nextItemInColumn + 1}<span class="arrows">↓</span>
               {/if}
