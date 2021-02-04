@@ -643,7 +643,7 @@
 
     // determine "listing" item w/ unique label matching first term
     // (in reverse order w/ listing item label last so larger is better and missing=-1)
-    if (idsFromLabel.get(terms[0])?.length == 1) {
+    if (terms[0] != "#log" && idsFromLabel.get(terms[0])?.length == 1) {
       listingItemIndex = indexFromId.get(idsFromLabel.get(terms[0])[0]);
       let item = items[listingItemIndex];
       context = [item.label].concat(item.labelPrefixes);
@@ -838,6 +838,8 @@
           numeric: true,
           sensitivity: "base",
         }) ||
+        // log items matching #log query ordered by time
+        (text == "#log" && b.log ? b.time : 0) - (text == "#log" && a.log ? a.time : 0) ||
         // listing item context position (includes labelPrefixes)
         context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
         // position of (unique) label in listing item (item w/ unique label = first term)
@@ -1082,7 +1084,7 @@
     item.tagsRaw = tags.raw;
     item.tagsAlt = _.uniq(_.flattenDeep(item.tags.concat(item.tags.map(altTags))));
     item.tagsHiddenAlt = _.uniq(_.flattenDeep(item.tagsHidden.concat(item.tagsHidden.map(altTags))));
-    item.log = item.tags.includes("#log"); // can be visible or hidden
+    item.log = item.tagsRaw.includes("#_log"); // can also be visible label #log, see below
     item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
     item.async = item.tagsRaw.includes("#_async");
@@ -1136,6 +1138,12 @@
     }
     // name is always unique and either unique label or id:<id>
     item.name = item.labelUnique ? item.labelText : "id:" + item.id;
+
+    // #log label designates log items and is never considered unique
+    if (item.label == "#log") {
+      item.log = true;
+      item.labelUnique = false;
+    }
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
