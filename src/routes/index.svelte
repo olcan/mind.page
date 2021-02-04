@@ -878,7 +878,7 @@
       // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
       if (matchingItemCount == 0) hideIndex = extendedTailIndex;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "24h", time: items[extendedTailIndex].time });
+        tailIndices.push({ index: extendedTailIndex, timeString: "24 hours", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -886,7 +886,7 @@
     if (tailTime7d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "7d", time: items[extendedTailIndex].time });
+        tailIndices.push({ index: extendedTailIndex, timeString: "7 days", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -894,7 +894,7 @@
     if (tailTime30d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "30d", time: items[extendedTailIndex].time });
+        tailIndices.push({ index: extendedTailIndex, timeString: "30 days", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -2618,16 +2618,12 @@
           {#each tailIndices as tail}
             {#if hideIndex < tail.index}
               <div class="show-more" on:click={() => (hideIndex = tail.index)}>
-                <span class="show-time">{tail.timeString}</span>
-                show older items
-                <span class="show-count">{tail.index}</span>
+                show last {tail.timeString}
               </div>
             {/if}
           {/each}
           <div class="show-more" on:click={() => (hideIndex = Infinity)}>
-            <span class="show-time">{oldestTimeString}</span>
-            show all items
-            <span class="show-count">{items.length}</span>
+            show all {items.length} items
           </div>
         {/if}
       {/each}
@@ -2852,29 +2848,22 @@
   }
 
   .show-more {
-    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
-    /* color: #999; */
-    /* background: #222; */
-    color: black;
-    background: #999;
+    color: #999;
+    background: #222;
+    /* color: black; */
+    /* background: #666; */
+    font-weight: 500;
     font-size: 16px;
     font-family: Avenir Next, Helvetica;
-    font-weight: 500;
     border-radius: 4px;
     cursor: pointer;
-    margin: 4px 0;
-    height: 40px;
-  }
-  .show-more .show-time {
-    position: absolute;
-    left: 10px;
-  }
-  .show-more .show-count {
-    position: absolute;
-    right: 10px;
+    margin: auto;
+    margin-top: 28px; /* same as having time string */
+    padding: 15px 30px;
+    width: fit-content;
   }
 
   .show-more + .show-more {
