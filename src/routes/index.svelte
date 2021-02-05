@@ -1222,6 +1222,69 @@
     }
   }
 
+  async function getSecretPhrase() {
+    let secret = localStorage.getItem("mindpage_secret");
+    if (secret) return secret;
+    let phrase = "";
+    while (!phrase) phrase = prompt("Please enter your Personal Secret Phrase:", "");
+    let confirm = "";
+    while (confirm != phrase) confirm = prompt("Please CONFIRM your Personal Secret Phrase:", "");
+    const utf8 = new TextEncoder().encode(user.uid + phrase);
+    const secret_buffer = await crypto.subtle.digest("SHA-256", utf8);
+    const secret_array = Array.from(new Uint8Array(secret_buffer));
+    const secret_string = secret_array.map((b) => String.fromCharCode(b)).join("");
+    secret = btoa(secret_string);
+    localStorage.setItem("mindpage_secret", secret);
+    return secret;
+  }
+
+  // based on https://gist.github.com/chrisveness/43bcda93af9f646d083fad678071b90a
+  async function encrypt(text: string) {
+    const secret = await getSecretPhrase(); // get secret phrase
+    const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
+    const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
+    const iv = crypto.getRandomValues(new Uint8Array(12)); // get 96-bit random iv
+    const alg = { name: "AES-GCM", iv: iv }; // configure AES-GCM
+    const key = await crypto.subtle.importKey("raw", secret_sha256, alg, false, ["encrypt"]); // generate key
+    const text_utf8 = new TextEncoder().encode(text); // utf8-encode text
+    const cipher_buffer = await crypto.subtle.encrypt(alg, key, text_utf8); // encrypt text using key
+    const cipher_array = Array.from(new Uint8Array(cipher_buffer)); // convert cipher to byte array
+    const cipher_string = cipher_array.map((byte) => String.fromCharCode(byte)).join(""); // convert cipher to string
+    const cipher_base64 = btoa(cipher_string); // base64-encode cipher
+    const iv_hex = Array.from(iv)
+      .map((b) => ("00" + b.toString(16)).slice(-2))
+      .join(""); // convert iv to hex string
+    return iv_hex + cipher_base64; // return iv + cipher
+  }
+  async function decrypt(cipher: string) {
+    const secret = await getSecretPhrase();
+    const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
+    const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
+    const iv = cipher
+      .slice(0, 24)
+      .match(/.{2}/g)
+      .map((byte) => parseInt(byte, 16)); // get iv from cipher
+    const alg = { name: "AES-GCM", iv: new Uint8Array(iv) }; // configure AES-GCM
+    const key = await crypto.subtle.importKey("raw", secret_sha256, alg, false, ["decrypt"]); // generate key
+    const cipher_string = atob(cipher.slice(24)); // base64-decode cipher
+    const cipher_array = new Uint8Array(cipher_string.match(/[\s\S]/g).map((ch) => ch.charCodeAt(0))); // convert cipher to byte array
+    const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array); // decrypt cipher using key
+    const text = new TextDecoder().decode(text_buffer); // utf8-decode text
+    return text;
+  }
+  async function encryptItem(item) {
+    if (item.cipher) return item; // already encrypted
+    item.cipher = await encrypt(JSON.stringify(item));
+    delete item.text;
+    return item;
+  }
+  async function decryptItem(item) {
+    if (item.text) return item; // already decrypted
+    item.text = JSON.parse(await decrypt(item.cipher)).text;
+    delete item.cipher;
+    return item;
+  }
+
   let sessionCounter = 0; // to ensure unique increasing temporary ids for this session
   let sessionHistory = [];
   let sessionHistoryIndex = 0;
@@ -1506,47 +1569,49 @@
       }, 0);
     }
 
-    (readonly
-      ? Promise.resolve({ id: item.id, delete: Promise.resolve })
-      : firestore().collection("items").add(itemToSave)
-    )
-      .then((doc) => {
-        let index = indexFromId.get(item.id); // since index can change
-        tempIdFromSavedId.set(doc.id, item.id);
-        item = items[index];
-        if (index == undefined) {
-          // item was deleted before it could be saved
-          doc.delete().catch(console.error);
-          return;
-        }
-        let textarea = textArea(index);
-        let selectionStart = textarea ? textarea.selectionStart : 0;
-        let selectionEnd = textarea ? textarea.selectionEnd : 0;
-        item.savedId = doc.id;
-        // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
-        if (!item.editing) onItemSaved(item.id, itemToSave);
-        else items[index] = item; // trigger dom update
+    encryptItem(itemToSave).then((itemToSave) => {
+      (readonly
+        ? Promise.resolve({ id: item.id, delete: Promise.resolve })
+        : firestore().collection("items").add(itemToSave)
+      )
+        .then((doc) => {
+          let index = indexFromId.get(item.id); // since index can change
+          tempIdFromSavedId.set(doc.id, item.id);
+          item = items[index];
+          if (index == undefined) {
+            // item was deleted before it could be saved
+            doc.delete().catch(console.error);
+            return;
+          }
+          let textarea = textArea(index);
+          let selectionStart = textarea ? textarea.selectionStart : 0;
+          let selectionEnd = textarea ? textarea.selectionEnd : 0;
+          item.savedId = doc.id;
+          // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
+          if (!item.editing) onItemSaved(item.id, itemToSave);
+          else items[index] = item; // trigger dom update
 
-        if (focusedItem == index)
-          // maintain focus (and caret placement) through id/element change
-          setTimeout(() => {
-            let index = indexFromId.get(item.id);
-            if (index == undefined) return;
-            let textarea = textArea(index);
-            if (!textarea) return;
-            textarea.selectionStart = selectionStart;
-            textarea.selectionEnd = selectionEnd;
-            textarea.focus();
-          }, 0);
-        // also save to history (using persistent doc.id) ...
-        if (!readonly) {
-          firestore()
-            .collection("history")
-            .add({ item: doc.id, ...itemToSave })
-            .catch(console.error);
-        }
-      })
-      .catch(console.error);
+          if (focusedItem == index)
+            // maintain focus (and caret placement) through id/element change
+            setTimeout(() => {
+              let index = indexFromId.get(item.id);
+              if (index == undefined) return;
+              let textarea = textArea(index);
+              if (!textarea) return;
+              textarea.selectionStart = selectionStart;
+              textarea.selectionEnd = selectionEnd;
+              textarea.focus();
+            }, 0);
+          // also save to history (using persistent doc.id) ...
+          if (!readonly) {
+            firestore()
+              .collection("history")
+              .add({ item: doc.id, ...itemToSave })
+              .catch(console.error);
+          }
+        })
+        .catch(console.error);
+    }); // encryptItem(itemToSave)
   }
 
   function focusOnNearestEditingItem(index: number) {
@@ -1566,14 +1631,17 @@
     if (index == undefined) return; // item was deleted
     // console.debug("saved item", index);
     let item = items[index];
-    item.savedText = savedItem.text;
-    item.savedTime = savedItem.time;
-    item.saving = false;
-    items[index] = item; // trigger dom update
-    if (item.saveClosure) {
-      item.saveClosure(item.id);
-      delete item.saveClosure;
-    }
+
+    decryptItem(savedItem).then((savedItem) => {
+      item.savedText = savedItem.text;
+      item.savedTime = savedItem.time;
+      item.saving = false;
+      items[index] = item; // trigger dom update
+      if (item.saveClosure) {
+        item.saveClosure(item.id);
+        delete item.saveClosure;
+      }
+    }); // decryptItem(savedItem)
   }
 
   let lastEditTime = 0; // updated in onItemEdited
@@ -1713,20 +1781,22 @@
       return;
     }
 
-    firestore()
-      .collection("items")
-      .doc(item.savedId)
-      .update(itemToSave)
-      .then(() => {
-        onItemSaved(item.id, itemToSave);
-      })
-      .catch(console.error);
+    encryptItem(itemToSave).then((itemToSave) => {
+      firestore()
+        .collection("items")
+        .doc(item.savedId)
+        .update(itemToSave)
+        .then(() => {
+          onItemSaved(item.id, itemToSave);
+        })
+        .catch(console.error);
 
-    // also save to history ...
-    firestore()
-      .collection("history")
-      .add({ user: user.uid, item: item.savedId, ...itemToSave })
-      .catch(console.error);
+      // also save to history ...
+      firestore()
+        .collection("history")
+        .add({ user: user.uid, item: item.savedId, ...itemToSave })
+        .catch(console.error);
+    }); // encryptItem(itemToSave)
   }
 
   // https://stackoverflow.com/a/9039885
@@ -2067,7 +2137,10 @@
 
   let initTime = 0;
   let hiddenItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
-  function initialize() {
+  async function initialize() {
+    // decrypt any encrypted items
+    items = await Promise.all(items.map(decryptItem));
+
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !hiddenItems.has(item.id));
 
@@ -2232,22 +2305,42 @@
         anonymous = readonly = false; // just in case (should already be false)
         signedin = true;
 
-        // set up server-side session cookie
-        // store user's ID token as a 1-hour __session cookie to send to server for preload
-        // NOTE: __session is the only cookie allowed by firebase for efficient caching
-        //       (see https://stackoverflow.com/a/44935288)
-        user
-          .getIdToken(false /*force refresh*/)
-          .then((token) => {
-            document.cookie = "__session=" + token + ";max-age=3600";
+        // test encryption features, asking for secret phrase if needed
+        function encryptionTestFailed() {
+          alert(
+            `Your browser does not seem to support modern encryption features. Plese email support@mind.page with your device and browser information. Signing you out for now!`
+          );
+          signOut();
+        }
+        const time = Date.now();
+        const hello_item = { user: user.uid, time: time, text: "hello" };
+        encryptItem(hello_item)
+          .then(decryptItem)
+          .then((item) => {
+            if (JSON.stringify(item) != JSON.stringify(hello_item)) {
+              encryptionTestFailed();
+              return;
+            }
+
+            // set up server-side session cookie
+            // store user's ID token as a 1-hour __session cookie to send to server for preload
+            // NOTE: __session is the only cookie allowed by firebase for efficient caching
+            //       (see https://stackoverflow.com/a/44935288)
+            user
+              .getIdToken(false /*force refresh*/)
+              .then((token) => {
+                document.cookie = "__session=" + token + ";max-age=3600";
+              })
+              .catch(console.error);
+
+            // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+            //       (this is the only case where user != firebase().auth().currentUser)
+            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
+              useAnonymousAccount();
+
+            initFirebaseRealtime();
           })
-          .catch(console.error);
-
-        // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
-        //       (this is the only case where user != firebase().auth().currentUser)
-        if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
-
-        initFirebaseRealtime();
+          .catch(encryptionTestFailed);
       });
 
     // Visual viewport resize/scroll handlers ...
@@ -2297,9 +2390,9 @@
               //     window.performance.now()
               //   )}ms w/ ${items.length} items`
               // );
-              setTimeout(() => {
+              setTimeout(async () => {
                 console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
-                if (!initTime) initialize();
+                if (!initTime) await initialize();
                 firstSnapshot = false;
                 // if account is empty, fetch the welcome item from the anonymous account ...
                 if (items.length == 0) onEditorDone("/_welcome");
