@@ -77,6 +77,10 @@
               image_url: user.photoURL,
               image: `<img src="${user.photoURL}" style="width:20px;height:20px;border-radius:50%">`,
               uid: user.uid,
+              total_text_length: textLength,
+              total_text_length_string: numberWithCommas(textLength),
+              oldest_item_time: oldestTime,
+              oldest_item_time_string: oldestTimeString,
             },
     });
     Object.defineProperty(window, "_stack", { get: () => evalStack.slice() }); // return copy not reference
@@ -2564,12 +2568,10 @@
             <span class="triangle"> ▲ </span>
             {#if items.length > 0}
               <div class="counts">
-                {@html oldestTimeString.replace(/(\D+)/, '<span class="unit">$1</span>')}&nbsp;
-                {@html numberWithCommas(textLength).replace(/,/g, '<span class="comma">,</span>') +
-                  '<span class="unit">B</span>'}&nbsp;
-                {items.length}
                 {#if matchingItemCount > 0}
-                  &nbsp;<span class="matching">{matchingItemCount}</span>
+                  &nbsp;<span class="matching">{matchingItemCount} matching items</span>
+                {:else}
+                  {items.length} items
                 {/if}
               </div>
             {/if}
