@@ -1010,8 +1010,8 @@
 
   function resetUser() {
     user = null;
-    localStorage.removeItem("user");
-    window.sessionStorage.removeItem("signin_pending");
+    localStorage.removeItem("mindpage_user");
+    window.sessionStorage.removeItem("mindpage_signin_pending");
     document.cookie = "__session=;max-age=0"; // delete cookie for server
   }
 
@@ -2168,7 +2168,7 @@
     // firebase().auth().setPersistence("session")
     firebase().auth().setPersistence("local");
     // NOTE: getRedirectResult() seem to be redundant given onAuthStateChanged
-    window.sessionStorage.setItem("signin_pending", "1");
+    window.sessionStorage.setItem("mindpage_signin_pending", "1");
     document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
     firebase().auth().signInWithRedirect(provider);
     // NOTE: signInWithPopup also requires a reload since we are currently unable to cleanly re-initialize items via firebase realtime snapshot once they have already been initialize via server-side request; reloading allows the next server response to be ignored so that session cookie can be set; forced reload also means that we might as well do a redirect which can be cleaner anyway (esp. on mobile, as stated on https://firebase.google.com/docs/auth/web/google-signin)
@@ -2200,11 +2200,11 @@
 
     // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
     // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
-    if (!user && localStorage.getItem("user")) {
-      user = JSON.parse(localStorage.getItem("user"));
+    if (!user && localStorage.getItem("mindpage_user")) {
+      user = JSON.parse(localStorage.getItem("mindpage_user"));
       console.debug(`restored user ${user.email} from local storage`);
       if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
-    } else if (window.sessionStorage.getItem("signin_pending")) {
+    } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
       user = null;
     } else {
       useAnonymousAccount();
@@ -2215,7 +2215,7 @@
 
     // if items were returned from server, confirm user, then initialize if valid
     if (items.length > 0) {
-      if (window.sessionStorage.getItem("signin_pending")) {
+      if (window.sessionStorage.getItem("mindpage_signin_pending")) {
         console.warn(`ignoring ${items.length} items received while signing in`);
         items = [];
       } else if (user && user.uid != items[0].user) {
@@ -2254,7 +2254,7 @@
         resetUser(); // clean up first
         user = authUser;
         console.log("signed in", user.email);
-        localStorage.setItem("user", JSON.stringify(user));
+        localStorage.setItem("mindpage_user", JSON.stringify(user));
         anonymous = readonly = false; // just in case (should already be false)
         signedin = true;
 
