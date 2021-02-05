@@ -672,7 +672,7 @@
     cacheElems();
 
     // highlight matching terms in item text
-    let mindbox = document.getElementById("textarea-mindbox");
+    let mindbox = document.getElementById("textarea-mindbox") as HTMLTextAreaElement;
     if (window["_highlight_text"] != mindbox.value) {
       window["_highlight_text"] = mindbox.value;
       window["_highlight_counts"] = {};
@@ -688,7 +688,8 @@
 
       // remove previous highlights or related elements
       itemdiv.querySelectorAll("span.highlight").forEach((span: HTMLElement) => {
-        span.replaceWith(span.firstChild); // seems to scale beter
+        // span.replaceWith(span.firstChild); // seems to scale beter
+        span.outerHTML = span.innerHTML;
       });
       itemdiv.querySelectorAll("mark div").forEach((spacer) => {
         spacer.remove();
@@ -723,7 +724,10 @@
             case "script":
               return NodeFilter.FILTER_REJECT;
             default:
-              return classList?.contains("math") || classList?.contains("math-display")
+              return classList?.contains("c3") ||
+                classList?.contains("dot") ||
+                classList?.contains("math") ||
+                classList?.contains("math-display")
                 ? // || classList?.contains("deps-and-dependents")
                   NodeFilter.FILTER_REJECT
                 : NodeFilter.FILTER_ACCEPT;
