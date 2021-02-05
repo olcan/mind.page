@@ -660,6 +660,7 @@
       // console.debug("afterUpdate skipped");
       // update all children w/ _update attribute (and property)
       // TODO: move this above if disappearing charts continues to be a problem
+      //       (actually it may have something to do with opening the web inspector so rule that out)
       itemdiv.querySelectorAll("[_update]").forEach((e) => e["_update"]());
       return;
     }
@@ -671,14 +672,23 @@
     cacheElems();
 
     // highlight matching terms in item text
+    let mindbox = document.getElementById("textarea-mindbox");
+    if (window["_highlight_text"] != mindbox.value) {
+      window["_highlight_text"] = mindbox.value;
+      window["_highlight_counts"] = {};
+    }
+    let highlight_counts = window["_highlight_counts"];
+    const maxHighlightsPerTerm = 100;
+    const mindboxTextAtDispatch = mindbox.value;
     const highlightTermsAtDispatch = highlightTerms;
     let highlightClosure = () => {
       if (!itemdiv) return;
+      if (mindbox.value != mindboxTextAtDispatch) return;
       if (highlightTerms != highlightTermsAtDispatch) return;
+
       // remove previous highlights or related elements
-      itemdiv.querySelectorAll("span.highlight").forEach((span) => {
-        // span.replaceWith(span.firstChild);
-        span.outerHTML = span.innerHTML;
+      itemdiv.querySelectorAll("span.highlight").forEach((span: HTMLElement) => {
+        span.replaceWith(span.firstChild); // seems to scale beter
       });
       itemdiv.querySelectorAll("mark div").forEach((spacer) => {
         spacer.remove();
@@ -725,6 +735,8 @@
         if (node.nodeType != Node.TEXT_NODE) continue;
         const parent = node.parentNode;
         let text = node.nodeValue;
+        terms = terms.filter((t) => !(highlight_counts[t] >= maxHighlightsPerTerm));
+        if (terms.length == 0) continue; // nothing left to highlight
         let regex = new RegExp(`^(.*?)(${terms.map(_.escapeRegExp).join("|")})`, "si");
         // if we are highlighting inside a non-selected tag, then we expand the regex to allow shortening and rendering adjustments ...
         if (
@@ -732,18 +744,26 @@
           !node.parentElement.classList.contains("selected") &&
           !node.parentElement.classList.contains("secondary-selected")
         ) {
-          let tagTerms = terms.concat("#…").map(_.escapeRegExp);
+          let tagTerms = terms
+            .concat(highlight_counts["#…"] + highlight_counts["…"] >= maxHighlightsPerTerm ? [] : ["#…"])
+            .map(_.escapeRegExp);
           tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#(.+)$/, "^$1")));
           regex = new RegExp(`(^.*?)(${tagTerms.join("|")})`, "si");
         }
         let m;
         while ((m = text.match(regex))) {
           text = text.slice(m[0].length);
-          const tagText = node.parentElement?.innerText;
+          const term = m[2].toLowerCase();
+          const count = highlight_counts[term] || 0;
+          if (count >= maxHighlightsPerTerm) continue;
+          highlight_counts[term] = count + 1;
+
+          const tagText = node.parentElement?.tagName == "MARK" ? node.parentElement?.innerText : "";
           parent.insertBefore(document.createTextNode(m[1]), node);
           let word = parent.insertBefore(document.createElement("span"), node);
           word.appendChild(document.createTextNode(m[2]));
           word.className = "highlight";
+
           if (node.parentElement.tagName == "MARK") {
             // ensure tag visible
             node.parentElement.classList.add("matching");
