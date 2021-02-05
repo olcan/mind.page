@@ -2823,6 +2823,9 @@
     /* bottom padding for easier tapping on last item */
     padding-bottom: 200px;
   }
+  .items.multi-column {
+    padding-bottom: 0;
+  }
   :global(#sapper) {
     min-height: 100%;
     min-height: -webkit-fill-available;
