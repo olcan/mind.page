@@ -1225,11 +1225,14 @@
   async function getSecretPhrase() {
     let secret = localStorage.getItem("mindpage_secret");
     if (secret) return secret;
+    // NOTE: we use currentUser to avoid confusion for admin acting as anonymous user
+    const uid = firebase().auth().currentUser?.uid;
+    if (!uid) throw new Error("unable to determine uid");
     let phrase = "";
     while (!phrase) phrase = prompt("Please enter your Personal Secret Phrase:", "");
     let confirm = "";
     while (confirm != phrase) confirm = prompt("Please CONFIRM your Personal Secret Phrase:", "");
-    const utf8 = new TextEncoder().encode(user.uid + phrase);
+    const utf8 = new TextEncoder().encode(uid + phrase);
     const secret_buffer = await crypto.subtle.digest("SHA-256", utf8);
     const secret_array = Array.from(new Uint8Array(secret_buffer));
     const secret_string = secret_array.map((b) => String.fromCharCode(b)).join("");
@@ -1275,13 +1278,13 @@
   async function encryptItem(item) {
     if (item.cipher) return item; // already encrypted
     item.cipher = await encrypt(JSON.stringify(item));
-    delete item.text;
+    delete item.text; // remove text until decryption
     return item;
   }
   async function decryptItem(item) {
     if (item.text) return item; // already decrypted
     item.text = JSON.parse(await decrypt(item.cipher)).text;
-    delete item.cipher;
+    delete item.cipher; // remove cipher until encryption
     return item;
   }
 
@@ -1772,6 +1775,7 @@
     }
     item.saving = true;
     let itemToSave = {
+      user: user.uid, // allows us to use set() instead of update()
       time: item.time,
       text: item.text,
     };
@@ -1785,7 +1789,7 @@
       firestore()
         .collection("items")
         .doc(item.savedId)
-        .update(itemToSave)
+        .set(itemToSave)
         .then(() => {
           onItemSaved(item.id, itemToSave);
         })
@@ -1794,7 +1798,7 @@
       // also save to history ...
       firestore()
         .collection("history")
-        .add({ user: user.uid, item: item.savedId, ...itemToSave })
+        .add({ item: item.savedId, ...itemToSave })
         .catch(console.error);
     }); // encryptItem(itemToSave)
   }
