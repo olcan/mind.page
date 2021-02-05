@@ -1506,9 +1506,10 @@
       }, 0);
     }
 
-    firestore()
-      .collection(readonly ? "items-tmp" : "items")
-      .add(itemToSave)
+    (readonly
+      ? Promise.resolve({ id: item.id, delete: Promise.resolve })
+      : firestore().collection("items").add(itemToSave)
+    )
       .then((doc) => {
         let index = indexFromId.get(item.id); // since index can change
         tempIdFromSavedId.set(doc.id, item.id);
@@ -1706,48 +1707,26 @@
       time: item.time,
       text: item.text,
     };
+
     if (readonly) {
-      // if read-only, we can only "update" items added (to items-tmp) in this session
-      if (tempIdFromSavedId.get(item.savedId)) {
-        firestore()
-          .collection("items-tmp")
-          .doc(item.savedId)
-          .update({ user: user.uid, ...itemToSave })
-          .then(() => {
-            onItemSaved(item.id, itemToSave);
-          })
-          .catch(console.error);
-      } else {
-        firestore()
-          .collection("items-tmp")
-          .add({ user: user.uid, ...itemToSave })
-          .then((doc) => {
-            let index = indexFromId.get(item.id);
-            if (index == undefined) return; // deleted
-            items[index].savedId = doc.id;
-            onItemSaved(item.id, itemToSave);
-            tempIdFromSavedId.set(items[index].savedId, item.id); // can update next time
-          })
-          .catch(console.error);
-      }
-    } else {
-      firestore()
-        .collection(readonly ? "items-tmp" : "items")
-        .doc(item.savedId)
-        .update(itemToSave)
-        .then(() => {
-          onItemSaved(item.id, itemToSave);
-        })
-        .catch(console.error);
+      setTimeout(() => onItemSaved(item.id, itemToSave));
+      return;
     }
 
-    if (!readonly) {
-      // also save to history ...
-      firestore()
-        .collection("history")
-        .add({ user: user.uid, item: item.savedId, ...itemToSave })
-        .catch(console.error);
-    }
+    firestore()
+      .collection("items")
+      .doc(item.savedId)
+      .update(itemToSave)
+      .then(() => {
+        onItemSaved(item.id, itemToSave);
+      })
+      .catch(console.error);
+
+    // also save to history ...
+    firestore()
+      .collection("history")
+      .add({ user: user.uid, item: item.savedId, ...itemToSave })
+      .catch(console.error);
   }
 
   // https://stackoverflow.com/a/9039885
@@ -1806,13 +1785,8 @@
           time: item.savedTime,
           text: item.savedText,
         }); // for /undelete
-        // we can skip delete if read-only and item not created under items-tmp
-        if (item.savedId && (!readonly || tempIdFromSavedId.get(item.savedId))) {
-          firestore()
-            .collection(readonly ? "items-tmp" : "items")
-            .doc(item.savedId)
-            .delete()
-            .catch(console.error);
+        if (!readonly && item.savedId) {
+          firestore().collection("items").doc(item.savedId).delete().catch(console.error);
         }
       } else {
         itemTextChanged(index, item.text);
