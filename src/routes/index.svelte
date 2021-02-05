@@ -606,8 +606,8 @@
       }
       return;
     }
-    // console.debug("onEditorChange", editorText);
     lastEditorChangeTime = Infinity; // force minimum wait for next change
+    const start = Date.now();
 
     text = text.toLowerCase().trim();
     const tags = parseTags(text);
@@ -909,6 +909,8 @@
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     setTimeout(updateDotted, 0); // show/hide dotted/undotted items
+
+    if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -2577,7 +2579,8 @@
       {/if}
 
       {#each items as item (item.id)}
-        {#if item.column == column && item.index < hideIndex}
+        <!-- NOTE: we ignore hideIndex at initial render when item heights are unknown -->
+        {#if item.column == column && (item.index < hideIndex || totalItemHeight == 0)}
           <Item
             onEditing={onItemEditing}
             onFocused={onItemFocused}

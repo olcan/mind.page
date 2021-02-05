@@ -659,6 +659,7 @@
     ) {
       // console.debug("afterUpdate skipped");
       // update all children w/ _update attribute (and property)
+      // TODO: move this above if disappearing charts continues to be a problem
       itemdiv.querySelectorAll("[_update]").forEach((e) => e["_update"]());
       return;
     }
@@ -829,9 +830,9 @@
         node.nodeValue = text;
       }
     };
-    // highlight menu items immediately, otherwise dispatch
+    // highlight menu items immediately, otherwise dispatch with index-proportional delay
     if (itemdiv.querySelector(".menu")) highlightClosure();
-    else setTimeout(highlightClosure, 0);
+    else setTimeout(highlightClosure, index * 100);
 
     // indicate errors/warnings and context/target items
     error = itemdiv.querySelector(".console-error,.macro-error,mark.missing") != null;

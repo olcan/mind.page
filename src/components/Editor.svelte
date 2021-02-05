@@ -502,7 +502,6 @@
     bind:this={textarea}
     {placeholder}
     on:input={onInput}
-    on:click={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
     on:paste={onPaste}
