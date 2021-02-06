@@ -2644,132 +2644,135 @@
   }
 </script>
 
-<div class="items" class:multi-column={columnCount > 1}>
-  {#each { length: columnCount } as _, column}
-    <div class="column">
-      {#if column == 0}
-        <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-          <div id="header-container" class:focused>
-            <div id="editor">
-              <Editor
-                id="mindbox"
-                bind:text={editorText}
-                bind:focused
-                cancelOnDelete={true}
-                clearOnShiftBackspace={true}
-                allowCommandCtrlBracket={true}
-                onEdited={onEditorChange}
-                onDone={onEditorDone}
-                onPrev={onPrevItem}
-                onNext={onNextItem}
-              />
-            </div>
-            <div class="spacer" />
-            {#if user}
-              <img
-                id="user"
-                class:anonymous
-                class:readonly
-                class:signedin
-                src={user.photoURL}
-                alt={user.displayName || user.email}
-                title={user.displayName || user.email}
-                on:click={() => (!signedin ? signIn() : signOut())}
-              />
-            {/if}
-          </div>
-          <div id="status" on:click={onStatusClick}>
-            <span id="console-summary" on:click={onConsoleSummaryClick} />
-            <span class="dots">
-              {#each { length: dotCount } as _}•{/each}
-            </span>
-            <span class="triangle"> ▲ </span>
-            {#if items.length > 0}
-              <div class="counts">
-                {#if matchingItemCount > 0}
-                  &nbsp;<span class="matching">{matchingItemCount} matching items</span>
-                {:else}
-                  {items.length} items
-                {/if}
+<!-- NOTE: we put the items on the page as soon as they are initialized, but .loading overlay remains until heights are calculated -->
+{#if user && initTime}
+  <div class="items" class:multi-column={columnCount > 1}>
+    {#each { length: columnCount } as _, column}
+      <div class="column">
+        {#if column == 0}
+          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div id="header-container" class:focused>
+              <div id="editor">
+                <Editor
+                  id="mindbox"
+                  bind:text={editorText}
+                  bind:focused
+                  cancelOnDelete={true}
+                  clearOnShiftBackspace={true}
+                  allowCommandCtrlBracket={true}
+                  onEdited={onEditorChange}
+                  onDone={onEditorDone}
+                  onPrev={onPrevItem}
+                  onNext={onNextItem}
+                />
               </div>
-            {/if}
-            <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
-          </div>
-        </div>
-      {/if}
-
-      {#each items as item (item.id)}
-        <!-- NOTE: we ignore hideIndex at initial render when item heights are unknown -->
-        {#if item.column == column && (item.index < hideIndex || totalItemHeight == 0)}
-          <Item
-            onEditing={onItemEditing}
-            onFocused={onItemFocused}
-            onEdited={onItemEdited}
-            onRun={onItemRun}
-            onTouch={onItemTouch}
-            onResized={onItemResized}
-            {onTagClick}
-            {onLinkClick}
-            {onLogSummaryClick}
-            onPrev={onPrevItem}
-            onNext={onNextItem}
-            bind:text={item.text}
-            bind:editing={item.editing}
-            bind:focused={item.focused}
-            bind:saving={item.saving}
-            bind:running={item.running}
-            bind:hidden={item.hidden}
-            bind:showLogs={item.showLogs}
-            bind:height={item.height}
-            bind:time={item.time}
-            index={item.index}
-            id={item.id}
-            label={item.label}
-            labelUnique={item.labelUnique}
-            labelText={item.labelText}
-            hash={item.hash}
-            deephash={item.deephash}
-            missingTags={item.missingTags.join(" ")}
-            matchingTerms={item.matchingTerms.join(" ")}
-            matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
-            timeString={item.timeString}
-            timeOutOfOrder={item.timeOutOfOrder}
-            updateTime={item.updateTime}
-            createTime={item.createTime}
-            depsString={item.depsString}
-            dependentsString={item.dependentsString}
-            dotted={item.dotted}
-            runnable={item.runnable}
-            scripted={item.scripted}
-            macroed={item.macroed}
-          />
-          {#if item.nextColumn >= 0}
-            <div class="section-separator">
-              <hr />
-              {item.index + 2}<span class="arrows">{item.arrows}</span
-              >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
-                &nbsp;
-                {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+              <div class="spacer" />
+              {#if user}
+                <img
+                  id="user"
+                  class:anonymous
+                  class:readonly
+                  class:signedin
+                  src={user.photoURL}
+                  alt={user.displayName || user.email}
+                  title={user.displayName || user.email}
+                  on:click={() => (!signedin ? signIn() : signOut())}
+                />
               {/if}
-              <hr />
             </div>
-          {/if}
-        {:else if item.column == column && item.index == hideIndex}
-          {#each tailIndices as tail}
-            {#if hideIndex < tail.index}
-              <div class="show-more" on:click={() => (hideIndex = tail.index)}>
-                show last {tail.timeString}
-              </div>
-            {/if}
-          {/each}
-          <div class="show-more" on:click={() => (hideIndex = Infinity)}>
-            show all {items.length} items
+            <div id="status" on:click={onStatusClick}>
+              <span id="console-summary" on:click={onConsoleSummaryClick} />
+              <span class="dots">
+                {#each { length: dotCount } as _}•{/each}
+              </span>
+              <span class="triangle"> ▲ </span>
+              {#if items.length > 0}
+                <div class="counts">
+                  {#if matchingItemCount > 0}
+                    &nbsp;<span class="matching">{matchingItemCount} matching items</span>
+                  {:else}
+                    {items.length} items
+                  {/if}
+                </div>
+              {/if}
+              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
+            </div>
           </div>
         {/if}
-      {/each}
-    </div>
-  {/each}
-</div>
+
+        {#each items as item (item.id)}
+          <!-- NOTE: we ignore hideIndex at initial render when item heights are unknown -->
+          {#if item.column == column && (item.index < hideIndex || totalItemHeight == 0)}
+            <Item
+              onEditing={onItemEditing}
+              onFocused={onItemFocused}
+              onEdited={onItemEdited}
+              onRun={onItemRun}
+              onTouch={onItemTouch}
+              onResized={onItemResized}
+              {onTagClick}
+              {onLinkClick}
+              {onLogSummaryClick}
+              onPrev={onPrevItem}
+              onNext={onNextItem}
+              bind:text={item.text}
+              bind:editing={item.editing}
+              bind:focused={item.focused}
+              bind:saving={item.saving}
+              bind:running={item.running}
+              bind:hidden={item.hidden}
+              bind:showLogs={item.showLogs}
+              bind:height={item.height}
+              bind:time={item.time}
+              index={item.index}
+              id={item.id}
+              label={item.label}
+              labelUnique={item.labelUnique}
+              labelText={item.labelText}
+              hash={item.hash}
+              deephash={item.deephash}
+              missingTags={item.missingTags.join(" ")}
+              matchingTerms={item.matchingTerms.join(" ")}
+              matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+              timeString={item.timeString}
+              timeOutOfOrder={item.timeOutOfOrder}
+              updateTime={item.updateTime}
+              createTime={item.createTime}
+              depsString={item.depsString}
+              dependentsString={item.dependentsString}
+              dotted={item.dotted}
+              runnable={item.runnable}
+              scripted={item.scripted}
+              macroed={item.macroed}
+            />
+            {#if item.nextColumn >= 0}
+              <div class="section-separator">
+                <hr />
+                {item.index + 2}<span class="arrows">{item.arrows}</span
+                >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
+                  &nbsp;
+                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+                {/if}
+                <hr />
+              </div>
+            {/if}
+          {:else if item.column == column && item.index == hideIndex}
+            {#each tailIndices as tail}
+              {#if hideIndex < tail.index}
+                <div class="show-more" on:click={() => (hideIndex = tail.index)}>
+                  show last {tail.timeString}
+                </div>
+              {/if}
+            {/each}
+            <div class="show-more" on:click={() => (hideIndex = Infinity)}>
+              show all {items.length} items
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/each}
+  </div>
+{/if}
 
 {#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
   <div id="loading">
