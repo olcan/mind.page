@@ -1010,13 +1010,15 @@
 
   function resetUser() {
     user = null;
+    // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
     localStorage.removeItem("mindpage_user");
     window.sessionStorage.removeItem("mindpage_signin_pending");
     document.cookie = "__session=;max-age=0"; // delete cookie for server
   }
 
   function signOut() {
-    if (!firebase().auth().currentUser) return; // not logged in yet, so ignore click for now
+    if (window.sessionStorage.getItem("mindpage_signin_pending")) return; // can not signout during signin
+    localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
     setTimeout(() => (document.activeElement as HTMLElement).blur());
@@ -1222,28 +1224,29 @@
     }
   }
 
-  async function getSecretPhrase() {
-    let secret = localStorage.getItem("mindpage_secret");
-    if (secret) return secret;
-    // NOTE: we use currentUser to avoid confusion for admin acting as anonymous user
-    const uid = firebase().auth().currentUser?.uid;
-    if (!uid) throw new Error("unable to determine uid");
+  // NOTE: secret phrase is initialized or retrieved only ONCE PER SESSION so that it can not be tampered with after having been used to decrypt existing items; otherwise account can contain items encrypted using different secret phrases, which would make the account unusable
+  let secret; // retrieved once and stored separately to prevent tampering during session
+
+  async function initSecretPhrase() {
+    if (anonymous) throw Error("anonymous user can not have a secret phrase");
+    if (secret) return; // already initialized from localStorage
+    secret = localStorage.getItem("mindpage_secret");
+    if (secret) return; // retrieved from localStorage
     let phrase = "";
     while (!phrase) phrase = prompt("Please enter your Personal Secret Phrase:", "");
     let confirm = "";
     while (confirm != phrase) confirm = prompt("Please CONFIRM your Personal Secret Phrase:", "");
-    const utf8 = new TextEncoder().encode(uid + phrase);
+    const utf8 = new TextEncoder().encode(user.uid + phrase);
     const secret_buffer = await crypto.subtle.digest("SHA-256", utf8);
     const secret_array = Array.from(new Uint8Array(secret_buffer));
     const secret_string = secret_array.map((b) => String.fromCharCode(b)).join("");
     secret = btoa(secret_string);
     localStorage.setItem("mindpage_secret", secret);
-    return secret;
   }
 
   // based on https://gist.github.com/chrisveness/43bcda93af9f646d083fad678071b90a
   async function encrypt(text: string) {
-    const secret = await getSecretPhrase(); // get secret phrase
+    if (!secret) throw Error("missing secret");
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = crypto.getRandomValues(new Uint8Array(12)); // get 96-bit random iv
@@ -1259,8 +1262,9 @@
       .join(""); // convert iv to hex string
     return iv_hex + cipher_base64; // return iv + cipher
   }
+
   async function decrypt(cipher: string) {
-    const secret = await getSecretPhrase();
+    if (!secret) throw Error("missing secret");
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = cipher
@@ -1276,6 +1280,7 @@
     return text;
   }
   async function encryptItem(item) {
+    if (anonymous) return item; // do not encrypt for anonymous user
     if (item.cipher) return item; // already encrypted
     item.cipher = await encrypt(JSON.stringify(item));
     delete item.text; // remove text until decryption
@@ -2123,6 +2128,14 @@
       : undefined;
   }
 
+  function encryptionError() {
+    alert(
+      `MindPage is unable to access your account. Your personal secret phrase may be entered incorrectly, or your browser may not fully support modern encryption features. You may try entering your phrase again or using a different browser. If the problem persists, please email support@mind.page with your device and browser information but NOT your secret phrase. NEVER share your secret phrase with anyone. Signing you out for now!`
+    );
+    items = [];
+    signOut();
+  }
+
   import { onMount } from "svelte";
   import { hashCode, numberWithCommas, extractBlock, parseTags, renderTag, invalidateElemCache } from "../util.js";
 
@@ -2143,7 +2156,7 @@
   let hiddenItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   async function initialize() {
     // decrypt any encrypted items
-    items = await Promise.all(items.map(decryptItem));
+    items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) as any[];
 
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !hiddenItems.has(item.id));
@@ -2237,6 +2250,7 @@
       displayName: "Anonymous",
       uid: "anonymous",
     };
+    secret = null; // should never be needed under anonymous account
     anonymous = true;
   }
 
@@ -2251,12 +2265,13 @@
 
     // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
     // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
-    if (!user && localStorage.getItem("mindpage_user")) {
+    if (!user && localStorage.getItem("mindpage_user") && localStorage.getItem("mindpage_secret")) {
       user = JSON.parse(localStorage.getItem("mindpage_user"));
+      secret = localStorage.getItem("mindpage_secret");
       console.debug(`restored user ${user.email} from local storage`);
       if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
-      user = null;
+      user = secret = null;
     } else {
       useAnonymousAccount();
       document.cookie = "__session=;max-age=0"; // clear just in case
@@ -2265,6 +2280,7 @@
     readonly = anonymous && !location.href.match(/user=anonymous/);
 
     // if items were returned from server, confirm user, then initialize if valid
+    let initialization;
     if (items.length > 0) {
       if (window.sessionStorage.getItem("mindpage_signin_pending")) {
         console.warn(`ignoring ${items.length} items received while signing in`);
@@ -2276,7 +2292,7 @@
         items = [];
       } else {
         // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
-        initialize();
+        initialization = initialize();
       }
     }
 
@@ -2296,56 +2312,55 @@
       }
     }
 
-    // listen for auth state change ...
-    firebase()
-      .auth()
-      .onAuthStateChanged((authUser) => {
-        // console.debug("onAuthStateChanged", user, authUser);
-        if (!authUser) return;
-        resetUser(); // clean up first
-        user = authUser;
-        console.log("signed in", user.email);
+    // if initializing items, wait for that before signing in user since errors can trigger signout
+    Promise.resolve(initialization).then(() => {
+      firebase()
+        .auth()
+        .onAuthStateChanged((authUser) => {
+          // console.debug("onAuthStateChanged", user, authUser);
+          if (!authUser) return;
+          resetUser(); // clean up first
+          user = authUser;
+          console.log("signed in", user.email);
         localStorage.setItem("mindpage_user", JSON.stringify(user));
-        anonymous = readonly = false; // just in case (should already be false)
-        signedin = true;
+          anonymous = readonly = false; // just in case (should already be false)
+          signedin = true;
 
-        // test encryption features, asking for secret phrase if needed
-        function encryptionTestFailed() {
-          alert(
-            `Your browser does not seem to support modern encryption features. Plese email support@mind.page with your device and browser information. Signing you out for now!`
-          );
-          signOut();
-        }
-        const time = Date.now();
-        const hello_item = { user: user.uid, time: time, text: "hello" };
-        encryptItem(hello_item)
-          .then(decryptItem)
-          .then((item) => {
-            if (JSON.stringify(item) != JSON.stringify(hello_item)) {
-              encryptionTestFailed();
-              return;
-            }
+          // initialize secret phrase if needed, then test encryption just in case
+          initSecretPhrase()
+            .then(() => {
+              const time = Date.now();
+              const hello_item = { user: user.uid, time: time, text: "hello" };
+              encryptItem(hello_item)
+                .then(decryptItem)
+                .then((item) => {
+                  if (JSON.stringify(item) != JSON.stringify(hello_item)) {
+                    encryptionError();
+                    return;
+                  }
 
-            // set up server-side session cookie
-            // store user's ID token as a 1-hour __session cookie to send to server for preload
-            // NOTE: __session is the only cookie allowed by firebase for efficient caching
-            //       (see https://stackoverflow.com/a/44935288)
-            user
-              .getIdToken(false /*force refresh*/)
-              .then((token) => {
-                document.cookie = "__session=" + token + ";max-age=3600";
-              })
-              .catch(console.error);
+                  // set up server-side session cookie
+                  // store user's ID token as a 1-hour __session cookie to send to server for preload
+                  // NOTE: __session is the only cookie allowed by firebase for efficient caching
+                  //       (see https://stackoverflow.com/a/44935288)
+                  user
+                    .getIdToken(false /*force refresh*/)
+                    .then((token) => {
+                      document.cookie = "__session=" + token + ";max-age=3600";
+                    })
+                    .catch(console.error);
 
-            // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
-            //       (this is the only case where user != firebase().auth().currentUser)
-            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
-              useAnonymousAccount();
+                  // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+                  //       (this is the only case where user != firebase().auth().currentUser)
+                  if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
+                    useAnonymousAccount();
 
-            initFirebaseRealtime();
-          })
-          .catch(encryptionTestFailed);
-      });
+                  initFirebaseRealtime();
+                });
+            })
+            .catch(encryptionError);
+        });
+    });
 
     // Visual viewport resize/scroll handlers ...
     // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
