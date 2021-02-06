@@ -1233,7 +1233,6 @@
     secret = localStorage.getItem("mindpage_secret");
     if (secret) return secret; // retrieved from localStorage
 
-    console.debug("missing secret");
     let phrase = "";
     let confirmed = "";
     if (new_phrase) {
@@ -1272,7 +1271,7 @@
   // based on https://gist.github.com/chrisveness/43bcda93af9f646d083fad678071b90a
   async function encrypt(text: string) {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */);
-    await Promise.resolve(secret);
+    secret = await Promise.resolve(secret); // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = crypto.getRandomValues(new Uint8Array(12)); // get 96-bit random iv
@@ -1291,7 +1290,7 @@
 
   async function decrypt(cipher: string) {
     if (!secret) secret = getSecretPhrase();
-    await Promise.resolve(secret);
+    secret = await Promise.resolve(secret); // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = cipher
@@ -2157,7 +2156,8 @@
       : undefined;
   }
 
-  function encryptionError() {
+  function encryptionError(e) {
+    console.error("encryption/decryption failed", e);
     alert(
       `MindPage is unable to access your account. The secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, please email support@mind.page with your browser/device information but NOT your secret key, which you should never share with anyone. Signing you out for now!`
     );
@@ -2426,13 +2426,12 @@
                 if (!initTime) await initialize();
                 else console.debug(`${items.length} items already initialized at ${initTime}ms`);
                 firstSnapshot = false;
-                // if account is empty, fetch the welcome item from the anonymous account ...
+                // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
                 if (items.length == 0) onEditorDone("/_welcome");
 
                 // if necessary, init secret by triggering a test encryption/decryption
                 if (!secret) {
-                  const time = Date.now();
-                  const hello_item = { user: user.uid, time: time, text: "hello" };
+                  const hello_item = { user: user.uid, time: Date.now(), text: "hello" };
                   encryptItem(hello_item)
                     .then(decryptItem)
                     .then((item) => {
