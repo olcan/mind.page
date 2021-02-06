@@ -2763,7 +2763,7 @@
               </div>
             {/if}
           {/if}
-          {#if item.column == column && item.index == hideIndex - 1}
+          {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
             {#each tailIndices as tail}
               {#if hideIndex < tail.index}
                 <div class="show-more" on:click={() => (hideIndex = tail.index)}>
