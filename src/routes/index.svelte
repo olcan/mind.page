@@ -2309,9 +2309,9 @@
 
     // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
     // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
-    if (!user && localStorage.getItem("mindpage_user") && localStorage.getItem("mindpage_secret")) {
+    if (!user && localStorage.getItem("mindpage_user")) {
       user = JSON.parse(localStorage.getItem("mindpage_user"));
-      secret = localStorage.getItem("mindpage_secret");
+      secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
       console.debug(`restored user ${user.email} from local storage`);
       if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
@@ -2340,39 +2340,45 @@
       }
     }
 
-    // if initializing items, wait for that before signing in user since errors can trigger signout
-    Promise.resolve(initialization).then(() => {
-      firebase()
-        .auth()
-        .onAuthStateChanged((authUser) => {
-          // console.debug("onAuthStateChanged", user, authUser);
-          if (!authUser) return;
-          resetUser(); // clean up first
-          user = authUser;
-          console.log("signed in", user.email);
-          localStorage.setItem("mindpage_user", JSON.stringify(user));
-          anonymous = readonly = false; // just in case (should already be false)
-          signedin = true;
+    if (!readonly) {
+      // if initializing items, wait for that before signing in user since errors can trigger signout
+      Promise.resolve(initialization).then(() => {
+        firebase()
+          .auth()
+          .onAuthStateChanged((authUser) => {
+            // console.debug("onAuthStateChanged", user, authUser);
+            if (!authUser) return;
+            if (readonly) {
+              console.warn("ignoring unexpected signin");
+              return;
+            }
+            resetUser(); // clean up first
+            user = authUser;
+            console.log("signed in", user.email);
+            localStorage.setItem("mindpage_user", JSON.stringify(user));
+            anonymous = readonly = false; // just in case (should already be false)
+            signedin = true;
 
-          // set up server-side session cookie
-          // store user's ID token as a 1-hour __session cookie to send to server for preload
-          // NOTE: __session is the only cookie allowed by firebase for efficient caching
-          //       (see https://stackoverflow.com/a/44935288)
-          user
-            .getIdToken(false /*force refresh*/)
-            .then((token) => {
-              document.cookie = "__session=" + token + ";max-age=3600";
-            })
-            .catch(console.error);
+            // set up server-side session cookie
+            // store user's ID token as a 1-hour __session cookie to send to server for preload
+            // NOTE: __session is the only cookie allowed by firebase for efficient caching
+            //       (see https://stackoverflow.com/a/44935288)
+            user
+              .getIdToken(false /*force refresh*/)
+              .then((token) => {
+                document.cookie = "__session=" + token + ";max-age=3600";
+              })
+              .catch(console.error);
 
-          // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
-          //       (this is the only case where user != firebase().auth().currentUser)
-          if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
-            useAnonymousAccount();
+            // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+            //       (this is the only case where user != firebase().auth().currentUser)
+            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
+              useAnonymousAccount();
 
-          initFirebaseRealtime();
-        });
-    });
+            initFirebaseRealtime();
+          });
+      });
+    }
 
     // Visual viewport resize/scroll handlers ...
     // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
