@@ -1224,29 +1224,55 @@
     }
   }
 
-  // NOTE: secret phrase is initialized or retrieved only ONCE PER SESSION so that it can not be tampered with after having been used to decrypt existing items; otherwise account can contain items encrypted using different secret phrases, which would make the account unusable
+  // NOTE: secret phrase is initialized OR retrieved only ONCE PER SESSION so that it can not be tampered with after having been used to decrypt existing items; otherwise account can contain items encrypted using different secret phrases, which would make the account unusable
   let secret; // retrieved once and stored separately to prevent tampering during session
 
-  async function initSecretPhrase() {
+  async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error("anonymous user can not have a secret phrase");
-    if (secret) return; // already initialized from localStorage
+    if (secret) return secret; // already initialized from localStorage
     secret = localStorage.getItem("mindpage_secret");
-    if (secret) return; // retrieved from localStorage
+    if (secret) return secret; // retrieved from localStorage
+
+    console.debug("missing secret");
     let phrase = "";
-    while (!phrase) phrase = prompt("Please enter your Personal Secret Phrase:", "");
-    let confirm = "";
-    while (confirm != phrase) confirm = prompt("Please CONFIRM your Personal Secret Phrase:", "");
-    const utf8 = new TextEncoder().encode(user.uid + phrase);
-    const secret_buffer = await crypto.subtle.digest("SHA-256", utf8);
+    let confirmed = "";
+    if (new_phrase) {
+      while (phrase == "" || confirmed != phrase) {
+        while (phrase == "") {
+          phrase = prompt(
+            "MindPage needs a personal secret phrase to ensure that NO ONE (not even MindPage) can read your items outside of this particular page rendered on your device. This phrase is never stored anywhere, and you should never share it with anyone. Please enter your chosen phrase:",
+            ""
+          );
+        }
+        if (phrase == null) break;
+        confirmed = prompt("Confirm your new secret phrase:", "");
+        if (confirmed == null) break;
+        if (confirmed != phrase) {
+          alert("Confirmed phrase did not match. Let's try again ...");
+          phrase = "";
+        }
+      }
+    } else {
+      while (phrase == "") phrase = prompt("Enter your existing secret phrase:", "");
+    }
+    if (phrase == null || confirmed == null) {
+      // cancelled
+      signOut();
+      return;
+    }
+    const secret_utf8 = new TextEncoder().encode(user.uid + phrase);
+    const secret_buffer = await crypto.subtle.digest("SHA-256", secret_utf8);
     const secret_array = Array.from(new Uint8Array(secret_buffer));
     const secret_string = secret_array.map((b) => String.fromCharCode(b)).join("");
     secret = btoa(secret_string);
     localStorage.setItem("mindpage_secret", secret);
+    return secret;
   }
 
   // based on https://gist.github.com/chrisveness/43bcda93af9f646d083fad678071b90a
   async function encrypt(text: string) {
-    if (!secret) throw Error("missing secret");
+    if (!secret) secret = getSecretPhrase(true /* new_phrase */);
+    await Promise.resolve(secret);
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = crypto.getRandomValues(new Uint8Array(12)); // get 96-bit random iv
@@ -1264,7 +1290,8 @@
   }
 
   async function decrypt(cipher: string) {
-    if (!secret) throw Error("missing secret");
+    if (!secret) secret = getSecretPhrase();
+    await Promise.resolve(secret);
     const secret_utf8 = new TextEncoder().encode(secret); // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest("SHA-256", secret_utf8); // sha256-hash the secret
     const iv = cipher
@@ -1282,12 +1309,14 @@
   async function encryptItem(item) {
     if (anonymous) return item; // do not encrypt for anonymous user
     if (item.cipher) return item; // already encrypted
+    if (!item.text) return item; // nothing to encrypt
     item.cipher = await encrypt(JSON.stringify(item));
     delete item.text; // remove text until decryption
     return item;
   }
   async function decryptItem(item) {
     if (item.text) return item; // already decrypted
+    if (!item.cipher) return item; // nothing to decrypt
     item.text = JSON.parse(await decrypt(item.cipher)).text;
     delete item.cipher; // remove cipher until encryption
     return item;
@@ -2130,9 +2159,8 @@
 
   function encryptionError() {
     alert(
-      `MindPage is unable to access your account. Your personal secret phrase may be entered incorrectly, or your browser may not fully support modern encryption features. You may try entering your phrase again or using a different browser. If the problem persists, please email support@mind.page with your device and browser information but NOT your secret phrase. NEVER share your secret phrase with anyone. Signing you out for now!`
+      `MindPage is unable to access your account. The secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, please email support@mind.page with your browser/device information but NOT your secret key, which you should never share with anyone. Signing you out for now!`
     );
-    items = [];
     signOut();
   }
 
@@ -2218,6 +2246,22 @@
 
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
+
+    // if fragment corresponds to an item tag or id, focus on that item immediately ...
+    if (items.length > 0 && location.href.match(/#.+$/)) {
+      const tag = location.href.match(/#.+$/)[0];
+      // if it is a valid item id, then we convert it to name
+      const index = indexFromId.get(tag.substring(1));
+      if (index != undefined) {
+        replaceStateOnEditorChange = true; // replace state
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = items[index].name));
+      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
+        replaceStateOnEditorChange = true; // replace state
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = tag));
+      }
+    }
   }
 
   function signIn() {
@@ -2296,22 +2340,6 @@
       }
     }
 
-    // if fragment corresponds to an item tag or id, focus on that item immediately ...
-    if (items.length > 0 && location.href.match(/#.+$/)) {
-      const tag = location.href.match(/#.+$/)[0];
-      // if it is a valid item id, then we convert it to name
-      const index = indexFromId.get(tag.substring(1));
-      if (index != undefined) {
-        replaceStateOnEditorChange = true; // replace state
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = items[index].name));
-      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
-        replaceStateOnEditorChange = true; // replace state
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = tag));
-      }
-    }
-
     // if initializing items, wait for that before signing in user since errors can trigger signout
     Promise.resolve(initialization).then(() => {
       firebase()
@@ -2322,43 +2350,27 @@
           resetUser(); // clean up first
           user = authUser;
           console.log("signed in", user.email);
-        localStorage.setItem("mindpage_user", JSON.stringify(user));
+          localStorage.setItem("mindpage_user", JSON.stringify(user));
           anonymous = readonly = false; // just in case (should already be false)
           signedin = true;
 
-          // initialize secret phrase if needed, then test encryption just in case
-          initSecretPhrase()
-            .then(() => {
-              const time = Date.now();
-              const hello_item = { user: user.uid, time: time, text: "hello" };
-              encryptItem(hello_item)
-                .then(decryptItem)
-                .then((item) => {
-                  if (JSON.stringify(item) != JSON.stringify(hello_item)) {
-                    encryptionError();
-                    return;
-                  }
-
-                  // set up server-side session cookie
-                  // store user's ID token as a 1-hour __session cookie to send to server for preload
-                  // NOTE: __session is the only cookie allowed by firebase for efficient caching
-                  //       (see https://stackoverflow.com/a/44935288)
-                  user
-                    .getIdToken(false /*force refresh*/)
-                    .then((token) => {
-                      document.cookie = "__session=" + token + ";max-age=3600";
-                    })
-                    .catch(console.error);
-
-                  // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
-                  //       (this is the only case where user != firebase().auth().currentUser)
-                  if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
-                    useAnonymousAccount();
-
-                  initFirebaseRealtime();
-                });
+          // set up server-side session cookie
+          // store user's ID token as a 1-hour __session cookie to send to server for preload
+          // NOTE: __session is the only cookie allowed by firebase for efficient caching
+          //       (see https://stackoverflow.com/a/44935288)
+          user
+            .getIdToken(false /*force refresh*/)
+            .then((token) => {
+              document.cookie = "__session=" + token + ";max-age=3600";
             })
-            .catch(encryptionError);
+            .catch(console.error);
+
+          // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+          //       (this is the only case where user != firebase().auth().currentUser)
+          if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
+            useAnonymousAccount();
+
+          initFirebaseRealtime();
         });
     });
 
@@ -2412,9 +2424,22 @@
               setTimeout(async () => {
                 console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
                 if (!initTime) await initialize();
+                else console.debug(`${items.length} items already initialized at ${initTime}ms`);
                 firstSnapshot = false;
                 // if account is empty, fetch the welcome item from the anonymous account ...
                 if (items.length == 0) onEditorDone("/_welcome");
+
+                // if necessary, init secret by triggering a test encryption/decryption
+                if (!secret) {
+                  const time = Date.now();
+                  const hello_item = { user: user.uid, time: time, text: "hello" };
+                  encryptItem(hello_item)
+                    .then(decryptItem)
+                    .then((item) => {
+                      if (JSON.stringify(item) != JSON.stringify(hello_item)) throw new Error("encryption test failed");
+                    })
+                    .catch(encryptionError);
+                }
               });
             }
             snapshot.docChanges().forEach(function (change) {
@@ -2432,52 +2457,55 @@
                 return;
               }
               if (doc.metadata.hasPendingWrites) return; // ignore local change
-              // no need to log initial snapshot
-              // console.debug("detected remote change:", change.type, doc.id);
-              if (change.type === "added") {
-                // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                let item = Object.assign(doc.data(), {
-                  id: doc.id,
-                  savedId: doc.id,
-                  savedTime: doc.data().time,
-                  savedText: doc.data().text,
-                });
-                items = [item, ...items];
-                // update indices as needed by itemTextChanged
-                items.forEach((item, index) => indexFromId.set(item.id, index));
-                itemTextChanged(0, item.text);
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // integrate new item at index 0
-              } else if (change.type == "removed") {
-                // NOTE: remote remove is similar to onItemEditing (deletion case)
-                // NOTE: document may be under temporary id if it was added locally
-                let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                if (index == undefined) return; // nothing to remove
-                let item = items[index];
-                itemTextChanged(index, ""); // clears label, deps, etc
-                items.splice(index, 1);
-                // update indices as needed by onEditorChange
-                indexFromId = new Map<string, number>();
-                items.forEach((item, index) => indexFromId.set(item.id, index));
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
-                deletedItems.unshift({
-                  time: item.savedTime,
-                  text: item.savedText,
-                }); // for /undelete
-              } else if (change.type == "modified") {
-                // NOTE: remote modify is similar to _write without saving
-                // NOTE: document may be under temporary id if it was added locally
-                let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                if (index == undefined) return; // nothing to modify
-                let item = items[index];
-                item.text = item.savedText = doc.data().text;
-                item.time = items[index].savedTime = doc.data().time;
-                // since there is no
-                itemTextChanged(index, item.text); // updates label, deps, etc
-                lastEditorChangeTime = 0; // disable debounce even if editor focused
-                onEditorChange(editorText); // item time/text has changed
-              }
+              decryptItem(doc.data()).then((savedItem) => {
+                // no need to log initial snapshot
+                // console.debug("detected remote change:", change.type, doc.id);
+                if (change.type === "added") {
+                  // NOTE: remote add is similar to onEditorDone without js, saving, etc
+                  let item = {
+                    ...savedItem,
+                    id: doc.id,
+                    savedId: doc.id,
+                    savedTime: savedItem.time,
+                    savedText: savedItem.text,
+                  };
+                  items = [item, ...items];
+                  // update indices as needed by itemTextChanged
+                  items.forEach((item, index) => indexFromId.set(item.id, index));
+                  itemTextChanged(0, item.text);
+                  lastEditorChangeTime = 0; // disable debounce even if editor focused
+                  onEditorChange(editorText); // integrate new item at index 0
+                } else if (change.type == "removed") {
+                  // NOTE: remote remove is similar to onItemEditing (deletion case)
+                  // NOTE: document may be under temporary id if it was added locally
+                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
+                  if (index == undefined) return; // nothing to remove
+                  let item = items[index];
+                  itemTextChanged(index, ""); // clears label, deps, etc
+                  items.splice(index, 1);
+                  // update indices as needed by onEditorChange
+                  indexFromId = new Map<string, number>();
+                  items.forEach((item, index) => indexFromId.set(item.id, index));
+                  lastEditorChangeTime = 0; // disable debounce even if editor focused
+                  onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
+                  deletedItems.unshift({
+                    time: item.savedTime,
+                    text: item.savedText,
+                  }); // for /undelete
+                } else if (change.type == "modified") {
+                  // NOTE: remote modify is similar to _write without saving
+                  // NOTE: document may be under temporary id if it was added locally
+                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
+                  if (index == undefined) return; // nothing to modify
+                  let item = items[index];
+                  item.text = item.savedText = savedItem.text;
+                  item.time = items[index].savedTime = savedItem.time;
+                  // since there is no
+                  itemTextChanged(index, item.text); // updates label, deps, etc
+                  lastEditorChangeTime = 0; // disable debounce even if editor focused
+                  onEditorChange(editorText); // item time/text has changed
+                }
+              });
             });
           },
           (error) => {
@@ -2548,7 +2576,6 @@
       errors.forEach((args) => console.error(...args));
 
       if (anonymous) console.log("user is anonymous");
-      if (initTime) console.debug(`${items.length} items initialized at ${initTime}ms`);
 
       setInterval(checkLayout, 250); // check layout every 250ms
       updateDotted(); // update dotted items
