@@ -419,7 +419,7 @@
   let dotCount = 0;
   let columnCount = 0;
   let hideIndex = Infinity;
-  let truncateIndex = Infinity;
+  let truncateIndex = 50;
   let tailIndices = [];
   let newestTime = 0;
   let oldestTime = Infinity;
@@ -2708,7 +2708,7 @@
         {/if}
 
         {#each items as item (item.id)}
-          {#if item.column == column && (!item.hidden || item.index < truncateIndex)}
+          {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
@@ -3019,6 +3019,7 @@
     margin: 28px auto; /* same as having time string */
     padding: 15px 30px;
     width: fit-content;
+    white-space: nowrap;
   }
 
   .show-more + .show-more {
