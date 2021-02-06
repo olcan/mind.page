@@ -419,7 +419,8 @@
   let dotCount = 0;
   let columnCount = 0;
   let hideIndex = Infinity;
-  let truncateIndex = 50;
+  // NOTE: truncation removes items from the page completely and speeds up updates (e.g. when searching or tapping tags). It is safe to do as long as the truncation index does not vary too much, which can trigger problems with async scripts that are not implemented properly, e.g. that do not use resume/defer/etc and throw errors or invoke invalidate_cache when target elements go missing. Currently truncation index is fixed but can still effectively vary when hideIndex > truncateIndex, which seems relative safe as it concerns items lower on the page, and larger indices which are unlikely to be toggled as frequently as smaller indices.
+  const truncateIndex = 50;
   let tailIndices = [];
   let newestTime = 0;
   let oldestTime = Infinity;
