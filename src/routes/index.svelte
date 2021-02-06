@@ -419,6 +419,7 @@
   let dotCount = 0;
   let columnCount = 0;
   let hideIndex = Infinity;
+  let truncateIndex = Infinity;
   let tailIndices = [];
   let newestTime = 0;
   let oldestTime = Infinity;
@@ -2707,7 +2708,7 @@
         {/if}
 
         {#each items as item (item.id)}
-          {#if item.column == column}
+          {#if item.column == column && (!item.hidden || item.index < truncateIndex)}
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
