@@ -12,6 +12,7 @@
   export let focused = false;
   export let saving = false;
   export let running = false;
+  export let admin = false;
   export let hidden = false;
   export let showLogs = false;
   // NOTE: required props should not have default values
@@ -1003,6 +1004,7 @@
   id={"super-container-" + id}
   class:dotted
   class:editing
+  class:hidden
   class:timed={timeString.length > 0}
 >
   {#if timeString}
@@ -1023,7 +1025,7 @@
     class:context
     class:target
     class:running
-    class:hidden
+    class:admin
     class:showLogs
     class:bordered={error || warning || running}
     class:runnable
@@ -1098,6 +1100,11 @@
   .super-container.editing:not(.timed) {
     padding-top: 24px; /* extra space for .edit-menu */
   }
+  .hidden {
+    position: absolute;
+    visibility: hidden;
+    width: 100%;
+  }
   .container {
     position: relative;
     border-radius: 5px; /* aligns with editor radius (4px) 1px inside */
@@ -1105,8 +1112,7 @@
     border: 1px solid #111;
     box-sizing: border-box;
   }
-  /* svelte ensures this does not conflict with mark.hidden */
-  .hidden {
+  .admin {
     border: 1px dashed #444;
   }
   .item-menu {

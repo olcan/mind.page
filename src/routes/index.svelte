@@ -2187,19 +2187,19 @@
   }
 
   let initTime = 0;
-  let hiddenItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
+  let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   async function initialize() {
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) as any[];
 
     // filter hidden items on readonly account
-    if (readonly) items = items.filter((item) => !hiddenItems.has(item.id));
+    if (readonly) items = items.filter((item) => !adminItems.has(item.id));
 
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
-      item.hidden = hiddenItems.has(item.id);
+      item.admin = adminItems.has(item.id);
       item.savedId = item.id;
       item.savedText = item.text;
       item.savedTime = item.time;
@@ -2707,8 +2707,7 @@
         {/if}
 
         {#each items as item (item.id)}
-          <!-- NOTE: we ignore hideIndex at initial render when item heights are unknown -->
-          {#if item.column == column && (item.index < hideIndex || totalItemHeight == 0)}
+          {#if item.column == column}
             <Item
               onEditing={onItemEditing}
               onFocused={onItemFocused}
@@ -2724,12 +2723,13 @@
               bind:text={item.text}
               bind:editing={item.editing}
               bind:focused={item.focused}
-              bind:saving={item.saving}
-              bind:running={item.running}
-              bind:hidden={item.hidden}
-              bind:showLogs={item.showLogs}
-              bind:height={item.height}
-              bind:time={item.time}
+              saving={item.saving}
+              running={item.running}
+              admin={item.admin}
+              hidden={item.index >= hideIndex}
+              showLogs={item.showLogs}
+              height={item.height}
+              time={item.time}
               index={item.index}
               id={item.id}
               label={item.label}
@@ -2751,7 +2751,7 @@
               scripted={item.scripted}
               macroed={item.macroed}
             />
-            {#if item.nextColumn >= 0}
+            {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
               <div class="section-separator">
                 <hr />
                 {item.index + 2}<span class="arrows">{item.arrows}</span
@@ -2762,7 +2762,8 @@
                 <hr />
               </div>
             {/if}
-          {:else if item.column == column && item.index == hideIndex}
+          {/if}
+          {#if item.column == column && item.index == hideIndex - 1}
             {#each tailIndices as tail}
               {#if hideIndex < tail.index}
                 <div class="show-more" on:click={() => (hideIndex = tail.index)}>
@@ -2952,9 +2953,9 @@
     /* bottom padding for easier tapping on last item */
     padding-bottom: 200px;
   }
-  .items.multi-column {
+  /* .items.multi-column {
     padding-bottom: 0;
-  }
+  } */
   :global(#sapper) {
     min-height: 100%;
     min-height: -webkit-fill-available;
@@ -2965,6 +2966,8 @@
     /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
     min-width: 0px;
     max-width: 750px;
+    /* allow absolute-positioned .hidden items */
+    position: relative;
   }
   .column:not(:last-child) {
     padding-right: 8px;
@@ -3012,8 +3015,7 @@
     font-family: Avenir Next, Helvetica;
     border-radius: 4px;
     cursor: pointer;
-    margin: auto;
-    margin-top: 28px; /* same as having time string */
+    margin: 28px auto; /* same as having time string */
     padding: 15px 30px;
     width: fit-content;
   }
