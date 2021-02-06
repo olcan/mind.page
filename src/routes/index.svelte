@@ -324,8 +324,7 @@
         return out;
       } catch (e) {
         console.error(e);
-        // invalidate element cache for <script> tags
-        if (options["trigger"].startsWith("script_")) invalidateElemCache(this.id);
+        invalidateElemCache(this.id);
         if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
@@ -370,6 +369,7 @@
         return out;
       } catch (e) {
         console.error(e);
+        invalidateElemCache(this.id);
         if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
@@ -397,6 +397,12 @@
     // delay = promise that resolves on a timeout
     delay(ms) {
       return this.promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    // invalidates dom rendering cache for item
+    // (automatically triggered on errors, but can also be invoked silently)
+    invalidate_cache() {
+      invalidateElemCache(this.id);
     }
   }
 
