@@ -816,7 +816,7 @@
                 spacer.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
                 if (!suffixMatch) {
                   let rightSpacer = node.parentElement.appendChild(document.createElement("div"));
-                  rightSpacer.style.flexGrow = "1";
+                  rightSpacer.classList.add("spacer");
                 }
               }
             }
@@ -846,7 +846,7 @@
                     document.createElement("div"),
                     node.parentElement.firstChild
                   );
-                  leftSpacer.style.flexGrow = "1";
+                  leftSpacer.classList.add("spacer");
                 }
               }
             }
@@ -1514,6 +1514,15 @@
   }
   :global(.item mark.label span.highlight) {
     background: #9f9;
+  }
+
+  :global(.item mark .spacer) {
+    flex-grow: 1;
+  }
+  /* disable spacers inside .menu highlights when prefix and suffix matches coincide */
+  :global(.item .menu mark .spacer:nth-last-of-type(4)),
+  :global(.item .menu mark .spacer:nth-last-child(2)) {
+    display: none;
   }
 
   :global(.item .vertical-bar) {
