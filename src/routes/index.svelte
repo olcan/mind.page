@@ -1247,7 +1247,7 @@
       while (phrase == "" || confirmed != phrase) {
         while (phrase == "") {
           phrase = prompt(
-            "MindPage needs a personal secret phrase to ensure that NO ONE (not even MindPage) can read your items outside of this particular page rendered on your device. This phrase is never stored anywhere, and you should never share it with anyone. Please enter your chosen phrase:",
+            "MindPage uses a secret phrase to encrypt your items so that they they are readable only by you, on your devices. This phrase is never stored anywhere, and you should never share it with anyone. Please enter your chosen phrase:",
             ""
           );
         }
@@ -1262,11 +1262,7 @@
     } else {
       while (phrase == "") phrase = prompt("Enter your existing secret phrase:", "");
     }
-    if (phrase == null || confirmed == null) {
-      // cancelled
-      signOut();
-      return;
-    }
+    if (phrase == null || confirmed == null) throw new Error("secret phrase cancelled");
     const secret_utf8 = new TextEncoder().encode(user.uid + phrase);
     const secret_buffer = await crypto.subtle.digest("SHA-256", secret_utf8);
     const secret_array = Array.from(new Uint8Array(secret_buffer));
@@ -2166,9 +2162,13 @@
 
   function encryptionError(e) {
     console.error("encryption/decryption failed", e);
-    alert(
-      `MindPage is unable to access your account. The secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, please email support@mind.page with your browser/device information but NOT your secret key, which you should never share with anyone. Signing you out for now!`
-    );
+    if (e.message.includes("cancelled")) {
+      alert("Secret phrase entry was cancelled. Signing you out ...");
+    } else {
+      alert(
+        `MindPage is unable to access your account. The secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone. Signing you out for now ...`
+      );
+    }
     signOut();
   }
 
@@ -2524,7 +2524,7 @@
           (error) => {
             if (error.code == "permission-denied")
               alert(
-                `This account requires activation. Plese email support@mind.page from your email address ${user.email} and specify your account id:${user.uid}. Signing you out for now!`
+                `This account requires activation. Plese email support@mind.page from your email address ${user.email} and specify your account id:${user.uid}. Signing you out for now ...`
               );
             console.error(error);
             signOut();
