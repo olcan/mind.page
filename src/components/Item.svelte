@@ -341,7 +341,7 @@
         )
           str = str + "<br>\n";
 
-        // NOTE: html tag lines require an extra \n for markdown parser
+        // NOTE: some lines (e.g. html tag lines) require an extra \n for markdown parser
         if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
@@ -1478,6 +1478,9 @@
   }
   :global(.item br:last-child) {
     display: none;
+  }
+  :global(.item blockquote br:last-child) {
+    display: block;
   }
 
   :global(.item mark.hidden.missing) {
