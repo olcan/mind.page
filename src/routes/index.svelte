@@ -295,7 +295,18 @@
       );
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
-        if (options["async"]) evaljs = ["_this.start(async (done) => {", evaljs, "}) // _this.start"].join("\n");
+        if (options["async"])
+          evaljs = [
+            "_this.start(async (done) => {",
+            // "try {",
+            evaljs,
+            // "} catch(e) {",
+            // "  console.error(e)",
+            // "  _this.invalidate_cache()",
+            // "  done(null, {item:'any',level:4})",
+            // "}",
+            "}) // _this.start",
+          ].join("\n");
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
         evaljs = ["'use strict';", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
       }
@@ -332,55 +343,66 @@
 
     // starts an async task in context of this item
     // if no function is given, returns 'done' function to be invoked later by caller
-    // if function is given (can be async), passes done into that and returns promise
+    // if function is given (can be async), passes done into that
     start(func = null) {
       const done = (output, log_options = {}) => {
         if (output) this.write(output);
         this.write_log(log_options);
         item(this.id).running = false;
       };
-      if (!func) {
-        // start is invoked sync, caller will invoke done() async later
-        item(this.id).running = true;
-        return done;
-      }
-      return this.resume(async () => {
-        item(this.id).running = true;
-        // ensure spinner is visible in case function blocks updates for extended period
-        // NOTE: turns out tick() is not sufficient, and even polling for DOM state did not work without a _delay(50)
-        await tick();
-        await this.delay(50); // ensure spinner is visible
-        await func(done);
-      });
+      item(this.id).running = true;
+      if (!func) return done; // caller will invoke done() later
+      // skip animation frame to ensure DOM is updated for running=true
+      // (otherwise only option is an arbitrary delay since polling DOM does not work)
+      // (see https://stackoverflow.com/a/57659371 and other answers to that question)
+      requestAnimationFrame(() =>
+        requestAnimationFrame(
+          this.defer(
+            () => func(done),
+            () => {
+              // as a generic top-level safety net to avoid blocked item, stop running and write any errors
+              if (item(this.id).running) done(null, { item: "any", level: 4 /* errors */ });
+            }
+          )
+        )
+      );
     }
 
-    // resumes async task by calling (async) function after restoring stack
-    // NOTE: stack should be either [this.id] or [], because we do not allow nested eval of start/resume/etc
-    // NOTE: for the stack to remain valid, we can NOT await on an async function since that would give up control while item is still on the stack, causing misattribution and potential corruption (with multiple async tasks popping each other off the stack); instead we allow item to popped off and leave it up to item code to ensure that _this.resume() is invoked to restore stack as needed -- note that _this remains valid when stack is empty because it is defined within lexical scope in eval()
-    async resume(func) {
+    // resumes async task by calling given function after restoring stack
+    // handles all exceptions and rejections by logging, invalidating cache, and invoking optional onerror
+    resume(func, onerror = null) {
+      // stack should be either [this.id] or [], because we do not allow nested eval of start/resume/etc
       // console.debug(evalStack.map((id) => item(id).name));
       if (evalStack.length > 1 || (evalStack.length == 1 && evalStack[0] != this.id)) {
         console.error(`unexpected eval stack [${evalStack.map((id) => item(id).name)}] at resume()`);
       }
       evalStack.push(this.id);
       try {
-        const out = func();
+        // NOTE: we can NOT await on an async function here since that would give up control while item is still on the stack, causing misattribution and potential corruption (with multiple async tasks popping each other off the stack); instead we allow item to popped off and leave it up to item code to ensure that _this.resume() is invoked to restore stack as needed -- note that _this remains valid when stack is empty because it is defined within lexical scope in eval()
+        Promise.resolve(func()).catch(
+          this.defer((e) => {
+            console.error(e);
+            invalidateElemCache(this.id);
+            if (onerror) onerror(e);
+            else throw e;
+          })
+        );
         if (evalStack.pop() != this.id) console.error("invalid stack");
-        return out;
       } catch (e) {
         console.error(e);
         invalidateElemCache(this.id);
         if (evalStack.pop() != this.id) console.error("invalid stack");
-        throw e;
+        if (onerror) onerror(e);
+        else throw e;
       }
     }
 
     // like resume, but returns "deferred" function to be invoked by caller
     // useful for passing callback functions, e.g. into Promise.then()
-    defer(func) {
+    defer(func, onerror = null) {
       const _item = this; // capture for deferred function
       return function (...args) {
-        _item.resume(() => func(...args));
+        _item.resume(() => func(...args), onerror);
       };
     }
 
@@ -2136,6 +2158,8 @@
 
   function errorMessage(e) {
     if (!e) return undefined;
+    // Some client libraries (e.g. Google API JS client) return an embedded 'error' property, which can itself be a non-standard object with various details (e.g. HTTP error code, message, details, etc), so we just stringify the whole object to provide the most information possible.
+    if (e.error) return JSON.stringify(e);
     // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
     // NOTE: we log url for "error" Events that do not have message/reason
     //       (see https://www.w3schools.com/jsref/event_onerror.asp)
