@@ -159,6 +159,12 @@
     get elem(): HTMLElement {
       return document.getElementById("super-container-" + this.id);
     }
+    // log options for write_log and write_log_any, reset in eval()
+    get log_options(): object {
+      let _item = item(this.id);
+      if (!_item.log_options) _item.log_options = {};
+      return _item.log_options;
+    }
     // general-purpose key-value store with session/item lifetime
     get store(): object {
       let _item = item(this.id);
@@ -272,6 +278,7 @@
           type: "_log",
           item: "self",
         },
+        item(this.id).log_options, // may be undefined
         options
       );
       this.write(this.console_log(options).join("\n"), options["type"]);
@@ -279,7 +286,7 @@
     }
 
     write_log_any(options = {}) {
-      return this.write_log(Object.assign({ item: "any" }, options));
+      return this.write_log(Object.assign({ item: "any" }, item(this.id).log_options, options));
     }
 
     show_logs(autohide_after: number = 15000) {
@@ -295,18 +302,7 @@
       );
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
-        if (options["async"])
-          evaljs = [
-            "_this.start(async (done) => {",
-            // "try {",
-            evaljs,
-            // "} catch(e) {",
-            // "  console.error(e)",
-            // "  _this.invalidate_cache()",
-            // "  done(null, {item:'any',level:4})",
-            // "}",
-            "}) // _this.start",
-          ].join("\n");
+        if (options["async"]) evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
         evaljs = ["'use strict';", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
       }
@@ -327,7 +323,10 @@
       );
       // run eval within try/catch block
       item(this.id).lastEvalTime = Date.now();
-      if (options["trigger"] == "run") item(this.id).lastRunTime = Date.now();
+      if (options["trigger"] == "run") {
+        item(this.id).lastRunTime = Date.now();
+        item(this.id).log_options = null;
+      }
       evalStack.push(this.id);
       try {
         const out = eval.call(window, evaljs);
@@ -341,90 +340,66 @@
       }
     }
 
-    // starts an async task in context of this item
-    // if no function is given, returns 'done' function to be invoked later by caller
-    // if function is given (can be async), passes done into that
-    start(func = null) {
-      const done = (output, log_options = {}) => {
-        if (output) this.write(output);
-        this.write_log(log_options);
-        item(this.id).running = false;
-      };
+    // starts an async evaluation in context of this item
+    // item is NOT on stack unless added explicitly (see below)
+    // log messages are NOT associated with item while it is off the stack
+    // _this is still defined in lexical context as if item is top of stack
+    start(async_func) {
       item(this.id).running = true;
-      if (!func) return done; // caller will invoke done() later
       // skip animation frame to ensure DOM is updated for running=true
       // (otherwise only option is an arbitrary delay since polling DOM does not work)
       // (see https://stackoverflow.com/a/57659371 and other answers to that question)
       requestAnimationFrame(() =>
-        requestAnimationFrame(
-          this.defer(
-            () => func(done),
-            () => {
-              // as a generic top-level safety net to avoid blocked item, stop running and write any errors
-              if (item(this.id).running) done(null, { item: "any", level: 4 /* errors */ });
-            }
-          )
+        requestAnimationFrame(() =>
+          Promise.resolve(async_func())
+            .then((output) => {
+              if (output) this.write(output);
+            })
+            .catch((e) => {
+              console.error(e);
+              invalidateElemCache(this.id);
+            })
+            .finally(() => {
+              this.write_log_any(); // customized via _this.log_options
+              item(this.id).running = false;
+            })
         )
       );
     }
 
-    // resumes async task by calling given function after restoring stack
-    // handles all exceptions and rejections by logging, invalidating cache, and invoking optional onerror
-    resume(func, onerror = null) {
-      // stack should be either [this.id] or [], because we do not allow nested eval of start/resume/etc
-      // console.debug(evalStack.map((id) => item(id).name));
-      if (evalStack.length > 1 || (evalStack.length == 1 && evalStack[0] != this.id)) {
-        console.error(`unexpected eval stack [${evalStack.map((id) => item(id).name)}] at resume()`);
-      }
+    // invokes given (sync) function after restoring item onto stack if necessary
+    // re-returns any return value, rethrows (after logging) any errors
+    invoke(func) {
       evalStack.push(this.id);
       try {
-        // NOTE: we can NOT await on an async function here since that would give up control while item is still on the stack, causing misattribution and potential corruption (with multiple async tasks popping each other off the stack); instead we allow item to popped off and leave it up to item code to ensure that _this.resume() is invoked to restore stack as needed -- note that _this remains valid when stack is empty because it is defined within lexical scope in eval()
-        Promise.resolve(func()).catch(
-          this.defer((e) => {
-            console.error(e);
-            invalidateElemCache(this.id);
-            if (onerror) onerror(e);
-            else throw e;
-          })
-        );
+        const out = func();
         if (evalStack.pop() != this.id) console.error("invalid stack");
+        return out;
       } catch (e) {
         console.error(e);
         invalidateElemCache(this.id);
         if (evalStack.pop() != this.id) console.error("invalid stack");
-        if (onerror) onerror(e);
-        else throw e;
+        throw e;
       }
     }
 
-    // like resume, but returns "deferred" function to be invoked by caller
-    // useful for passing callback functions, e.g. into Promise.then()
-    defer(func, onerror = null) {
+    // "attaches" given function to item such that it will go through _this.invoke()
+    // useful for passing callback functions, e.g. into Promise.then(...)
+    attach(func) {
       const _item = this; // capture for deferred function
       return function (...args) {
-        _item.resume(() => func(...args), onerror);
+        _item.invoke(() => func(...args));
       };
     }
 
-    // dispatch = setTimeout on deferred function
+    // dispatch = setTimeout on attached function
     dispatch(func, ms, ...args) {
-      setTimeout(this.defer(func), ms, ...args);
+      setTimeout(this.attach(func), ms, ...args);
     }
 
-    // promise = new Promise on deferred executor function
+    // promise = new Promise on attached executor function (resolve, reject) => {...}
     promise(func) {
-      return new Promise(this.defer(func));
-    }
-
-    // delay = promise that resolves on a timeout
-    delay(ms) {
-      return this.promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    // invalidates dom rendering cache for item
-    // (automatically triggered on errors, but can also be invoked silently)
-    invalidate_cache() {
-      invalidateElemCache(this.id);
+      return new Promise(this.attach(func));
     }
   }
 
@@ -1798,10 +1773,10 @@
     const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
     let jsin = extractBlock(item.text, "js_input");
     if (!jsin) return item.text; // missing or empty, ignore
-    if (async && !jsin.match(/\bdone\b/)) {
-      alert(`${item.name}: can not run async js_input without any reference to 'done'`);
-      return item.text;
-    }
+    // if (async && !jsin.match(/\bdone\b/)) {
+    //   alert(`${item.name}: can not run async js_input without any reference to 'done'`);
+    //   return item.text;
+    // }
     let jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined;
