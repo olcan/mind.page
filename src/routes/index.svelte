@@ -173,7 +173,7 @@
       if (!_item.log_options) _item.log_options = {};
       return _item.log_options;
     }
-    // general-purpose key-value store with session/item lifetime
+    // general-purpose key-value store with session/item lifetime (can be saved/loaded)
     get store(): object {
       let _item = item(this.id);
       if (!_item.store) _item.store = {};
@@ -416,6 +416,35 @@
     // promise = new Promise on attached executor function (resolve, reject) => {...}
     promise(func) {
       return new Promise(this.attach(func));
+    }
+
+    // loads item's key-value store from localStorage (requires saved item for permanent id)
+    load_store(): object {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("load_store is not available until item has been saved");
+      _item.store = JSON.parse(localStorage.getItem("mindpage_item_store_" + _item.savedId)) || {};
+      return _item.store;
+    }
+
+    // saves item's key-value store into localStorage (requires saved item for permanent id)
+    save_store() {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("save_store is not available until item has been saved");
+      localStorage.setItem("mindpage_item_store_" + _item.savedId, JSON.stringify(_item.store));
+    }
+
+    // removes any previous saves from localStorage
+    unsave_store() {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("remove_store is not available until item has been saved");
+      localStorage.removeItem("mindpage_item_store_" + _item.savedId);
+    }
+
+    // clears items's key-value store, including any previous save into localStorage
+    clear_store() {
+      let _item = item(this.id);
+      _item.store = {};
+      if (_item.savedId) this.unsave_store();
     }
   }
 
