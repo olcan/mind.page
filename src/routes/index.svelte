@@ -10,8 +10,7 @@
   import _ from "lodash";
   import { isClient, firebase, firestore } from "../../firebase.js";
   import { Circle2 } from "svelte-loading-spinners";
-  import Modal from "svelte-simple-modal";
-  import Modals from "../components/Modals.svelte";
+  import Modal from "../components/Modal.svelte";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
   export let items = [];
@@ -24,6 +23,7 @@
   let signedin = false;
   let anonymous = false;
   let readonly = false;
+  let modal;
 
   let evalStack = [];
   function addLineNumbers(code) {
@@ -65,6 +65,11 @@
     return _.sortBy((idsFromLabel.get(label.toLowerCase()) || []).map(_item), (item) => -item.time);
   }
 
+  // _modal shows a modal dialog
+  function _modal(options) {
+    return modal.show(options);
+  }
+
   // define window properties and functions
   if (isClient) {
     Object.defineProperty(window, "_user", {
@@ -89,6 +94,7 @@
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
     window["_item"] = _item;
     window["_items"] = _items;
+    window["_modal"] = _modal;
   }
 
   // private function for looking up item given its id
@@ -1243,33 +1249,50 @@
   // NOTE: secret phrase is initialized OR retrieved only ONCE PER SESSION so that it can not be tampered with after having been used to decrypt existing items; otherwise account can contain items encrypted using different secret phrases, which would make the account unusable
   let secret; // retrieved once and stored separately to prevent tampering during session
 
+  import { tick } from "svelte";
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error("anonymous user can not have a secret phrase");
     if (secret) return secret; // already initialized from localStorage
     secret = localStorage.getItem("mindpage_secret");
     if (secret) return secret; // retrieved from localStorage
+    await tick(); // wait until modal is rendered on page
 
     let phrase = "";
     let confirmed = "";
     if (new_phrase) {
       while (phrase == "" || confirmed != phrase) {
         while (phrase == "") {
-          phrase = await window["_phrase"](
-            "MindPage uses a <b>secret phrase</b> to ensure that your items are readable <b>only by you, on your devices</b>. This phrase is never stored anywhere, and you should never share it with anyone. Please enter the phrase you would like to use:",
-            "Create Secret Phrase",
-            "Sign Out"
-          );
+          phrase = await modal.show({
+            content:
+              "Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.",
+            confirm: "Create Secret Phrase",
+            cancel: "Sign Out",
+            input: "",
+          });
         }
         if (phrase == null) break;
-        confirmed = await window["_phrase"]("Confirm your new secret phrase:", "Confirm Secret Phrase", "Sign Out");
+        confirmed = await modal.show({
+          content: "Confirm your new secret phrase:",
+          confirm: "Confirm Secret Phrase",
+          cancel: "Sign Out",
+          input: "",
+        });
         if (confirmed == null) break;
         if (confirmed != phrase) {
-          await window["_alert"]("Confirmed phrase did not match. Let's try again ...", "Try Again");
+          await modal.show({
+            content: "Confirmed phrase did not match. Let's try again ...",
+            confirm: "Try Again",
+          });
           phrase = "";
         }
       }
     } else {
-      while (phrase == "") phrase = await window["_phrase"]("Enter your secret phrase:", "Continue", "Sign Out");
+      phrase = await modal.show({
+        content: "Enter your secret phrase:",
+        confirm: "Continue",
+        cancel: "Sign Out",
+        input: "",
+      });
     }
     if (phrase == null || confirmed == null) throw new Error("secret phrase cancelled");
     const secret_utf8 = new TextEncoder().encode(user.uid + phrase);
@@ -2178,11 +2201,13 @@
       signOut();
       return;
     }
-    // _alert may require dispatch if there is an existing prompt
-    window["_alert"](
-      `Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone.`,
-      "Sign Out"
-    ).then(signOut);
+    // dispatch in case error is triggered before modal is created
+    modal.show({
+      content:
+        "Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone.",
+      confirm: "Sign Out",
+      onConfirm: signOut,
+    });
   }
 
   import { onMount } from "svelte";
@@ -2617,6 +2642,13 @@
       setInterval(checkLayout, 250); // check layout every 250ms
       updateDotted(); // update dotted items
 
+      // modal.show({
+      //   content: "Hello World!",
+      //   confirm: "Yes",
+      //   cancel: "No",
+      //   input: "",
+      // });
+
       // console.debug(
       //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
       //     items.length
@@ -2677,156 +2709,158 @@
   }
 </script>
 
-<Modal>
-  <Modals />
-
-  <!-- NOTE: we put the items on the page as soon as they are initialized, but .loading overlay remains until heights are calculated -->
-  {#if user && initTime}
-    <div class="items" class:multi-column={columnCount > 1}>
-      {#each { length: columnCount } as _, column}
-        <div class="column">
-          {#if column == 0}
-            <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-              <div id="header-container" class:focused>
-                <div id="editor">
-                  <Editor
-                    id="mindbox"
-                    bind:text={editorText}
-                    bind:focused
-                    cancelOnDelete={true}
-                    clearOnShiftBackspace={true}
-                    allowCommandCtrlBracket={true}
-                    onEdited={onEditorChange}
-                    onDone={onEditorDone}
-                    onPrev={onPrevItem}
-                    onNext={onNextItem}
-                  />
-                </div>
-                <div class="spacer" />
-                {#if user}
-                  <img
-                    id="user"
-                    class:anonymous
-                    class:readonly
-                    class:signedin
-                    src={user.photoURL}
-                    alt={user.displayName || user.email}
-                    title={user.displayName || user.email}
-                    on:click={() => (!signedin ? signIn() : signOut())}
-                  />
-                {/if}
+<!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
+{#if user && initTime}
+  <div class="items" class:multi-column={columnCount > 1}>
+    {#each { length: columnCount } as _, column}
+      <div class="column">
+        {#if column == 0}
+          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div id="header-container" class:focused>
+              <div id="editor">
+                <Editor
+                  id="mindbox"
+                  bind:text={editorText}
+                  bind:focused
+                  cancelOnDelete={true}
+                  clearOnShiftBackspace={true}
+                  allowCommandCtrlBracket={true}
+                  onEdited={onEditorChange}
+                  onDone={onEditorDone}
+                  onPrev={onPrevItem}
+                  onNext={onNextItem}
+                />
               </div>
-              <div id="status" on:click={onStatusClick}>
-                <span id="console-summary" on:click={onConsoleSummaryClick} />
-                <span class="dots">
-                  {#each { length: dotCount } as _}•{/each}
-                </span>
-                <span class="triangle"> ▲ </span>
-                {#if items.length > 0}
-                  <div class="counts">
-                    {#if matchingItemCount > 0}
-                      &nbsp;<span class="matching">{matchingItemCount} matching items</span>
-                    {:else}
-                      {items.length} items
-                    {/if}
-                  </div>
-                {/if}
-                <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
-              </div>
+              <div class="spacer" />
+              {#if user}
+                <img
+                  id="user"
+                  class:anonymous
+                  class:readonly
+                  class:signedin
+                  src={user.photoURL}
+                  alt={user.displayName || user.email}
+                  title={user.displayName || user.email}
+                  on:click={() => (!signedin ? signIn() : signOut())}
+                />
+              {/if}
             </div>
-          {/if}
-
-          {#each items as item (item.id)}
-            {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
-              <Item
-                onEditing={onItemEditing}
-                onFocused={onItemFocused}
-                onEdited={onItemEdited}
-                onRun={onItemRun}
-                onTouch={onItemTouch}
-                onResized={onItemResized}
-                {onTagClick}
-                {onLinkClick}
-                {onLogSummaryClick}
-                onPrev={onPrevItem}
-                onNext={onNextItem}
-                bind:text={item.text}
-                bind:editing={item.editing}
-                bind:focused={item.focused}
-                saving={item.saving}
-                running={item.running}
-                admin={item.admin}
-                hidden={item.index >= hideIndex}
-                showLogs={item.showLogs}
-                height={item.height}
-                time={item.time}
-                index={item.index}
-                id={item.id}
-                label={item.label}
-                labelUnique={item.labelUnique}
-                labelText={item.labelText}
-                hash={item.hash}
-                deephash={item.deephash}
-                missingTags={item.missingTags.join(" ")}
-                matchingTerms={item.matchingTerms.join(" ")}
-                matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
-                timeString={item.timeString}
-                timeOutOfOrder={item.timeOutOfOrder}
-                updateTime={item.updateTime}
-                createTime={item.createTime}
-                depsString={item.depsString}
-                dependentsString={item.dependentsString}
-                dotted={item.dotted}
-                runnable={item.runnable}
-                scripted={item.scripted}
-                macroed={item.macroed}
-              />
-              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
-                <div class="section-separator">
-                  <hr />
-                  {item.index + 2}<span class="arrows">{item.arrows}</span
-                  >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
-                    &nbsp;
-                    {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+            <div id="status" on:click={onStatusClick}>
+              <span id="console-summary" on:click={onConsoleSummaryClick} />
+              <span class="dots">
+                {#each { length: dotCount } as _}•{/each}
+              </span>
+              <span class="triangle"> ▲ </span>
+              {#if items.length > 0}
+                <div class="counts">
+                  {#if matchingItemCount > 0}
+                    &nbsp;<span class="matching">{matchingItemCount} matching items</span>
+                  {:else}
+                    {items.length} items
                   {/if}
-                  <hr />
                 </div>
               {/if}
-            {/if}
-            {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
-              {#each tailIndices as tail}
-                {#if hideIndex < tail.index}
-                  <div class="show-more" on:click={() => (hideIndex = tail.index)}>
-                    show last {tail.timeString}
-                  </div>
+              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
+            </div>
+          </div>
+        {/if}
+
+        {#each items as item (item.id)}
+          {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
+            <Item
+              onEditing={onItemEditing}
+              onFocused={onItemFocused}
+              onEdited={onItemEdited}
+              onRun={onItemRun}
+              onTouch={onItemTouch}
+              onResized={onItemResized}
+              {onTagClick}
+              {onLinkClick}
+              {onLogSummaryClick}
+              onPrev={onPrevItem}
+              onNext={onNextItem}
+              bind:text={item.text}
+              bind:editing={item.editing}
+              bind:focused={item.focused}
+              saving={item.saving}
+              running={item.running}
+              admin={item.admin}
+              hidden={item.index >= hideIndex}
+              showLogs={item.showLogs}
+              height={item.height}
+              time={item.time}
+              index={item.index}
+              id={item.id}
+              label={item.label}
+              labelUnique={item.labelUnique}
+              labelText={item.labelText}
+              hash={item.hash}
+              deephash={item.deephash}
+              missingTags={item.missingTags.join(" ")}
+              matchingTerms={item.matchingTerms.join(" ")}
+              matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+              timeString={item.timeString}
+              timeOutOfOrder={item.timeOutOfOrder}
+              updateTime={item.updateTime}
+              createTime={item.createTime}
+              depsString={item.depsString}
+              dependentsString={item.dependentsString}
+              dotted={item.dotted}
+              runnable={item.runnable}
+              scripted={item.scripted}
+              macroed={item.macroed}
+            />
+            {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
+              <div class="section-separator">
+                <hr />
+                {item.index + 2}<span class="arrows">{item.arrows}</span
+                >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
+                  &nbsp;
+                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
                 {/if}
-              {/each}
-              <div class="show-more" on:click={() => (hideIndex = Infinity)}>
-                show all {items.length} items
+                <hr />
               </div>
             {/if}
-          {/each}
-        </div>
-      {/each}
-    </div>
-  {/if}
+          {/if}
+          {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
+            {#each tailIndices as tail}
+              {#if hideIndex < tail.index}
+                <div class="show-more" on:click={() => (hideIndex = tail.index)}>
+                  show last {tail.timeString}
+                </div>
+              {/if}
+            {/each}
+            <div class="show-more" on:click={() => (hideIndex = Infinity)}>
+              show all {items.length} items
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/each}
+  </div>
+{/if}
 
-  {#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
-    <div id="loading">
-      <Circle2 size="60" unit="px" />
-    </div>
-  {:else}<script>
-      setTimeout(() => {
-        // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-        //       programmatic focus except in click handlers, when returning to app, etc
-        if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone")) {
-          let mindbox = document.getElementById("textarea-mindbox");
-          mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
-          mindbox.focus();
-        }
-      });
-    </script>{/if}
-</Modal>
+{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
+  <div id="loading">
+    <Circle2 size="60" unit="px" />
+  </div>
+{:else}<script>
+    setTimeout(() => {
+      // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+      //       programmatic focus except in click handlers, when returning to app, etc
+      if (
+        document.activeElement.tagName.toLowerCase() != "textarea" &&
+        !navigator.platform.startsWith("iPhone") &&
+        !document.querySelector(".modal input")
+      ) {
+        let mindbox = document.getElementById("textarea-mindbox");
+        mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
+        mindbox.focus();
+      }
+    });
+  </script>{/if}
+
+<Modal bind:this={modal} />
 
 <svelte:window
   on:keydown={onKeyDown}
@@ -2837,6 +2871,7 @@
   on:scroll={onScroll}
 />
 
+<!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
 <style>
   #loading {
     position: absolute;

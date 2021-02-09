@@ -17,5 +17,6 @@
   "prettier.printWidth": 120,
   "diffEditor.renderSideBySide": false,
   "javascript.suggest.autoImports": false,
-  "typescript.suggest.autoImports": false
+  "typescript.suggest.autoImports": false,
+  "editor.tabSize": 2
 }
