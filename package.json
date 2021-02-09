@@ -32,7 +32,7 @@
     "firebase": "^7.24.0",
     "firebase-admin": "^9.3.0",
     "firebase-auth": "^0.1.2",
-    "firebase-functions": "^3.11.0",
+    "firebase-functions": "^3.13.1",
     "highlight.js": "^10.3.2",
     "lodash": "^4.17.20",
     "marked": "^1.2.3",

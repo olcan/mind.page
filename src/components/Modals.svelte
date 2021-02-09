@@ -1,5 +1,4 @@
 <script lang="ts">
-  import _ from "lodash";
   import { getContext } from "svelte";
   import Alert from "./modals/Alert.svelte";
   import Phrase from "./modals/Phrase.svelte";
@@ -45,7 +44,7 @@
                 ok = false;
               },
             },
-            _.merge(options, {
+            Object.assign(options, {
               closeOnEsc: true,
               closeOnOuterClick: true,
             }),
@@ -73,7 +72,7 @@
                 output = null;
               },
             },
-            _.merge(options, {
+            Object.assign(options, {
               closeOnEsc: false,
               closeOnOuterClick: false,
             }),
