@@ -514,13 +514,14 @@
 <!-- update editor on window resize (height changes due to text reflow) -->
 <svelte:window on:resize={updateTextDivs} />
 
+<!-- update editor on window resize (height changes due to text reflow) -->
 <style>
   .editor {
     position: relative;
     width: 100%;
     cursor: text;
     padding-bottom: 2px; /* covers extra 2px of backdrop (see below), aligns correctly if item has outer border */
-    caret-color: red;
+    caret-color: #59f;
   }
   .backdrop,
   textarea {

@@ -23,6 +23,7 @@
   let signedin = false;
   let anonymous = false;
   let readonly = false;
+  let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
   let modal;
 
   let evalStack = [];
@@ -1521,6 +1522,11 @@
         editing = false;
         break;
       }
+      case "/_invert": {
+        inverted = !inverted;
+        localStorage.setItem("mindpage_inverted", inverted ? "true" : "false");
+        return;
+      }
       default: {
         if (text.match(/^\/\w+/)) {
           const cmd = text.match(/^\/\w+/)[0];
@@ -2870,6 +2876,17 @@
   on:popstate={onPopState}
   on:scroll={onScroll}
 />
+
+{#if inverted}
+  <style>
+    html {
+      filter: invert(100%);
+    }
+    img {
+      filter: invert(100%);
+    }
+  </style>
+{/if}
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
 <style>
