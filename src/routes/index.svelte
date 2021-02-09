@@ -1265,7 +1265,7 @@
         while (phrase == "") {
           phrase = await modal.show({
             content:
-              "Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.",
+              "Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never sent or stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.",
             confirm: "Create Secret Phrase",
             cancel: "Sign Out",
             input: "",
@@ -1283,6 +1283,7 @@
           await modal.show({
             content: "Confirmed phrase did not match. Let's try again ...",
             confirm: "Try Again",
+            background: "confirm",
           });
           phrase = "";
         }
@@ -2212,6 +2213,7 @@
       content:
         "Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone.",
       confirm: "Sign Out",
+      background: "confirm",
       onConfirm: signOut,
     });
   }
@@ -2577,12 +2579,19 @@
             });
           },
           (error) => {
-            if (error.code == "permission-denied")
-              alert(
-                `This account requires activation. Plese email support@mind.page from your email address ${user.email} and specify your account id:${user.uid}. Signing you out for now ...`
-              );
             console.error(error);
-            signOut();
+            if (error.code == "permission-denied") {
+              // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
+              //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
+              document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
+              signingOut = true; // no other option at this point
+              modal.show({
+                content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier ${user.uid} in the email.`,
+                confirm: "Sign Out",
+                background: "confirm",
+                onConfirm: signOut,
+              });
+            }
           }
         );
     }
@@ -2643,17 +2652,23 @@
       // replay any errors during init
       errors.forEach((args) => console.error(...args));
 
-      if (anonymous) console.log("user is anonymous");
+      if (anonymous) {
+        console.log("user is anonymous");
+      }
 
       setInterval(checkLayout, 250); // check layout every 250ms
       updateDotted(); // update dotted items
 
-      // modal.show({
-      //   content: "Hello World!",
-      //   confirm: "Yes",
-      //   cancel: "No",
-      //   input: "",
-      // });
+      if (anonymous) {
+        modal.show({
+          content:
+            "Welcome to MindPage! This is an <b>anonymous</b> demo account. Your edits are visible <i>only to you</i>, not sent or stored anywhere, and <i>discarded on reload</i>. Once you sign in, your items will be saved and synchronized securely, readable <i>only by you, on your devices</i>.",
+          confirm: "Stay Anonymous",
+          cancel: "Sign In",
+          onCancel: signIn,
+          background: "confirm",
+        });
+      }
 
       // console.debug(
       //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${

@@ -7,12 +7,13 @@
   let canConfirm = (input: string) => input.length > 0;
   let onConfirm = (input = null) => {};
   let onCancel = () => {};
+  let background = ""; // can be "confirm" or "cancel"
 
   let visible = false;
   let enabled = false;
   $: enabled = input == null || canConfirm(input);
 
-  const defaults = { content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel };
+  const defaults = { content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel, background };
 
   let _promise, _resolve;
   export function show(options) {
@@ -20,7 +21,7 @@
     return (_promise = new Promise((resolve) => {
       Promise.resolve(last_promise).then(() => {
         _resolve = resolve;
-        ({ content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel } = Object.assign(
+        ({ content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel, background } = Object.assign(
           { ...defaults },
           options
         ));
@@ -47,12 +48,18 @@
       _resolve(input != null ? input : true);
     });
   }
+
   function _onCancel() {
     if (!cancel) return;
     hide().then(() => {
       onCancel();
       _resolve(input != null ? null : false);
     });
+  }
+
+  function onBackgroundClick() {
+    if (background.toLowerCase() == "confirm") _onConfirm();
+    else if (background.toLowerCase() == "cancel") _onCancel();
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -67,7 +74,7 @@
 </script>
 
 {#if visible}
-  <div class="background">
+  <div class="background" on:click={onBackgroundClick}>
     <div class="modal">
       {#if content}{@html content}{/if}
       {#if input != null}
