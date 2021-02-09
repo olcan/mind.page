@@ -2477,8 +2477,6 @@
                     })
                     .catch(encryptionError);
                 }
-
-                window["_alert"]("Hello, World!", "Okay", "Cancel!");
               });
             }
             snapshot.docChanges().forEach(function (change) {

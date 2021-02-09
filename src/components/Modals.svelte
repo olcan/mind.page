@@ -24,22 +24,32 @@
   let modal = null; // currently displayed modal
 
   if (typeof window !== "undefined") {
-    window["_alert"] = function (content: string = "", close_text: string = "Close", cancel_text: string = "") {
-      let output = true; // default output is true (false if cancelled)
+    window["_alert"] = function (
+      content: string = "",
+      ok_text: string = "Close",
+      cancel_text: string = "",
+      onClick = null
+    ) {
+      let ok = true; // default output ("ok") is true (false if cancelled)
       const last_modal = modal;
       return (modal = new Promise((resolve) => {
         Promise.resolve(last_modal).then(() => {
           open(
             Alert,
-            { content, close_text, cancel_text },
+            {
+              content,
+              ok_text,
+              cancel_text,
+              onClick: onClick,
+              onCancel: () => {
+                ok = false;
+              },
+            },
             _.merge(options, {
               closeOnEsc: true,
               closeOnOuterClick: true,
-              onCancel: () => {
-                output = false;
-              },
             }),
-            { onClosed: () => resolve(output) }
+            { onClosed: () => resolve(ok) }
           );
         });
       }).finally(() => (modal = null)));
