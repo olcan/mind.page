@@ -43,7 +43,8 @@ export default {
       }),
       resolve({
         browser: true,
-        dedupe: ["svelte"],
+        // updated based on https://github.com/flekschas/svelte-simple-modal
+        dedupe: ["svelte", "svelte/transition", "svelte/internal"],
       }),
       commonjs(),
 
@@ -103,7 +104,8 @@ export default {
         emitFiles: false, // already emitted by client build
       }),
       resolve({
-        dedupe: ["svelte"],
+        // updated based on https://github.com/flekschas/svelte-simple-modal
+        dedupe: ["svelte", "svelte/transition", "svelte/internal"],
       }),
       commonjs(),
       typescript({ sourceMap: dev }),
