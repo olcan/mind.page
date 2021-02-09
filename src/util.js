@@ -16,6 +16,11 @@ export function numberWithCommas(x) {
   return parts.join(".");
 }
 
+export function blockRegExp(type_regex) {
+  if ("".match(type_regex)) throw new Error("invalid block type regex");
+  return new RegExp("(^|\\n) *```(" + type_regex + ")\\n(?: *```|.*?\\n *```)", "gs");
+}
+
 export function extractBlock(text, type) {
   // NOTE: this logic is consistent with onInput() in Editor.svelte
   let insideBlock = false;

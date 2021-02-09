@@ -10,9 +10,10 @@
   import _ from "lodash";
   import { isClient, firebase, firestore } from "../../firebase.js";
   import { Circle2 } from "svelte-loading-spinners";
+  import Modal from "svelte-simple-modal";
+  import Modals from "../components/Modals.svelte";
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
-  import { tick } from "svelte";
   export let items = [];
   export let error = null;
   let user = null;
@@ -254,10 +255,10 @@
       // (and skip write if block is empty)
       let __item = item(this.id); // writeable item
       if (type.endsWith("_log")) {
-        __item.text = this.text.replace(/(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$3");
-        if (text) __item.text = appendBlock(this.text, type, text);
+        __item.text = removeBlock(this.text, "\\w*?_log"); // remove existing *_log
+        if (text) __item.text = appendBlock(this.text, type, text); // if empty, skip
       } else {
-        if (type == "") __item.text = text;
+        if (type.trim() == "") __item.text = text;
         else __item.text = appendBlock(this.text, type, text);
       }
       if (!__item.log) __item.time = Date.now();
@@ -268,6 +269,14 @@
         onEditorChange(editorText); // item time/text has changed
         saveItem(this.id);
       });
+    }
+
+    clear(type: string) {
+      item(this.id).text = clearBlock(this.text, _.escapeRegExp(type));
+    }
+
+    remove(type: string) {
+      item(this.id).text = removeBlock(this.text, _.escapeRegExp(type));
     }
 
     write_log(options = {}) {
@@ -304,7 +313,7 @@
       if (!options["debug"]) {
         if (options["async"]) evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
-        evaljs = ["'use strict';", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
+        evaljs = ["'use strict';null;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
       }
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
@@ -1021,8 +1030,10 @@
     document.cookie = "__session=;max-age=0"; // delete cookie for server
   }
 
+  let signingOut = false;
   function signOut() {
     if (window.sessionStorage.getItem("mindpage_signin_pending")) return; // can not signout during signin
+    signingOut = true;
     localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
@@ -1243,21 +1254,22 @@
     if (new_phrase) {
       while (phrase == "" || confirmed != phrase) {
         while (phrase == "") {
-          phrase = prompt(
-            "MindPage uses a secret phrase to encrypt your items so that they they are readable only by you, on your devices. This phrase is never stored anywhere, and you should never share it with anyone. Please enter your chosen phrase:",
-            ""
+          phrase = await window["_phrase"](
+            "MindPage uses a <b>secret phrase</b> to ensure that your items are readable <b>only by you, on your devices</b>. This phrase is never stored anywhere, and you should never share it with anyone. Please enter the phrase you would like to use:",
+            "Create Secret Phrase",
+            "Sign Out"
           );
         }
         if (phrase == null) break;
-        confirmed = prompt("Confirm your new secret phrase:", "");
+        confirmed = await window["_phrase"]("Confirm your new secret phrase:", "Confirm Secret Phrase", "Sign Out");
         if (confirmed == null) break;
         if (confirmed != phrase) {
-          alert("Confirmed phrase did not match. Let's try again ...");
+          await window["_alert"]("Confirmed phrase did not match. Let's try again ...", "Try Again");
           phrase = "";
         }
       }
     } else {
-      while (phrase == "") phrase = prompt("Enter your existing secret phrase:", "");
+      while (phrase == "") phrase = await window["_phrase"]("Enter your secret phrase:", "Continue", "Sign Out");
     }
     if (phrase == null || confirmed == null) throw new Error("secret phrase cancelled");
     const secret_utf8 = new TextEncoder().encode(user.uid + phrase);
@@ -1752,18 +1764,21 @@
     }
   }
 
+  function removeBlock(text: string, type: string) {
+    return text.replace(blockRegExp(type), "");
+  }
+
+  function clearBlock(text: string, type: string) {
+    return text.replace(blockRegExp(type), (m, pfx, t) => pfx + "```" + t + "\n```");
+  }
+
   function appendBlock(text: string, type: string, block) {
     if (typeof block != "string") block = "" + block;
     if (block.length > 0 && block[block.length - 1] != "\n") block += "\n";
-    block = "\n```" + type + "\n" + block + "```";
-    const empty = "\n```" + type + "\n```";
-    const regex = "(?:^|\\n) *```" + type + "\\n.*?\\s*```";
-    if (text.match(RegExp(regex, "s"))) {
-      let count = 0;
-      text = text.replace(RegExp(regex, "gs"), () => (count++ == 0 ? block : empty));
-    } else {
-      text += block;
-    }
+    const regex = blockRegExp(type);
+    let count = 0;
+    text = text.replace(regex, (m, pfx, t) => pfx + "```" + t + "\n" + (count++ == 0 ? block : "") + "```");
+    if (count == 0) text = [text, "```" + type + "\n" + block + "```"].join("\n");
     return text;
   }
 
@@ -1900,12 +1915,10 @@
         itemTextChanged(index, item.text);
         // clear _output and execute javascript unless cancelled
         if (run && !cancelled) {
-          // empty out any *_output|*_log blocks as they should be re-generated
-          item.text = item.text.replace(/(^|\n) *```(\w*?_output)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$1```$2\n```$3");
-          item.text = item.text.replace(
-            /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
-            "$3" // remove so errors do not leave empty blocks
-          );
+          // clear *_output blocks as they should be re-generated
+          item.text = clearBlock(item.text, "\\w*?_output");
+          // remove *_log blocks so errors do not leave empty blocks
+          item.text = removeBlock(item.text, "\\w*?_log");
           itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
           appendJSOutput(index);
         }
@@ -1956,12 +1969,10 @@
   function onItemRun(index: number = -1) {
     if (index < 0) index = focusedItem;
     let item = items[index];
-    // empty out any *_output|*_log blocks as they should be re-generated
-    item.text = item.text.replace(/(^|\n) *```(\w*?_output)\n(?: *```|.*?\n *```) *(\n|$)/gs, "$1```$2\n```$3");
-    item.text = item.text.replace(
-      /(^|\n) *```(\w*?_log)\n(?: *```|.*?\n *```) *(\n|$)/gs,
-      "$3" // remove so errors do not leave empty blocks
-    );
+    // clear *_output blocks as they should be re-generated
+    item.text = clearBlock(item.text, "\\w*?_output");
+    // remove *_log blocks so errors do not leave empty blocks
+    item.text = removeBlock(item.text, "\\w*?_log");
     itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
     appendJSOutput(index);
     item.time = Date.now();
@@ -2134,7 +2145,7 @@
   function errorMessage(e) {
     if (!e) return undefined;
     // Some client libraries (e.g. Google API JS client) return an embedded 'error' property, which can itself be a non-standard object with various details (e.g. HTTP error code, message, details, etc), so we just stringify the whole object to provide the most information possible.
-    if (e.error) return JSON.stringify(e);
+    if (!e.message && e.error) return JSON.stringify(e);
     // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
     // NOTE: we log url for "error" Events that do not have message/reason
     //       (see https://www.w3schools.com/jsref/event_onerror.asp)
@@ -2161,18 +2172,29 @@
 
   function encryptionError(e) {
     console.error("encryption/decryption failed", e);
+    if (signingOut) return; // already signing out
+    signingOut = true; // no other option at this point
     if (e.message.includes("cancelled")) {
-      alert("Secret phrase entry was cancelled. Signing you out ...");
-    } else {
-      alert(
-        `MindPage is unable to access your account. The secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone. Signing you out for now ...`
-      );
+      signOut();
+      return;
     }
-    signOut();
+    // _alert may require dispatch if there is an existing prompt
+    window["_alert"](
+      `Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone.`,
+      "Sign Out"
+    ).then(signOut);
   }
 
   import { onMount } from "svelte";
-  import { hashCode, numberWithCommas, extractBlock, parseTags, renderTag, invalidateElemCache } from "../util.js";
+  import {
+    hashCode,
+    numberWithCommas,
+    extractBlock,
+    blockRegExp,
+    parseTags,
+    renderTag,
+    invalidateElemCache,
+  } from "../util.js";
 
   let consoleLog = [];
   const consoleLogMaxSize = 10000;
@@ -2191,7 +2213,8 @@
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   async function initialize() {
     // decrypt any encrypted items
-    items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) as any[];
+    items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
+    if (signingOut) return; // encryption error
 
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
@@ -2438,6 +2461,8 @@
                 console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
                 if (!initTime) await initialize();
                 else console.debug(`${items.length} items already initialized at ${initTime}ms`);
+                if (!initTime) return; // initialization failed, should be signing out ...
+
                 firstSnapshot = false;
                 // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
                 if (items.length == 0) onEditorDone("/_welcome");
@@ -2452,6 +2477,8 @@
                     })
                     .catch(encryptionError);
                 }
+
+                window["_alert"]("Hello, World!", "Okay", "Cancel!");
               });
             }
             snapshot.docChanges().forEach(function (change) {
@@ -2607,6 +2634,7 @@
   let altKey = false;
   let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
+    if (!initTime) return; // not yet initialized
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;
@@ -2651,152 +2679,156 @@
   }
 </script>
 
-<!-- NOTE: we put the items on the page as soon as they are initialized, but .loading overlay remains until heights are calculated -->
-{#if user && initTime}
-  <div class="items" class:multi-column={columnCount > 1}>
-    {#each { length: columnCount } as _, column}
-      <div class="column">
-        {#if column == 0}
-          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-            <div id="header-container" class:focused>
-              <div id="editor">
-                <Editor
-                  id="mindbox"
-                  bind:text={editorText}
-                  bind:focused
-                  cancelOnDelete={true}
-                  clearOnShiftBackspace={true}
-                  allowCommandCtrlBracket={true}
-                  onEdited={onEditorChange}
-                  onDone={onEditorDone}
-                  onPrev={onPrevItem}
-                  onNext={onNextItem}
-                />
+<Modal>
+  <Modals />
+
+  <!-- NOTE: we put the items on the page as soon as they are initialized, but .loading overlay remains until heights are calculated -->
+  {#if user && initTime}
+    <div class="items" class:multi-column={columnCount > 1}>
+      {#each { length: columnCount } as _, column}
+        <div class="column">
+          {#if column == 0}
+            <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+              <div id="header-container" class:focused>
+                <div id="editor">
+                  <Editor
+                    id="mindbox"
+                    bind:text={editorText}
+                    bind:focused
+                    cancelOnDelete={true}
+                    clearOnShiftBackspace={true}
+                    allowCommandCtrlBracket={true}
+                    onEdited={onEditorChange}
+                    onDone={onEditorDone}
+                    onPrev={onPrevItem}
+                    onNext={onNextItem}
+                  />
+                </div>
+                <div class="spacer" />
+                {#if user}
+                  <img
+                    id="user"
+                    class:anonymous
+                    class:readonly
+                    class:signedin
+                    src={user.photoURL}
+                    alt={user.displayName || user.email}
+                    title={user.displayName || user.email}
+                    on:click={() => (!signedin ? signIn() : signOut())}
+                  />
+                {/if}
               </div>
-              <div class="spacer" />
-              {#if user}
-                <img
-                  id="user"
-                  class:anonymous
-                  class:readonly
-                  class:signedin
-                  src={user.photoURL}
-                  alt={user.displayName || user.email}
-                  title={user.displayName || user.email}
-                  on:click={() => (!signedin ? signIn() : signOut())}
-                />
-              {/if}
+              <div id="status" on:click={onStatusClick}>
+                <span id="console-summary" on:click={onConsoleSummaryClick} />
+                <span class="dots">
+                  {#each { length: dotCount } as _}•{/each}
+                </span>
+                <span class="triangle"> ▲ </span>
+                {#if items.length > 0}
+                  <div class="counts">
+                    {#if matchingItemCount > 0}
+                      &nbsp;<span class="matching">{matchingItemCount} matching items</span>
+                    {:else}
+                      {items.length} items
+                    {/if}
+                  </div>
+                {/if}
+                <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
+              </div>
             </div>
-            <div id="status" on:click={onStatusClick}>
-              <span id="console-summary" on:click={onConsoleSummaryClick} />
-              <span class="dots">
-                {#each { length: dotCount } as _}•{/each}
-              </span>
-              <span class="triangle"> ▲ </span>
-              {#if items.length > 0}
-                <div class="counts">
-                  {#if matchingItemCount > 0}
-                    &nbsp;<span class="matching">{matchingItemCount} matching items</span>
-                  {:else}
-                    {items.length} items
+          {/if}
+
+          {#each items as item (item.id)}
+            {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
+              <Item
+                onEditing={onItemEditing}
+                onFocused={onItemFocused}
+                onEdited={onItemEdited}
+                onRun={onItemRun}
+                onTouch={onItemTouch}
+                onResized={onItemResized}
+                {onTagClick}
+                {onLinkClick}
+                {onLogSummaryClick}
+                onPrev={onPrevItem}
+                onNext={onNextItem}
+                bind:text={item.text}
+                bind:editing={item.editing}
+                bind:focused={item.focused}
+                saving={item.saving}
+                running={item.running}
+                admin={item.admin}
+                hidden={item.index >= hideIndex}
+                showLogs={item.showLogs}
+                height={item.height}
+                time={item.time}
+                index={item.index}
+                id={item.id}
+                label={item.label}
+                labelUnique={item.labelUnique}
+                labelText={item.labelText}
+                hash={item.hash}
+                deephash={item.deephash}
+                missingTags={item.missingTags.join(" ")}
+                matchingTerms={item.matchingTerms.join(" ")}
+                matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+                timeString={item.timeString}
+                timeOutOfOrder={item.timeOutOfOrder}
+                updateTime={item.updateTime}
+                createTime={item.createTime}
+                depsString={item.depsString}
+                dependentsString={item.dependentsString}
+                dotted={item.dotted}
+                runnable={item.runnable}
+                scripted={item.scripted}
+                macroed={item.macroed}
+              />
+              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
+                <div class="section-separator">
+                  <hr />
+                  {item.index + 2}<span class="arrows">{item.arrows}</span
+                  >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
+                    &nbsp;
+                    {item.nextItemInColumn + 1}<span class="arrows">↓</span>
                   {/if}
+                  <hr />
                 </div>
               {/if}
-              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
-            </div>
-          </div>
-        {/if}
-
-        {#each items as item (item.id)}
-          {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
-            <Item
-              onEditing={onItemEditing}
-              onFocused={onItemFocused}
-              onEdited={onItemEdited}
-              onRun={onItemRun}
-              onTouch={onItemTouch}
-              onResized={onItemResized}
-              {onTagClick}
-              {onLinkClick}
-              {onLogSummaryClick}
-              onPrev={onPrevItem}
-              onNext={onNextItem}
-              bind:text={item.text}
-              bind:editing={item.editing}
-              bind:focused={item.focused}
-              saving={item.saving}
-              running={item.running}
-              admin={item.admin}
-              hidden={item.index >= hideIndex}
-              showLogs={item.showLogs}
-              height={item.height}
-              time={item.time}
-              index={item.index}
-              id={item.id}
-              label={item.label}
-              labelUnique={item.labelUnique}
-              labelText={item.labelText}
-              hash={item.hash}
-              deephash={item.deephash}
-              missingTags={item.missingTags.join(" ")}
-              matchingTerms={item.matchingTerms.join(" ")}
-              matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
-              timeString={item.timeString}
-              timeOutOfOrder={item.timeOutOfOrder}
-              updateTime={item.updateTime}
-              createTime={item.createTime}
-              depsString={item.depsString}
-              dependentsString={item.dependentsString}
-              dotted={item.dotted}
-              runnable={item.runnable}
-              scripted={item.scripted}
-              macroed={item.macroed}
-            />
-            {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
-              <div class="section-separator">
-                <hr />
-                {item.index + 2}<span class="arrows">{item.arrows}</span
-                >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
-                  &nbsp;
-                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+            {/if}
+            {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
+              {#each tailIndices as tail}
+                {#if hideIndex < tail.index}
+                  <div class="show-more" on:click={() => (hideIndex = tail.index)}>
+                    show last {tail.timeString}
+                  </div>
                 {/if}
-                <hr />
+              {/each}
+              <div class="show-more" on:click={() => (hideIndex = Infinity)}>
+                show all {items.length} items
               </div>
             {/if}
-          {/if}
-          {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
-            {#each tailIndices as tail}
-              {#if hideIndex < tail.index}
-                <div class="show-more" on:click={() => (hideIndex = tail.index)}>
-                  show last {tail.timeString}
-                </div>
-              {/if}
-            {/each}
-            <div class="show-more" on:click={() => (hideIndex = Infinity)}>
-              show all {items.length} items
-            </div>
-          {/if}
-        {/each}
-      </div>
-    {/each}
-  </div>
-{/if}
+          {/each}
+        </div>
+      {/each}
+    </div>
+  {/if}
 
-{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
-  <div id="loading">
-    <Circle2 size="60" unit="px" />
-  </div>
-{:else}<script>
-    setTimeout(() => {
-      // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-      //       programmatic focus except in click handlers, when returning to app, etc
-      if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone")) {
-        let mindbox = document.getElementById("textarea-mindbox");
-        mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
-        mindbox.focus();
-      }
-    });
-  </script>{/if}
+  {#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
+    <div id="loading">
+      <Circle2 size="60" unit="px" />
+    </div>
+  {:else}<script>
+      setTimeout(() => {
+        // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
+        //       programmatic focus except in click handlers, when returning to app, etc
+        if (document.activeElement.tagName.toLowerCase() != "textarea" && !navigator.platform.startsWith("iPhone")) {
+          let mindbox = document.getElementById("textarea-mindbox");
+          mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
+          mindbox.focus();
+        }
+      });
+    </script>{/if}
+</Modal>
 
 <svelte:window
   on:keydown={onKeyDown}
