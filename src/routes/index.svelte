@@ -1292,7 +1292,7 @@
           phrase = await modal.show({
             content:
               "Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never sent or stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.",
-            confirm: "Create Secret Phrase",
+            confirm: "Continue",
             cancel: "Sign Out",
             input: "",
           });
@@ -1300,7 +1300,7 @@
         if (phrase == null) break;
         confirmed = await modal.show({
           content: "Confirm your new secret phrase:",
-          confirm: "Confirm Secret Phrase",
+          confirm: "Confirm",
           cancel: "Sign Out",
           input: "",
         });
