@@ -537,7 +537,7 @@
     spellcheck={false}
     autocapitalize="off">{text}</textarea>
 {#if showShiftReturnButton}
-  <div class="button" class:focused on:click={onShiftReturn}>⇧⏎</div>
+  <div class="button" class:focused on:click={onShiftReturn}>create</div>
 {/if}
 </div>
 
@@ -596,8 +596,8 @@
   }
   .button {
     position: absolute;
-    top: 0;
-    right: 0;
+    top: -10px;
+    right: -2px;
     background: #666;
     color: black;
     display: flex;
@@ -605,10 +605,9 @@
     justify-content: center;
     cursor: pointer;
     height: 25px;
-    padding: 0 4px;
-    border-top-right-radius: 5px;
-    border-bottom-left-radius: 5px;
-    font-family: Avenir Next, Helvetica;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-family: Avenir Next, sans-serif;
     font-size: 15px;
     font-weight: 500;
     -webkit-touch-callout: none;

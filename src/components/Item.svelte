@@ -1128,7 +1128,7 @@
     /* overflow: hidden; */
     color: black;
     font-size: 15px;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     font-weight: 500;
     box-sizing: border-box;
     -webkit-touch-callout: none;
@@ -1162,7 +1162,7 @@
     /* overflow: hidden; */
     opacity: 1;
     color: black;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     font-size: 15px;
     font-weight: 500;
     -webkit-touch-callout: none;
@@ -1232,7 +1232,7 @@
     padding-left: 5px;
     padding-right: 5px;
     margin-bottom: 4px;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     font-size: 15px;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1249,7 +1249,7 @@
     /* display: inline-block; */
     display: none;
     color: #444;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
   }
   .item {
     color: #ddd;
@@ -1259,7 +1259,7 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     font-size: 18px;
     line-height: 28px;
     /* cursor: pointer; */

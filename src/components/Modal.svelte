@@ -131,7 +131,7 @@
     border-radius: 5px;
     padding: 20px;
     color: black;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     font-size: 20px;
     font-weight: 500;
   }

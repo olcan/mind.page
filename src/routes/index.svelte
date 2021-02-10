@@ -2354,23 +2354,26 @@
     }
   }
 
+  let signingIn = false;
   function signIn() {
     if (firebase().auth().currentUser) return; // already signed in, must sign out first
+    signingIn = true;
+
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
     setTimeout(() => (document.activeElement as HTMLElement).blur());
+
     resetUser();
+    window.sessionStorage.setItem("mindpage_signin_pending", "1"); // prevents anonymous user on reload
+    document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
+
     let provider = new window.firebase.auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
     // firebase().auth().setPersistence("none")
     // firebase().auth().setPersistence("session")
     firebase().auth().setPersistence("local");
-    // NOTE: getRedirectResult() seem to be redundant given onAuthStateChanged
-    window.sessionStorage.setItem("mindpage_signin_pending", "1");
-    document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
+    // NOTE: getRedirectResult() is redundant given onAuthStateChanged. Both redirect and popup-based login seems to work, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) claim redirect is preferred on mobile, but we find that the popup works better on android. Even with the popup we do a reload because it is much easier and cleaner than changing all user/item state.
     // firebase().auth().signInWithRedirect(provider);
-    // NOTE: signInWithPopup also requires a reload since we are currently unable to cleanly re-initialize items via firebase realtime snapshot once they have already been initialize via server-side request; reloading allows the next server response to be ignored so that session cookie can be set; forced reload also means that we might as well do a redirect which can be cleaner anyway (esp. on mobile, as stated on https://firebase.google.com/docs/auth/web/google-signin)
-    // NOTE 2: redirects would occasionally fail on android, so trying popup+reload now ...
     firebase()
       .auth()
       .signInWithPopup(provider)
@@ -2700,7 +2703,7 @@
       if (anonymous) {
         modal.show({
           content:
-            "Welcome to MindPage! This is an <b>anonymous</b> demo account. Your edits are visible <i>only to you</i>, not sent or stored anywhere, and <i>discarded on reload</i>. Once you sign in, your items will be saved and synchronized securely, readable <i>only by you, on your devices</i>.",
+            "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
           // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
           confirm: "Stay Anonymous",
           cancel: "Sign In",
@@ -2903,7 +2906,7 @@
   </div>
 {/if}
 
-{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0)}
+{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0) || signingIn || signingOut}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
@@ -2965,10 +2968,10 @@
   }
   #header-container {
     display: flex;
-    padding: 4px 0;
+    padding: 10px;
     background: #111; /* matches unfocused editor */
     border-radius: 0 0 4px 4px;
-    padding-left: 2px; /* matches 1px super-container padding + 1px container border */
+    /*padding-left: 2px;*/ /* matches 1px super-container padding + 1px container border */
   }
   #header-container.focused {
     background: #111;
@@ -2992,7 +2995,6 @@
     height: 46px; /* match focused height of single-line editor (also see @media query below) */
     width: 46px;
     min-width: 46px; /* seems necessary to ensure full width inside flex */
-    margin-right: 4px;
     border-radius: 50%;
     background: #222;
     cursor: pointer;
@@ -3066,7 +3068,7 @@
     padding-left: 4px;
   }
   #status .counts {
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     position: absolute;
     right: 0;
     top: 0;
@@ -3120,7 +3122,7 @@
     height: 40px; /* 40px offset height assumed by column layout */
     color: #444; /* same as time indicators */
     font-size: 16px;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
@@ -3153,7 +3155,7 @@
     /* background: #666; */
     font-weight: 500;
     font-size: 16px;
-    font-family: Avenir Next, Helvetica;
+    font-family: Avenir Next, sans-serif;
     border-radius: 4px;
     cursor: pointer;
     margin: 28px auto; /* same as having time string */
@@ -3175,6 +3177,7 @@
   @media only screen and (max-width: 600px) {
     #header-container {
       padding-left: 1px; /* matches 1px container border, no super-container padding */
+      padding-right: 1px; /* reduced padding to save space */
     }
     #user {
       height: 45px; /* must match height of single-line editor (on narrow window) */
