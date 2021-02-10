@@ -2237,7 +2237,7 @@
     // dispatch in case error is triggered before modal is created
     modal.show({
       content:
-        "Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. Do not include your secret phrase, which you should never share with anyone.",
+        "Unable to access your account. Secret phrase may be incorrect, or your browser may not fully support modern encryption features. Try entering your phrase again or using a different browser. If the problem persists, email support@mind.page with your browser and device information. <i>Do not include your secret phrase, which you should never share with anyone.</i>",
       confirm: "Sign Out",
       background: "confirm",
       onConfirm: signOut,
@@ -2618,7 +2618,7 @@
               document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
               signingOut = true; // no other option at this point
               modal.show({
-                content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier ${user.uid} in the email.`,
+                content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
                 confirm: "Sign Out",
                 background: "confirm",
                 onConfirm: signOut,
@@ -2695,6 +2695,7 @@
         modal.show({
           content:
             "Welcome to MindPage! This is an <b>anonymous</b> demo account. Your edits are visible <i>only to you</i>, not sent or stored anywhere, and <i>discarded on reload</i>. Once you sign in, your items will be saved and synchronized securely, readable <i>only by you, on your devices</i>.",
+          // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
           confirm: "Stay Anonymous",
           cancel: "Sign In",
           onCancel: signIn,
@@ -2717,6 +2718,8 @@
   let altKey = false;
   let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
+    const key = e.code || e.key; // for android compatibility
+
     if (!initTime) return; // not yet initialized
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
@@ -2725,8 +2728,8 @@
 
     // resume-edit items on Shift-(save shortcut)
     if (
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
-      (e.code == "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey)
+      (key == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
+      (key == "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey)
     ) {
       e.preventDefault();
       resumeLastEdit();
@@ -2736,11 +2739,11 @@
     // disable item editor shortcuts on window, focus on editor instead
     if (focusedItem >= 0) return; // already focused on an item
     if (
-      (e.code == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey)) ||
-      (e.code == "Slash" && (e.metaKey || e.ctrlKey)) ||
-      e.code == "Tab" ||
-      e.code == "Escape"
+      (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
+      (key == "KeyS" && (e.metaKey || e.ctrlKey)) ||
+      (key == "Slash" && (e.metaKey || e.ctrlKey)) ||
+      key == "Tab" ||
+      key == "Escape"
     ) {
       e.preventDefault();
       textArea(-1).focus();

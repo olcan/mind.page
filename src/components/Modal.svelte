@@ -1,4 +1,6 @@
 <script lang="ts">
+  import marked from "marked";
+
   let content = "";
   let confirm = "";
   let cancel = "";
@@ -63,10 +65,11 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    const key = e.code || e.key; // for android compatibility
     if (!visible) return;
-    if (e.code == "Enter") _onConfirm();
-    else if (e.code == "Escape") _onCancel();
-    if (e.code == "Enter") {
+    if (key == "Enter") _onConfirm();
+    else if (key == "Escape") _onCancel();
+    if (key == "Enter") {
       e.stopPropagation(); // stop enter propagation
       e.preventDefault();
     }
@@ -76,7 +79,7 @@
 {#if visible}
   <div class="background" on:click={onBackgroundClick}>
     <div class="modal">
-      {#if content}{@html content}{/if}
+      {#if content}{@html marked(content)}{/if}
       {#if input != null}
         {#if password}
           <input type="password" bind:value={input} on:keydown={onKeyDown} />
@@ -121,8 +124,9 @@
   }
   .modal {
     height: auto;
-    width: auto;
-    max-width: 500px;
+    /* width + max-width works best across devices, including android chrome */
+    width: 500px;
+    max-width: 100%;
     background: #eee;
     border-radius: 5px;
     padding: 20px;
@@ -133,7 +137,7 @@
   }
   input {
     -webkit-appearance: none;
-    font-size: 24px;
+    font-size: 20px;
     border-radius: 4px;
     border: 1px solid #ddd;
     background: white;
@@ -143,6 +147,7 @@
     margin-top: 10px;
   }
   .buttons {
+    font-size: 20px;
     margin-left: auto;
     width: fit-content;
     padding-top: 15px;
@@ -186,5 +191,14 @@
     background: #f55;
     color: white;
     border-color: white;
+  }
+
+  /* basic styling for markdown elements, similar to those in Item.svelte */
+  :global(.modal code) {
+    font-size: 18px;
+    background: #ddd;
+    white-space: pre-wrap;
+    padding: 2px 4px;
+    border-radius: 4px;
   }
 </style>

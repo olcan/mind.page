@@ -217,12 +217,16 @@
 
   let enterStart = -1;
   let enterIndentation = "";
-  function onKeyDown(e: KeyboardEvent) {
-    // console.debug("Editor.onKeyDown:", e);
-    // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
+  let lastKeyDown;
+  let lastKeyDownPosition;
+  function onKeyDown(e: any) {
+    let key = e.code || e.key; // for android compatibility
+    lastKeyDown = key;
+    lastKeyDownPosition = textarea.selectionStart;
+    // console.debug("Editor.onKeyDown:", e, key);
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
-    if (!allowCommandCtrlBracket && (e.code == "BracketLeft" || e.code == "BracketRight") && (e.metaKey || e.ctrlKey)) {
+    if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -237,7 +241,7 @@
     //   textarea.value.substring(0, textarea.selectionStart).match(/[-*+] $/)) ||
     //   textarea.selectionEnd > textarea.selectionStart;
     const tabShouldIndent = true; // always indent
-    if ((e.code == "Tab" && tabShouldIndent) || (e.code == "Slash" && (e.metaKey || e.ctrlKey))) {
+    if ((key == "Tab" && tabShouldIndent) || (key == "Slash" && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       const oldStart = textarea.selectionStart;
@@ -264,11 +268,11 @@
       document.execCommand(
         "insertText",
         false,
-        e.code == "Slash"
+        key == "Slash"
           ? selectedText.match(/^\s*\/\//) // match(/(^|\n)\s*\/\//)
             ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, "$1")
             : selectedText.replace(/((?:^|\n)\s*)(.*)/g, "$1// $2")
-          : e.code == "Tab" && e.shiftKey
+          : key == "Tab" && e.shiftKey
           ? selectedText.replace(/(^|\n)  /g, "$1")
           : selectedText.replace(/(^|\n)/g, "$1  ")
       );
@@ -290,18 +294,18 @@
 
     // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
     if (
-      (e.code == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
-      (e.code == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
-      (e.code == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
+      (key == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
+      (key == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+      (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
     ) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value), e, false, e.code == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
+      onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
       return;
     }
 
     // run item with Alt/Option+Enter
-    if (e.code == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
+    if (key == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation(); // do not propagate to window
       let selectionStart = textarea.selectionStart;
@@ -317,7 +321,7 @@
     // create line on Enter, maintain indentation
     // NOTE: to prevent delay on caret update, we do the actual indentation in onKeyUp
     if (
-      e.code == "Enter" &&
+      key == "Enter" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
       textarea.selectionStart == textarea.selectionEnd
     ) {
@@ -328,13 +332,13 @@
       return;
     }
 
-    if (e.code == "ArrowUp" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
+    if (key == "ArrowUp" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
       e.stopPropagation();
       e.preventDefault();
       onPrev();
       return;
     }
-    if (e.code == "ArrowDown" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
+    if (key == "ArrowDown" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
       e.stopPropagation();
       e.preventDefault();
       onNext();
@@ -345,7 +349,7 @@
     // (for backspace, unlike shift-tab, we require/allow an _extra_ space and we require even number of spaces)
     const prefix = textarea.value.substring(0, textarea.selectionStart);
     if (
-      e.code == "Backspace" &&
+      key == "Backspace" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey) &&
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart >= 2 &&
@@ -361,7 +365,7 @@
     }
 
     // cancel edit with escape
-    if (e.code == "Escape") {
+    if (key == "Escape") {
       onDone(text /* maintain text */, e, true /* cancelled */);
       e.preventDefault();
       return;
@@ -369,7 +373,7 @@
 
     // NOTE: this was too easy to trigger accidentally on mobile, so we limit it to search box
     // clear item (from current position to start) with shift-backspace
-    if (e.code == "Backspace" && e.shiftKey && textarea.selectionStart == textarea.selectionEnd) {
+    if (key == "Backspace" && e.shiftKey && textarea.selectionStart == textarea.selectionEnd) {
       e.preventDefault();
       if (clearOnShiftBackspace) {
         textarea.selectionStart = 0;
@@ -381,14 +385,14 @@
 
     // delete non-empty item with Cmd/Ctrl+Backspace
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
-    if (e.code == "Backspace" && (e.metaKey || e.ctrlKey)) {
+    if (key == "Backspace" && (e.metaKey || e.ctrlKey)) {
       onDone((text = ""), e, cancelOnDelete); // if cancelled, item will not be deleted
       e.preventDefault();
       return;
     }
 
     // insert spaces on Tab
-    if (e.code == "Tab" && textarea.selectionStart == textarea.selectionEnd) {
+    if (key == "Tab" && textarea.selectionStart == textarea.selectionEnd) {
       e.preventDefault();
       if (!e.shiftKey) {
         // forward tab
@@ -405,11 +409,13 @@
     }
   }
 
-  function onKeyUp(e: KeyboardEvent) {
-    // console.debug("Editor.onKeyUp", e);
+  function onKeyUp(e: any) {
+    const key = e.code || e.key; // for android compatibility
+    // console.debug("Editor.onKeyUp", e, key);
+
     // indent lines created by Enter (based on state recorded in onKeyDown above)
     if (
-      e.code == "Enter" &&
+      key == "Enter" &&
       !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
       textarea.selectionStart == textarea.selectionEnd
     ) {
@@ -456,6 +462,20 @@
   }
 
   function onInput() {
+    // fix for some android keyboard (e.g. GBoard) sending Unidentified for many keys, including Enter
+    if (
+      lastKeyDown == "Unidentified" &&
+      lastKeyDownPosition == textarea.selectionStart - 1 && // exclude backspace
+      textarea.selectionStart == textarea.selectionEnd &&
+      textarea.value.substring(textarea.selectionStart - 1).startsWith("\n")
+    ) {
+      const pos = textarea.selectionStart;
+      textarea.selectionEnd = textarea.selectionStart = pos - 1;
+      onKeyDown({ code: "Enter" });
+      textarea.selectionEnd = textarea.selectionStart = pos;
+      onKeyUp({ code: "Enter" });
+    }
+
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
     onEdited(textarea.value);
