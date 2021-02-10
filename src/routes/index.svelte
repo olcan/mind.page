@@ -2407,6 +2407,8 @@
       console.debug(`restored user ${user.email} from local storage`);
       if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
+      console.debug("resuming signing in ...");
+      window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
       user = secret = null;
     } else {
       useAnonymousAccount();
@@ -2439,9 +2441,13 @@
           .auth()
           .onAuthStateChanged((authUser) => {
             // console.debug("onAuthStateChanged", user, authUser);
-            if (!authUser) return;
             if (readonly) {
               console.warn("ignoring unexpected signin");
+              return;
+            }
+            if (!authUser) {
+              console.error("failed to sign in"); // can happen in chrome for localhost
+              resetUser(); // clean up for reload
               return;
             }
             resetUser(); // clean up first
