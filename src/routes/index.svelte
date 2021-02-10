@@ -2958,6 +2958,7 @@
     padding: 4px 0;
     background: #111; /* matches unfocused editor */
     border-radius: 0 0 4px 4px;
+    padding-left: 2px; /* matches 1px super-container padding + 1px container border */
   }
   #header-container.focused {
     background: #111;
@@ -3162,6 +3163,9 @@
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
+    #header-container {
+      padding-left: 1px; /* matches 1px container border, no super-container padding */
+    }
     #user {
       height: 45px; /* must match height of single-line editor (on narrow window) */
       width: 45px;

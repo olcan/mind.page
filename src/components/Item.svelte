@@ -1096,6 +1096,7 @@
   .super-container {
     position: relative;
     padding: 4px 0;
+    padding-left: 1px; /* avoid touching window border, looks better on the mac */
   }
   .super-container.editing:not(.timed) {
     padding-top: 24px; /* extra space for .edit-menu */
@@ -1764,6 +1765,9 @@
 
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
+    .super-container {
+      padding-left: 0; /* assume no border issue, maximize space use */
+    }
     .item {
       font-size: 16px;
       line-height: 25px;
