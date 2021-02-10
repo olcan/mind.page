@@ -2368,13 +2368,14 @@
     // NOTE: getRedirectResult() seem to be redundant given onAuthStateChanged
     window.sessionStorage.setItem("mindpage_signin_pending", "1");
     document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
-    firebase().auth().signInWithRedirect(provider);
+    // firebase().auth().signInWithRedirect(provider);
     // NOTE: signInWithPopup also requires a reload since we are currently unable to cleanly re-initialize items via firebase realtime snapshot once they have already been initialize via server-side request; reloading allows the next server response to be ignored so that session cookie can be set; forced reload also means that we might as well do a redirect which can be cleaner anyway (esp. on mobile, as stated on https://firebase.google.com/docs/auth/web/google-signin)
-    // firebase()
-    //   .auth()
-    //   .signInWithPopup(provider)
-    //   .then(() => location.reload())
-    //   .catch(console.error);
+    // NOTE 2: redirects would occasionally fail on android, so trying popup+reload now ...
+    firebase()
+      .auth()
+      .signInWithPopup(provider)
+      .then(() => location.reload())
+      .catch(console.error);
   }
 
   function useAnonymousAccount() {
@@ -2445,8 +2446,10 @@
             }
             if (!authUser) {
               if (anonymous) return; // anonymous user can be signed in or out
-              console.error("failed to sign in"); // can happen in chrome for localhost
-              resetUser(); // clean up for reload
+              // TODO: investigate when/why this happens and how to handle
+              console.error("failed to sign in"); // can happen in chrome for localhost, and on android occasionally
+              // resetUser(); // clean up for reload
+              document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
               return;
             }
             resetUser(); // clean up first
@@ -2675,6 +2678,7 @@
             setTimeout(() => {
               elem.remove();
               summaryelem.remove();
+              if (!consolediv) return;
               if (consolediv.childNodes.length == 0) {
                 consolediv.style.display = "none";
                 summarydiv.style.visibility = "visible";
