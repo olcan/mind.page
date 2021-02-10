@@ -1390,9 +1390,10 @@
   let sessionHistoryIndex = 0;
   let tempIdFromSavedId = new Map<string, string>();
   let editorText = "";
-  function onEditorDone(text: string, e: KeyboardEvent = null, cancelled: boolean = false, run: boolean = false) {
+  function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false) {
+    const key = e?.code || e?.key;
     if (cancelled) {
-      if (e?.code == "Escape") {
+      if (key == "Escape") {
         setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
@@ -2338,7 +2339,7 @@
 
     // if fragment corresponds to an item tag or id, focus on that item immediately ...
     if (items.length > 0 && location.href.match(/#.+$/)) {
-      const tag = location.href.match(/#.+$/)[0];
+      const tag = decodeURI(location.href.match(/#.+$/)[0]);
       // if it is a valid item id, then we convert it to name
       const index = indexFromId.get(tag.substring(1));
       if (index != undefined) {
@@ -2779,6 +2780,7 @@
                   id="mindbox"
                   bind:text={editorText}
                   bind:focused
+                  showShiftReturnButton={true}
                   cancelOnDelete={true}
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}

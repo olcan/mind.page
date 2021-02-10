@@ -2,12 +2,13 @@
   export let id = "editor";
   export let text = "";
   export let focused = false;
+  export let showShiftReturnButton = false;
   export let cancelOnDelete = false;
   export let clearOnShiftBackspace = false;
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
-  export let onDone = (text: string, e: KeyboardEvent, cancelled: boolean = false, run: boolean = false) => {};
+  export let onDone = (text: string, e: any, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -481,6 +482,12 @@
     onEdited(textarea.value);
   }
 
+  function onShiftReturn(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    onDone(text, { code: "Enter" });
+  }
+
   import { afterUpdate, onMount, onDestroy } from "svelte";
   afterUpdate(updateTextDivs);
 
@@ -529,6 +536,9 @@
     on:blur={() => onFocused((focused = false))}
     spellcheck={false}
     autocapitalize="off">{text}</textarea>
+{#if showShiftReturnButton}
+  <div class="button" class:focused on:click={onShiftReturn}>⇧⏎</div>
+{/if}
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->
@@ -584,6 +594,31 @@
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }
+  .button {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: #666;
+    color: black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    height: 25px;
+    padding: 0 4px;
+    border-top-right-radius: 5px;
+    border-bottom-left-radius: 5px;
+    font-family: Avenir Next, Helvetica;
+    font-size: 15px;
+    font-weight: 500;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .button:not(.focused) {
+    opacity: 0; /* allow completion of click events */
+  }
+
   :global(mark) {
     /* color: transparent; */
     background: #999;
