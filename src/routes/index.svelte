@@ -2443,6 +2443,7 @@
               return;
             }
             if (!authUser) {
+              if (anonymous) return; // anonymous user can be signed in or out
               console.error("failed to sign in"); // can happen in chrome for localhost
               resetUser(); // clean up for reload
               return;
