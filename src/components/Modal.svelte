@@ -25,7 +25,7 @@
           { ...defaults },
           options
         ));
-        console.debug(options, confirm, cancel);
+        // console.debug(options, confirm, cancel);
         visible = true;
       });
     }).finally(() => (_promise = null)));
