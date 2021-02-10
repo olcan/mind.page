@@ -1104,6 +1104,7 @@
   .hidden {
     position: absolute;
     visibility: hidden;
+    opacity: 0; /* necessary to hide some child elements on android */
     width: 100%;
   }
   .container {
