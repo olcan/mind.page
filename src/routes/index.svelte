@@ -173,11 +173,37 @@
       if (!_item.log_options) _item.log_options = {};
       return _item.log_options;
     }
-    // general-purpose key-value store with session/item lifetime (can be saved/loaded)
+    // general-purpose key-value store with session/item lifetime
     get store(): object {
       let _item = item(this.id);
       if (!_item.store) _item.store = {};
       return _item.store;
+    }
+    // key-value store synchronized into localStorage
+    // (should always be accessed via this accessor to ensure updates)
+    get local_store(): object {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("local_store is not available until item has been saved");
+      const key = "mindpage_item_store_" + _item.savedId;
+      if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {};
+      // dispatch save to localStorage
+      setTimeout(() => {
+        let _item = item(this.id);
+        if (!_item || !_item.local_store) {
+          localStorage.removeItem(key);
+          return;
+        }
+        const obj = JSON.stringify(_item.local_store);
+        if (obj == "{}") localStorage.removeItem(key);
+        else localStorage.setItem(key, obj);
+      });
+      return _item.local_store;
+    }
+    // separate store used for debugging
+    get debug_store(): object {
+      let _item = item(this.id);
+      if (!_item.debug_store) _item.debug_store = {};
+      return _item.debug_store;
     }
 
     read(type: string = "", options: object = {}) {
@@ -326,13 +352,13 @@
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
       evaljs = evaljs.replace(/(^|[^\\])\$hash/g, "$1" + this.hash);
       evaljs = evaljs.replace(/(^|[^\\])\$deephash/g, "$1" + this.deephash);
-      // store eval text under item.store[debug_trigger] for debugging, including a reverse stack string
+      // store eval text under item.debug_store[trigger] for debugging, including a reverse stack string
       let stack = evalStack
         .map((id) => item(id).name)
         .concat(this.name)
         .reverse()
         .join(" < ");
-      this.store["debug_" + (options["trigger"] || "other")] = appendBlock(
+      this.debug_store[options["trigger"] || "other"] = appendBlock(
         `\`eval(…)\` on ${stack}`,
         "js_input",
         addLineNumbers(evaljs)
@@ -416,35 +442,6 @@
     // promise = new Promise on attached executor function (resolve, reject) => {...}
     promise(func) {
       return new Promise(this.attach(func));
-    }
-
-    // loads item's key-value store from localStorage (requires saved item for permanent id)
-    load_store(): object {
-      let _item = item(this.id);
-      if (!_item.savedId) throw new Error("load_store is not available until item has been saved");
-      _item.store = JSON.parse(localStorage.getItem("mindpage_item_store_" + _item.savedId)) || {};
-      return _item.store;
-    }
-
-    // saves item's key-value store into localStorage (requires saved item for permanent id)
-    save_store() {
-      let _item = item(this.id);
-      if (!_item.savedId) throw new Error("save_store is not available until item has been saved");
-      localStorage.setItem("mindpage_item_store_" + _item.savedId, JSON.stringify(_item.store));
-    }
-
-    // removes any previous saves from localStorage
-    unsave_store() {
-      let _item = item(this.id);
-      if (!_item.savedId) throw new Error("remove_store is not available until item has been saved");
-      localStorage.removeItem("mindpage_item_store_" + _item.savedId);
-    }
-
-    // clears items's key-value store, including any previous save into localStorage
-    clear_store() {
-      let _item = item(this.id);
-      _item.store = {};
-      if (_item.savedId) this.unsave_store();
     }
   }
 
