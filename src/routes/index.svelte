@@ -2984,7 +2984,6 @@
     background: #111;
   }
   #editor {
-    margin-right: 4px;
     width: 100%;
   }
   /* remove dashed border when top editor is unfocused */
@@ -2999,10 +2998,12 @@
     flex-grow: 1;
   }
   #user {
-    height: 46px; /* match focused height of single-line editor (also see @media query below) */
-    width: 46px;
-    min-width: 46px; /* seems necessary to ensure full width inside flex */
+    height: 56px; /* 46px = focused height of single-line editor (also see @media query below) */
+    width: 56px;
+    min-width: 56px; /* seems necessary to ensure full width inside flex */
     border-radius: 50%;
+    margin: -5px;
+    margin-left: 5px;
     background: #222;
     cursor: pointer;
     overflow: hidden;
@@ -3184,12 +3185,14 @@
   @media only screen and (max-width: 600px) {
     #header-container {
       padding-left: 1px; /* matches 1px container border, no super-container padding */
-      padding-right: 1px; /* reduced padding to save space */
+      padding-right: 6px; /* reduced padding to save space */
     }
     #user {
-      height: 45px; /* must match height of single-line editor (on narrow window) */
-      width: 45px;
-      min-width: 45px;
+      height: 55px; /* 45px = height of single-line editor (on narrow window) */
+      width: 55px;
+      min-width: 55px;
+      /* margin: 0; */
+      margin-left: 2px; /* reduce to minimal margin */
     }
   }
 </style>

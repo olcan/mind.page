@@ -597,7 +597,7 @@
   .button {
     position: absolute;
     top: -9px;
-    right: -1px;
+    right: -2px;
     background: #666;
     color: black;
     display: flex;
