@@ -1917,6 +1917,10 @@
       (navigator.userAgent.includes("Mac") && "ontouchend" in document)
     );
   }
+  // https://stackoverflow.com/a/6031480
+  function android() {
+    return navigator.userAgent.toLowerCase().includes("android");
+  }
 
   function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
@@ -2372,13 +2376,16 @@
     // firebase().auth().setPersistence("none")
     // firebase().auth().setPersistence("session")
     firebase().auth().setPersistence("local");
-    // NOTE: getRedirectResult() is redundant given onAuthStateChanged. Both redirect and popup-based login seems to work, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) claim redirect is preferred on mobile, but we find that the popup works better on android. Even with the popup we do a reload because it is much easier and cleaner than changing all user/item state.
-    // firebase().auth().signInWithRedirect(provider);
-    firebase()
-      .auth()
-      .signInWithPopup(provider)
-      .then(() => location.reload())
-      .catch(console.error);
+    // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
+    // if (!android()) firebase().auth().signInWithRedirect(provider);
+    if (iOS()) firebase().auth().signInWithRedirect(provider);
+    else {
+      firebase()
+        .auth()
+        .signInWithPopup(provider)
+        .then(() => location.reload())
+        .catch(console.error);
+    }
   }
 
   function useAnonymousAccount() {
