@@ -1437,10 +1437,13 @@
     let origText = text; // if text is modified, caret position will be lost
     let time = Date.now(); // default time is current, can be past if undeleting
     let clearLabel = false; // force clear, even if text starts with tag
-    // NOTE: default is to create item in editing mode, unless any 2+ modifiers are held
-    //       (or edit:true|false is specified by custom command function)
-    //       (some modifier combinations, e.g. Ctrl+Alt, may be blocked by browsers)
-    if (editing == null) editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
+    if (editing == null) {
+      // NOTE: for non-synthetic calls, default is to edit unless any 2+ modifiers are held
+      //       (some modifier combinations, e.g. Ctrl+Alt, may be blocked by browsers)
+      editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
+    }
+    // disable running if Shift is held
+    if (e && e.shiftKey) run = false;
 
     switch (text.trim()) {
       case "/_signout": {
@@ -2836,6 +2839,7 @@
                   bind:focused
                   showButtons={true}
                   cancelOnDelete={true}
+                  createOnAnyModifiers={true}
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}
                   onEdited={onEditorChange}

@@ -4,6 +4,7 @@
   export let focused = false;
   export let showButtons = false;
   export let cancelOnDelete = false;
+  export let createOnAnyModifiers = false;
   export let clearOnShiftBackspace = false;
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
@@ -293,30 +294,45 @@
       return;
     }
 
-    // add/save item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
-    if (
-      (key == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
-      (key == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
-      (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
-    ) {
-      e.preventDefault();
-      e.stopPropagation(); // do not propagate to window
-      onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
-      return;
-    }
+    // ignore resume shortcut Shift+Cmd/Ctrl+S, let window handle it
+    if (key == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) return;
 
-    // run item with Alt/Option+Enter
-    if (key == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      e.stopPropagation(); // do not propagate to window
-      let selectionStart = textarea.selectionStart;
-      let selectionEnd = textarea.selectionEnd;
-      onRun();
-      setTimeout(() => {
-        textarea.selectionStart = selectionStart;
-        textarea.selectionEnd = selectionEnd;
-      }, 0);
-      return;
+    // create item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
+    if (createOnAnyModifiers) {
+      if (
+        (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
+        (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
+      ) {
+        e.preventDefault();
+        e.stopPropagation(); // do not propagate to window
+        onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
+        return;
+      }
+    } else {
+      if (
+        (key == "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
+        (key == "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+        (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
+      ) {
+        e.preventDefault();
+        e.stopPropagation(); // do not propagate to window
+        onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
+        return;
+      }
+
+      // run item with Alt/Option+Enter
+      if (key == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation(); // do not propagate to window
+        let selectionStart = textarea.selectionStart;
+        let selectionEnd = textarea.selectionEnd;
+        onRun();
+        setTimeout(() => {
+          textarea.selectionStart = selectionStart;
+          textarea.selectionEnd = selectionEnd;
+        }, 0);
+        return;
+      }
     }
 
     // create line on Enter, maintain indentation
@@ -492,6 +508,7 @@
     e.stopPropagation();
     e.preventDefault();
     textarea.selectionStart = 0;
+    textarea.selectionEnd = textarea.value.length;
     document.execCommand("forwardDelete");
     onInput();
   }
