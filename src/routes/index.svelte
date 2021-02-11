@@ -1596,14 +1596,16 @@
                 return;
               } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
-                  `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...",edit:true|false}`
+                  `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", edit:true|false, run:true|false}`
                 );
                 return;
               }
               text = obj.text;
-              if (obj.edit != undefined)
-                // if undefined use key-based default
-                editing = obj.edit == true;
+              // if obj.{edit,run} is not truthy or falsy we keep the default (based on modifier keys)
+              if (obj.edit == true) editing = true;
+              else if (obj.edit == false) editing = false;
+              if (obj.run == true) run = true;
+              else if (obj.run == false) run = false;
             } catch (e) {
               const log = _item("#commands" + cmd).console_log(-1 /*lastEvalTime*/, 4 /*errors*/);
               let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
