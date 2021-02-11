@@ -112,6 +112,8 @@
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {};
   if (!window["handleTagClick"])
     window["handleTagClick"] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault(); // disables handler for onmousedown, prevents change of focus, text selection, etc
       onTagClick(id, tag, reltag, e);
     };
 

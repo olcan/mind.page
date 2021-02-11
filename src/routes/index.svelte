@@ -492,9 +492,9 @@
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
     let columnItems = new Array(columnCount).fill(-1);
+    let columnTopMovers = new Array(columnCount).fill(items.length);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
     let lastTimeString = "";
-    let topMovedIndex = items.length;
     newestTime = 0;
     oldestTime = Infinity;
     oldestTimeString = "";
@@ -502,7 +502,7 @@
     lastLayoutTime = Date.now();
 
     items.forEach((item, index) => {
-      if (index < item.index && index < topMovedIndex) topMovedIndex = index;
+      item.lastIndex = index;
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
@@ -536,6 +536,7 @@
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
 
+      item.lastColumn = item.column;
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
@@ -556,6 +557,10 @@
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
+      // record item as top mover if it is lowest-index item that moved in its column
+      const moved = item.index != item.lastIndex || item.column != item.lastColumn;
+      if (moved && item.index < columnTopMovers[item.column]) columnTopMovers[item.column] = item.index;
+
       // if non-dotted item is first in its column and missing time string, add it now
       if (!item.dotted && columnItems[item.column] < 0 && !item.timeString) {
         item.timeString = timeString;
@@ -588,12 +593,20 @@
       }
     }
     // scroll up to top moved item if necessary
-    if (topMovedIndex < items.length) {
+    if (_.min(columnTopMovers) < items.length) {
+      // allow dom update before calculating scroll position
+      const lastLayoutTimeAtDispatch = lastLayoutTime;
       setTimeout(() => {
-        // allow dom update before calculating new position
-        const div = document.querySelector("#super-container-" + items[topMovedIndex].id);
-        if (!div) return; // item hidden
-        const itemTop = (div as HTMLElement).offsetTop;
+        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancel
+        const itemTop = _.min(
+          columnTopMovers.map((index) => {
+            if (index == items.length) return Infinity;
+            const div = document.querySelector("#super-container-" + items[index].id);
+            if (!div) return Infinity; // item hidden
+            return (div as HTMLElement).offsetTop;
+          })
+        );
+        console.debug(itemTop, window.scrollY);
         if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
       });
     }
@@ -981,11 +994,6 @@
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
-    if (focused) {
-      // maintain focus on editor by disabling default action (assuming mousedown event)
-      e.preventDefault();
-      e.stopPropagation();
-    }
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
@@ -1981,7 +1989,8 @@
     if (editing) {
       // started editing
       editingItems.push(index);
-      if (item.time != item.savedTime) onEditorChange(editorText); // time has changed
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange(editorText); // editing state (and possibly time) has changed
       // NOTE: setTimeout is required for editor to be added to the Dom
       if (iOS()) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
@@ -2348,10 +2357,12 @@
       item.hasError = false;
       // state from updateItemLayout
       item.index = index;
+      item.lastIndex = index;
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
       item.column = 0;
+      item.lastColumn = 0;
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
       item.outerHeight = 0;
