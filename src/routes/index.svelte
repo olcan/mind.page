@@ -950,6 +950,7 @@
     let tailIndex = items.findIndex((item) => item.id === null);
     items.splice(tailIndex, 1);
     tailIndex = Math.max(1, tailIndex);
+    if (editingItems.length > 0) tailIndex = Math.max(_.max(editingItems) + 1, tailIndex);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndex = tailIndex;
 
