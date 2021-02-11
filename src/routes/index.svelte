@@ -606,7 +606,6 @@
             return (div as HTMLElement).offsetTop;
           })
         );
-        console.debug(itemTop, window.scrollY);
         if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
       });
     }
