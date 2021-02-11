@@ -2994,11 +2994,13 @@
     padding: 10px;
     background: #111; /* matches unfocused editor */
     border-radius: 0 0 5px 0;
+    border-bottom: 1px solid #222;
     /*padding-left: 2px;*/ /* matches 1px super-container padding + 1px container border */
   }
   #header-container.focused {
     /* background: #232; */
     background: #222; /* #222 matches #user background */
+    border-bottom: 1px solid #333;
   }
   #editor {
     width: 100%;
