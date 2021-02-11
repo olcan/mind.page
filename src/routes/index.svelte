@@ -2965,6 +2965,9 @@
     img {
       filter: invert(100%);
     }
+    textarea {
+      caret-color: #0ff !important; /* maintain red (#f00) caret */
+    }
   </style>
 {/if}
 

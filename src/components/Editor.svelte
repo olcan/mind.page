@@ -522,7 +522,12 @@
       }
     }, selectionUpdateDebounceTime);
   }
-  onMount(() => document.addEventListener("selectionchange", onSelectionChange));
+  onMount(() => {
+    document.addEventListener("selectionchange", onSelectionChange);
+    // standardize initial position at 0; can be value.length (e.g. on android)
+    // 0 works better for longer items since top of item provides much better context
+    textarea.selectionStart = textarea.selectionEnd = 0;
+  });
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>
 
@@ -563,13 +568,13 @@
     width: 100%;
     cursor: text;
     padding-bottom: 2px; /* covers extra 2px of backdrop (see below), aligns correctly if item has outer border */
-    caret-color: #59f;
   }
   .backdrop,
   textarea {
     font-family: monospace;
     font-size: 15px;
     line-height: 24px;
+    caret-color: red;
   }
   .backdrop {
     /* color: transparent; */
