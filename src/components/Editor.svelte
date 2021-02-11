@@ -2,7 +2,7 @@
   export let id = "editor";
   export let text = "";
   export let focused = false;
-  export let showShiftReturnButton = false;
+  export let showButtons = false;
   export let cancelOnDelete = false;
   export let clearOnShiftBackspace = false;
   export let allowCommandCtrlBracket = false;
@@ -482,10 +482,18 @@
     onEdited(textarea.value);
   }
 
-  function onShiftReturn(e) {
+  function onCreate(e) {
     e.stopPropagation();
     e.preventDefault();
     onDone(text, { code: "Enter" });
+  }
+
+  function onClear(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    textarea.selectionStart = 0;
+    document.execCommand("forwardDelete");
+    onInput();
   }
 
   import { afterUpdate, onMount, onDestroy } from "svelte";
@@ -536,8 +544,12 @@
     on:blur={() => onFocused((focused = false))}
     spellcheck={false}
     autocapitalize="off">{text}</textarea>
-{#if showShiftReturnButton}
-  <div class="button" class:focused on:click={onShiftReturn}>create</div>
+{#if showButtons}
+  <div class="buttons" class:focused>
+    <!-- on:mousedown keeps focus on textarea -->
+    <div class="clear" on:mousedown={onClear}>clear</div>
+    <div class="create" on:click={onCreate}>create</div>
+  </div>
 {/if}
 </div>
 
@@ -594,9 +606,9 @@
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }
-  .button {
+  .buttons {
     position: absolute;
-    top: -9px;
+    top: -10px; /* -10px touches browser bar, -9px leaves 1px of background visible */
     right: -2px;
     background: #666;
     color: black;
@@ -604,18 +616,32 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    height: 25px;
-    padding: 0 8px;
-    border-radius: 5px;
+    /* border-radius: 5px; */ /* round all borders if leaving space on top */
+    border-radius: 0 0 5px 5px;
     font-family: Avenir Next, sans-serif;
     font-size: 15px;
     font-weight: 500;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    overflow: hidden;
   }
-  .button:not(.focused) {
+  .buttons:not(.focused) {
     opacity: 0; /* allow completion of click events */
+  }
+  .clear,
+  .create {
+    height: 25px;
+    padding: 0 8px;
+    display: inline-flex;
+    cursor: pointer;
+    align-items: center;
+  }
+  .clear {
+    border-right: 1px solid black;
+  }
+  .create {
+    background: #7a7;
   }
 
   :global(mark) {

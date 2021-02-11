@@ -645,8 +645,14 @@
       else sessionHistory[0] = text;
     }
 
-    // if editor has focus, and it is too soon since last change/return, debounce
-    if (document.activeElement == textArea(-1) && Date.now() - lastEditorChangeTime < editorDebounceTime) {
+    // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
+    // NOTE: non-empty condition is dropped if last call was debounced, otherwise backspace can stall on first char
+    text = text.toLowerCase().trim();
+    if (
+      (text.length > 0 || lastEditorChangeTime < Infinity) &&
+      document.activeElement == textArea(-1) &&
+      Date.now() - lastEditorChangeTime < editorDebounceTime
+    ) {
       lastEditorChangeTime = Date.now(); // reset timer at each postponed change
       if (!editorChangePending) {
         editorChangePending = true;

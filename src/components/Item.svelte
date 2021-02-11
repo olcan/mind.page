@@ -112,8 +112,6 @@
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {};
   if (!window["handleTagClick"])
     window["handleTagClick"] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
-      e.preventDefault(); // disables href on anchor tag
-      e.stopPropagation();
       onTagClick(id, tag, reltag, e);
     };
 
@@ -401,7 +399,7 @@
               )
                 reltag = "#…" + tag.substring(firstTerm.length);
               return (
-                `${pfx}<mark${classNames} title="${tag}" onclick=` +
+                `${pfx}<mark${classNames} title="${tag}" onmousedown=` +
                 `"handleTagClick('${id}','${tag}','${reltag}',event)">` +
                 `${renderTag(reltag)}</mark>`
               );
@@ -459,7 +457,7 @@
         else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
-        return `<mark class="${classNames}" title="${tag}" onclick="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
+        return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
       }
       return `<a target="_blank" title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
@@ -1192,7 +1190,7 @@
     display: inline-flex;
     cursor: pointer;
     align-items: center;
-    border-right: 1px solid #111;
+    border-right: 1px solid black;
     height: 25px;
     padding: 0 8px;
   }
@@ -1217,6 +1215,9 @@
   .run {
     /* color: #0b0; */
     background: #4ae;
+  }
+  .save {
+    background: #7a7;
   }
   .container:not(.runnable) .run {
     display: none;
