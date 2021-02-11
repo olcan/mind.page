@@ -214,6 +214,7 @@
         options["include_deps"] = false; // deps are recursive already
         item.deps.forEach((id) => {
           const dep = items[indexFromId.get(id)];
+          // NOTE: we allow async dependents to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
           if (
             options["exclude_async_deps"] &&
             (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
@@ -344,7 +345,11 @@
       );
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
-        if (options["async"]) evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
+        if (options["async"]) {
+          // NOTE: async commands use a light-weight wrapper without output/logging into item
+          if (options["trigger"] == "command") evaljs = ["(async () => {", evaljs, "})()"].join("\n");
+          else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
+        }
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
         evaljs = ["'use strict';null;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
       }
@@ -386,30 +391,35 @@
     // item is NOT on stack unless added explicitly (see below)
     // log messages are NOT associated with item while it is off the stack
     // _this is still defined in lexical context as if item is top of stack
+    // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
     start(async_func) {
       item(this.id).running = true;
-      // skip animation frame to ensure DOM is updated for running=true
-      // (otherwise only option is an arbitrary delay since polling DOM does not work)
-      // (see https://stackoverflow.com/a/57659371 and other answers to that question)
-      requestAnimationFrame(() =>
+      return new Promise((resolve, reject) => {
+        // skip animation frame to ensure DOM is updated for running=true
+        // (otherwise only option is an arbitrary delay since polling DOM does not work)
+        // (see https://stackoverflow.com/a/57659371 and other answers to that question)
         requestAnimationFrame(() =>
-          Promise.resolve(async_func())
-            .then((output) => {
-              if (output) this.write(output);
-            })
-            .catch((e) => {
-              console.error(e);
-              invalidateElemCache(this.id);
-            })
-            .finally(() => {
-              this.write_log_any(); // customized via _this.log_options
-              item(this.id).running = false;
-            })
-        )
-      );
+          requestAnimationFrame(() =>
+            Promise.resolve(async_func())
+              .then((output) => {
+                if (output) this.write(output);
+                this.write_log_any(); // customized via _this.log_options
+                item(this.id).running = false;
+                resolve(output);
+              })
+              .catch((e) => {
+                console.error(e);
+                invalidateElemCache(this.id);
+                this.write_log_any(); // customized via _this.log_options
+                item(this.id).running = false;
+                reject(e);
+              })
+          )
+        );
+      });
     }
 
-    // invokes given (sync) function after restoring item onto stack if necessary
+    // invokes given (sync) function after pushing item onto stack
     // re-returns any return value, rethrows (after logging) any errors
     invoke(func) {
       evalStack.push(this.id);
@@ -1401,7 +1411,7 @@
   let sessionHistoryIndex = 0;
   let tempIdFromSavedId = new Map<string, string>();
   let editorText = "";
-  function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false) {
+  function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false, editing = null) {
     const key = e?.code || e?.key;
     if (cancelled) {
       if (key == "Escape") {
@@ -1430,7 +1440,7 @@
     // NOTE: default is to create item in editing mode, unless any 2+ modifiers are held
     //       (or edit:true|false is specified by custom command function)
     //       (some modifier combinations, e.g. Ctrl+Alt, may be blocked by browsers)
-    let editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
+    if (editing == null) editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2;
 
     switch (text.trim()) {
       case "/_signout": {
@@ -1585,33 +1595,56 @@
               .catch(console.error);
             return;
           } else if (_item("#commands" + cmd)) {
-            try {
-              const obj = _item("#commands" + cmd).eval(`run(\`${args}\`)`, { trigger: "command" });
-              if (!obj) {
-                onEditorChange((editorText = ""));
-                return;
-              } else if (typeof obj == "string") {
-                onEditorChange((editorText = obj));
-                textArea(-1).focus(); // refocus on non-empty editor
-                return;
-              } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
-                alert(
-                  `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", edit:true|false, run:true|false}`
-                );
-                return;
-              }
-              text = obj.text;
-              // if obj.{edit,run} is not truthy or falsy we keep the default (based on modifier keys)
-              if (obj.edit == true) editing = true;
-              else if (obj.edit == false) editing = false;
-              if (obj.run == true) run = true;
-              else if (obj.run == false) run = false;
-            } catch (e) {
+            function handleError(e) {
               const log = _item("#commands" + cmd).console_log(-1 /*lastEvalTime*/, 4 /*errors*/);
               let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
               alert(msg);
+            }
+            try {
+              // NOTE: if command item is async (or has async dependents), we specify async:true for eval so that it provides (given "command" trigger) a light-weight async wrapper that does not output/log into the item
+              let cmd_item = items[_item("#commands" + cmd).index];
+              const async =
+                cmd_item.async || cmd_item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
+              Promise.resolve(
+                _item("#commands" + cmd).eval((async ? "return " : "") + `run(\`${args}\`)`, {
+                  trigger: "command",
+                  async, // enables async command wrapper
+                })
+              )
+                .then((obj) => {
+                  if (!obj) {
+                    onEditorChange((editorText = ""));
+                  } else if (typeof obj == "string") {
+                    onEditorChange((editorText = obj));
+                    textArea(-1).focus(); // refocus on non-empty editor
+                  } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
+                    alert(
+                      `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", edit:true|false, run:true|false}`
+                    );
+                  } else {
+                    text = obj.text;
+                    // if obj.{edit,run} is not truthy or falsy we keep the default (based on modifier keys)
+                    if (obj.edit == true) editing = true;
+                    else if (obj.edit == false) editing = false;
+                    if (obj.run == true) run = true;
+                    else if (obj.run == false) run = false;
+                    // since we are async, we need to call onEditorDone again with run/editing set properly
+                    let item = onEditorDone((editorText = text), null, false, run, editing);
+                    // run programmatic initializer function if any
+                    try {
+                      if (obj.init) Promise.resolve(obj.init(item)).catch(handleError);
+                    } catch (e) {
+                      handleError(e);
+                      throw e;
+                    }
+                  }
+                })
+                .catch(handleError);
+            } catch (e) {
+              handleError(e);
               throw e;
             }
+            return;
           } else {
             alert(`unknown command ${cmd}`);
             return;
@@ -1646,15 +1679,10 @@
     items.forEach((item, index) => indexFromId.set(item.id, index));
     itemTextChanged(0, text);
 
-    // NOTE: command can do this if indeed useful
-    // if command, just clear the arguments, keep the command
-    // (useful for repeated commands of the same type)
-    // if (editorText.match(/^\/\w+ ?/)) {
-    //   editorText = editorText.replace(/(^\/\w+ ?).*$/s, "$1");
-    // } else {
-    // if not command, but starts with a tag, keep if non-unique label
+    // if text is not synthetic and starts with a tag, keep if non-unique label
     // (useful for adding labeled items, e.g. todo items, without losing context)
     editorText =
+      e /* e == null for synthetic calls, e.g. from commands */ &&
       !clearLabel &&
       items[0].label &&
       !items[0].labelUnique &&
@@ -1662,7 +1690,6 @@
       editorText.startsWith(items[0].labelText + " ")
         ? items[0].labelText + " "
         : "";
-    // }
 
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
@@ -1732,6 +1759,8 @@
         })
         .catch(console.error);
     }); // encryptItem(itemToSave)
+
+    return _item(item.id); // return reference to created item
   }
 
   function focusOnNearestEditingItem(index: number) {
@@ -1859,10 +1888,6 @@
     const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
     let jsin = extractBlock(item.text, "js_input");
     if (!jsin) return item.text; // missing or empty, ignore
-    // if (async && !jsin.match(/\bdone\b/)) {
-    //   alert(`${item.name}: can not run async js_input without any reference to 'done'`);
-    //   return item.text;
-    // }
     let jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined;
