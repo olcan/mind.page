@@ -965,6 +965,11 @@
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
+    if (focused) {
+      // maintain focus on editor by disabling default action (assuming mousedown event)
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const index = indexFromId.get(id);
     if (index == undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
@@ -1581,6 +1586,7 @@
                 return;
               } else if (typeof obj == "string") {
                 onEditorChange((editorText = obj));
+                textArea(-1).focus(); // refocus on non-empty editor
                 return;
               } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                 alert(
@@ -2715,6 +2721,7 @@
           confirm: "Stay Anonymous",
           cancel: "Sign In",
           onCancel: signIn,
+          // onConfirm: () => textArea(-1).focus(),
           background: "confirm",
         });
       }
@@ -2794,7 +2801,7 @@
                   id="mindbox"
                   bind:text={editorText}
                   bind:focused
-                  showShiftReturnButton={true}
+                  showButtons={true}
                   cancelOnDelete={true}
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}
@@ -2977,11 +2984,12 @@
     display: flex;
     padding: 10px;
     background: #111; /* matches unfocused editor */
-    border-radius: 0 0 4px 4px;
+    border-radius: 0 0 5px 0;
     /*padding-left: 2px;*/ /* matches 1px super-container padding + 1px container border */
   }
   #header-container.focused {
-    background: #111;
+    /* background: #232; */
+    background: #222; /* #222 matches #user background */
   }
   #editor {
     width: 100%;
@@ -2990,10 +2998,11 @@
   :global(#header #editor .backdrop:not(.focused)) {
     border: 1px solid transparent;
   }
-  /* lighten up border when focused */
-  /* :global(#header #editor .backdrop.focused) {
-    border: 1px solid #383838;
-  } */
+  /* lighten solid border when top editor is focused */
+  :global(#header #editor .backdrop.focused) {
+    border: 1px solid #333;
+    /* border: 1px solid transparent; */
+  }
   .spacer {
     flex-grow: 1;
   }
@@ -3184,7 +3193,8 @@
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     #header-container {
-      padding-left: 1px; /* matches 1px container border, no super-container padding */
+      /*padding-left: 1px;*/ /* matches 1px container border, no super-container padding */
+      padding-left: 10px; /* not best use of space, but looks good and avoids edge on curved screens */
       padding-right: 6px; /* reduced padding to save space */
     }
     #user {
