@@ -544,6 +544,7 @@
     // standardize initial position at 0; can be value.length (e.g. on android)
     // 0 works better for longer items since top of item provides much better context
     textarea.selectionStart = textarea.selectionEnd = 0;
+    textarea.blur(); // prevent auto-focus in Safari due to selectionStart set
   });
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>
@@ -630,7 +631,7 @@
   }
   .buttons {
     position: absolute;
-    top: -10px; /* -10px touches browser bar, -9px leaves 1px of background visible */
+    top: -15px; /* -15px touches browser bar, -14px leaves 1px of background visible */
     right: -2px;
     background: #666;
     color: black;

@@ -477,7 +477,6 @@
   let defaultHeaderHeight = 0;
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
-  let firstLayoutTime = 0;
   let lastLayoutTime = 0;
   let lastTimeStringUpdateTime = 0;
 
@@ -503,23 +502,14 @@
     totalItemHeight = 0;
     lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
-    if (!firstLayoutTime) firstLayoutTime = lastLayoutTime;
-    // NOTE: updateItemLayout can ONLY increase hideIndex, and this is intentional to avoid abrupt hiding of items due to non-ranking layout updates (page width changes and item height changes) and ensure that only re-ranking actions can trigger re-hiding of items
 
     items.forEach((item, index) => {
       item.lastIndex = index;
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
-      if (item.editing) {
-        editingItems.push(index);
-        // extend hide index to include any editing items
-        if (index >= hideIndex) hideIndex = index + 1;
-      }
+      if (item.editing) editingItems.push(index);
       if (item.focused) focusedItem = index;
-
-      // extend hide index to include all items touched in this session (after first layout)
-      if (item.time > firstLayoutTime && index >= hideIndex) hideIndex = index + 1;
 
       let lastItem = items[index - 1];
       let timeString = itemTimeString((Date.now() - item.time) / 1000);
@@ -623,6 +613,8 @@
     }
   }
 
+  function onEditorFocused(focused: boolean) {}
+
   function isSpecialTag(tag) {
     return (
       tag == "#log" ||
@@ -672,6 +664,7 @@
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
   let hideIndexFromRanking = Infinity;
+  let firstRankingTime = 0;
 
   function onEditorChange(text: string) {
     // keep history entry 0 updated, reset index on changes
@@ -976,7 +969,11 @@
       // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
       // if (matchingItemCount == 0) hideIndex = extendedTailIndex;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "24 hours", time: items[extendedTailIndex].time });
+        tailIndices.push({
+          index: extendedTailIndex,
+          timeString: "last 24 hours",
+          time: items[extendedTailIndex].time,
+        });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -984,7 +981,7 @@
     if (tailTime7d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "7 days", time: items[extendedTailIndex].time });
+        tailIndices.push({ index: extendedTailIndex, timeString: "last 7 days", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -992,21 +989,25 @@
     if (tailTime30d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "30 days", time: items[extendedTailIndex].time });
+        tailIndices.push({ index: extendedTailIndex, timeString: "last 30 days", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
     }
     // console.debug(tailIndices);
 
+    // extend hide index to include any editing items and any items "touched" (soft or hard) in this session
+    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense. TODO: figure out a way to "show/hide this session", which would cover both soft/hard items and works separately from forward/back
+    if (!firstRankingTime) firstRankingTime = Date.now();
+    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.editing || item.time > firstRankingTime) + 1);
+
+    // save the final hide index calculated after each ranking
+    // used to determine where to show "hide older items" button
+    hideIndexFromRanking = hideIndex;
+
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     setTimeout(updateDotted, 0); // show/hide dotted/undotted items
-
-    // save the final hide index calculated after each ranking (+layout)
-    // used to determine where to show "hide older items" button
-    // subsequent non-ranking layout updates can not change this OR decrease hide index, so hiding of elements can only happen during ranking
-    hideIndexFromRanking = hideIndex;
 
     if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
@@ -1122,10 +1123,12 @@
   function signOut() {
     if (window.sessionStorage.getItem("mindpage_signin_pending")) return; // can not signout during signin
     signingOut = true;
-    localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
+
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
     setTimeout(() => (document.activeElement as HTMLElement).blur());
+
+    localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
     resetUser();
     firebase()
       .auth()
@@ -2417,7 +2420,8 @@
       item.depsString = itemDepsString(item);
       item.dependentsString = itemDependentsString(item);
     });
-    setTimeout(initItems); // need to dispatch as it needs window._eval
+
+    initItems();
 
     initTime = Math.round(performance.now());
     console.debug(`initialized ${items.length} items at ${initTime}ms`);
@@ -2898,6 +2902,7 @@
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}
                   onEdited={onEditorChange}
+                  onFocused={onEditorFocused}
                   onDone={onEditorDone}
                   onPrev={onPrevItem}
                   onNext={onNextItem}
@@ -2999,7 +3004,7 @@
             {#each tailIndices as tail}
               {#if hideIndex < tail.index}
                 <div class="show-toggle" on:click={() => (hideIndex = tail.index)}>
-                  show last {tail.timeString}
+                  show {tail.timeString}
                 </div>
               {/if}
             {/each}
@@ -3021,17 +3026,18 @@
   </div>
 {:else}<script>
     setTimeout(() => {
+      // NOTE: decided not to auto-focus on any device for now to "fake focus w/o keyboard" confusion (esp. on mobile even on desktop if window does not have focus you get a fake focus effect), and also complications with stealing focus away from initial modal (although we had a workaround for that below)
       // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
       //       programmatic focus except in click handlers, when returning to app, etc
-      if (
-        document.activeElement.tagName.toLowerCase() != "textarea" &&
-        !navigator.platform.startsWith("iPhone") &&
-        !document.querySelector(".modal input")
-      ) {
-        let mindbox = document.getElementById("textarea-mindbox");
-        mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
-        mindbox.focus();
-      }
+      // if (
+      //   document.activeElement.tagName.toLowerCase() != "textarea" &&
+      //   !navigator.platform.startsWith("iPhone") &&
+      //   !document.querySelector(".modal input")
+      // ) {
+      //   let mindbox = document.getElementById("textarea-mindbox");
+      //   mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
+      //   mindbox.focus();
+      // }
     });
   </script>{/if}
 
@@ -3101,6 +3107,11 @@
   }
   #editor {
     width: 100%;
+    /* push editor down/left for more clearance for buttons and from profile picture */
+    margin-top: 5px;
+    margin-bottom: -5px;
+    margin-left: -5px;
+    margin-right: 5px;
   }
   /* remove dashed border when top editor is unfocused */
   :global(#header #editor .backdrop:not(.focused)) {
@@ -3120,7 +3131,7 @@
     min-width: 56px; /* seems necessary to ensure full width inside flex */
     border-radius: 50%;
     margin: -5px;
-    margin-left: 5px;
+    margin-left: 0;
     background: #222;
     cursor: pointer;
     overflow: hidden;
@@ -3309,8 +3320,6 @@
       height: 55px; /* 45px = height of single-line editor (on narrow window) */
       width: 55px;
       min-width: 55px;
-      /* margin: 0; */
-      margin-left: 2px; /* reduce to minimal margin */
     }
   }
 </style>
