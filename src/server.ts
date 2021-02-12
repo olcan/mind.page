@@ -12,7 +12,7 @@ const sapperServer = express().use(
   sirv("static", { dev }),
   cookieParser(),
   (req, res, next) => {
-    globalThis.request = req; // for use in svelte template on server side
+    globalThis.hostname = req.hostname; // for index.svelte
     res.cookie = req.cookies["__session"] || "";
     next();
   },

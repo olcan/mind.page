@@ -2846,7 +2846,17 @@
   }
 
   // retrieve host name, in globalThis.request on server side (see server.ts)
-  const host = typeof location == "undefined" ? globalThis.request.headers.host : location.host;
+  const hostname = typeof location == "undefined" ? globalThis.hostname : location.hostname;
+
+  // custom directory for some static files, based on hostname
+  const hostdir =
+    hostname == "mind.page"
+      ? ""
+      : hostname == "olcan.com"
+      ? "olcan.com"
+      : hostname == "mindbox.io"
+      ? "mindbox.io"
+      : "other";
 </script>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
@@ -3028,7 +3038,11 @@
 {/if}
 
 <svelte:head>
-  <title>{host}</title>
+  <title>{hostname}</title>
+  <link rel="icon" type="image/png" href="{hostdir}/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="{hostdir}/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png" />
+  <link rel="manifest" href="{hostdir}/manifest.json" />
 </svelte:head>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->

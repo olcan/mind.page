@@ -1,0 +1,25 @@
+{
+  "background_color": "#111",
+  "theme_color": "#111",
+  "name": "mindbox.io",
+  "short_name": "mindbox.io",
+  "display": "minimal-ui",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "mindbox.io/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "mindbox.io/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "mindbox.io/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
