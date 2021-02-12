@@ -2771,7 +2771,7 @@
       setInterval(checkLayout, 250); // check layout every 250ms
       updateDotted(); // update dotted items
 
-      if (anonymous) {
+      if (readonly) {
         modal.show({
           content:
             "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
@@ -2846,8 +2846,7 @@
   }
 
   // retrieve host name, in globalThis.request on server side (see server.ts)
-  const host = typeof location == "undefined" ? globalThis.request.headers.host : location.host
-
+  const host = typeof location == "undefined" ? globalThis.request.headers.host : location.host;
 </script>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
