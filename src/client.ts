@@ -11,6 +11,7 @@ import * as sapper from "@sapper/app";
 // import _ from "lodash";
 // window._ = _;
 
+// comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
 sapper.start({
   target: document.querySelector("#sapper"),
 });

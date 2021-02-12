@@ -1103,8 +1103,9 @@
   }
   .hidden {
     position: absolute;
-    visibility: hidden;
-    opacity: 0; /* necessary to hide some child elements on android */
+    visibility: hidden !important;
+    opacity: 0 !important; /* necessary to hide some child elements on android */
+    pointer-events: none !important; /* apparently necessary on the mac, even with just visibility:hidden */
     width: 100%;
   }
   .container {

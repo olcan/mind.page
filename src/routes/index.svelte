@@ -1074,8 +1074,12 @@
     items[index].showLogsTime = Date.now(); // invalidates auto-hide
   }
 
+  function admin() {
+    return location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/);
+  }
+
   function onPopState(e) {
-    readonly = anonymous && !location.href.match(/user=anonymous/);
+    readonly = anonymous && !admin();
     if (!e?.state) return; // for fragment (#id) hrefs
     // console.debug("pop", e.state);
     // restore editor text and unsaved times
@@ -2475,7 +2479,7 @@
       user = JSON.parse(localStorage.getItem("mindpage_user"));
       secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
       console.debug(`restored user ${user.email} from local storage`);
-      if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/)) useAnonymousAccount();
+      if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && admin()) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
       console.debug("resuming signing in ...");
       window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
@@ -2485,7 +2489,7 @@
       document.cookie = "__session=;max-age=0"; // clear just in case
     }
     anonymous = user?.uid == "anonymous";
-    readonly = anonymous && !location.href.match(/user=anonymous/);
+    readonly = anonymous && !admin();
 
     // if items were returned from server, confirm user, then initialize if valid
     let initialization;
@@ -2541,10 +2545,9 @@
               })
               .catch(console.error);
 
-            // NOTE: olcans@gmail.com signed in with user=anonymous query will ACT as anonymous account
+            // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
             //       (this is the only case where user != firebase().auth().currentUser)
-            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && location.href.match(/user=anonymous/))
-              useAnonymousAccount();
+            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && admin()) useAnonymousAccount();
 
             initFirebaseRealtime();
           });
@@ -2841,6 +2844,10 @@
     let msg = errorMessage(e);
     console.error(msg);
   }
+
+  // retrieve host name, in globalThis.request on server side (see server.ts)
+  const host = typeof location == "undefined" ? globalThis.request.headers.host : location.host
+
 </script>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
@@ -3020,6 +3027,10 @@
     }
   </style>
 {/if}
+
+<svelte:head>
+  <title>{host}</title>
+</svelte:head>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
 <style>
