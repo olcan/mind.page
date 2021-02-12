@@ -2476,6 +2476,8 @@
     };
     secret = null; // should never be needed under anonymous account
     anonymous = true;
+    // anonymous account should not have a server cookie (even if admin)
+    document.cookie = "__session=;max-age=0";
   }
 
   if (isClient) {
@@ -2493,17 +2495,16 @@
       user = JSON.parse(localStorage.getItem("mindpage_user"));
       secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
       console.debug(`restored user ${user.email} from local storage`);
-      if (admin()) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
       console.debug("resuming signing in ...");
       window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
       user = secret = null;
     } else {
       useAnonymousAccount();
-      document.cookie = "__session=;max-age=0"; // clear just in case
     }
     anonymous = user?.uid == "anonymous";
     readonly = anonymous && !admin();
+    if (admin()) useAnonymousAccount(); // become anonymous for item checks
 
     // if items were returned from server, confirm user, then initialize if valid
     let initialization;
@@ -2522,6 +2523,7 @@
       }
     }
 
+    // NOTE: we do not attempt login for readonly account (if login hangs, this is suspect)
     if (!readonly) {
       // if initializing items, wait for that before signing in user since errors can trigger signout
       Promise.resolve(initialization).then(() => {
@@ -2546,20 +2548,22 @@
             anonymous = readonly = false; // just in case (should already be false)
             signedin = true;
 
-            // set up server-side session cookie
-            // store user's ID token as a 1-hour __session cookie to send to server for preload
-            // NOTE: __session is the only cookie allowed by firebase for efficient caching
-            //       (see https://stackoverflow.com/a/44935288)
-            user
-              .getIdToken(false /*force refresh*/)
-              .then((token) => {
-                document.cookie = "__session=" + token + ";max-age=3600";
-              })
-              .catch(console.error);
-
             // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
             //       (this is the only case where user != firebase().auth().currentUser)
-            if (admin()) useAnonymousAccount();
+            if (admin()) {
+              useAnonymousAccount();
+            } else {
+              // set up server-side session cookie
+              // store user's ID token as a 1-hour __session cookie to send to server for preload
+              // NOTE: __session is the only cookie allowed by firebase for efficient caching
+              //       (see https://stackoverflow.com/a/44935288)
+              user
+                .getIdToken(false /*force refresh*/)
+                .then((token) => {
+                  document.cookie = "__session=" + token + ";max-age=3600";
+                })
+                .catch(console.error);
+            }
 
             initFirebaseRealtime();
           });
