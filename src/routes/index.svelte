@@ -1866,7 +1866,7 @@
     if (
       height == 0 ||
       prevHeight == 0 ||
-      height != prevHeight
+      Math.abs(height - prevHeight) > 300
       // height < 0.5 * prevHeight ||
       // height > prevHeight + 100
     ) {
