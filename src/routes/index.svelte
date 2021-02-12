@@ -3043,7 +3043,7 @@
     display: flex;
     padding: 10px;
     background: #111; /* matches unfocused editor */
-    border-radius: 0 0 5px 0;
+    border-radius: 0 0 5px 5px;
     border-bottom: 1px solid #222;
     /*padding-left: 2px;*/ /* matches 1px super-container padding + 1px container border */
   }
