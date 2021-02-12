@@ -556,6 +556,7 @@
           for (let i = 0; i < Math.abs(item.column - lastColumn) - 1; ++i)
             lastItem.arrows += item.column < lastColumn ? "←" : "→";
           lastItem.arrows += item.column < lastColumn ? "" : "↗";
+          // NOTE: we include .section-separator height but ignore show-toggle which is dynamic (like dotted items)
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
@@ -663,8 +664,9 @@
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
-  let hideIndexFromRanking = Infinity;
   let firstRankingTime = 0;
+  let hideIndexFromRanking = Infinity;
+  let hideIndexForSession = Infinity;
 
   function onEditorChange(text: string) {
     // keep history entry 0 updated, reset index on changes
@@ -953,11 +955,14 @@
     );
 
     // determine "tail" index after which items are ordered purely by time
+    // (also including editing log items which are edited in place)
     let tailIndex = items.findIndex((item) => item.id === null);
     items.splice(tailIndex, 1);
     tailIndex = Math.max(1, tailIndex);
+    tailIndex = Math.max(tailIndex, _.findLastIndex(items, (item) => item.editing) + 1);
     let tailTime = items[tailIndex]?.time || 0;
-    hideIndex = tailIndex; // can be increased below in updateItemLayout
+    hideIndex = tailIndex;
+    hideIndexFromRanking = hideIndex;
 
     // determine other non-trivial "tail times" <= tailTime but > oldestTime
     const tailTime24h = Date.now() - 24 * 3600 * 1000;
@@ -996,14 +1001,20 @@
     }
     // console.debug(tailIndices);
 
-    // extend hide index to include any editing items and any items "touched" (soft or hard) in this session
-    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense. TODO: figure out a way to "show/hide this session", which would cover both soft/hard items and works separately from forward/back
+    // extend hide index to include items "touched" (soft or hard) in this session
+    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     if (!firstRankingTime) firstRankingTime = Date.now();
-    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.editing || item.time > firstRankingTime) + 1);
+    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > firstRankingTime) + 1);
+    hideIndexForSession = hideIndex; // used to determine where to show "hide older items"
 
-    // save the final hide index calculated after each ranking
-    // used to determine where to show "hide older items" button
-    hideIndexFromRanking = hideIndex;
+    // prepend tail index for "show recent items"
+    if (hideIndexForSession > hideIndexFromRanking) {
+      tailIndices.unshift({
+        index: hideIndexForSession,
+        timeString: "recent items",
+        time: items[hideIndexForSession].time,
+      });
+    }
 
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
@@ -1096,6 +1107,10 @@
   function onPopState(e) {
     readonly = anonymous && !admin();
     if (!e?.state) return; // for fragment (#id) hrefs
+    if (!initTime) {
+      console.warn("onPopState before init");
+      return;
+    }
     // console.debug("pop", e.state);
     // restore editor text and unsaved times
     editorText = e.state.editorText || "";
@@ -3011,8 +3026,13 @@
             <div class="show-toggle" on:click={() => (hideIndex = Infinity)}>
               show all {items.length} items
             </div>
-          {:else if hideIndex > hideIndexFromRanking && item.column == column && item.index == hideIndexFromRanking - 1 && item.index < items.length - 1}
-            <div class="show-toggle" on:click={() => (hideIndex = hideIndexFromRanking)}>hide older items</div>
+          {:else if hideIndex > hideIndexForSession && item.column == column && item.index == hideIndexForSession - 1 && item.index < items.length - 1}
+            <div class="show-toggle" on:click={() => (hideIndex = hideIndexForSession)}>hide older items</div>
+          {/if}
+
+          {#if hideIndexForSession > hideIndexFromRanking && item.column == column && item.index == hideIndexFromRanking - 1 && item.index < items.length - 1}
+            <!-- hide recent/all/below items is hard to name, but since it only gets shown when there are recent items and it is in the same place as "show recent items", we use "recent", but it really hides "all items including recent", which seems ok -->
+            <div class="show-toggle recent" on:click={() => (hideIndex = hideIndexFromRanking)}>hide recent items</div>
           {/if}
         {/each}
       </div>
@@ -3278,6 +3298,11 @@
     margin-top: -24px;
   }
 
+  /* allow time strings to overlap preceding .show-toggle */
+  :global(.show-toggle + .super-container.timed) {
+    margin-top: -24px;
+  }
+
   .show-toggle {
     display: flex;
     justify-content: center;
@@ -3292,12 +3317,16 @@
     border-radius: 4px;
     cursor: pointer;
     margin: 28px auto; /* same as having time string */
-    padding: 15px 30px;
+    padding: 20px 30px;
     width: fit-content;
     white-space: nowrap;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+  .show-toggle.recent {
+    margin: 14px auto;
+    padding: 10px 20px;
   }
 
   .show-toggle + .show-toggle {
