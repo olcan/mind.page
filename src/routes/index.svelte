@@ -480,8 +480,6 @@
   let firstLayoutTime = 0;
   let lastLayoutTime = 0;
   let lastTimeStringUpdateTime = 0;
-  let hideIndexFromRanking = Infinity;
-  let hideIndexFromLayout = Infinity;
 
   function updateItemLayout() {
     // console.debug("updateItemLayout");
@@ -506,7 +504,7 @@
     lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
     if (!firstLayoutTime) firstLayoutTime = lastLayoutTime;
-    hideIndex = hideIndexFromRanking; // restore in case ranking is skipped
+    // NOTE: updateItemLayout can ONLY increase hideIndex, and this is intentional to avoid abrupt hiding of items due to non-ranking layout updates (page width changes and item height changes) and ensure that only re-ranking actions can trigger re-hiding of items
 
     items.forEach((item, index) => {
       item.lastIndex = index;
@@ -591,10 +589,6 @@
       columnItems[item.column] = index;
     });
 
-    // save the original hide index calculated after each layout
-    // used to determine where to show "hide older items" button
-    hideIndexFromLayout = hideIndex;
-
     if (focusedItem >= 0) {
       // maintain focus/selection
       let textarea = textArea(focusedItem);
@@ -677,6 +671,8 @@
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
+  let hideIndexFromRanking = Infinity;
+
   function onEditorChange(text: string) {
     // keep history entry 0 updated, reset index on changes
     if (text != sessionHistory[sessionHistoryIndex]) {
@@ -968,8 +964,7 @@
     items.splice(tailIndex, 1);
     tailIndex = Math.max(1, tailIndex);
     let tailTime = items[tailIndex]?.time || 0;
-    hideIndex = tailIndex;
-    hideIndexFromRanking = hideIndex; // to be restored when updateItemLayout is invoked directly
+    hideIndex = tailIndex; // can be increased below in updateItemLayout
 
     // determine other non-trivial "tail times" <= tailTime but > oldestTime
     const tailTime24h = Date.now() - 24 * 3600 * 1000;
@@ -1007,6 +1002,11 @@
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     setTimeout(updateDotted, 0); // show/hide dotted/undotted items
+
+    // save the final hide index calculated after each ranking (+layout)
+    // used to determine where to show "hide older items" button
+    // subsequent non-ranking layout updates can not change this OR decrease hide index, so hiding of elements can only happen during ranking
+    hideIndexFromRanking = hideIndex;
 
     if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
@@ -1875,10 +1875,7 @@
             // TODO: if this does not prevent the edit issues, consider waiting until no item editor has focus
             // (also make sure it is related to item resizing, because sometimes it seems to happen w/o resizing and in that case would be more related to keyboard event handling in Editor)
             if (Date.now() - lastEditTime >= 500) {
-              // NOTE: since height changes can be triggered by minor local changes (logging, toggling of content, etc), we do not allow hide index to be moved up after the layout to prevent an abrupt change to the page ...
-              const hideIndexBeforeLayout = hideIndex;
               updateItemLayout();
-              hideIndex = Math.max(hideIndex, hideIndexBeforeLayout);
               layoutPending = false;
               clearInterval(layoutInterval);
             }
@@ -3004,8 +3001,8 @@
             <div class="show-toggle" on:click={() => (hideIndex = Infinity)}>
               show all {items.length} items
             </div>
-          {:else if hideIndex > hideIndexFromLayout && item.column == column && item.index == hideIndexFromLayout - 1 && item.index < items.length - 1}
-            <div class="show-toggle" on:click={() => (hideIndex = hideIndexFromLayout)}>hide older items</div>
+          {:else if hideIndex > hideIndexFromRanking && item.column == column && item.index == hideIndexFromRanking - 1 && item.index < items.length - 1}
+            <div class="show-toggle" on:click={() => (hideIndex = hideIndexFromRanking)}>hide older items</div>
           {/if}
         {/each}
       </div>
