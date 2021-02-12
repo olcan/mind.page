@@ -479,6 +479,9 @@
   let totalItemHeight = 0;
   let firstLayoutTime = 0;
   let lastLayoutTime = 0;
+  let lastTimeStringUpdateTime = 0;
+  let hideIndexFromRanking = Infinity;
+  let hideIndexFromLayout = Infinity;
 
   function updateItemLayout() {
     // console.debug("updateItemLayout");
@@ -501,7 +504,9 @@
     oldestTimeString = "";
     totalItemHeight = 0;
     lastLayoutTime = Date.now();
+    lastTimeStringUpdateTime = Date.now();
     if (!firstLayoutTime) firstLayoutTime = lastLayoutTime;
+    hideIndex = hideIndexFromRanking; // restore in case ranking is skipped
 
     items.forEach((item, index) => {
       item.lastIndex = index;
@@ -585,6 +590,10 @@
       }
       columnItems[item.column] = index;
     });
+
+    // save the original hide index calculated after each layout
+    // used to determine where to show "hide older items" button
+    hideIndexFromLayout = hideIndex;
 
     if (focusedItem >= 0) {
       // maintain focus/selection
@@ -960,6 +969,7 @@
     tailIndex = Math.max(1, tailIndex);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndex = tailIndex;
+    hideIndexFromRanking = hideIndex; // to be restored when updateItemLayout is invoked directly
 
     // determine other non-trivial "tail times" <= tailTime but > oldestTime
     const tailTime24h = Date.now() - 24 * 3600 * 1000;
@@ -1865,7 +1875,10 @@
             // TODO: if this does not prevent the edit issues, consider waiting until no item editor has focus
             // (also make sure it is related to item resizing, because sometimes it seems to happen w/o resizing and in that case would be more related to keyboard event handling in Editor)
             if (Date.now() - lastEditTime >= 500) {
+              // NOTE: since height changes can be triggered by minor local changes (logging, toggling of content, etc), we do not allow hide index to be moved up after the layout to prevent an abrupt change to the page ...
+              const hideIndexBeforeLayout = hideIndex;
               updateItemLayout();
+              hideIndex = Math.max(hideIndex, hideIndexBeforeLayout);
               layoutPending = false;
               clearInterval(layoutInterval);
             }
@@ -2525,9 +2538,7 @@
             }
             if (!authUser) {
               if (anonymous) return; // anonymous user can be signed in or out
-              // TODO: investigate when/why this happens and how to handle
               console.error("failed to sign in"); // can happen in chrome for localhost, and on android occasionally
-              // resetUser(); // clean up for reload
               document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
               return;
             }
@@ -2575,12 +2586,15 @@
         lastDocumentWidth = documentWidth;
         return;
       }
-      if (Date.now() - lastLayoutTime > 60000) {
-        // console.debug(
-        //   `updating layout after more than a minute since last layout`
-        // );
-        updateItemLayout();
-        return;
+      // update time strings every 10 seconds
+      // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
+      if (Date.now() - lastTimeStringUpdateTime > 10000) {
+        lastTimeStringUpdateTime = Date.now();
+        items.forEach((item, index) => {
+          if (!item.timeString) return;
+          item.timeString = itemTimeString((Date.now() - item.time) / 1000);
+        });
+        items = items; // trigger svelte render
       }
     }
     visualViewport.addEventListener("resize", checkLayout);
@@ -2979,16 +2993,19 @@
             {/if}
           {/if}
           {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
+            <!--  NOTE: for simplicity, we put all valid show-toggle buttons on the page but show only the first one by css -->
             {#each tailIndices as tail}
               {#if hideIndex < tail.index}
-                <div class="show-more" on:click={() => (hideIndex = tail.index)}>
+                <div class="show-toggle" on:click={() => (hideIndex = tail.index)}>
                   show last {tail.timeString}
                 </div>
               {/if}
             {/each}
-            <div class="show-more" on:click={() => (hideIndex = Infinity)}>
+            <div class="show-toggle" on:click={() => (hideIndex = Infinity)}>
               show all {items.length} items
             </div>
+          {:else if hideIndex > hideIndexFromLayout && item.column == column && item.index == hideIndexFromLayout - 1 && item.index < items.length - 1}
+            <div class="show-toggle" on:click={() => (hideIndex = hideIndexFromLayout)}>hide older items</div>
           {/if}
         {/each}
       </div>
@@ -3248,7 +3265,7 @@
     margin-top: -24px;
   }
 
-  .show-more {
+  .show-toggle {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -3265,9 +3282,12 @@
     padding: 15px 30px;
     width: fit-content;
     white-space: nowrap;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
-  .show-more + .show-more {
+  .show-toggle + .show-toggle {
     display: none;
   }
 
