@@ -477,6 +477,7 @@
   let defaultHeaderHeight = 0;
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
+  let firstLayoutTime = 0;
   let lastLayoutTime = 0;
 
   function updateItemLayout() {
@@ -500,14 +501,22 @@
     oldestTimeString = "";
     totalItemHeight = 0;
     lastLayoutTime = Date.now();
+    if (!firstLayoutTime) firstLayoutTime = lastLayoutTime;
 
     items.forEach((item, index) => {
       item.lastIndex = index;
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
-      if (item.editing) editingItems.push(index);
+      if (item.editing) {
+        editingItems.push(index);
+        // extend hide index to include any editing items
+        if (index >= hideIndex) hideIndex = index + 1;
+      }
       if (item.focused) focusedItem = index;
+
+      // extend hide index to include all items touched in this session (after first layout)
+      if (item.time > firstLayoutTime && index >= hideIndex) hideIndex = index + 1;
 
       let lastItem = items[index - 1];
       let timeString = itemTimeString((Date.now() - item.time) / 1000);
@@ -949,7 +958,6 @@
     let tailIndex = items.findIndex((item) => item.id === null);
     items.splice(tailIndex, 1);
     tailIndex = Math.max(1, tailIndex);
-    if (editingItems.length > 0) tailIndex = Math.max(_.max(editingItems) + 1, tailIndex);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndex = tailIndex;
 
@@ -961,7 +969,7 @@
     if (tailTime24h <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
       // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
-      if (matchingItemCount == 0) hideIndex = extendedTailIndex;
+      // if (matchingItemCount == 0) hideIndex = extendedTailIndex;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
         tailIndices.push({ index: extendedTailIndex, timeString: "24 hours", time: items[extendedTailIndex].time });
         tailIndex = extendedTailIndex;
