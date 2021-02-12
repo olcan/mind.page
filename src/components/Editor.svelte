@@ -349,13 +349,13 @@
       return;
     }
 
-    if (key == "ArrowUp" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
+    if (key == "ArrowUp" && e.metaKey && e.altKey) {
       e.stopPropagation();
       e.preventDefault();
       onPrev();
       return;
     }
-    if (key == "ArrowDown" && e.metaKey && !(e.shiftKey || e.ctrlKey)) {
+    if (key == "ArrowDown" && e.metaKey && e.altKey) {
       e.stopPropagation();
       e.preventDefault();
       onNext();

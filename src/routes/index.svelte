@@ -1611,6 +1611,8 @@
       case "/_invert": {
         inverted = !inverted;
         localStorage.setItem("mindpage_inverted", inverted ? "true" : "false");
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange((editorText = ""));
         return;
       }
       default: {
