@@ -1075,7 +1075,11 @@
   }
 
   function admin() {
-    return location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/);
+    return (
+      user &&
+      user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+      (location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/))
+    );
   }
 
   function onPopState(e) {
@@ -2479,7 +2483,7 @@
       user = JSON.parse(localStorage.getItem("mindpage_user"));
       secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
       console.debug(`restored user ${user.email} from local storage`);
-      if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && admin()) useAnonymousAccount();
+      if (admin()) useAnonymousAccount();
     } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
       console.debug("resuming signing in ...");
       window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
@@ -2547,7 +2551,7 @@
 
             // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
             //       (this is the only case where user != firebase().auth().currentUser)
-            if (user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && admin()) useAnonymousAccount();
+            if (admin()) useAnonymousAccount();
 
             initFirebaseRealtime();
           });
@@ -3042,7 +3046,7 @@
   <link rel="icon" type="image/png" href="{hostdir}/favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="{hostdir}/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png" />
-  <link rel="manifest" href="{hostdir}/manifest.json" />
+  <link rel="manifest" href="/manifest.json" />
 </svelte:head>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
@@ -3101,9 +3105,6 @@
     background: #222;
     cursor: pointer;
     overflow: hidden;
-  }
-  #user.anonymous:not(.readonly) {
-    background: red;
   }
   #user.anonymous:not(.readonly).signedin {
     background: green;

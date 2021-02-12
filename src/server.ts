@@ -9,10 +9,50 @@ const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
 
 const sapperServer = express().use(
   compression({ threshold: 0 }),
-  sirv("static", { dev }),
+  // serve dynamic manifest before serving static files
+  (req, res, next) => {
+    // see https://stackoverflow.com/a/51200572 about x-forwarded-host
+    let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
+    globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
+    const hostdir =
+      hostname == "mind.page"
+        ? ""
+        : hostname == "olcan.com"
+        ? "olcan.com"
+        : hostname == "mindbox.io"
+        ? "mindbox.io"
+        : "other";
+    if (req.path != "/manifest.json") next();
+    else
+      res.json({
+        background_color: "#111",
+        theme_color: "#111",
+        name: "MindPage",
+        short_name: "MindPage",
+        display: "minimal-ui",
+        start_url: "/",
+        icons: [
+          {
+            src: hostdir + "/apple-touch-icon.png",
+            sizes: "180x180",
+            type: "image/png",
+          },
+          {
+            src: hostdir + "/android-chrome-192x192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: hostdir + "/android-chrome-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+        ],
+      });
+  },
+  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   cookieParser(),
   (req, res, next) => {
-    globalThis.hostname = req.hostname; // for index.svelte
     res.cookie = req.cookies["__session"] || "";
     next();
   },
