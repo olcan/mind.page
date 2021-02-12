@@ -2701,8 +2701,7 @@
                   if (index == undefined) return; // nothing to modify
                   let item = items[index];
                   item.text = item.savedText = savedItem.text;
-                  item.time = items[index].savedTime = savedItem.time;
-                  // since there is no
+                  item.time = item.savedTime = savedItem.time;
                   itemTextChanged(index, item.text); // updates label, deps, etc
                   lastEditorChangeTime = 0; // disable debounce even if editor focused
                   onEditorChange(editorText); // item time/text has changed
