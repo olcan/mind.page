@@ -9,7 +9,7 @@ const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
 
 const sapperServer = express().use(
   compression({ threshold: 0 }),
-  // serve dynamic manifest and apple-touch-icon (in case iOS fetches from root)
+  // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   (req, res, next) => {
     // see https://stackoverflow.com/a/51200572 about x-forwarded-host
     let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
@@ -42,6 +42,8 @@ const sapperServer = express().use(
         ],
       });
     } else if (req.path == "/apple-touch-icon.png") {
+      res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
+    } else if (req.path == "/favicon.ico") {
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
     } else {
       next();

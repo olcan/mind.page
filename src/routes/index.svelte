@@ -3075,7 +3075,7 @@
 
 <svelte:head>
   <title>{hostname}</title>
-  <link rel="icon" type="image/png" href="{hostdir}/favicon.ico?v={favicon_version}" />
+  <link rel="icon" type="image/ico" href="{hostdir}/favicon.ico?v={favicon_version}" />
   <link rel="icon" type="image/png" sizes="32x32" href="{hostdir}/favicon-32x32.png?v={favicon_version}" />
   <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png?v={favicon_version}" />
   <!-- see https://stackoverflow.com/a/25041921 about custom apple-touch-icon location -->
