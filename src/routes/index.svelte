@@ -455,11 +455,13 @@
     }
   }
 
-  function itemTimeString(delta: number) {
-    if (delta < 60) return "<1m";
-    if (delta < 3600) return Math.floor(delta / 60).toString() + "m";
-    if (delta < 24 * 3600) return Math.floor(delta / 3600).toString() + "h";
-    return Math.floor(delta / (24 * 3600)).toString() + "d";
+  function itemTimeString(time: number, round_up = false) {
+    const round = round_up ? Math.ceil : Math.floor;
+    time = (Date.now() - time) / 1000;
+    if (time < 60) return round_up ? "1m" : "now";
+    if (time < 3600) return round(time / 60).toString() + "m";
+    if (time < 24 * 3600) return round(time / 3600).toString() + "h";
+    return round(time / (24 * 3600)).toString() + "d";
   }
 
   let indexFromId;
@@ -470,7 +472,7 @@
   let hideIndex = Infinity;
   // NOTE: truncation removes items from the page completely and speeds up updates (e.g. when searching or tapping tags). It is safe to do as long as the truncation index does not vary too much, which can trigger problems with async scripts that are not implemented properly, e.g. that do not use resume/defer/etc and throw errors or invoke invalidate_cache when target elements go missing. Currently truncation index is fixed but can still effectively vary when hideIndex > truncateIndex, which seems relative safe as it concerns items lower on the page, and larger indices which are unlikely to be toggled as frequently as smaller indices.
   const truncateIndex = 50;
-  let tailIndices = [];
+  let toggles = [];
   let newestTime = 0;
   let oldestTime = Infinity;
   let oldestTimeString = "";
@@ -512,7 +514,7 @@
       if (item.focused) focusedItem = index;
 
       let lastItem = items[index - 1];
-      let timeString = itemTimeString((Date.now() - item.time) / 1000);
+      let timeString = itemTimeString(item.time);
       if (item.time < oldestTime) {
         oldestTime = item.time;
         oldestTimeString = timeString;
@@ -556,7 +558,7 @@
           for (let i = 0; i < Math.abs(item.column - lastColumn) - 1; ++i)
             lastItem.arrows += item.column < lastColumn ? "←" : "→";
           lastItem.arrows += item.column < lastColumn ? "" : "↗";
-          // NOTE: we include .section-separator height but ignore show-toggle which is dynamic (like dotted items)
+          // NOTE: we include .section-separator height but ignore show which is dynamic (like dotted items)
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
@@ -564,8 +566,8 @@
       const moved = item.index != item.lastIndex || item.column != item.lastColumn;
       if (moved && item.index < columnTopMovers[item.column]) columnTopMovers[item.column] = item.index;
 
-      // if non-dotted item is first in its column and missing time string, add it now
-      if (!item.dotted && columnItems[item.column] < 0 && !item.timeString) {
+      // if non-dotted item is first in its column or section and missing time string, add it now
+      if (!item.dotted && (columnItems[item.column] < 0 || item.column != lastItem.column) && !item.timeString) {
         item.timeString = timeString;
         lastTimeString = timeString; // for grouping of subsequent items
         // add time string height now, assuming we are not ignoring item height
@@ -958,26 +960,40 @@
     // (also including editing log items which are edited in place)
     let tailIndex = items.findIndex((item) => item.id === null);
     items.splice(tailIndex, 1);
-    tailIndex = Math.max(1, tailIndex);
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, (item) => item.editing) + 1);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndex = tailIndex;
     hideIndexFromRanking = hideIndex;
 
+    // determine "toggle" indices (ranges) where item visibility can be toggled
+    toggles = [];
+
+    // initial (shown) toggle point is the "session toggle" for items "touched" in this session (since first ranking)
+    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
+    if (!firstRankingTime) firstRankingTime = Date.now();
+    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > firstRankingTime) + 1);
+    hideIndexForSession = hideIndex; // used to determine where to show "hide older items"
+    if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
+      toggles.push({
+        start: hideIndexFromRanking,
+        end: hideIndexForSession,
+      });
+      tailIndex = hideIndexForSession;
+      tailTime = items[hideIndexForSession].time;
+    }
+
     // determine other non-trivial "tail times" <= tailTime but > oldestTime
     const tailTime24h = Date.now() - 24 * 3600 * 1000;
     const tailTime7d = Date.now() - 7 * 24 * 3600 * 1000;
     const tailTime30d = Date.now() - 30 * 24 * 3600 * 1000;
-    tailIndices = [];
     if (tailTime24h <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
       // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
       // if (matchingItemCount == 0) hideIndex = extendedTailIndex;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({
-          index: extendedTailIndex,
-          timeString: "last 24 hours",
-          time: items[extendedTailIndex].time,
+        toggles.push({
+          start: tailIndex,
+          end: extendedTailIndex,
         });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
@@ -986,7 +1002,10 @@
     if (tailTime7d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "last 7 days", time: items[extendedTailIndex].time });
+        toggles.push({
+          start: tailIndex,
+          end: extendedTailIndex,
+        });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
@@ -994,27 +1013,21 @@
     if (tailTime30d <= tailTime) {
       const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
       if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        tailIndices.push({ index: extendedTailIndex, timeString: "last 30 days", time: items[extendedTailIndex].time });
+        toggles.push({
+          start: tailIndex,
+          end: extendedTailIndex,
+        });
         tailIndex = extendedTailIndex;
         tailTime = items[extendedTailIndex].time;
       }
     }
-    // console.debug(tailIndices);
-
-    // extend hide index to include items "touched" (soft or hard) in this session
-    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
-    if (!firstRankingTime) firstRankingTime = Date.now();
-    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > firstRankingTime) + 1);
-    hideIndexForSession = hideIndex; // used to determine where to show "hide older items"
-
-    // prepend tail index for "show recent items"
-    if (hideIndexForSession > hideIndexFromRanking) {
-      tailIndices.unshift({
-        index: hideIndexForSession,
-        timeString: "recent items",
-        time: items[hideIndexForSession].time,
+    if (tailIndex < items.length) {
+      toggles.push({
+        start: tailIndex,
+        end: items.length,
       });
     }
+    // console.debug(toggles);
 
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
@@ -2614,7 +2627,7 @@
         lastTimeStringUpdateTime = Date.now();
         items.forEach((item, index) => {
           if (!item.timeString) return;
-          item.timeString = itemTimeString((Date.now() - item.time) / 1000);
+          item.timeString = itemTimeString(item.time);
         });
         items = items; // trigger svelte render
       }
@@ -2958,81 +2971,81 @@
         {/if}
 
         {#each items as item (item.id)}
-          {#if item.column == column && item.index < Math.max(hideIndex, truncateIndex)}
-            <Item
-              onEditing={onItemEditing}
-              onFocused={onItemFocused}
-              onEdited={onItemEdited}
-              onRun={onItemRun}
-              onTouch={onItemTouch}
-              onResized={onItemResized}
-              {onTagClick}
-              {onLinkClick}
-              {onLogSummaryClick}
-              onPrev={onPrevItem}
-              onNext={onNextItem}
-              bind:text={item.text}
-              bind:editing={item.editing}
-              bind:focused={item.focused}
-              saving={item.saving}
-              running={item.running}
-              admin={item.admin}
-              hidden={item.index >= hideIndex}
-              showLogs={item.showLogs}
-              height={item.height}
-              time={item.time}
-              index={item.index}
-              id={item.id}
-              label={item.label}
-              labelUnique={item.labelUnique}
-              labelText={item.labelText}
-              hash={item.hash}
-              deephash={item.deephash}
-              missingTags={item.missingTags.join(" ")}
-              matchingTerms={item.matchingTerms.join(" ")}
-              matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
-              timeString={item.timeString}
-              timeOutOfOrder={item.timeOutOfOrder}
-              updateTime={item.updateTime}
-              createTime={item.createTime}
-              depsString={item.depsString}
-              dependentsString={item.dependentsString}
-              dotted={item.dotted}
-              runnable={item.runnable}
-              scripted={item.scripted}
-              macroed={item.macroed}
-            />
-            {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
-              <div class="section-separator">
-                <hr />
-                {item.index + 2}<span class="arrows">{item.arrows}</span
-                >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
-                  &nbsp;
-                  {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+          {#if item.column == column}
+            {#if item.index == hideIndex}
+              {#each toggles as toggle}
+                {#if hideIndex < toggle.end}
+                  <div class="toggle show" on:click={() => (hideIndex = toggle.end)}>
+                    ▼ {itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
+                  </div>
                 {/if}
-                <hr />
-              </div>
+              {/each}
+            {:else if item.index < hideIndex}
+              {#each toggles as toggle}
+                {#if item.index == toggle.start}
+                  <div class="toggle hide" on:click={() => (hideIndex = toggle.start)}>
+                    ▲ {itemTimeString(items[toggle.start].time)}
+                  </div>
+                {/if}
+              {/each}
             {/if}
-          {/if}
-          {#if item.column == column && item.index == hideIndex - 1 && item.index < items.length - 1}
-            <!--  NOTE: for simplicity, we put all valid show-toggle buttons on the page but show only the first one by css -->
-            {#each tailIndices as tail}
-              {#if hideIndex < tail.index}
-                <div class="show-toggle" on:click={() => (hideIndex = tail.index)}>
-                  show {tail.timeString}
+
+            {#if item.index < Math.max(hideIndex, truncateIndex)}
+              <Item
+                onEditing={onItemEditing}
+                onFocused={onItemFocused}
+                onEdited={onItemEdited}
+                onRun={onItemRun}
+                onTouch={onItemTouch}
+                onResized={onItemResized}
+                {onTagClick}
+                {onLinkClick}
+                {onLogSummaryClick}
+                onPrev={onPrevItem}
+                onNext={onNextItem}
+                bind:text={item.text}
+                bind:editing={item.editing}
+                bind:focused={item.focused}
+                saving={item.saving}
+                running={item.running}
+                admin={item.admin}
+                hidden={item.index >= hideIndex}
+                showLogs={item.showLogs}
+                height={item.height}
+                time={item.time}
+                index={item.index}
+                id={item.id}
+                label={item.label}
+                labelUnique={item.labelUnique}
+                labelText={item.labelText}
+                hash={item.hash}
+                deephash={item.deephash}
+                missingTags={item.missingTags.join(" ")}
+                matchingTerms={item.matchingTerms.join(" ")}
+                matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+                timeString={item.timeString}
+                timeOutOfOrder={item.timeOutOfOrder}
+                updateTime={item.updateTime}
+                createTime={item.createTime}
+                depsString={item.depsString}
+                dependentsString={item.dependentsString}
+                dotted={item.dotted}
+                runnable={item.runnable}
+                scripted={item.scripted}
+                macroed={item.macroed}
+              />
+              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
+                <div class="section-separator">
+                  <hr />
+                  {item.index + 2}<span class="arrows">{item.arrows}</span
+                  >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
+                    &nbsp;
+                    {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+                  {/if}
+                  <hr />
                 </div>
               {/if}
-            {/each}
-            <div class="show-toggle" on:click={() => (hideIndex = Infinity)}>
-              show all {items.length} items
-            </div>
-          {:else if hideIndex > hideIndexForSession && item.column == column && item.index == hideIndexForSession - 1 && item.index < items.length - 1}
-            <div class="show-toggle" on:click={() => (hideIndex = hideIndexForSession)}>hide older items</div>
-          {/if}
-
-          {#if hideIndexForSession > hideIndexFromRanking && item.column == column && item.index == hideIndexFromRanking - 1 && item.index < items.length - 1}
-            <!-- hide recent/all/below items is hard to name, but since it only gets shown when there are recent items and it is in the same place as "show recent items", we use "recent", but it really hides "all items including recent", which seems ok -->
-            <div class="show-toggle recent" on:click={() => (hideIndex = hideIndexFromRanking)}>hide recent items</div>
+            {/if}
           {/if}
         {/each}
       </div>
@@ -3044,22 +3057,7 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
-{:else}<script>
-    setTimeout(() => {
-      // NOTE: decided not to auto-focus on any device for now to "fake focus w/o keyboard" confusion (esp. on mobile even on desktop if window does not have focus you get a fake focus effect), and also complications with stealing focus away from initial modal (although we had a workaround for that below)
-      // NOTE: we do not auto-focus the editor on the iPhone, which generally does not allow
-      //       programmatic focus except in click handlers, when returning to app, etc
-      // if (
-      //   document.activeElement.tagName.toLowerCase() != "textarea" &&
-      //   !navigator.platform.startsWith("iPhone") &&
-      //   !document.querySelector(".modal input")
-      // ) {
-      //   let mindbox = document.getElementById("textarea-mindbox");
-      //   mindbox.selectionStart = mindbox.selectionEnd = mindbox.value.length;
-      //   mindbox.focus();
-      // }
-    });
-  </script>{/if}
+{/if}
 
 <Modal bind:this={modal} />
 
@@ -3298,12 +3296,12 @@
     margin-top: -24px;
   }
 
-  /* allow time strings to overlap preceding .show-toggle */
-  :global(.show-toggle + .super-container.timed) {
+  /* allow time strings to overlap preceding .toggle */
+  :global(.toggle + .super-container.timed) {
     margin-top: -24px;
   }
 
-  .show-toggle {
+  .toggle {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -3312,24 +3310,25 @@
     /* color: black; */
     /* background: #666; */
     font-weight: 500;
-    font-size: 16px;
+    font-size: 20px;
     font-family: Avenir Next, sans-serif;
     border-radius: 4px;
     cursor: pointer;
-    margin: 28px auto; /* same as having time string */
-    padding: 20px 30px;
+    margin: 20px auto;
+    padding: 15px 25px;
     width: fit-content;
     white-space: nowrap;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  .show-toggle.recent {
+  .toggle.hide {
+    font-size: 16px;
     margin: 14px auto;
     padding: 10px 20px;
   }
 
-  .show-toggle + .show-toggle {
+  .toggle + .toggle {
     display: none;
   }
 

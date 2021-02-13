@@ -1232,6 +1232,7 @@
   }
 
   .time {
+    height: 20px; /* fixed height (=24 including margin-bottom) */
     color: #444;
     display: inline-block;
     padding-left: 5px;
@@ -1777,9 +1778,6 @@
       font-size: 16px;
       line-height: 25px;
       min-height: 45px; /* single line height */
-    }
-    .time {
-      font-size: 14px;
     }
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
