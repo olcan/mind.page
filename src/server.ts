@@ -9,14 +9,13 @@ const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
 
 const sapperServer = express().use(
   compression({ threshold: 0 }),
-  // serve dynamic manifest before serving static files
+  // serve dynamic manifest and apple-touch-icon (to work around iOS bug)
   (req, res, next) => {
     // see https://stackoverflow.com/a/51200572 about x-forwarded-host
     let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
     globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
     const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
-    if (req.path != "/manifest.json") next();
-    else
+    if (req.path == "/manifest.json") {
       res.json({
         background_color: "#111",
         theme_color: "#111",
@@ -42,6 +41,11 @@ const sapperServer = express().use(
           },
         ],
       });
+    } else if (req.path == "/apple-touch-icon.png") {
+      res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
+    } else {
+      next();
+    }
   },
   sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   cookieParser(),
