@@ -3170,7 +3170,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: monospace;
+    font-family: "Source Code Pro", monospace;
     /* pointer-events: none; */
     text-align: left;
     -webkit-touch-callout: auto;
@@ -3197,7 +3197,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: monospace;
+    font-family: "Source Code Pro", monospace;
     font-size: 12px;
     color: #999;
     cursor: pointer;
@@ -3219,7 +3219,6 @@
     padding-left: 4px;
   }
   #status .counts {
-    font-family: Avenir Next, sans-serif;
     position: absolute;
     right: 0;
     top: 0;
@@ -3273,11 +3272,10 @@
     height: 40px; /* 40px offset height assumed by column layout */
     color: #444; /* same as time indicators */
     font-size: 16px;
-    font-family: Avenir Next, sans-serif;
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: monospace;
+    font-family: "Source Code Pro", monospace;
     font-size: 20px;
   }
   .section-separator hr {
@@ -3309,9 +3307,8 @@
     background: #222;
     /* color: black; */
     /* background: #666; */
-    font-weight: 500;
+    font-weight: 600;
     font-size: 20px;
-    font-family: Avenir Next, sans-serif;
     border-radius: 4px;
     cursor: pointer;
     margin: 20px auto;

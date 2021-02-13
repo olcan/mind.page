@@ -1130,8 +1130,7 @@
     /* overflow: hidden; */
     color: black;
     font-size: 15px;
-    font-family: Avenir Next, sans-serif;
-    font-weight: 500;
+    font-weight: 600;
     box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1164,9 +1163,8 @@
     /* overflow: hidden; */
     opacity: 1;
     color: black;
-    font-family: Avenir Next, sans-serif;
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 600;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -1238,7 +1236,6 @@
     padding-left: 5px;
     padding-right: 5px;
     margin-bottom: 4px;
-    font-family: Avenir Next, sans-serif;
     font-size: 15px;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1255,7 +1252,6 @@
     /* display: inline-block; */
     display: none;
     color: #444;
-    font-family: Avenir Next, sans-serif;
   }
   .item {
     color: #ddd;
@@ -1265,7 +1261,6 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-family: Avenir Next, sans-serif;
     font-size: 18px;
     line-height: 28px;
     /* cursor: pointer; */
@@ -1401,6 +1396,7 @@
   :global(.item code) {
     font-size: 15px;
     line-height: 24px;
+    font-family: "Source Code Pro", monospace;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1430,7 +1426,7 @@
   :global(.item mark) {
     color: black;
     background: #999;
-    font-weight: 500;
+    font-weight: 600;
     padding: 0 4px;
     margin: 0;
   }
@@ -1463,7 +1459,7 @@
     background: #ddd;
   }
   :global(.item mark.label.unique) {
-    font-weight: 700;
+    font-weight: 800;
   }
   :global(.item mark.missing) {
     background: #f88;
@@ -1505,12 +1501,12 @@
     /* background: #9f9; */
     border: 1px solid #9b9;
     border-radius: 4px;
-    /* font-weight: 500; */
+    /* font-weight: 600; */
     /* NOTE: we do not pad highlights as it can overlap non-highlighted text */
     margin: -1px;
   }
   :global(.item mark.label.unique span.highlight) {
-    font-weight: 700; /* match weight of mark.label.unique */
+    font-weight: 800; /* match weight of mark.label.unique */
   }
 
   :global(.item mark span.highlight) {
@@ -1597,7 +1593,7 @@
   :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
-    font-family: monospace;
+    font-family: "Source Code Pro", monospace;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
@@ -1733,7 +1729,7 @@
   :global(.item .deps-and-dependents .dependents-title) {
     color: black;
     background: #bbb;
-    font-weight: 500;
+    font-weight: 600;
 
     /* border: 1px solid #999; */
     padding: 0 4px;
@@ -1746,7 +1742,7 @@
     color: black;
     background: #f55;
     border-radius: 4px;
-    font-weight: 500;
+    font-weight: 600;
     padding: 0 4px;
   }
 

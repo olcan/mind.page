@@ -131,9 +131,8 @@
     border-radius: 5px;
     padding: 20px;
     color: black;
-    font-family: Avenir Next, sans-serif;
     font-size: 20px;
-    font-weight: 500;
+    font-weight: 600;
   }
   input {
     -webkit-appearance: none;
@@ -196,6 +195,7 @@
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
     font-size: 18px;
+    font-family: "Source Code Pro", monospace;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;

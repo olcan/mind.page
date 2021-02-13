@@ -9,7 +9,22 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="/global.css" />
     <link href="https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.css" rel="stylesheet" />
-    <!-- <link async href="https://s3-us-west-2.amazonaws.com/cdn.webppl.org/webppl-viz-0.7.11.css" rel="stylesheet" /> -->
+
+    <!-- google fonts -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&family=Source+Code+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html {
+        /* set default font globally */
+        font-family: "Nunito Sans", sans-serif;
+        font-weight: 400;
+        font-kerning: none; /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
+      }
+    </style>
+
     %sapper.styles% %sapper.head%
   </head>
 

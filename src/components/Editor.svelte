@@ -589,7 +589,7 @@
   }
   .backdrop,
   textarea {
-    font-family: monospace;
+    font-family: "Source Code Pro", monospace;
     font-size: 15px;
     line-height: 24px;
     caret-color: red;
@@ -641,9 +641,8 @@
     cursor: pointer;
     /* border-radius: 5px; */ /* round all borders if leaving space on top */
     border-radius: 0 0 5px 5px;
-    font-family: Avenir Next, sans-serif;
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 600;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
