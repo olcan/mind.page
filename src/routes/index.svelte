@@ -2906,14 +2906,10 @@
   const hostname = typeof location == "undefined" ? globalThis.hostname : location.hostname;
 
   // custom directory for some static files, based on hostname
-  const hostdir =
-    hostname == "mind.page"
-      ? ""
-      : hostname == "olcan.com"
-      ? "olcan.com"
-      : hostname == "mindbox.io"
-      ? "mindbox.io"
-      : "other";
+  const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
+
+  // favicon version to force updates, especially on iOS
+  const favicon_version = 1;
 </script>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
@@ -3100,10 +3096,10 @@
 
 <svelte:head>
   <title>{hostname}</title>
-  <link rel="icon" type="image/png" href="{hostdir}/favicon.ico" />
-  <link rel="icon" type="image/png" sizes="32x32" href="{hostdir}/favicon-32x32.png" />
-  <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png" />
-  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" href="{hostdir}/favicon.ico?v={favicon_version}" />
+  <link rel="icon" type="image/png" sizes="32x32" href="{hostdir}/favicon-32x32.png?v={favicon_version}" />
+  <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png?v={favicon_version}" />
+  <link rel="manifest" href="/manifest.json?v={favicon_version}" />
 </svelte:head>
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->

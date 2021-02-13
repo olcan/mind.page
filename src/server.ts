@@ -14,14 +14,7 @@ const sapperServer = express().use(
     // see https://stackoverflow.com/a/51200572 about x-forwarded-host
     let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
     globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
-    const hostdir =
-      hostname == "mind.page"
-        ? ""
-        : hostname == "olcan.com"
-        ? "olcan.com"
-        : hostname == "mindbox.io"
-        ? "mindbox.io"
-        : "other";
+    const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
     if (req.path != "/manifest.json") next();
     else
       res.json({
