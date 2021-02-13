@@ -19,8 +19,8 @@ const sapperServer = express().use(
       res.json({
         background_color: "#111",
         theme_color: "#111",
-        name: "MindPage",
-        short_name: "MindPage",
+        name: hostname,
+        short_name: hostname,
         display: "minimal-ui",
         start_url: "/",
         icons: [
