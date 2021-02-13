@@ -9,7 +9,7 @@ const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
 
 const sapperServer = express().use(
   compression({ threshold: 0 }),
-  // serve dynamic manifest and apple-touch-icon (to work around iOS bug)
+  // serve dynamic manifest and apple-touch-icon (in case iOS fetches from root)
   (req, res, next) => {
     // see https://stackoverflow.com/a/51200572 about x-forwarded-host
     let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
