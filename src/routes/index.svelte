@@ -666,7 +666,6 @@
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
-  let firstRankingTime = 0;
   let hideIndexFromRanking = Infinity;
   let hideIndexForSession = Infinity;
 
@@ -970,8 +969,8 @@
 
     // initial (shown) toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
-    if (!firstRankingTime) firstRankingTime = Date.now();
-    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > firstRankingTime) + 1);
+    if (initTime == 0) console.warn("onEditorChange before init");
+    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > initTime) + 1);
     hideIndexForSession = hideIndex; // used to determine where to show "hide older items"
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -1004,7 +1003,7 @@
         end: items.length,
       });
     }
-    console.debug(toggles);
+    // console.debug(toggles);
 
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
@@ -1454,6 +1453,7 @@
   let tempIdFromSavedId = new Map<string, string>();
   let editorText = "";
   function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false, editing = null) {
+    editorText = text; // in case invoked without setting editorText
     const key = e?.code || e?.key;
     if (cancelled) {
       if (key == "Escape") {
@@ -1676,7 +1676,7 @@
                     if (obj.run == true) run = true;
                     else if (obj.run == false) run = false;
                     // since we are async, we need to call onEditorDone again with run/editing set properly
-                    let item = onEditorDone((editorText = text), null, false, run, editing);
+                    let item = onEditorDone(text, null, false, run, editing);
                     // run programmatic initializer function if any
                     try {
                       if (obj.init) Promise.resolve(obj.init(item)).catch(handleError);
@@ -2371,6 +2371,7 @@
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
     if (signingOut) return; // encryption error
+    initTime = Date.now();
 
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
@@ -2433,8 +2434,7 @@
 
     initItems();
 
-    initTime = Math.round(performance.now());
-    console.debug(`initialized ${items.length} items at ${initTime}ms`);
+    console.debug(`initialized ${items.length} items at ${Date.now() - initTime}ms`);
 
     // if fragment corresponds to an item tag or id, focus on that item immediately ...
     if (items.length > 0 && location.href.match(/#.+$/)) {
@@ -2639,7 +2639,7 @@
               setTimeout(async () => {
                 console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
                 if (!initTime) await initialize();
-                else console.debug(`${items.length} items already initialized at ${initTime}ms`);
+                else console.debug(`${items.length} items already initialized at ${Date.now() - initTime}ms`);
                 if (!initTime) return; // initialization failed, should be signing out ...
 
                 firstSnapshot = false;
