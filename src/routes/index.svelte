@@ -848,11 +848,11 @@
 
     // Update time for listing item (but not save yet, a.k.a. "soft touch")
     // NOTE: we may add a few ms to the current time to dominate other recent touches (e.g. tag clicks)
-    if (listingItemIndex >= 0 && !items[listingItemIndex].log) items[listingItemIndex].time = Date.now() + 2; // prioritize
+    if (listingItemIndex >= 0 && !items[listingItemIndex].log) items[listingItemIndex].time = now + 2; // prioritize
 
     // Update times for id-matching items (but not save yet, a.k.a. "soft touch")
     idMatchItemIndices.forEach((index) => {
-      if (!items[index].log) items[index].time = Date.now() + 1; // prioritize
+      if (!items[index].log) items[index].time = now + 1; // prioritize
     });
 
     // update history, replace unless current state is final (from tag click)
@@ -888,7 +888,7 @@
       matchingTermsSecondary: [],
       missingTags: [],
       hasError: false,
-      time: Date.now(),
+      time: now + 1000 /* dominate any offsets used above */,
       id: null,
     });
 
