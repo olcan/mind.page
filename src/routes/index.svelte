@@ -982,52 +982,29 @@
       tailTime = items[hideIndexForSession].time;
     }
 
-    // determine other non-trivial "tail times" <= tailTime but > oldestTime
-    const tailTime24h = Date.now() - 24 * 3600 * 1000;
-    const tailTime7d = Date.now() - 7 * 24 * 3600 * 1000;
-    const tailTime30d = Date.now() - 30 * 24 * 3600 * 1000;
-    if (tailTime24h <= tailTime) {
-      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime24h).length;
-      // if no matching items, show last 24h, so take extendedTailIndex (even if == items.length)
-      // if (matchingItemCount == 0) hideIndex = extendedTailIndex;
-      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        toggles.push({
-          start: tailIndex,
-          end: extendedTailIndex,
-        });
-        tailIndex = extendedTailIndex;
-        tailTime = items[extendedTailIndex].time;
-      }
-    }
-    if (tailTime7d <= tailTime) {
-      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime7d).length;
-      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        toggles.push({
-          start: tailIndex,
-          end: extendedTailIndex,
-        });
-        tailIndex = extendedTailIndex;
-        tailTime = items[extendedTailIndex].time;
-      }
-    }
-    if (tailTime30d <= tailTime) {
-      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter((item) => item.time >= tailTime30d).length;
-      if (extendedTailIndex > tailIndex && extendedTailIndex < items.length) {
-        toggles.push({
-          start: tailIndex,
-          end: extendedTailIndex,
-        });
-        tailIndex = extendedTailIndex;
-        tailTime = items[extendedTailIndex].time;
-      }
-    }
+    // add toggle points for "extended tail times"
+    // NOTE: we do this by time to help avoid big gaps in time (that cross these thresholds)
+    [1, 3, 7, 14, 30].forEach((daysAgo) => {
+      const extendedTailTime = Date.now() - daysAgo * 24 * 3600 * 1000;
+      if (extendedTailTime > tailTime) return;
+      const extendedTailIndex =
+        tailIndex + items.slice(tailIndex).filter((item) => item.time >= extendedTailTime).length;
+      if (extendedTailIndex <= tailIndex || extendedTailIndex >= items.length) return;
+      toggles.push({
+        start: tailIndex,
+        end: extendedTailIndex,
+      });
+      tailIndex = extendedTailIndex;
+      tailTime = items[extendedTailIndex].time;
+    });
+    // add final toggle point for all items
     if (tailIndex < items.length) {
       toggles.push({
         start: tailIndex,
         end: items.length,
       });
     }
-    // console.debug(toggles);
+    console.debug(toggles);
 
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
@@ -2978,6 +2955,7 @@
                 {#if hideIndex < toggle.end}
                   <div class="toggle show" on:click={() => (hideIndex = toggle.end)}>
                     ▼ {itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
+                    <span class="count">show {toggle.end - toggle.start} items</span>
                   </div>
                 {/if}
               {/each}
@@ -2986,6 +2964,7 @@
                 {#if item.index == toggle.start}
                   <div class="toggle hide" on:click={() => (hideIndex = toggle.start)}>
                     ▲ {itemTimeString(items[toggle.start].time)}
+                    <span class="count">hide {Math.min(hideIndex, items.length) - toggle.start} items</span>
                   </div>
                 {/if}
               {/each}
@@ -3318,21 +3297,33 @@
     /* color: black; */
     /* background: #666; */
     font-weight: 600;
-    font-size: 20px;
     border-radius: 4px;
     cursor: pointer;
-    margin: 20px auto;
-    padding: 15px 25px;
     width: fit-content;
     white-space: nowrap;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
+  .toggle .count {
+    font-size: 80%;
+    color: #777;
+  }
+  .toggle.show {
+    font-size: 20px;
+    margin: 20px auto;
+    padding: 15px 25px;
+  }
+  .toggle.show .count {
+    margin-left: 25px;
+  }
   .toggle.hide {
     font-size: 16px;
     margin: 14px auto;
     padding: 10px 20px;
+  }
+  .toggle.hide .count {
+    margin-left: 20px;
   }
 
   .toggle + .toggle {
