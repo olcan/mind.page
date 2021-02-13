@@ -2019,7 +2019,8 @@
   }
 
   // https://stackoverflow.com/a/9039885
-  function iOS() {
+  function isIOS() {
+    if (typeof navigator == "undefined") return false;
     return (
       ["iPad Simulator", "iPhone Simulator", "iPod Simulator", "iPad", "iPhone", "iPod"].includes(navigator.platform) ||
       // iPad on iOS 13 detection
@@ -2027,9 +2028,13 @@
     );
   }
   // https://stackoverflow.com/a/6031480
-  function android() {
+  function isAndroid() {
+    if (typeof navigator == "undefined") return false;
     return navigator.userAgent.toLowerCase().includes("android");
   }
+
+  const android = isAndroid();
+  const ios = isIOS();
 
   function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
@@ -2051,7 +2056,7 @@
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
       // NOTE: setTimeout is required for editor to be added to the Dom
-      if (iOS()) {
+      if (ios) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
         // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
       }
@@ -2491,7 +2496,7 @@
     firebase().auth().setPersistence("local");
     // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
     // if (!android()) firebase().auth().signInWithRedirect(provider);
-    if (iOS()) firebase().auth().signInWithRedirect(provider);
+    if (ios) firebase().auth().signInWithRedirect(provider);
     else {
       firebase()
         .auth()
@@ -3069,6 +3074,15 @@
   on:popstate={onPopState}
   on:scroll={onScroll}
 />
+
+<!-- increase list item padding on android, otherwise too small -->
+{#if android}
+  <style>
+    span.list-item {
+      margin-left: 0 !important;
+    }
+  </style>
+{/if}
 
 {#if inverted}
   <style>
