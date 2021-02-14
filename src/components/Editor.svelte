@@ -23,15 +23,17 @@
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
-  // let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   // let escapeHTML = (t) => he.encode(t);
   // let unescapeHTML = (t) => he.decode(t);
-  let escapeHTML = (t) => _.escape(t);
-  let unescapeHTML = (t) => _.unescape(t);
+  // let escapeHTML = (t) => _.escape(t);
+  // let unescapeHTML = (t) => _.unescape(t);
+  // NOTE: we intentionally do not escape/unescape quotes since it does not appear necessary and simplifies the regex below
+  //       (if we decide to escape later we can try &#39; and &quot; for single and double quotes respectively)
+  let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
-  let highlightTags = (text) => {
+  function highlightTags(text) {
     const tags = parseTags(unescapeHTML(text)).raw;
     if (tags.length == 0) return text;
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length);
@@ -41,12 +43,12 @@
       "g"
     );
     return text.replace(regex, "$1<mark>$2</mark>");
-  };
-  let highlightOther = (text) => {
+  }
+  function highlightOther(text) {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
     // https://www.w3schools.com/jsref/jsref_obj_regexp.asp
     return text.replace(
-      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;(?:\/|\w))(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|[\w'"]&gt;(?:(?!&gt;|&lt;)|$))/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|[\w'"]&gt;(?:(?!&gt;|&lt;)|$))/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
@@ -73,12 +75,15 @@
             highlight(unescapeHTML(content), "css") +
             highlight(unescapeHTML(end), "html")
           );
-        else if (begin.match(/&lt;(?:\/|\w)/) && end.match(/[\w'"]&gt;/))
+        else if (
+          (begin.match(/&lt;[/\w]/) && end.match(/[\w'"]&gt;/)) ||
+          (begin.match(/&lt;!--/) && end.match(/--&gt;/))
+        )
           return pfx + highlight(unescapeHTML(begin + content + end), "html");
         else return m;
       }
     );
-  };
+  }
 
   function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos];
