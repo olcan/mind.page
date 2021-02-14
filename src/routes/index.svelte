@@ -2823,7 +2823,7 @@
         if (readonly) {
           modal.show({
             content:
-              "Welcome to MindPage! This is an **anonymous** demo account. Your `edits are visible` **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
+              "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you** and are discarded when you close this page, not sent or stored anywhere (except your browser history unless you clear it or use private mode). Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: "Stay Anonymous",
             cancel: "Sign In",
