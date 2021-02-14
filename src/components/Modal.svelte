@@ -119,7 +119,7 @@
     height: 100%;
     justify-content: center;
     align-items: center;
-    min-height: -webkit-fill-available;
+    min-height: 100%;
     background: rgba(17, 17, 17, 0.8);
   }
   .modal {
@@ -131,7 +131,7 @@
     border-radius: 5px;
     padding: 20px;
     color: black;
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
   }
   input {
@@ -194,7 +194,7 @@
 
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
-    font-size: 18px;
+    font-size: 16px; /* 2px smaller looks better */
     font-family: "Source Code Pro", monospace;
     background: #ddd;
     white-space: pre-wrap;

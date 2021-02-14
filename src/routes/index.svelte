@@ -2823,7 +2823,7 @@
         if (readonly) {
           modal.show({
             content:
-              "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
+              "Welcome to MindPage! This is an **anonymous** demo account. Your `edits are visible` **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: "Stay Anonymous",
             cancel: "Sign In",
@@ -3047,6 +3047,11 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
+{:else}
+  <script>
+    // restore overflow visibility, which was hidden to work around an odd iOS scroll bug (see global.css)
+    document.documentElement.style.overflow = "visible";
+  </script>
 {/if}
 
 <Modal bind:this={modal} />
@@ -3102,7 +3107,6 @@
     display: flex;
     width: 100%;
     height: 100%;
-    min-height: -webkit-fill-available;
     justify-content: center;
     align-items: center;
     /* NOTE: if you add transparency, initial zero-height layout will be visible */
@@ -3242,17 +3246,18 @@
     overflow: hidden;
     /* fill full height of page even if no items are shown */
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
+    /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
     min-height: 100%;
-    min-height: -webkit-fill-available;
-    /* bottom padding for easier tapping on last item */
+
+    /* bottom padding for easier tapping on last item, but included in min-height */
     padding-bottom: 200px;
+    box-sizing: border-box;
   }
   /* .items.multi-column {
     padding-bottom: 0;
   } */
   :global(#sapper) {
     min-height: 100%;
-    min-height: -webkit-fill-available;
   }
 
   .column {
@@ -3262,6 +3267,8 @@
     max-width: 750px;
     /* allow absolute-positioned .hidden items */
     position: relative;
+    /* prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
+    min-height: 100%;
   }
   .column:not(:last-child) {
     padding-right: 8px;
