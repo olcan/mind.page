@@ -2552,9 +2552,10 @@
           console.warn(`ignoring ${items.length} items during signin`);
           items = [];
         } else if (user && user.uid != items[0].user) {
-          // items are for wrong user, usually anonymous, due to missing cookie
+          // items are for wrong user, usually anonymous, due to missing/expired cookie
           // (you can test this with document.cookie='__session=;max-age=0' in console)
-          console.warn(`ignoring ${items.length} items for wrong user (${items[0].user})`);
+          if (items[0].user != "anonymous")
+            console.warn(`ignoring ${items.length} items for wrong user (${items[0].user})`);
           items = [];
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
