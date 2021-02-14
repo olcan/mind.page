@@ -106,6 +106,8 @@
     return items[index];
   }
 
+  const log_levels = ["debug", "info", "log", "warn", "error"];
+
   class _Item {
     id: string;
     constructor(id) {
@@ -247,19 +249,25 @@
     }
 
     // accessor for console log associated with item
-    // default level (1) excludes debug messages
+    // levels are listed below, default level ("info") excludes debug messages
     // since can be "run" (default), "eval", or any epoch time (same as Date.now)
     // item can be "self" (default), specific item name (label or id), or "any"
     console_log(options = {}) {
       let since = options["since"] || "run";
-      const level = options["level"] || 1;
-      const name = options["item"] || "self";
       if (since == "run") since = item(this.id).lastRunTime;
       else if (since == "eval") since = item(this.id).lastEvalTime;
       else if (typeof since != "number") {
-        console.error(`console_log: invalid since='${since}', should be "run", "eval", or number (ms since epoch)`);
+        console.error(
+          `console_log: invalid since time '${since}', should be "run", "eval", or number (ms since epoch)`
+        );
         return [];
       }
+      const level = log_levels.indexOf(options["level"] || "info");
+      if (level < 0) {
+        console.error(`console_log: invalid level '${options["level"]}', should be one of: ${log_levels}`);
+        return [];
+      }
+      const name = options["item"] || "self";
       if (name != "self" && name != "any" && !item(name)) {
         console.error(`console_log: item '${name}' not found`);
         return [];
@@ -317,7 +325,7 @@
       options = _.merge(
         {
           since: "run",
-          level: 1,
+          level: "info",
           type: "_log",
           item: "self",
         },
@@ -1643,7 +1651,7 @@
             return;
           } else if (_item("#commands" + cmd)) {
             function handleError(e) {
-              const log = _item("#commands" + cmd).console_log(-1 /*lastEvalTime*/, 4 /*errors*/);
+              const log = _item("#commands" + cmd).console_log({ since: "eval", level: "error" });
               let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
               alert(msg);
             }
@@ -2434,7 +2442,7 @@
 
     initItems();
 
-    console.debug(`initialized ${items.length} items at ${Date.now() - initTime}ms`);
+    console.debug(`initialized ${items.length} items at ${Math.round(performance.now())}ms`);
 
     // if fragment corresponds to an item tag or id, focus on that item immediately ...
     if (items.length > 0 && location.href.match(/#.+$/)) {
@@ -2497,10 +2505,15 @@
   }
 
   if (isClient) {
-    // redirect console.error to save errors until #console is set up in onMount
-    let errors = [];
-    console["_error"] = console.error;
-    console.error = (...args) => errors.push(args);
+    // set up replay log until #console is set up in onMount
+    let replay_log = [];
+    log_levels.forEach((verb) => {
+      console["_" + verb] = console[verb];
+      console[verb] = (...args) => {
+        replay_log.push({ verb, args });
+        return console["_" + verb](...args);
+      };
+    });
 
     // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
     if (error) console.warn(error); // log server-side error
@@ -2637,10 +2650,9 @@
               //   )}ms w/ ${items.length} items`
               // );
               setTimeout(async () => {
-                console.debug(`${items.length} items synchronized at ${Math.round(performance.now())}ms`);
+                console.debug(`synchronized ${items.length} items at ${Math.round(performance.now())}ms`);
                 if (!initTime) await initialize();
-                else console.debug(`${items.length} items already initialized at ${Date.now() - initTime}ms`);
-                if (!initTime) return; // initialization failed, should be signing out ...
+                if (!initTime) return; // initialization failed, we should be signing out ...
 
                 firstSnapshot = false;
                 // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
@@ -2742,15 +2754,15 @@
     }
 
     onMount(() => {
-      // copy console into #console (if it exists)
-      console.error = console["_error"]; // restore console.error for redirect
-      // NOTE: some errors do not go through console.error but are reported via window.onerror
-      const levels = ["debug", "info", "log", "warn", "error"];
-      levels.forEach(function (verb) {
-        console[verb] = (function (method, verb, div) {
-          return function (...args) {
-            method(...args);
-            if (!consolediv) return;
+      Promise.resolve(initialization).then(() => {
+        let replay = true; // true until replay below
+        log_levels.forEach(function (verb) {
+          console[verb] = function (...args) {
+            if (!replay) console["_" + verb](...args);
+            if (!consolediv) {
+              console["_warn"]("consolediv not ready");
+              return;
+            }
             var elem = document.createElement("div");
             if (verb.endsWith("error")) verb = "error";
             elem.classList.add("console-" + verb);
@@ -2762,14 +2774,14 @@
             else text = args.join(" ") + "\n";
             elem.textContent = prefix + text;
             elem.setAttribute("_time", Date.now().toString());
-            elem.setAttribute("_level", levels.indexOf(verb).toString());
+            elem.setAttribute("_level", log_levels.indexOf(verb).toString());
             consolediv.appendChild(elem);
             consoleLog.push({
               type: verb,
               stack: evalStack.slice(),
               text: text.trim(),
               time: Date.now(),
-              level: levels.indexOf(verb),
+              level: log_levels.indexOf(verb),
             });
             if (consoleLog.length > consoleLogMaxSize) consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
 
@@ -2793,14 +2805,12 @@
               }
             }, statusLogExpiration);
           };
-        })(console[verb].bind(console), verb);
+        });
+        replay_log.forEach((entry) => console[entry.verb](...entry.args));
+        replay = false;
       });
-      // replay any errors during init
-      errors.forEach((args) => console.error(...args));
 
-      if (anonymous) {
-        console.log("user is anonymous");
-      }
+      if (anonymous) console.log("user is anonymous");
 
       setInterval(checkLayout, 250); // check layout every 250ms
       updateDotted(); // update dotted items
