@@ -2375,6 +2375,11 @@
 
   let initTime = 0;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
+  let resolve_init; // set below
+  function init_log(...args) {
+    console.debug(`[${Math.round(performance.now())}ms] ${args.join(" ")}`);
+  }
+
   async function initialize() {
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
@@ -2442,8 +2447,6 @@
 
     initItems();
 
-    console.debug(`initialized ${items.length} items at ${Math.round(performance.now())}ms`);
-
     // if fragment corresponds to an item tag or id, focus on that item immediately ...
     if (items.length > 0 && location.href.match(/#.+$/)) {
       const tag = decodeURI(location.href.match(/#.+$/)[0]);
@@ -2459,6 +2462,9 @@
         onEditorChange((editorText = tag));
       }
     }
+
+    init_log(`initialized ${items.length} items`);
+    resolve_init();
   }
 
   let signingIn = false;
@@ -2492,7 +2498,6 @@
   }
 
   function useAnonymousAccount() {
-    console.log("using anonymous account");
     user = {
       photoURL: "/incognito.png",
       displayName: "Anonymous",
@@ -2504,339 +2509,333 @@
     document.cookie = "__session=;max-age=0";
   }
 
-  if (isClient) {
-    // set up replay log until #console is set up in onMount
-    let replay_log = [];
-    log_levels.forEach((verb) => {
-      console["_" + verb] = console[verb];
-      console[verb] = (...args) => {
-        replay_log.push({ verb, args });
-        return console["_" + verb](...args);
-      };
-    });
+  let initialization;
+  if (isClient)
+    initialization = new Promise((resolve) => {
+      resolve_init = resolve; // invoked from initialize()
 
-    // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
-    if (error) console.warn(error); // log server-side error
-
-    // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
-    // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
-    if (!user && localStorage.getItem("mindpage_user")) {
-      user = JSON.parse(localStorage.getItem("mindpage_user"));
-      secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
-      console.debug(`restored user ${user.email} from local storage`);
-    } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
-      console.debug("resuming signing in ...");
-      window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
-      user = secret = null;
-    } else {
-      useAnonymousAccount();
-    }
-    anonymous = user?.uid == "anonymous";
-    readonly = anonymous && !admin();
-    if (admin()) useAnonymousAccount(); // become anonymous for item checks
-
-    // if items were returned from server, confirm user, then initialize if valid
-    let initialization;
-    if (items.length > 0) {
-      if (window.sessionStorage.getItem("mindpage_signin_pending")) {
-        console.warn(`ignoring ${items.length} items received while signing in`);
-        items = [];
-      } else if (user && user.uid != items[0].user) {
-        // items are for wrong user, usually anonymous, due to missing cookie
-        // (you can test this with document.cookie='__session=;max-age=0' in console)
-        console.warn(`ignoring ${items.length} items received for wrong user (${items[0].user})`);
-        items = [];
-      } else {
-        // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
-        initialization = initialize();
-      }
-    }
-
-    // NOTE: we do not attempt login for readonly account (if login hangs, this is suspect)
-    if (!readonly) {
-      // if initializing items, wait for that before signing in user since errors can trigger signout
-      Promise.resolve(initialization).then(() => {
-        firebase()
-          .auth()
-          .onAuthStateChanged((authUser) => {
-            // console.debug("onAuthStateChanged", user, authUser);
-            if (readonly) {
-              console.warn("ignoring unexpected signin");
-              return;
-            }
-            if (!authUser) {
-              if (anonymous) return; // anonymous user can be signed in or out
-              console.error("failed to sign in"); // can happen in chrome for localhost, and on android occasionally
-              document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
-              return;
-            }
-            resetUser(); // clean up first
-            user = authUser;
-            console.log("signed in", user.email);
-            localStorage.setItem("mindpage_user", JSON.stringify(user));
-            anonymous = readonly = false; // just in case (should already be false)
-            signedin = true;
-
-            // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
-            //       (this is the only case where user != firebase().auth().currentUser)
-            if (admin()) {
-              useAnonymousAccount();
-            } else {
-              // set up server-side session cookie
-              // store user's ID token as a 1-hour __session cookie to send to server for preload
-              // NOTE: __session is the only cookie allowed by firebase for efficient caching
-              //       (see https://stackoverflow.com/a/44935288)
-              user
-                .getIdToken(false /*force refresh*/)
-                .then((token) => {
-                  document.cookie = "__session=" + token + ";max-age=3600";
-                })
-                .catch(console.error);
-            }
-
-            initFirebaseRealtime();
-          });
+      // set up replay log until #console is set up in onMount
+      let replay_log = [];
+      log_levels.forEach((verb) => {
+        console["_" + verb] = console[verb];
+        console[verb] = (...args) => {
+          replay_log.push({ verb, args });
+          return console["_" + verb](...args);
+        };
       });
-    }
 
-    // Visual viewport resize/scroll handlers ...
-    // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
-    //       (also window.outerWidth can be stale after device rotation in iOS Safari)
-    let lastDocumentWidth = 0;
-    function checkLayout() {
-      if (Date.now() - lastScrollTime < 250) return; // will be invoked again via setInterval
-      const documentWidth = document.documentElement.clientWidth;
-      if (documentWidth != lastDocumentWidth) {
-        // console.debug(
-        //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
-        // );
-        updateItemLayout();
-        // resize of all elements w/ _resize attribute (and property)
-        document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
-        lastDocumentWidth = documentWidth;
-        return;
+      console.debug(`[${window["_client_start_time"]}ms] loaded client`);
+
+      // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
+      if (error) console.warn(error); // log server-side error
+
+      // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
+      // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
+      if (!user && localStorage.getItem("mindpage_user")) {
+        user = JSON.parse(localStorage.getItem("mindpage_user"));
+        secret = localStorage.getItem("mindpage_secret"); // may be null if user was acting as anonymous
+        init_log(`restored user ${user.email}`);
+      } else if (window.sessionStorage.getItem("mindpage_signin_pending")) {
+        init_log("resuming signin ...");
+        window.sessionStorage.removeItem("mindpage_signin_pending"); // no longer considered pending
+        user = secret = null;
+      } else {
+        useAnonymousAccount();
       }
-      // update time strings every 10 seconds
-      // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
-      if (Date.now() - lastTimeStringUpdateTime > 10000) {
-        lastTimeStringUpdateTime = Date.now();
-        items.forEach((item, index) => {
-          if (!item.timeString) return;
-          item.timeString = itemTimeString(item.time);
-        });
-        items = items; // trigger svelte render
+      anonymous = user?.uid == "anonymous";
+      readonly = anonymous && !admin();
+      if (admin()) useAnonymousAccount(); // become anonymous for item checks
+
+      // if items were returned from server, confirm user, then initialize if valid
+      if (items.length > 0) {
+        if (window.sessionStorage.getItem("mindpage_signin_pending")) {
+          console.warn(`ignoring ${items.length} items during signin`);
+          items = [];
+        } else if (user && user.uid != items[0].user) {
+          // items are for wrong user, usually anonymous, due to missing cookie
+          // (you can test this with document.cookie='__session=;max-age=0' in console)
+          console.warn(`ignoring ${items.length} items for wrong user (${items[0].user})`);
+          items = [];
+        } else {
+          // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
+          initialize();
+        }
       }
-    }
-    visualViewport.addEventListener("resize", checkLayout);
-    visualViewport.addEventListener("scroll", onScroll);
 
-    let firstSnapshot = true;
-    function initFirebaseRealtime() {
-      if (!user || !firebase().auth().currentUser) return; // need user object and auth
-
-      // start listening for remote changes
-      // (also initialize if items were not returned by server)
-      firebase()
-        .firestore()
-        .collection("items")
-        .where("user", "==", user.uid)
-        .orderBy("time", "desc")
-        .onSnapshot(
-          function (snapshot) {
-            if (firstSnapshot) {
-              // console.debug(
-              //   `onSnapshot invoked at ${Math.round(
-              //     window.performance.now()
-              //   )}ms w/ ${items.length} items`
-              // );
-              setTimeout(async () => {
-                console.debug(`synchronized ${items.length} items at ${Math.round(performance.now())}ms`);
-                if (!initTime) await initialize();
-                if (!initTime) return; // initialization failed, we should be signing out ...
-
-                firstSnapshot = false;
-                // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
-                if (items.length == 0) onEditorDone("/_welcome");
-
-                // if necessary, init secret by triggering a test encryption/decryption
-                if (!secret) {
-                  const hello_item = { user: user.uid, time: Date.now(), text: "hello" };
-                  encryptItem(hello_item)
-                    .then(decryptItem)
-                    .then((item) => {
-                      if (JSON.stringify(item) != JSON.stringify(hello_item)) throw new Error("encryption test failed");
-                    })
-                    .catch(encryptionError);
-                }
-              });
-            }
-            snapshot.docChanges().forEach(function (change) {
-              const doc = change.doc;
-              // on first snapshot, we only need to append for initalize (see above)
-              // and only if items were not returned by server (and initialized) already
-              // (otherwise we can just skip the first snapshot, which is hopefully coming
-              //  from a local cache so that it is cheap and worse than the server snapshot)
-              if (firstSnapshot) {
-                if (change.type != "added") console.warn("unexpected change type: ", change.type);
-                if (!initTime) {
-                  // NOTE: snapshot items do not have updateTime/createTime available
-                  items.push(Object.assign(doc.data(), { id: doc.id }));
-                }
+      // NOTE: we do not attempt login for readonly account (if login hangs, this is suspect)
+      if (!readonly) {
+        // if initializing items, wait for that before signing in user since errors can trigger signout
+        Promise.resolve(initialization).then(() => {
+          firebase()
+            .auth()
+            .onAuthStateChanged((authUser) => {
+              // console.debug("onAuthStateChanged", user, authUser);
+              if (readonly) {
+                console.warn("ignoring unexpected signin");
                 return;
               }
-              if (doc.metadata.hasPendingWrites) return; // ignore local change
-              decryptItem(doc.data()).then((savedItem) => {
-                // no need to log initial snapshot
-                // console.debug("detected remote change:", change.type, doc.id);
-                if (change.type === "added") {
-                  // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                  let item = {
-                    ...savedItem,
-                    id: doc.id,
-                    savedId: doc.id,
-                    savedTime: savedItem.time,
-                    savedText: savedItem.text,
-                  };
-                  items = [item, ...items];
-                  // update indices as needed by itemTextChanged
-                  items.forEach((item, index) => indexFromId.set(item.id, index));
-                  itemTextChanged(0, item.text);
-                  lastEditorChangeTime = 0; // disable debounce even if editor focused
-                  onEditorChange(editorText); // integrate new item at index 0
-                } else if (change.type == "removed") {
-                  // NOTE: remote remove is similar to onItemEditing (deletion case)
-                  // NOTE: document may be under temporary id if it was added locally
-                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                  if (index == undefined) return; // nothing to remove
-                  let item = items[index];
-                  itemTextChanged(index, ""); // clears label, deps, etc
-                  items.splice(index, 1);
-                  // update indices as needed by onEditorChange
-                  indexFromId = new Map<string, number>();
-                  items.forEach((item, index) => indexFromId.set(item.id, index));
-                  lastEditorChangeTime = 0; // disable debounce even if editor focused
-                  onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
-                  deletedItems.unshift({
-                    time: item.savedTime,
-                    text: item.savedText,
-                  }); // for /undelete
-                } else if (change.type == "modified") {
-                  // NOTE: remote modify is similar to _write without saving
-                  // NOTE: document may be under temporary id if it was added locally
-                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                  if (index == undefined) return; // nothing to modify
-                  let item = items[index];
-                  item.text = item.savedText = savedItem.text;
-                  item.time = item.savedTime = savedItem.time;
-                  itemTextChanged(index, item.text); // updates label, deps, etc
-                  lastEditorChangeTime = 0; // disable debounce even if editor focused
-                  onEditorChange(editorText); // item time/text has changed
-                }
-              });
-            });
-          },
-          (error) => {
-            console.error(error);
-            if (error.code == "permission-denied") {
-              // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
-              //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
-              document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
-              signingOut = true; // no other option at this point
-              modal.show({
-                content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
-                confirm: "Sign Out",
-                background: "confirm",
-                onConfirm: signOut,
-              });
-            }
-          }
-        );
-    }
-
-    onMount(() => {
-      Promise.resolve(initialization).then(() => {
-        let replay = true; // true until replay below
-        log_levels.forEach(function (verb) {
-          console[verb] = function (...args) {
-            if (!replay) console["_" + verb](...args);
-            if (!consolediv) {
-              console["_warn"]("consolediv not ready");
-              return;
-            }
-            var elem = document.createElement("div");
-            if (verb.endsWith("error")) verb = "error";
-            elem.classList.add("console-" + verb);
-            // NOTE: we indicate full eval stack as prefix
-            let prefix = evalStack.map((id) => items[indexFromId.get(id)].name).join(" ");
-            if (prefix) prefix = "[" + prefix + "] ";
-            let text = "";
-            if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
-            else text = args.join(" ") + "\n";
-            elem.textContent = prefix + text;
-            elem.setAttribute("_time", Date.now().toString());
-            elem.setAttribute("_level", log_levels.indexOf(verb).toString());
-            consolediv.appendChild(elem);
-            consoleLog.push({
-              type: verb,
-              stack: evalStack.slice(),
-              text: text.trim(),
-              time: Date.now(),
-              level: log_levels.indexOf(verb),
-            });
-            if (consoleLog.length > consoleLogMaxSize) consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
-
-            const summarydiv = document.getElementById("console-summary");
-            const summaryelem = document.createElement("span");
-            summaryelem.innerText = "·";
-            summaryelem.classList.add("console-" + verb);
-            summarydiv.appendChild(summaryelem);
-
-            // if console is hidden, make sure summary is visible
-            if (consolediv.style.display == "none") summarydiv.style.visibility = "visible";
-
-            // auto-remove after 15 seconds ...
-            setTimeout(() => {
-              elem.remove();
-              summaryelem.remove();
-              if (!consolediv) return;
-              if (consolediv.childNodes.length == 0) {
-                consolediv.style.display = "none";
-                summarydiv.style.visibility = "visible";
+              if (!authUser) {
+                if (anonymous) return; // anonymous user can be signed in or out
+                console.error("failed to sign in"); // can happen in chrome for localhost, and on android occasionally
+                document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
+                return;
               }
-            }, statusLogExpiration);
-          };
-        });
-        replay_log.forEach((entry) => console[entry.verb](...entry.args));
-        replay = false;
-      });
+              resetUser(); // clean up first
+              user = authUser;
+              init_log("signed in", user.email);
+              localStorage.setItem("mindpage_user", JSON.stringify(user));
+              anonymous = readonly = false; // just in case (should already be false)
+              signedin = true;
 
-      if (anonymous) console.log("user is anonymous");
+              // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
+              //       (this is the only case where user != firebase().auth().currentUser)
+              if (admin()) {
+                useAnonymousAccount();
+              } else {
+                // set up server-side session cookie
+                // store user's ID token as a 1-hour __session cookie to send to server for preload
+                // NOTE: __session is the only cookie allowed by firebase for efficient caching
+                //       (see https://stackoverflow.com/a/44935288)
+                user
+                  .getIdToken(false /*force refresh*/)
+                  .then((token) => {
+                    document.cookie = "__session=" + token + ";max-age=3600";
+                  })
+                  .catch(console.error);
+              }
 
-      setInterval(checkLayout, 250); // check layout every 250ms
-      updateDotted(); // update dotted items
-
-      if (readonly) {
-        modal.show({
-          content:
-            "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
-          // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
-          confirm: "Stay Anonymous",
-          cancel: "Sign In",
-          onCancel: signIn,
-          // onConfirm: () => textArea(-1).focus(),
-          background: "confirm",
+              initFirebaseRealtime();
+            });
         });
       }
 
-      // console.debug(
-      //   `onMount invoked at ${Math.round(window.performance.now())}ms w/ ${
-      //     items.length
-      //   } items`
-      // );
-    });
+      // Visual viewport resize/scroll handlers ...
+      // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
+      //       (also window.outerWidth can be stale after device rotation in iOS Safari)
+      let lastDocumentWidth = 0;
+      function checkLayout() {
+        if (Date.now() - lastScrollTime < 250) return; // will be invoked again via setInterval
+        const documentWidth = document.documentElement.clientWidth;
+        if (documentWidth != lastDocumentWidth) {
+          // console.debug(
+          //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
+          // );
+          updateItemLayout();
+          // resize of all elements w/ _resize attribute (and property)
+          document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
+          lastDocumentWidth = documentWidth;
+          return;
+        }
+        // update time strings every 10 seconds
+        // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
+        if (Date.now() - lastTimeStringUpdateTime > 10000) {
+          lastTimeStringUpdateTime = Date.now();
+          items.forEach((item, index) => {
+            if (!item.timeString) return;
+            item.timeString = itemTimeString(item.time);
+          });
+          items = items; // trigger svelte render
+        }
+      }
+      visualViewport.addEventListener("resize", checkLayout);
+      visualViewport.addEventListener("scroll", onScroll);
 
-    console.debug(`index.js executed at ${Math.round(window.performance.now())}ms w/ ${items.length} items`);
-  }
+      let firstSnapshot = true;
+      function initFirebaseRealtime() {
+        if (!user || !firebase().auth().currentUser) return; // need user object and auth
+
+        // start listening for remote changes
+        // (also initialize if items were not returned by server)
+        firebase()
+          .firestore()
+          .collection("items")
+          .where("user", "==", user.uid)
+          .orderBy("time", "desc")
+          .onSnapshot(
+            function (snapshot) {
+              if (firstSnapshot) {
+                setTimeout(async () => {
+                  init_log(`synchronized ${items.length} items`);
+                  if (!initTime) await initialize();
+                  if (!initTime) return; // initialization failed, we should be signing out ...
+
+                  firstSnapshot = false;
+                  // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
+                  if (items.length == 0) onEditorDone("/_welcome");
+
+                  // if necessary, init secret by triggering a test encryption/decryption
+                  if (!secret) {
+                    const hello_item = { user: user.uid, time: Date.now(), text: "hello" };
+                    encryptItem(hello_item)
+                      .then(decryptItem)
+                      .then((item) => {
+                        if (JSON.stringify(item) != JSON.stringify(hello_item))
+                          throw new Error("encryption test failed");
+                      })
+                      .catch(encryptionError);
+                  }
+                });
+              }
+              snapshot.docChanges().forEach(function (change) {
+                const doc = change.doc;
+                // on first snapshot, we only need to append for initalize (see above)
+                // and only if items were not returned by server (and initialized) already
+                // (otherwise we can just skip the first snapshot, which is hopefully coming
+                //  from a local cache so that it is cheap and worse than the server snapshot)
+                if (firstSnapshot) {
+                  if (change.type != "added") console.warn("unexpected change type: ", change.type);
+                  if (!initTime) {
+                    // NOTE: snapshot items do not have updateTime/createTime available
+                    items.push(Object.assign(doc.data(), { id: doc.id }));
+                  }
+                  return;
+                }
+                if (doc.metadata.hasPendingWrites) return; // ignore local change
+                decryptItem(doc.data()).then((savedItem) => {
+                  // no need to log initial snapshot
+                  // console.debug("detected remote change:", change.type, doc.id);
+                  if (change.type === "added") {
+                    // NOTE: remote add is similar to onEditorDone without js, saving, etc
+                    let item = {
+                      ...savedItem,
+                      id: doc.id,
+                      savedId: doc.id,
+                      savedTime: savedItem.time,
+                      savedText: savedItem.text,
+                    };
+                    items = [item, ...items];
+                    // update indices as needed by itemTextChanged
+                    items.forEach((item, index) => indexFromId.set(item.id, index));
+                    itemTextChanged(0, item.text);
+                    lastEditorChangeTime = 0; // disable debounce even if editor focused
+                    onEditorChange(editorText); // integrate new item at index 0
+                  } else if (change.type == "removed") {
+                    // NOTE: remote remove is similar to onItemEditing (deletion case)
+                    // NOTE: document may be under temporary id if it was added locally
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
+                    if (index == undefined) return; // nothing to remove
+                    let item = items[index];
+                    itemTextChanged(index, ""); // clears label, deps, etc
+                    items.splice(index, 1);
+                    // update indices as needed by onEditorChange
+                    indexFromId = new Map<string, number>();
+                    items.forEach((item, index) => indexFromId.set(item.id, index));
+                    lastEditorChangeTime = 0; // disable debounce even if editor focused
+                    onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
+                    deletedItems.unshift({
+                      time: item.savedTime,
+                      text: item.savedText,
+                    }); // for /undelete
+                  } else if (change.type == "modified") {
+                    // NOTE: remote modify is similar to _write without saving
+                    // NOTE: document may be under temporary id if it was added locally
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
+                    if (index == undefined) return; // nothing to modify
+                    let item = items[index];
+                    item.text = item.savedText = savedItem.text;
+                    item.time = item.savedTime = savedItem.time;
+                    itemTextChanged(index, item.text); // updates label, deps, etc
+                    lastEditorChangeTime = 0; // disable debounce even if editor focused
+                    onEditorChange(editorText); // item time/text has changed
+                  }
+                });
+              });
+            },
+            (error) => {
+              console.error(error);
+              if (error.code == "permission-denied") {
+                // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
+                //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
+                document.cookie = "__session=;max-age=0"; // delete cookie to prevent preload on reload
+                signingOut = true; // no other option at this point
+                modal.show({
+                  content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
+                  confirm: "Sign Out",
+                  background: "confirm",
+                  onConfirm: signOut,
+                });
+              }
+            }
+          );
+      }
+
+      onMount(() => {
+        Promise.resolve(initialization).then(() => {
+          let replay = true; // true until replay below
+          log_levels.forEach(function (verb) {
+            console[verb] = function (...args) {
+              if (!replay) console["_" + verb](...args);
+              if (!consolediv) {
+                console["_warn"]("consolediv not ready");
+                return;
+              }
+              var elem = document.createElement("div");
+              if (verb.endsWith("error")) verb = "error";
+              elem.classList.add("console-" + verb);
+              // NOTE: we indicate full eval stack as prefix
+              let prefix = evalStack.map((id) => items[indexFromId.get(id)].name).join(" ");
+              if (prefix) prefix = "[" + prefix + "] ";
+              let text = "";
+              if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0]);
+              else text = args.join(" ") + "\n";
+              elem.textContent = prefix + text;
+              elem.setAttribute("_time", Date.now().toString());
+              elem.setAttribute("_level", log_levels.indexOf(verb).toString());
+              consolediv.appendChild(elem);
+              consoleLog.push({
+                type: verb,
+                stack: evalStack.slice(),
+                text: text.trim(),
+                time: Date.now(),
+                level: log_levels.indexOf(verb),
+              });
+              if (consoleLog.length > consoleLogMaxSize) consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
+
+              const summarydiv = document.getElementById("console-summary");
+              const summaryelem = document.createElement("span");
+              summaryelem.innerText = "·";
+              summaryelem.classList.add("console-" + verb);
+              summarydiv.appendChild(summaryelem);
+
+              // if console is hidden, make sure summary is visible
+              if (consolediv.style.display == "none") summarydiv.style.visibility = "visible";
+
+              // auto-remove after 15 seconds ...
+              setTimeout(() => {
+                elem.remove();
+                summaryelem.remove();
+                if (!consolediv) return;
+                if (consolediv.childNodes.length == 0) {
+                  consolediv.style.display = "none";
+                  summarydiv.style.visibility = "visible";
+                }
+              }, statusLogExpiration);
+            };
+          });
+          replay_log.forEach((entry) => console[entry.verb](...entry.args));
+          replay = false;
+        });
+
+        setInterval(checkLayout, 250); // check layout every 250ms
+        updateDotted(); // update dotted items
+
+        if (readonly) {
+          modal.show({
+            content:
+              "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you**, not sent or stored anywhere, and discarded on reload. Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
+            // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
+            confirm: "Stay Anonymous",
+            cancel: "Sign In",
+            onCancel: signIn,
+            // onConfirm: () => textArea(-1).focus(),
+            background: "confirm",
+          });
+        }
+        init_log("initialized document");
+      });
+
+      init_log(`initialized client`);
+    });
 
   let metaKey = false;
   let ctrlKey = false; // NOTE: can cause left click
