@@ -624,6 +624,132 @@
     }
   }
 
+  let images = new Map<string, string>(); // permanent fname to temporary url
+
+  function onPastedImage(url: string, file: File): Promise<string> {
+    console.debug("pasted image", url);
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsBinaryString(file);
+      reader.onload = (e) => {
+        let str = e.target.result as string;
+        const hash = hashCode(str).toString();
+        const fname = `${user.uid}/images/${hash}`; // short fname is just hash
+        if (readonly) images.set(fname, url); // skip upload
+        if (images.has(fname)) {
+          resolve(hash);
+          return;
+        }
+        if (anonymous) {
+          // console.debug(`uploading image ${fname} (${str.length} bytes) ...`);
+          const ref = firebase().storage().ref().child(`${user.uid}/images/${hash}`);
+          ref
+            .put(file) // gets mime type from file.type
+            .then((snapshot) => {
+              console.debug(`uploaded image ${fname} (${str.length} bytes) in ${Date.now() - start}ms`);
+              images.set(fname, url);
+              resolve(hash);
+            })
+            .catch((e) => {
+              console.error(e);
+              reject(e);
+            });
+        } else {
+          encrypt(file.type + ";" + str)
+            .then((cipher) => {
+              // console.debug(
+              //   `uploading encrypted image ${fname} (${cipher.length} bytes, ${str.length} original) ...`
+              // );
+              const ref = firebase().storage().ref().child(`${user.uid}/images/${hash}`);
+              ref
+                .putString(cipher)
+                .then((snapshot) => {
+                  console.debug(
+                    `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms`
+                  );
+                  images.set(fname, url);
+                  resolve(hash);
+                })
+                .catch((e) => {
+                  console.error(e);
+                  reject(e);
+                });
+            })
+            .catch(console.error);
+        }
+      };
+      reader.onerror = (e) => {
+        console.error(e);
+        reject(e);
+      };
+    });
+  }
+
+  function onImageRendering(src: string) {
+    if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
+    if (!src.startsWith(user.uid + "/images/") && !src.startsWith("anonymous/images/")) return src; // external image
+    if (images.has(src)) return images.get(src); // image ready
+    return "/loading.gif"; // image must be loaded
+  }
+
+  function onImageRendered(img: HTMLImageElement) {
+    // console.debug("image rendered", img.src);
+    if (!img.hasAttribute("_src")) return; // nothing to do
+    let src = img.getAttribute("_src");
+    if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
+    if (images.has(src)) {
+      img.src = images.get(src);
+      img.removeAttribute("_loading");
+      return;
+    }
+    // image must be downloaded and decrypted if user is not anonymous
+    const ref = firebase().storage().ref().child(src);
+    ref
+      .getDownloadURL()
+      .then((url) => {
+        if (src.startsWith("anonymous/")) {
+          img.src = url;
+          img.removeAttribute("_loading");
+        } else {
+          // download data
+          const start = Date.now();
+          // console.debug(`downloading encrypted image ${src} ...`);
+          let xhr = new XMLHttpRequest();
+          xhr.responseType = "blob";
+          xhr.onload = (event) => {
+            const blob = xhr.response;
+            const reader = new FileReader();
+            reader.readAsBinaryString(blob);
+            reader.onload = (e) => {
+              const cipher = e.target.result as string;
+              decrypt(cipher)
+                .then((str) => {
+                  const type = str.substring(0, str.indexOf(";"));
+                  str = str.substring(str.indexOf(";") + 1);
+                  console.debug(
+                    `downloaded encrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
+                  );
+                  const array = new Uint8Array(
+                    [].map.call(str, function (x) {
+                      return x.charCodeAt(0);
+                    })
+                  );
+                  img.src = URL.createObjectURL(new Blob([array], { type: type }));
+                  img.removeAttribute("_loading");
+                })
+                .catch(console.error);
+            };
+            reader.onerror = console.error;
+          };
+          xhr.onerror = console.error;
+          xhr.open("GET", url);
+          xhr.send();
+        }
+      })
+      .catch(console.error);
+  }
+
   function onEditorFocused(focused: boolean) {}
 
   function isSpecialTag(tag) {
@@ -1771,49 +1897,51 @@
       }, 0);
     }
 
-    encryptItem(itemToSave).then((itemToSave) => {
-      (readonly
-        ? Promise.resolve({ id: item.id, delete: Promise.resolve })
-        : firestore().collection("items").add(itemToSave)
-      )
-        .then((doc) => {
-          let index = indexFromId.get(item.id); // since index can change
-          tempIdFromSavedId.set(doc.id, item.id);
-          item = items[index];
-          if (index == undefined) {
-            // item was deleted before it could be saved
-            doc.delete().catch(console.error);
-            return;
-          }
-          let textarea = textArea(index);
-          let selectionStart = textarea ? textarea.selectionStart : 0;
-          let selectionEnd = textarea ? textarea.selectionEnd : 0;
-          item.savedId = doc.id;
-          // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
-          if (!item.editing) onItemSaved(item.id, itemToSave);
-          else items[index] = item; // trigger dom update
+    encryptItem(itemToSave)
+      .then((itemToSave) => {
+        (readonly
+          ? Promise.resolve({ id: item.id, delete: Promise.resolve })
+          : firestore().collection("items").add(itemToSave)
+        )
+          .then((doc) => {
+            let index = indexFromId.get(item.id); // since index can change
+            tempIdFromSavedId.set(doc.id, item.id);
+            item = items[index];
+            if (index == undefined) {
+              // item was deleted before it could be saved
+              doc.delete().catch(console.error);
+              return;
+            }
+            let textarea = textArea(index);
+            let selectionStart = textarea ? textarea.selectionStart : 0;
+            let selectionEnd = textarea ? textarea.selectionEnd : 0;
+            item.savedId = doc.id;
+            // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
+            if (!item.editing) onItemSaved(item.id, itemToSave);
+            else items[index] = item; // trigger dom update
 
-          if (focusedItem == index)
-            // maintain focus (and caret placement) through id/element change
-            setTimeout(() => {
-              let index = indexFromId.get(item.id);
-              if (index == undefined) return;
-              let textarea = textArea(index);
-              if (!textarea) return;
-              textarea.selectionStart = selectionStart;
-              textarea.selectionEnd = selectionEnd;
-              textarea.focus();
-            }, 0);
-          // also save to history (using persistent doc.id) ...
-          if (!readonly) {
-            firestore()
-              .collection("history")
-              .add({ item: doc.id, ...itemToSave })
-              .catch(console.error);
-          }
-        })
-        .catch(console.error);
-    }); // encryptItem(itemToSave)
+            if (focusedItem == index)
+              // maintain focus (and caret placement) through id/element change
+              setTimeout(() => {
+                let index = indexFromId.get(item.id);
+                if (index == undefined) return;
+                let textarea = textArea(index);
+                if (!textarea) return;
+                textarea.selectionStart = selectionStart;
+                textarea.selectionEnd = selectionEnd;
+                textarea.focus();
+              }, 0);
+            // also save to history (using persistent doc.id) ...
+            if (!readonly) {
+              firestore()
+                .collection("history")
+                .add({ item: doc.id, ...itemToSave })
+                .catch(console.error);
+            }
+          })
+          .catch(console.error);
+      })
+      .catch(console.error);
 
     return _item(item.id); // return reference to created item
   }
@@ -2823,7 +2951,7 @@
         if (readonly) {
           modal.show({
             content:
-              "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you** and are discarded when you close this page, not sent or stored anywhere (except your browser history unless you clear it or use private mode). Once signed in, your items will be saved securely so that they are readable **only by you, on your devices**.",
+              "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you** and are discarded when you close this page, not sent or stored anywhere but your own device (and not even that if you use private browsing). Once signed in, your items will be saved securely so that they are always readable **only by you, on your devices**.",
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: "Stay Anonymous",
             cancel: "Sign In",
@@ -2919,6 +3047,7 @@
                   allowCommandCtrlBracket={true}
                   onEdited={onEditorChange}
                   onFocused={onEditorFocused}
+                  {onPastedImage}
                   onDone={onEditorDone}
                   onPrev={onPrevItem}
                   onNext={onNextItem}
@@ -2988,6 +3117,9 @@
                 onRun={onItemRun}
                 onTouch={onItemTouch}
                 onResized={onItemResized}
+                {onImageRendering}
+                {onImageRendered}
+                {onPastedImage}
                 {onTagClick}
                 {onLinkClick}
                 {onLogSummaryClick}

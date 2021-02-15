@@ -9,6 +9,9 @@
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
+  export let onPastedImage = (url: string, file: File): Promise<string> => {
+    return null;
+  };
   export let onDone = (text: string, e: any, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
@@ -469,18 +472,39 @@
   }
 
   function onPaste(e: ClipboardEvent) {
-    let content = e.clipboardData.getData("text");
-    // copy bullet and indentation to subsequent lines
-    let bullet;
-    if ((bullet = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *)([-*+] +)$/))) {
-      content = content.replace(/(^|\n)( *[-*+] +)/g, "$1"); // remove existing bullets
-      content = content.replace(/(\n\s*)/g, "$1" + bullet[1] + bullet[2]);
-    }
-    // replace tabs with double-space
-    content = content.replace(/\t/g, "  ");
-    document.execCommand("insertText", false, content);
     e.preventDefault();
     e.stopPropagation();
+    const data = e.clipboardData || e["originalEvent"].clipboardData;
+    // console.debug(Array.from(data.items).map((item: any) => item.type));
+    Array.from(data.items).forEach((item: any) => {
+      if (item.type == "text/plain") {
+        item.getAsString((text) => {
+          // copy bullet and indentation to subsequent lines
+          let bullet;
+          if ((bullet = textarea.value.substring(0, textarea.selectionStart).match(/(?:^|\n)( *)([-*+] +)$/))) {
+            text = text.replace(/(^|\n)( *[-*+] +)/g, "$1"); // remove existing bullets
+            text = text.replace(/(\n\s*)/g, "$1" + bullet[1] + bullet[2]);
+          }
+          // replace tabs with double-space
+          text = text.replace(/\t/g, "  ");
+          document.execCommand("insertText", false, text);
+        });
+      } else if (item.type.startsWith("image")) {
+        const file = item.getAsFile();
+        // insert image with src="blob:..."
+        const url = URL.createObjectURL(file);
+        const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
+        // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
+        // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
+        // onPastedImage(url, file);
+        Promise.resolve(onPastedImage(url, file))
+          .then((fname) => {
+            const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`;
+            document.execCommand("insertText", false, img);
+          })
+          .catch(console.error);
+      }
+    });
   }
 
   function onInput() {
@@ -569,7 +593,7 @@
     on:keyup={onKeyUp}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
-    on:blur={() => onFocused((focused = false))}
+    on:blur={() => onFocused((focused = false))}    
     spellcheck={false}
     autocapitalize="off">{text}</textarea>
 {#if showButtons}

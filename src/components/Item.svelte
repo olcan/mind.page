@@ -48,9 +48,14 @@
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
+  export let onPastedImage = (url: string, file: File): Promise<string> => {
+    return null;
+  };
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
   export let onResized = (id, container, trigger: string) => {};
+  export let onImageRendering = (src: string) => {};
+  export let onImageRendered = (img: HTMLImageElement) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
 
@@ -279,7 +284,7 @@
       text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
         // try to maintain markdown links, html attributes, other url strings, etc
         // NOTE: markdown parser may still convert naked URLs to links
-        if (pfx.match(/\]\(|[="'`]/)) return m;
+        if (pfx.match(/\]\(|[="'`:]/)) return m;
         let sfx = "";
         if (url[url.length - 1].match(/[\.,;:]/)) {
           // move certain last characters out of the url
@@ -510,7 +515,10 @@
       src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
       m = m.replace(/ src=[^> ]*/, "");
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
-      // console.debug("img src", src, m);
+      // allow onImageRendering() to change src, and if so, put original as _src and add loading class
+      const _src = src;
+      src = onImageRendering(src);
+      if (src != _src) m = m.substring(0, m.length - 1) + ` _src="${_src}" _loading>`;
       return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}-${id}-${cacheIndex++}">`;
     });
 
@@ -893,13 +901,16 @@
         console.warn("img missing src");
         return;
       }
-      if (!img.hasAttribute("_cache_key") && !img.src.endsWith("loading.gif")) {
+      if (!img.hasAttribute("_cache_key")) {
         console.warn("img missing _cache_key (should be automatically added)");
         return;
       }
+      if (img.hasAttribute("_loading")) img.classList.add("loading");
+      onImageRendered(img);
       img.onload = () => {
         onResized(id, container, "img.onload");
         img.setAttribute("_loaded", Date.now().toString());
+        if (!img.hasAttribute("_loading")) img.classList.remove("loading");
       };
     });
 
@@ -1054,6 +1065,7 @@
         {onNext}
         onFocused={(focused) => onFocused(index, focused)}
         onEdited={(text) => onEdited(index, text)}
+        {onPastedImage}
         {onDone}
       />
     {:else}
@@ -1552,9 +1564,12 @@
     vertical-align: middle;
   }
   /* set default size/padding of loading images */
-  :global(.item img[src$="loading.gif"]) {
-    width: 120px;
-    padding: 10px;
+  :global(.item img.loading),
+  :global(.item img[_loading]) {
+    width: 32px;
+    height: 32px;
+    border: 1px dashed #999;
+    border-radius: 50%;
   }
   :global(.item :first-child) {
     margin-top: 0;

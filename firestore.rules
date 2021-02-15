@@ -31,3 +31,11 @@ service cloud.firestore {
 	  	}
 	}
 }
+service firebase.storage {
+  match /b/{bucket}/o {
+		match /{owner}/images/{hash} {
+      allow read: if owner == "anonymous" || request.auth.uid == owner;
+			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
+    }
+  }
+}
