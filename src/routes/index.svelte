@@ -2497,7 +2497,10 @@
     if (itemInitTime) return; // already initialized items
     itemInitTime = Date.now();
     items.forEach((item) => {
-      if (item.init) _item(item.id).eval("_init()", { include_deps: false, trigger: "init" });
+      if (!item.init) return;
+      try {
+        _item(item.id).eval("_init()", { include_deps: false, trigger: "init" });
+      } catch(e) {} // already logged, just continue init
     });
   }
 
