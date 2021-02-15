@@ -18,7 +18,6 @@ const sapperServer = express().use(
   compression({ threshold: 0 }),
   sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
-  // NOTE: /favicon.ico is returning 404 outside of localhost for unknown reasons (e.g. /icon.ico works)
   (req, res, next) => {
     const hostdir = get_hostdir(req);
     if (req.path == "/manifest.json") {

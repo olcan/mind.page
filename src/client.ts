@@ -16,3 +16,10 @@ window["_client_start_time"] = Math.round(performance.now());
 sapper.start({
   target: document.querySelector("#sapper"),
 });
+
+// disable service workers
+navigator.serviceWorker.getRegistrations().then(function (registrations) {
+  for (let registration of registrations) {
+    registration.unregister();
+  }
+});

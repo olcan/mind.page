@@ -1,3 +1,5 @@
+// WARNING: server workers are currently DISABLED in client.ts as they are so far useless and in fact appear to interfere with basic server functions such as serving of /favicon.ico (see TODO messages below) and appear to trigger errors in the service worker console (under Develop menu) that are only triggered in the cloud and have been very difficult to debug
+
 import { timestamp, files, shell } from "@sapper/service-worker";
 
 const ASSETS = `cache${timestamp}`;
