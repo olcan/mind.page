@@ -348,7 +348,7 @@
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
       let prefix = this.read_deep(
-        "js",
+        options["type"] || "js",
         Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
       );
       let evaljs = [prefix, js].join("\n").trim();
@@ -2499,8 +2499,13 @@
     items.forEach((item) => {
       if (!item.init) return;
       try {
-        _item(item.id).eval("_init()", { include_deps: false, trigger: "init" });
-      } catch(e) {} // already logged, just continue init
+        _item(item.id).eval("_init()", {
+          // if item has js_init block, use that, otherwise use js block without dependencies
+          type: extractBlock(item.text, "js_init") ? "js_init" : "js",
+          include_deps: false,
+          trigger: "init",
+        });
+      } catch (e) {} // already logged, just continue init
     });
   }
 
