@@ -491,7 +491,6 @@
         });
       } else if (item.type.startsWith("image")) {
         const file = item.getAsFile();
-        // insert image with src="blob:..."
         const url = URL.createObjectURL(file);
         const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
         // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);

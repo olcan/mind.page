@@ -71,6 +71,8 @@
   function onClick(e) {
     // ignore clicks on loading div
     if ((e.target as HTMLElement).closest(".loading")) return;
+    // ignore clicks on inputs
+    if (e.target.closest("input")) return;
     // console.debug(e.target);
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest("[_clickable]");
@@ -911,6 +913,36 @@
         onResized(id, container, "img.onload");
         img.setAttribute("_loaded", Date.now().toString());
         if (!img.hasAttribute("_loading")) img.classList.remove("loading");
+      };
+    });
+
+    // turn un-typed inputs into multiple file inputs
+    itemdiv.querySelectorAll("input:not([type])").forEach((input: HTMLInputElement) => {
+      input.type = "file";
+      input.multiple = true;
+    });
+
+    // set up file inputs to insert images into item
+    // NOTE: only the first file input is accepted and replaces all inputs
+    itemdiv.querySelectorAll("input[type=file]").forEach((input: HTMLInputElement) => {
+      input.accept = "image/*"; // accept only images
+      input.onchange = function (e: InputEvent) {
+        Promise.all(
+          Array.from(input.files).map((file) => Promise.resolve(onPastedImage(URL.createObjectURL(file), file)))
+        )
+          .then((fnames) => {
+            const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
+            const images = fnames
+              .map((fname) => {
+                return zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`;
+              })
+              .join("\n");
+            let item = window["_item"](id);
+            let text = item.read();
+            text = text.replace(/<input .*?type\s*=\s*["']?file.*?>|<input>/gi, images);
+            item.write(text, "" /* replace whole item*/);
+          })
+          .catch(console.error);
       };
     });
 
