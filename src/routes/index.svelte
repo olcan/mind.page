@@ -1231,7 +1231,8 @@
     readonly = anonymous && !admin();
     if (!e?.state) return; // for fragment (#id) hrefs
     if (!initTime) {
-      console.warn("onPopState before init");
+      // NOTE: this can happen when tab is restored, seems harmless so far
+      // console.warn("onPopState before init");
       return;
     }
     // console.debug("pop", e.state);
@@ -3364,6 +3365,8 @@
     padding-left: 4px;
   }
   #status .counts {
+    font-family: "Source Sans Pro", sans-serif;
+    font-size: 14px;
     position: absolute;
     right: 0;
     top: 0;
