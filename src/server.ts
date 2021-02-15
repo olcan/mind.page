@@ -7,20 +7,26 @@ import * as sapper from "@sapper/server";
 const { PORT, NODE_ENV } = process.env;
 const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
 
+function get_hostdir(req) {
+  // see https://stackoverflow.com/a/51200572 about x-forwarded-host
+  let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
+  globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
+  return ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
+}
+
 const sapperServer = express().use(
   compression({ threshold: 0 }),
+  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
+  // NOTE: /favicon.ico is returning 404 outside of localhost for unknown reasons (e.g. /icon.ico works)
   (req, res, next) => {
-    // see https://stackoverflow.com/a/51200572 about x-forwarded-host
-    let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
-    globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
-    const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
+    const hostdir = get_hostdir(req);
     if (req.path == "/manifest.json") {
       res.json({
         background_color: "#111",
         theme_color: "#111",
-        name: hostname,
-        short_name: hostname,
+        name: globalThis.hostname,
+        short_name: globalThis.hostname,
         display: "minimal-ui",
         start_url: "/",
         icons: [
@@ -45,11 +51,12 @@ const sapperServer = express().use(
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
     } else if (req.path == "/favicon.ico") {
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
+    } else if (req.path == "/icon.ico") {
+      res.sendFile(process.env["PWD"] + "/static/" + hostdir + "/favicon.ico");
     } else {
       next();
     }
   },
-  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   cookieParser(),
   (req, res, next) => {
     res.cookie = req.cookies["__session"] || "";

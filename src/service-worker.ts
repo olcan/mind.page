@@ -53,7 +53,16 @@ async function fetchAndCache(request: Request) {
 self.addEventListener("fetch", (event: FetchEvent) => {
   if (event.request.method !== "GET" || event.request.headers.has("range")) return;
 
+  // redirect /favicon.ico to /<host>/favicon.ico
+  // TODO: why does this need to be done here?
+  // TODO: how does service-worker work exactly?
+  // TODO: why does localhost console only log errors?
   const url = new URL(event.request.url);
+  if (url.pathname == "/favicon.ico") {
+    const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(url.hostname) ? url.hostname : "other";
+    event.respondWith(fetch("/" + hostdir + "/favicon.ico"));
+    return;
+  }
 
   // don't try to handle e.g. data: URIs
   const isHttp = url.protocol.startsWith("http");
