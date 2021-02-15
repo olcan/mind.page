@@ -51,13 +51,13 @@
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
     // https://www.w3schools.com/jsref/jsref_obj_regexp.asp
     return text.replace(
-      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|[\w'"]&gt;(?:(?!&gt;|&lt;)|$))/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|[\w'"]&gt;(?:(?!&gt;|&lt;)|$))/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
         else if ((begin == "$`" && end == "`$") || (begin == "$$`" && end == "`$$"))
           return pfx + `<span class="math">` + highlight(unescapeHTML(begin + content + end), "latex") + `</span>`;
-        else if (begin == "&lt;&lt;" && end == "&gt;&gt;")
+        else if ((begin == "&lt;&lt;" && end == "&gt;&gt;") || (begin == "@{" && end == "}@"))
           return (
             pfx +
             `<span class="macro"><span class="macro-delimiter">${begin}</span>` +

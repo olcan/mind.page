@@ -1329,7 +1329,7 @@
     item.lctext = text.toLowerCase();
     item.runnable = item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/);
     item.scripted = item.lctext.match(/<script.*?>/);
-    item.macroed = item.lctext.match(/<<.*?>>/);
+    item.macroed = item.lctext.match(/<<.*?>>/) || item.lctext.match(/@\{.*?\}@/);
 
     const tags = parseTags(item.lctext);
     item.tags = tags.all;

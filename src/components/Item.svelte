@@ -175,11 +175,11 @@
     }
     // console.debug("toHTML");
 
-    // evaluate inline <<macros>> first to ensure treatment just like non-macro content
+    // evaluate inline <<macros>>|@{macros}@ first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
     let hasMacroErrors = false;
     let macroIndex = 0;
-    text = text.replace(/(^|[^\\])<<(.*?)>>/g, (m, pfx, js) => {
+    const replaceMacro = (m, pfx, js) => {
       try {
         js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
         js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
@@ -199,7 +199,9 @@
         console.error(`macro error in item ${label || "id:" + id}: ${e}`);
         return pfx + `<span class="macro-error">MACRO ERROR: ${e}</span>`;
       }
-    });
+    };
+    text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
+    text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : "";
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
@@ -499,6 +501,7 @@
     text = text.replace(/(<code>.*?)\\\$`(.*?<\/code>)/g, "$1$$`$2"); // \$`
     text = text.replace(/(<code>.*?)\\\$\$`(.*?<\/code>)/g, "$1$$$$`$2"); // \$$`
     text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, "$1&lt;&lt;$2"); // \<<
+    text = text.replace(/(<code>.*?)\\@\{(.*?<\/code>)/g, "$1@{$2"); // \@{
 
     // wrap menu items in special .menu div, but exclude deps/dependents
     if (isMenu)
