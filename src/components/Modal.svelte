@@ -132,7 +132,7 @@
     padding: 20px;
     color: black;
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 400;
   }
   input {
     -webkit-appearance: none;
@@ -150,6 +150,7 @@
     margin-left: auto;
     width: fit-content;
     padding-top: 15px;
+    font-weight: 600;
   }
   .button {
     display: inline-flex;
