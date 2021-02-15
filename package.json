@@ -25,7 +25,8 @@
   "main": "lib/firebase/functions.js",
   "dependencies": {
     "compression": "^1.7.1",
-    "express": "4.17.1"
+    "express": "4.17.1",
+    "firebase-functions": "^3.13.1"
   },
   "devDependencies": {
     "@babel/core": "^7.0.0",
@@ -51,7 +52,6 @@
     "firebase": "^7.24.0",
     "firebase-admin": "^9.3.0",
     "firebase-auth": "^0.1.2",
-    "firebase-functions": "^3.13.1",
     "firebase-functions-test": "^0.2.0",
     "highlight.js": "^10.3.2",
     "lodash": "^4.17.20",
