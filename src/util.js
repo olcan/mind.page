@@ -1,6 +1,6 @@
 // from https://github.com/darkskyapp/string-hash/blob/master/index.js
 export function hashCode(str) {
-  let hash = 5381;
+  let hash = 5381; // see https://stackoverflow.com/q/10696223
   let i = str.length;
   while (i) hash = (hash * 33) ^ str.charCodeAt(--i);
   /* JavaScript does bitwise operations (like XOR, above) on 32-bit signed
