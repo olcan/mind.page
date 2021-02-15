@@ -42,7 +42,7 @@
   }
   h1 {
     font-size: 2.8em;
-    font-weight: 800;
+    font-weight: 900;
     margin: 0 0 0.5em 0;
   }
   p {
