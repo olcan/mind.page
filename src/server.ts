@@ -18,6 +18,7 @@ const sapperServer = express().use(
   compression({ threshold: 0 }),
   sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
+  // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     const hostdir = get_hostdir(req);
     if (req.path == "/manifest.json") {
@@ -50,7 +51,7 @@ const sapperServer = express().use(
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
     } else if (req.path == "/favicon.ico") {
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
-    } else if (req.path == "/icon.ico") {
+    } else if (req.path == "/icon.png") {
       res.sendFile(process.env["PWD"] + "/static/" + hostdir + "/favicon.ico");
     } else {
       next();

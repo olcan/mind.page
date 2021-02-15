@@ -10,6 +10,13 @@
   "hosting": {
     "public": "static",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "redirects": [
+      {
+        "source": "/favicon.ico",
+        "destination": "/icon.png",
+        "type": 302
+      }
+    ],
     "rewrites": [
       {
         "source": "**",
