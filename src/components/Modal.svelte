@@ -113,9 +113,11 @@
       selected_images.push(image);
       Promise.resolve(
         onPastedImage(url, file, (size) => {
+          if (selected_images[index]?.url != url) return; // cancelled
           selected_images[index].size = size;
         })
       ).then((fname) => {
+        if (selected_images[index]?.url != url) return; // cancelled
         selected_images[index].fname = fname;
         ready_image_count++;
       });
