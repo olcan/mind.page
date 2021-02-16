@@ -301,7 +301,7 @@
       text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
         // try to maintain markdown links, html attributes, other url strings, etc
         // NOTE: markdown parser may still convert naked URLs to links
-        if (pfx.match(/\]\(|[="'`:]/)) return m;
+        if (pfx.match(/\]\(|[="'`:]$/)) return m; // : can be from generated urls, e.g. blob:http://localhost//...
         let sfx = "";
         if (url[url.length - 1].match(/[\.,;:]/)) {
           // move certain last characters out of the url
