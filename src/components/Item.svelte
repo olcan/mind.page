@@ -432,6 +432,9 @@
         // replace URLs (except in lines that look like a reference-style link)
         if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str);
 
+        // break table with extra <br>\n to prevent leading pipe ambiguity (now required) and line-eating
+        if (!insideBlock && lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = "\n" + str;
+
         // close blockquotes with an extra \n before next line
         // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
         if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = "\n" + str;

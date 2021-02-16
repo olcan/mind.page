@@ -650,9 +650,9 @@
 {#if showButtons}
   <div class="buttons" class:focused>
     <!-- on:mousedown keeps focus on textarea and generally works better (e.g. allows us to refocus on iOS without going outside of scope of click handler) but we have to cancel subsequent click to avoid side effects (e.g. focus going back to editor after creating a new item) -->
-    <div class="clear" on:mousedown={onClear} on:click={cancel}>clear</div>
-    <div class="image" on:mousedown={onImage} on:click={cancel}>+img</div>
     <div class="create" on:mousedown={onCreate} on:click={cancel}>create</div>
+    <div class="image" on:mousedown={onImage} on:click={cancel}>+img</div>
+    <div class="clear" on:mousedown={onClear} on:click={cancel}>clear</div>
   </div>
 {/if}
 </div>
