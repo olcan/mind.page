@@ -81,7 +81,6 @@
     return modal.update(options);
   }
 
-
   // define window properties and functions
   if (isClient) {
     Object.defineProperty(window, "_user", {
@@ -490,7 +489,6 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
-  let hideIndex = Infinity;
   // NOTE: truncation removes items from the page completely and speeds up updates (e.g. when searching or tapping tags). It is safe to do as long as the truncation index does not vary too much, which can trigger problems with async scripts that are not implemented properly, e.g. that do not use resume/defer/etc and throw errors or invoke invalidate_cache when target elements go missing. Currently truncation index is fixed but can still effectively vary when hideIndex > truncateIndex, which seems relative safe as it concerns items lower on the page, and larger indices which are unlikely to be toggled as frequently as smaller indices.
   const truncateIndex = 50;
   let toggles = [];
@@ -814,8 +812,9 @@
   let editorChangePending = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
-  let hideIndexFromRanking = Infinity;
-  let hideIndexForSession = Infinity;
+  let hideIndex = 0;
+  let hideIndexFromRanking = 0;
+  let hideIndexForSession = 0;
 
   function onEditorChange(text: string) {
     // keep history entry 0 updated, reset index on changes
@@ -1003,23 +1002,6 @@
       if (!items[index].log) items[index].time = now + 1; // prioritize
     });
 
-    // update history, replace unless current state is final (from tag click)
-    if (history.state.editorText != editorText) {
-      // need to update history
-      const state = {
-        editorText: editorText,
-        unsavedTimes: _.compact(
-          items.map((item) => (item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null))
-        ),
-        final: !editorText || finalizeStateOnEditorChange,
-      };
-      // console.debug(history.state.final ? "push" : "replace", state);
-      if (history.state.final && !replaceStateOnEditorChange) history.pushState(state, editorText);
-      else history.replaceState(state, editorText);
-    }
-    finalizeStateOnEditorChange = false; // processed above
-    replaceStateOnEditorChange = false; // processed above
-
     // insert dummy item with time=now to determine (below) index after which items are ranked purely by time
     items.push({
       dotted: false,
@@ -1153,11 +1135,37 @@
     }
     // console.debug(toggles);
 
+    // update history, replace unless current state is final (from tag click)
+    if (history.state.editorText != editorText) {
+      // need to update history
+      const state = {
+        editorText: editorText,
+        unsavedTimes: _.compact(
+          items.map((item) => (item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null))
+        ),
+        hideIndex: hideIndex,
+        final: !editorText || finalizeStateOnEditorChange,
+      };
+      // console.debug(history.state.final ? "push" : "replace", state);
+      if (history.state.final && !replaceStateOnEditorChange) history.pushState(state, editorText);
+      else history.replaceState(state, editorText);
+    }
+    finalizeStateOnEditorChange = false; // processed above
+    replaceStateOnEditorChange = false; // processed above
+
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     setTimeout(updateDotted, 0); // show/hide dotted/undotted items
 
     if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
+  }
+
+  function toggleItems(index: number) {
+    hideIndex = index;
+    // also update history
+    const state = history.state;
+    state.hideIndex = index;
+    history.replaceState(state, editorText);
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -1262,6 +1270,8 @@
     }
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
+    // restore hide index _after_ onEditorChange which sets it to default index given query
+    if (typeof e.state.hideIndex == "number") hideIndex = e.state.hideIndex;
   }
 
   function resetUser() {
@@ -3115,7 +3125,7 @@
             {#if item.index == hideIndex}
               {#each toggles as toggle}
                 {#if hideIndex < toggle.end}
-                  <div class="toggle show" on:click={() => (hideIndex = toggle.end)}>
+                  <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
                     ▼ {itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
                     <span class="count">show {toggle.end - toggle.start} items</span>
                   </div>
@@ -3124,7 +3134,7 @@
             {:else if item.index < hideIndex}
               {#each toggles as toggle}
                 {#if item.index == toggle.start}
-                  <div class="toggle hide" on:click={() => (hideIndex = toggle.start)}>
+                  <div class="toggle hide" on:click={() => toggleItems(toggle.start)}>
                     ▲ {itemTimeString(items[toggle.start].time)}
                     <span class="count">hide {Math.min(hideIndex, items.length) - toggle.start} items</span>
                   </div>
