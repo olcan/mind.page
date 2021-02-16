@@ -4,7 +4,15 @@
   // Markdown library requires import as ESM (ECMAScript module)
   // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import marked from "marked";
-  import { highlight, extractBlock, hashCode, parseTags, renderTag, invalidateElemCache } from "../util.js";
+  import {
+    highlight,
+    extractBlock,
+    hashCode,
+    parseTags,
+    renderTag,
+    numberWithCommas,
+    invalidateElemCache,
+  } from "../util.js";
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
@@ -48,9 +56,7 @@
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
-  export let onPastedImage = (url: string, file: File): Promise<string> => {
-    return null;
-  };
+  export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
   export let onResized = (id, container, trigger: string) => {};
@@ -107,6 +113,13 @@
     e.stopPropagation();
     e.preventDefault();
     onEditing(index, (editing = false), true /* cancelled */);
+  }
+
+  let editor;
+  function onImageClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    editor.insertImages();
   }
 
   function onDeleteClick(e) {
@@ -930,10 +943,22 @@
     itemdiv.querySelectorAll("input[type=file]").forEach((input: HTMLInputElement) => {
       input.accept = "image/*"; // accept only images
       input.onchange = function (e: InputEvent) {
+        window["_modal"]({ content: "Inserting selected images ..." });
+        let total_size = 0;
         Promise.all(
-          Array.from(input.files).map((file) => Promise.resolve(onPastedImage(URL.createObjectURL(file), file)))
+          Array.from(input.files).map((file) =>
+            Promise.resolve(
+              onPastedImage(URL.createObjectURL(file), file, (size) => {
+                total_size += size;
+                window["_update_modal"]({
+                  content: `Inserting selected images (${numberWithCommas(Math.ceil(total_size / 1024))} KB) ...`,
+                });
+              })
+            )
+          )
         )
-          .then((fnames) => {
+          .then((fnames: any) => {
+            setTimeout(window["_close_modal"], 0); // increase delay for testing
             const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
             const images = fnames
               .map((fname) => {
@@ -1081,18 +1106,17 @@
   >
     {#if editing}
       <div class="edit-menu">
-        <span class="run" on:click={onRunClick}>run</span><span class="save" on:click={onSaveClick}>save</span><span
-          class="cancel"
-          on:click={onCancelClick}>cancel</span
-        ><span class="delete" on:click={onDeleteClick}>delete</span><span
-          class="index"
-          class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}>{index + 1}</span
-        >
+        <div class="run" on:click={onRunClick}>run</div>
+        <div class="save" on:click={onSaveClick}>save</div>
+        <div class="image" on:click={onImageClick}>+img</div>
+        <div class="cancel" on:click={onCancelClick}>cancel</div>
+        <div class="delete" on:click={onDeleteClick}>delete</div>
+        <div class="index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
       </div>
 
       <Editor
         {id}
+        bind:this={editor}
         bind:text
         bind:focused
         {onRun}
@@ -1201,6 +1225,7 @@
   }
 
   .edit-menu {
+    display: flex;
     position: absolute;
     top: -20px;
     right: -1px;
@@ -1212,28 +1237,19 @@
     color: black;
     font-size: 15px;
     font-weight: 600;
+    border-radius: 5px;
+    overflow: hidden;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  .container.runnable .edit-menu > .run {
-    border-top-left-radius: 5px;
-    border-bottom-left-radius: 5px;
-  }
-  .container:not(.runnable) .edit-menu > .save {
-    border-top-left-radius: 5px;
-    border-bottom-left-radius: 5px;
-  }
-  .edit-menu > span:last-child {
-    border-top-right-radius: 5px;
-    border-bottom-right-radius: 5px;
-  }
 
-  .index,
   .run,
-  .delete,
+  .save,
+  .image,
   .cancel,
-  .save {
+  .delete,
+  .index {
     background: #666;
     display: inline-flex;
     cursor: pointer;

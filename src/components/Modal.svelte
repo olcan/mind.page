@@ -1,42 +1,63 @@
 <script lang="ts">
   import marked from "marked";
+  import { numberWithCommas } from "../util.js";
+  export let onPastedImage = (url: string, file: File, size_handler = null) => {};
 
   let content = "";
   let confirm = "";
   let cancel = "";
   let input = null;
   let password = true;
+  let images = false;
   let canConfirm = (input: string) => input.length > 0;
   let onConfirm = (input = null) => {};
   let onCancel = () => {};
-  let background = ""; // can be "confirm" or "cancel"
+  let background = ""; // can be "confirm" or "cancel" (empty means block)
 
+  let selected_images = []; // used internally for file input
+  let ready_image_count = 0;
   let visible = false;
   let enabled = false;
-  $: enabled = input == null || canConfirm(input);
+  $: enabled =
+    (input == null || canConfirm(input)) &&
+    (!images || (selected_images.length > 0 && ready_image_count == selected_images.length));
 
-  const defaults = { content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel, background };
+  const defaults = { content, confirm, cancel, input, password, images, canConfirm, onConfirm, onCancel, background };
 
   let _promise, _resolve;
   export function show(options) {
     const last_promise = _promise;
     return (_promise = new Promise((resolve) => {
+      _resolve = resolve;
       Promise.resolve(last_promise).then(() => {
-        _resolve = resolve;
-        ({ content, confirm, cancel, input, password, canConfirm, onConfirm, onCancel, background } = Object.assign(
-          { ...defaults },
-          options
-        ));
+        ({
+          content,
+          confirm,
+          cancel,
+          input,
+          password,
+          images,
+          canConfirm,
+          onConfirm,
+          onCancel,
+          background,
+        } = Object.assign({ ...defaults }, options));
         // console.debug(options, confirm, cancel);
+        selected_images = [];
+        ready_image_count = 0;
         visible = true;
       });
     }).finally(() => (_promise = null)));
   }
 
-  import { tick } from "svelte";
+  export function update(options) {
+    content = options.content;
+  }
+
   export function hide() {
     visible = false;
-    return tick();
+    if (_resolve) _resolve();
+    return Promise.resolve(_promise);
   }
 
   export function isVisible() {
@@ -45,21 +66,22 @@
 
   function _onConfirm() {
     if (!enabled) return;
-    hide().then(() => {
-      onConfirm(input);
-      _resolve(input != null ? input : true);
-    });
+    visible = false;
+    const out = images ? selected_images : input != null ? input : true;
+    onConfirm(out);
+    _resolve(out);
   }
 
   function _onCancel() {
     if (!cancel) return;
-    hide().then(() => {
-      onCancel();
-      _resolve(input != null ? null : false);
-    });
+    visible = false;
+    const out = images ? [] : input != null ? null : false;
+    onCancel();
+    _resolve(out);
   }
 
-  function onBackgroundClick() {
+  function onBackgroundClick(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
     if (background.toLowerCase() == "confirm") _onConfirm();
     else if (background.toLowerCase() == "cancel") _onCancel();
   }
@@ -73,6 +95,31 @@
       e.stopPropagation(); // stop enter propagation
       e.preventDefault();
     }
+  }
+
+  function onFilesSelected(e) {
+    let input = e.target as HTMLInputElement;
+    selected_images = [];
+    ready_image_count = 0;
+    Array.from(input.files).map((file, index) => {
+      const url = URL.createObjectURL(file);
+      let image = {
+        url: url,
+        name: file.name,
+        type: file.type,
+        fname: null,
+        size: null,
+      };
+      selected_images.push(image);
+      Promise.resolve(
+        onPastedImage(url, file, (size) => {
+          selected_images[index].size = size;
+        })
+      ).then((fname) => {
+        selected_images[index].fname = fname;
+        ready_image_count++;
+      });
+    });
   }
 </script>
 
@@ -90,14 +137,38 @@
           setTimeout(() => document.querySelector(".modal input").focus());
         </script>
       {/if}
-      <div class="buttons">
-        {#if cancel}<div class="button cancel" on:click={_onCancel}>{cancel}</div>{/if}
-        {#if confirm}
-          <div class="button confirm" class:enabled on:click={_onConfirm}>
-            {confirm}
+      {#if images}
+        <label class="button">
+          Select Images
+          <input type="file" accept="image/*" multiple on:input={onFilesSelected} />
+        </label>
+        {#if selected_images.length > 0}
+          <div class="uploads">
+            {#each selected_images as image (image.url)}
+              {#if image.fname}
+                Ready to insert "{image.name}" ({numberWithCommas(Math.ceil(image.size / 1024))} KB) as "{image.fname}".
+              {:else if image.size != null}
+                {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ({numberWithCommas(
+                  Math.ceil(image.size / 1024)
+                )} KB) ...
+              {:else}
+                {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ...
+              {/if}
+              <br />
+            {/each}
           </div>
         {/if}
-      </div>
+      {/if}
+      {#if confirm || cancel}
+        <div class="buttons">
+          {#if cancel}<div class="button cancel" on:click={_onCancel}>{cancel}</div>{/if}
+          {#if confirm}
+            <div class="button confirm" class:enabled on:click={_onConfirm}>
+              {confirm}
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
   {#if input == null}
@@ -112,6 +183,7 @@
 <style>
   .background {
     position: fixed;
+    z-index: 10;
     top: 0;
     left: 0;
     display: flex;
@@ -145,6 +217,23 @@
     box-sizing: border-box;
     margin-top: 10px;
   }
+  input[type="file"] {
+    display: none;
+  }
+  label.button {
+    margin-left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 15px;
+    font-weight: 600;
+    font-size: 20px;
+  }
+  .uploads {
+    padding: 10px 0;
+    font-size: 16px;
+    color: #666;
+  }
+
   .buttons {
     font-size: 20px;
     margin-left: auto;

@@ -9,9 +9,7 @@
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
-  export let onPastedImage = (url: string, file: File): Promise<string> => {
-    return null;
-  };
+  export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onDone = (text: string, e: any, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
   export let onPrev = () => {};
@@ -19,7 +17,7 @@
 
   import _ from "lodash";
   // import he from "he";
-  import { highlight, parseTags } from "../util.js";
+  import { highlight, parseTags, numberWithCommas } from "../util.js";
 
   const placeholder = " ";
   let editor: HTMLDivElement;
@@ -223,6 +221,33 @@
     html = html.replace(/([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g, '<span class="highlight $3">$1</span>$2');
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
+  }
+
+  export function insertImages() {
+    window["_modal"]({
+      content:
+        window["_user"].uid == "anonymous"
+          ? "Select images to insert. Since you are not signed in, images **will not be uploaded** and will be discarded when you close the page. Once you sign in, all uploads will be encrypted with your secret phrase, viewable **only by you, on your devices.**"
+          : "Select images to upload for insertion. Uploads are encrypted with your secret phrase, viewable **only by you, on your devices.**",
+      images: true,
+      confirm: "Insert Images",
+      cancel: "Cancel",
+      background: "cancel",
+      onCancel: () => {
+        textarea.focus();
+      },
+      onConfirm: (images) => {
+        const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
+        const tags = images
+          .map((image) => {
+            return zoom == 1.0 ? `<img src="${image.fname}">` : `<img src="${image.fname}" style="zoom:${zoom}">`;
+          })
+          .join(" ");
+        textarea.focus();
+        document.execCommand("insertText", false, tags);
+        onInput();
+      },
+    });
   }
 
   let enterStart = -1;
@@ -432,6 +457,12 @@
       onInput();
       return;
     }
+
+    // insert images on Alt+Cmd+i
+    if (key == "KeyI" && e.metaKey && e.shiftKey) {
+      e.preventDefault();
+      insertImages();
+    }
   }
 
   function onKeyUp(e: any) {
@@ -496,9 +527,18 @@
         // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
         // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
         // onPastedImage(url, file);
-        Promise.resolve(onPastedImage(url, file))
+        window["_modal"]({ content: "Inserting pasted image ..." });
+        Promise.resolve(
+          onPastedImage(url, file, (size) => {
+            window["_update_modal"]({
+              content: `Inserting pasted image (${numberWithCommas(Math.ceil(size / 1024))} KB) ...`,
+            });
+          })
+        )
           .then((fname) => {
+            setTimeout(window["_close_modal"], 0); // increase delay for testing
             const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`;
+            textarea.focus();
             document.execCommand("insertText", false, img);
           })
           .catch(console.error);
@@ -539,6 +579,12 @@
     textarea.selectionEnd = textarea.value.length;
     document.execCommand("forwardDelete");
     onInput();
+  }
+
+  function onImage(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    insertImages();
   }
 
   import { afterUpdate, onMount, onDestroy } from "svelte";
@@ -599,6 +645,7 @@
   <div class="buttons" class:focused>
     <!-- on:mousedown keeps focus on textarea -->
     <div class="clear" on:mousedown={onClear}>clear</div>
+    <div class="image" on:mousedown={onImage}>+img</div>
     <div class="create" on:click={onCreate}>create</div>
   </div>
 {/if}
@@ -681,14 +728,16 @@
     opacity: 0; /* allow completion of click events */
   }
   .clear,
+  .image,
   .create {
-    height: 25px;
+    height: 23px;
     padding: 0 8px;
     display: inline-flex;
     cursor: pointer;
     align-items: center;
   }
-  .clear {
+  .clear,
+  .image {
     border-right: 1px solid black;
   }
   .create {

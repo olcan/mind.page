@@ -71,6 +71,17 @@
     return modal.show(options);
   }
 
+  // _close_modal closes modal manually
+  function _close_modal(options) {
+    return modal.hide();
+  }
+
+  // _update_modal updates existing modal without closing it
+  function _update_modal(options) {
+    return modal.update(options);
+  }
+
+
   // define window properties and functions
   if (isClient) {
     Object.defineProperty(window, "_user", {
@@ -96,6 +107,8 @@
     window["_item"] = _item;
     window["_items"] = _items;
     window["_modal"] = _modal;
+    window["_close_modal"] = _close_modal;
+    window["_update_modal"] = _update_modal;
   }
 
   // private function for looking up item given its id
@@ -626,7 +639,7 @@
 
   let images = new Map<string, string>(); // permanent fname to temporary url
 
-  function onPastedImage(url: string, file: File): Promise<string> {
+  function onPastedImage(url: string, file: File, size_handler = null) {
     console.debug("pasted image", url);
     const start = Date.now();
     return new Promise((resolve, reject) => {
@@ -634,6 +647,7 @@
       reader.readAsBinaryString(file);
       reader.onload = (e) => {
         let str = e.target.result as string;
+        if (size_handler) size_handler(str.length);
         const hash = hashCode(str).toString();
         const fname = `${user.uid}/images/${hash}`; // short fname is just hash
         if (readonly) images.set(fname, url); // skip upload
@@ -3195,7 +3209,7 @@
   </script>
 {/if}
 
-<Modal bind:this={modal} />
+<Modal bind:this={modal} {onPastedImage} />
 
 <svelte:window
   on:keydown={onKeyDown}
