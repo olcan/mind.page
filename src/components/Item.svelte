@@ -424,7 +424,7 @@
                 reltag = "#…" + tag.substring(firstTerm.length);
               return (
                 `${pfx}<mark${classNames} title="${tag}" onmousedown=` +
-                `"handleTagClick('${id}','${tag}','${reltag}',event)">` +
+                `"handleTagClick('${id}','${tag}','${reltag}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
                 `${renderTag(reltag)}</mark>`
               );
             });
@@ -481,7 +481,7 @@
         else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
-        return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)">${text}</mark>`;
+        return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`;
       }
       return `<a target="_blank" title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };

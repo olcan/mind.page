@@ -1919,7 +1919,7 @@
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
         textarea.focus();
-      }, 0);
+      });
     }
 
     encryptItem(itemToSave)
@@ -1955,7 +1955,7 @@
                 textarea.selectionStart = selectionStart;
                 textarea.selectionEnd = selectionEnd;
                 textarea.focus();
-              }, 0);
+              });
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
               firestore()
