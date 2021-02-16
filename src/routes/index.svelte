@@ -817,6 +817,9 @@
   let hideIndexForSession = 0;
 
   function onEditorChange(text: string) {
+    window["_mindboxLastModified"] = Date.now(); // for highlighting
+    window["_highlight_counts"] = {};
+
     // keep history entry 0 updated, reset index on changes
     if (text != sessionHistory[sessionHistoryIndex]) {
       sessionHistoryIndex = 0;
@@ -3185,6 +3188,7 @@
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
                 dotted={item.dotted}
+                pinned={item.pinned}
                 runnable={item.runnable}
                 scripted={item.scripted}
                 macroed={item.macroed}
@@ -3516,6 +3520,12 @@
   }
 
   .toggle + .toggle {
+    display: none;
+  }
+
+  /* hide section separators and toggles after any items hiddenPendingUpdate */
+  :global(.super-container.hiddenPendingUpdate ~ .section-separator),
+  :global(.super-container.hiddenPendingUpdate ~ .toggle) {
     display: none;
   }
 
