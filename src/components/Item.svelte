@@ -1116,12 +1116,12 @@
   >
     {#if editing}
       <div class="edit-menu">
-        <div class="run" on:click={onRunClick}>run</div>
-        <div class="save" on:click={onSaveClick}>save</div>
-        <div class="image" on:click={onImageClick}>+img</div>
-        <div class="cancel" on:click={onCancelClick}>cancel</div>
-        <div class="delete" on:click={onDeleteClick}>delete</div>
-        <div class="index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
+        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+        <div class="button save" on:click={onSaveClick}>save</div>
+        <div class="button image" on:click={onImageClick}>+img</div>
+        <div class="button cancel" on:click={onCancelClick}>cancel</div>
+        <div class="button delete" on:click={onDeleteClick}>delete</div>
+        <div class="button index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
       </div>
 
       <Editor
@@ -1139,11 +1139,8 @@
       />
     {:else}
       <div class="item-menu">
-        <span class="run" on:click={onRunClick}>run</span><span
-          class="index"
-          class:matching={matchingTerms.length > 0}
-          on:click={onIndexClick}>{index + 1}</span
-        >
+        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+        <div class="button index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
@@ -1218,25 +1215,42 @@
     color: black;
     font-size: 15px;
     font-weight: 600;
+    /* outer border causes odd cutoff on right side, so we cut off at the buttons */
+    /* border-radius: 5px; */
+    /* overflow: hidden; */
     box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  .container.runnable .item-menu > .run {
+  .button {
+    background: #666;
+    display: inline-flex;
+    cursor: pointer;
+    align-items: center;
+    border-right: 1px solid black;
+    height: 25px;
+    padding: 0 8px;
+  }
+  .button:first-child {
+    border-top-left-radius: 5px;
     border-bottom-left-radius: 5px;
   }
-  .container:not(.runnable) .item-menu > .index {
-    border-bottom-left-radius: 5px;
-  }
-  .item-menu > span:last-child {
+  .button:last-child {
     border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
   }
   .bordered .item-menu {
     top: 0;
     right: 0;
   }
-  .bordered .item-menu > span:last-child {
+  .item-menu > .button:first-child {
+    border-top-left-radius: 0;
+  }
+  .item-menu > .button:last-child {
+    border-bottom-right-radius: 0;
+  }
+  .bordered .item-menu > .button:last-child {
     border-top-right-radius: 4px;
   }
 
@@ -1253,27 +1267,12 @@
     color: black;
     font-size: 15px;
     font-weight: 600;
-    border-radius: 5px;
-    overflow: hidden;
+    box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
 
-  .run,
-  .save,
-  .image,
-  .cancel,
-  .delete,
-  .index {
-    background: #666;
-    display: inline-flex;
-    cursor: pointer;
-    align-items: center;
-    border-right: 1px solid black;
-    height: 25px;
-    padding: 0 8px;
-  }
   .index {
     padding: 0 4px;
     border: 0;
