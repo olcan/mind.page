@@ -529,6 +529,7 @@
     totalItemHeight = 0;
     lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
+    // showDotted = false;
 
     items.forEach((item, index) => {
       item.lastIndex = index;
@@ -536,6 +537,7 @@
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
       if (item.editing) editingItems.push(index);
+      if (item.dotted && item.editing) showDotted = true;
       if (item.focused) focusedItem = index;
 
       let lastItem = items[index - 1];
@@ -2453,22 +2455,6 @@
     setTimeout(() => textArea(index + inc).focus(), 0);
   }
 
-  function updateDotted() {
-    if (!consolediv) return; // can happen during login process
-    // auto-hide dotted items (and console) when empty
-    if (dotCount == 0) showDotted = false;
-    // force show dotted items when any of them are editing
-    if (editingItems.findIndex((i) => items[i].dotted) >= 0) showDotted = true;
-    (document.querySelector("span.dots") as HTMLElement).style.opacity = "1";
-    (document.querySelector("span.dots") as HTMLElement).style.display = showDotted ? "none" : "block";
-    (document.querySelector("span.triangle") as HTMLElement).style.display = showDotted ? "block" : "none";
-    document.querySelectorAll(".dotted").forEach((dotted) => {
-      // we toggle "hidden" class which keeps item on page and allows height calculation
-      // (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
-      (dotted as HTMLElement).classList.toggle("hidden", !showDotted);
-    });
-  }
-
   let lastScrollTime = 0;
   let showDotted = false;
   function onScroll() {
@@ -2483,8 +2469,11 @@
       return;
     }
     e.stopPropagation();
+    if (showDotted && editingItems.map((index) => items[index].editing).includes(true)) {
+      alert("can not minimize items while editing");
+      return;
+    }
     showDotted = !showDotted;
-    updateDotted();
   }
 
   function onConsoleClick(e) {
@@ -2683,7 +2672,6 @@
       init_log(`rendered ${items.length} items`);
       rendered = true;
     });
-    tick().then(updateDotted); // update (hide) dotted items
     init_log(`initialized ${items.length} items`);
     initialized = true;
     resolve_init();
@@ -3024,8 +3012,11 @@
               summaryelem.classList.add("console-" + verb);
               summarydiv.appendChild(summaryelem);
 
-              // if console is hidden, make sure summary is visible
-              if (consolediv.style.display == "none") summarydiv.style.visibility = "visible";
+              // if console is hidden, make sure summary is visible and clickable
+              if (consolediv.style.display == "none") {
+                summarydiv.style.visibility = "visible";
+                summarydiv.style.cursor = "pointer";
+              }
 
               // auto-remove after 15 seconds ...
               setTimeout(() => {
@@ -3035,6 +3026,7 @@
                 if (consolediv.childNodes.length == 0) {
                   consolediv.style.display = "none";
                   summarydiv.style.visibility = "visible";
+                  summarydiv.style.cursor = "auto";
                 }
               }, statusLogExpiration);
             };
@@ -3163,12 +3155,17 @@
                 />
               {/if}
             </div>
-            <div id="status" on:click={onStatusClick}>
+            <div id="status" class:hasDots={dotCount > 0} on:click={onStatusClick}>
               <span id="console-summary" on:click={onConsoleSummaryClick} />
-              <span class="dots">
-                {#each { length: dotCount } as _, index}<span class:matching={items[index].matching}>•</span>{/each}
-              </span>
-              <span class="triangle"> ▲ </span>
+              {#if dotCount > 0}
+                {#if showDotted}
+                  <div class="triangle">▲</div>
+                {:else}
+                  <div class="dots">
+                    {#each { length: dotCount } as _, index}<span class:matching={items[index].matching}>•</span>{/each}
+                  </div>
+                {/if}
+              {/if}
               {#if items.length > 0}
                 <div class="counts">
                   {#if matchingItemCount > 0}
@@ -3231,7 +3228,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
-                hidden={item.index >= hideIndex}
+                hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
                 showLogs={item.showLogs}
                 height={item.height}
                 time={item.time}
@@ -3251,7 +3248,6 @@
                 createTime={item.createTime}
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
-                dotted={item.dotted}
                 aboveTheFold={item.aboveTheFold}
                 runnable={item.runnable}
                 scripted={item.scripted}
@@ -3440,7 +3436,6 @@
     font-weight: 500;
     font-size: 12px;
     color: #999;
-    cursor: pointer;
     position: relative;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -3457,6 +3452,10 @@
     text-align: left;
     overflow: hidden;
     padding-left: 4px;
+    cursor: pointer;
+  }
+  #status.hasDots {
+    cursor: pointer;
   }
   #status .dots {
     color: #666;

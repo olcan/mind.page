@@ -39,7 +39,6 @@
   export let createTime: number;
   export let depsString: string;
   export let dependentsString: string;
-  export let dotted: boolean;
   export let aboveTheFold: boolean;
   export let runnable: boolean;
   export let scripted: boolean;
@@ -1091,7 +1090,6 @@
 <div
   class="super-container"
   id={"super-container-" + id}
-  class:dotted
   class:editing
   class:hidden
   class:hiddenPendingUpdate
@@ -1187,6 +1185,7 @@
     position: relative;
     padding: 4px 0;
     padding-left: 1px; /* avoid touching window border, looks better on the mac */
+    pointer-events: none; /* pointer events are left to .container */
   }
   .super-container.editing:not(.timed) {
     padding-top: 24px; /* extra space for .edit-menu */
@@ -1206,6 +1205,7 @@
     background: #111;
     border: 1px solid #111;
     box-sizing: border-box;
+    pointer-events: all;
   }
   .admin {
     border: 1px dashed #444;
