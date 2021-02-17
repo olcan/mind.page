@@ -715,19 +715,20 @@
     // NOTE: because highlights can be out-of-order, we always highlight priority items
     const maxHighlightsPerTerm = aboveTheFold ? Infinity : Infinity; // no limit for now
     hiddenPendingUpdate = !aboveTheFold;
+    // remove previous highlights or related elements
+    itemdiv.querySelectorAll("span.highlight").forEach((span: HTMLElement) => {
+      // span.replaceWith(span.firstChild); // seems to scale beter
+      span.outerHTML = span.innerHTML;
+    });
+    itemdiv.querySelectorAll("mark div").forEach((spacer) => {
+      spacer.remove();
+    });
+    itemdiv.querySelectorAll("mark.matching").forEach((mark) => {
+      mark.classList.remove("matching");
+    });
 
     const highlightClosure = () => {
-      if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) {
-        // if we are cancelling and no other dispatch yet, we need to dispatch an unhide just in case
-        if (highlightDispatchIndex == highlightDispatchCount - 1) {
-          setTimeout(() => {
-            if (highlightDispatchIndex == highlightDispatchCount - 1) hiddenPendingUpdate = false;
-          }, 1000);
-        }
-        return;
-      }
-      if (highlightDispatchIndex != highlightDispatchCount - 1) return; // cancelled
-      let highlight_counts = window["_highlight_counts"];
+      if (highlightDispatchIndex != highlightDispatchCount - 1) return; // cancelled due to other dispatch
 
       // if mindbox was modified recently, postpone up to 500ms
       const timeSinceMindboxModified = Date.now() - window["_mindboxLastModified"];
@@ -736,17 +737,9 @@
         return;
       }
 
-      // remove previous highlights or related elements
-      itemdiv.querySelectorAll("span.highlight").forEach((span: HTMLElement) => {
-        // span.replaceWith(span.firstChild); // seems to scale beter
-        span.outerHTML = span.innerHTML;
-      });
-      itemdiv.querySelectorAll("mark div").forEach((spacer) => {
-        spacer.remove();
-      });
-      itemdiv.querySelectorAll("mark.matching").forEach((mark) => {
-        mark.classList.remove("matching");
-      });
+      // show item again, but cancel highlights if itemdiv is missing or mindbox modified
+      hiddenPendingUpdate = false;
+      if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) return;
 
       let terms = highlightTerms.split(" ").filter((t) => t);
       if (label) {
@@ -761,9 +754,8 @@
         });
       }
 
-      // setTimeout(() => (hiddenPendingUpdate = false));
-      hiddenPendingUpdate = false;
       if (terms.length == 0) return;
+      let highlight_counts = window["_highlight_counts"];
 
       let treeWalker = document.createTreeWalker(itemdiv, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
         acceptNode: function (node) {

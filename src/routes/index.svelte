@@ -988,7 +988,8 @@
       // item is considered matching if primary terms match
       // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
       // (this is consistent with .index.matching in Item.svelte)
-      if (item.matchingTerms.length > 0) matchingItemCount++;
+      item.matching = item.matchingTerms.length > 0;
+      if (item.matching) matchingItemCount++;
 
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
@@ -1118,12 +1119,12 @@
     toggles = [];
 
     // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
-    const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
-    const belowFoldIndex = _.findLastIndex(items, (item) => item.aboveTheFold) + 1;
+    const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned || item.editing) + 1;
+    const belowFoldIndex = _.findLastIndex(items, (item) => item.aboveTheFold || item.editing) + 1;
     if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
       toggles.push({
         start: unpinnedIndex,
-        end: belowFoldIndex,
+        end: Math.min(belowFoldIndex, hideIndexFromRanking),
         positionBased: true,
       });
     }
@@ -1131,14 +1132,14 @@
       let lastToggleIndex = belowFoldIndex;
       [0, 10, 30, 50, 100, 200, 500, 1000].forEach((toggleIndex) => {
         if (lastToggleIndex >= hideIndexFromRanking) return;
-        toggleIndex += belowFoldIndex; // exclude indices aboveTheFold
         toggles.push({
           start: lastToggleIndex,
-          end: Math.min(toggleIndex, hideIndexFromRanking),
+          end: Math.min(belowFoldIndex + toggleIndex, hideIndexFromRanking),
           positionBased: true,
         });
-        lastToggleIndex = toggleIndex;
+        lastToggleIndex = belowFoldIndex + toggleIndex;
       });
+      if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking;
     }
 
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
@@ -2605,6 +2606,7 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
+      item.matching = false;
       item.tagMatches = 0;
       item.labelMatch = false;
       item.prefixMatch = false;
@@ -3166,7 +3168,7 @@
             <div id="status" on:click={onStatusClick}>
               <span id="console-summary" on:click={onConsoleSummaryClick} />
               <span class="dots">
-                {#each { length: dotCount } as _}•{/each}
+                {#each { length: dotCount } as _, index}<span class:matching={items[index].matching}>•</span>{/each}
               </span>
               <span class="triangle"> ▲ </span>
               {#if items.length > 0}
@@ -3470,7 +3472,8 @@
     color: #666;
     font-size: 80%;
   }
-  #status .counts .matching {
+  #status .counts .matching,
+  #status .dots .matching {
     color: #9f9;
   }
 
