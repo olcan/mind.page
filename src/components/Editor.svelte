@@ -650,9 +650,9 @@
 {#if showButtons}
   <div class="buttons" class:focused>
     <!-- on:mousedown keeps focus on textarea and generally works better (e.g. allows us to refocus on iOS without going outside of scope of click handler) but we have to cancel subsequent click to avoid side effects (e.g. focus going back to editor after creating a new item) -->
-    <div class="create" on:mousedown={onCreate} on:click={cancel}>create</div>
-    <div class="image" on:mousedown={onImage} on:click={cancel}>+img</div>
-    <div class="clear" on:mousedown={onClear} on:click={cancel}>clear</div>
+    <div class="button create" on:mousedown={onCreate} on:click={cancel}>create</div>
+    <div class="button image" on:mousedown={onImage} on:click={cancel}>+img</div>
+    <div class="button clear" on:mousedown={onClear} on:click={cancel}>clear</div>
   </div>
 {/if}
 </div>
@@ -715,35 +715,39 @@
     position: absolute;
     top: -15px; /* -15px touches browser bar, -14px leaves 1px of background visible */
     right: -2px;
-    background: #666;
     color: black;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    /* border-radius: 5px; */ /* round all borders if leaving space on top */
-    border-radius: 0 0 5px 5px;
     font-size: 15px;
     font-weight: 600;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    overflow: hidden;
+    /* radius is at the buttons (same reason as .item-menu and .edit-menu in Item.svelte)
+    /* border-radius: 5px; */ /* round all borders if leaving space on top */
+    /* border-radius: 0 0 5px 5px; */
+    /* overflow: hidden; */
   }
   .buttons:not(.focused) {
     opacity: 0; /* allow completion of click events */
   }
-  .clear,
-  .image,
-  .create {
+  .button {
     height: 23px;
     padding: 0 8px;
     display: inline-flex;
+    background: #666;
     cursor: pointer;
     align-items: center;
   }
-  .clear,
-  .image {
+  .button:first-child {
+    border-bottom-left-radius: 5px;
+  }
+  .button:last-child {
+    border-bottom-right-radius: 5px;
+  }
+  :global(.button:not(:last-child)) {
     border-right: 1px solid black;
   }
   .create {
