@@ -1130,11 +1130,11 @@
     if (belowFoldIndex < hideIndexFromRanking) {
       let lastToggleIndex = belowFoldIndex;
       [0, 10, 30, 50, 100, 200, 500, 1000].forEach((toggleIndex) => {
+        if (lastToggleIndex >= hideIndexFromRanking) return;
         toggleIndex += belowFoldIndex; // exclude indices aboveTheFold
-        if (toggleIndex >= hideIndexFromRanking) return;
         toggles.push({
           start: lastToggleIndex,
-          end: toggleIndex,
+          end: Math.min(toggleIndex, hideIndexFromRanking),
           positionBased: true,
         });
         lastToggleIndex = toggleIndex;
