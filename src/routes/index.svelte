@@ -2058,15 +2058,17 @@
     container.querySelectorAll("._log").forEach((log) => (logHeight += log.offsetHeight));
     const height = container.offsetHeight - logHeight;
     const prevHeight = item.height;
-    if (height == prevHeight) return; // nothing has changed
-    // NOTE: on iOS, editing items can trigger zero height to be reported, which we ignore
-    //       (seems to make sense generally since items should not have zero height)
-    if (height == 0 && prevHeight > 0) {
-      // console.warn(
-      //   `zero height (last known height ${prevHeight}) for item ${id} at index ${index+1}`,
-      //   item.text.substring(0, Math.min(item.text.length, 80))
-      // );
+    if (height > 0 && prevHeight == 0) {
+      item.resolve_render(height);
+    } else if (height == 0 && prevHeight > 0) {
+      console.warn(`zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`);
       return;
+    } else if (height == prevHeight) {
+      if (height == 0) {
+        console.warn(`zero initial height for item ${item.name} at position ${index + 1}`);
+        item.resolve_render(height);
+      }
+      return; // nothing has changed
     }
 
     // console.debug(
@@ -2582,9 +2584,8 @@
   }
 
   let initTime = 0; // set where initialize is invoked
-  let processed = false;
   let initialized = false;
-  let heightsCalculated = false;
+  let rendered = false;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -2629,6 +2630,7 @@
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
+      item.resolve_render = null; // invoked from onItemResized on first call
       item.column = 0;
       item.lastColumn = 0;
       item.nextColumn = -1;
@@ -2676,27 +2678,15 @@
       }
     }
 
-    processed = true;
-    checkHeights(); // start checking heights, but do not wait for it
+    // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning)
+    Promise.all(items.map((item) => new Promise((resolve) => (item.resolve_render = resolve)))).then(() => {
+      init_log(`rendered ${items.length} items`);
+      rendered = true;
+    });
     tick().then(updateDotted); // update (hide) dotted items
     init_log(`initialized ${items.length} items`);
     initialized = true;
     resolve_init();
-  }
-
-  function checkHeights() {
-    if (items.filter((item) => !item.dotted && item.height == 0).length > 0) {
-      if (Date.now() - initTime > 60000) {
-        console.warn(`failed to render ${items.length} items in 60s`);
-        heightsCalculated = true; // pretend calculated, so items can be truncated
-        return;
-      }
-      // console.log(items.filter((item) => item.height == 0).map((item) => item.name));
-      setTimeout(checkHeights, 250); // try again in 250 ms
-      return;
-    }
-    heightsCalculated = true;
-    init_log(`rendered ${items.length} items`);
   }
 
   let signingIn = false;
@@ -3134,8 +3124,7 @@
   const favicon_version = 1;
 </script>
 
-<!-- NOTE: we put the items on the page as soon as items are processed, but #loading overlay remains until heights are calculated (initialized = true) -->
-{#if user && processed}
+{#if user && initialized}
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
       <div class="column">
@@ -3218,9 +3207,9 @@
               {/each}
             {/if}
 
-            <!-- NOTE: we put all items on page until all item heights are calculated  -->
-            <!-- NOTE: after that we truncate some items because it speeds up updates (see comments above) -->
-            {#if !heightsCalculated || item.index < Math.max(hideIndex, truncateIndex)}
+            <!-- we put all items on page until all first render is complete (onItemResized invoked)  -->
+            <!-- after that we may trunacte because it speeds up DOM updates (see comments above) -->
+            {#if !rendered || item.index < Math.max(hideIndex, truncateIndex)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
