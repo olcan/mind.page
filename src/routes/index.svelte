@@ -3380,7 +3380,7 @@
   :global(html) {
     /* set default font globally */
     font-family: "Source Sans Pro", sans-serif;
-    font-weight: 400;
+    font-weight: 300;
     /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
     /* font-kerning: none; */
     -webkit-font-smoothing: antialiased;
