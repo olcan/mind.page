@@ -3396,9 +3396,12 @@
     /* set default font globally */
     font-family: "Source Sans Pro", sans-serif;
     font-weight: 300;
+    font-synthesis: none;
+    text-rendering: geometricPrecision;
     /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
-    /* font-kerning: none; */
-    -webkit-font-smoothing: antialiased;
+    font-kerning: none;
+    /* this makes fonts much smoother (compare to none) in Safari */
+    -webkit-font-smoothing: subpixel-antialiased;
     /* specify color scheme matching meta tag (see https://web.dev/color-scheme/) */
     /* color-scheme: dark light; */
   }

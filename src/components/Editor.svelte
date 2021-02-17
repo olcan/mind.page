@@ -747,7 +747,7 @@
   .button:last-child {
     border-bottom-right-radius: 5px;
   }
-  :global(.button:not(:last-child)) {
+  .button:not(:last-child) {
     border-right: 1px solid black;
   }
   .create {
@@ -757,7 +757,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    font-weight: 600; /* even 500 feels too thin with light background */
+    font-weight: 500; /* 500 feels too thin with light background, but 600 feels too thick */
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;
