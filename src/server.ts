@@ -91,7 +91,7 @@ process["server-preload"] = async (page, session) => {
     // uncomment this to disable server-side init for non-anonymous accounts
     // return {}
     user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
-    if (!user) return { error: "invalid session cookie: " + session.cookie };
+    if (!user) return { error: "invalid/expired session cookie" };
   }
   let items = await firebaseAdmin()
     .firestore()

@@ -2060,25 +2060,19 @@
     container.querySelectorAll("._log").forEach((log) => (logHeight += log.offsetHeight));
     const height = container.offsetHeight - logHeight;
     const prevHeight = item.height;
-    if (height > 0 && prevHeight == 0) {
-      item.resolve_render(height);
-    } else if (height == 0 && prevHeight > 0) {
-      console.warn(`zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`);
+    if (prevHeight == 0) {
+      if (height == 0) console.warn(`zero initial height for item ${item.name} at position ${index + 1}`);
+      if (item.resolve_render) item.resolve_render(height);
+      item.resolve_render = null;
+    }
+    if (height == prevHeight) return; // nothing has changed
+    if (height == 0 && prevHeight > 0) {
+      console.warn(`ignoring zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`);
       return;
-    } else if (height == prevHeight) {
-      if (height == 0) {
-        console.warn(`zero initial height for item ${item.name} at position ${index + 1}`);
-        item.resolve_render(height);
-      }
-      return; // nothing has changed
     }
 
-    // console.debug(
-    //   `[${index + 1}] ${
-    //     item.label ? item.label + ": " : ""
-    //   } height changed ${prevHeight} → ${height} (${trigger})`
-    // );
     item.height = height;
+    if (item.hidden) return; // skip layout update for hidden item
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
     if (
@@ -2573,8 +2567,8 @@
   }
 
   let initTime = 0; // set where initialize is invoked
+  let processed = false;
   let initialized = false;
-  let rendered = false;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -2667,14 +2661,44 @@
       }
     }
 
-    // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning)
-    Promise.all(items.map((item) => new Promise((resolve) => (item.resolve_render = resolve)))).then(() => {
-      init_log(`rendered ${items.length} items`);
-      rendered = true;
+    processed = true;
+    // init_log(`processed ${items.length} items`);
+
+    // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
+    renderRange(0, truncateIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(() => {
+      init_log(`initialized ${items.length} items`);
+      initialized = true;
+      resolve_init();
     });
-    init_log(`initialized ${items.length} items`);
-    initialized = true;
-    resolve_init();
+  }
+
+  let rendered = false;
+  let renderStart = 0;
+  let renderEnd = 0;
+
+  function renderRange(start, end, chunk, cutoff, delay) {
+    renderStart = start;
+    renderEnd = Math.min(cutoff, end);
+    return Promise.all(
+      items.slice(renderStart, renderEnd).map(
+        (item) =>
+          new Promise((resolve) => {
+            if (item.height > 0) resolve(item.height);
+            // resolve immediately
+            else item.resolve_render = resolve; // resolve later in onItemResized
+          })
+      )
+    ).then(() => {
+      renderStart = renderEnd; // can remove items again (note: this is critical for responsiveness)
+      if (renderEnd < cutoff) {
+        // init_log(`rendered items ${renderStart}-${renderEnd}`);
+        if (renderEnd % 100 == 0) init_log(`rendered ${renderEnd}/${items.length} items`);
+        tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay));
+      } else {
+        init_log(`rendered ${cutoff}/${items.length} items`);
+        rendered = true;
+      }
+    });
   }
 
   let signingIn = false;
@@ -3116,7 +3140,7 @@
   const favicon_version = 1;
 </script>
 
-{#if user && initialized}
+{#if user && processed}
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
       <div class="column">
@@ -3204,9 +3228,7 @@
               {/each}
             {/if}
 
-            <!-- we put all items on page until all first render is complete (onItemResized invoked)  -->
-            <!-- after that we may trunacte because it speeds up DOM updates (see comments above) -->
-            {#if !rendered || item.index < Math.max(hideIndex, truncateIndex)}
+            {#if item.index < Math.max(hideIndex, truncateIndex) || (item.index >= renderStart && item.index < renderEnd)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
@@ -3376,7 +3398,7 @@
     justify-content: center;
     align-items: center;
     /* NOTE: if you add transparency, initial zero-height layout will be visible */
-    background: rgba(17, 17, 17, 1);
+    background: rgba(17, 17, 17, 0.75);
   }
   #header {
     max-width: 100%;

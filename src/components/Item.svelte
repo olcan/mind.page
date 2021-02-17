@@ -1196,6 +1196,10 @@
   :global(.hiddenPendingUpdate ~ .super-container) {
     position: absolute;
     right: -100000px; /* off-screen to avoid any interactions */
+    /* the following (when used together) work even if item is on screen */
+    /* opacity: 0 !important; */
+    /* pointer-events: none !important; */
+    /* z-index: -10; */
     width: 100%;
   }
 
