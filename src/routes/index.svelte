@@ -1201,7 +1201,7 @@
     finalizeStateOnEditorChange = false; // processed above
     replaceStateOnEditorChange = false; // processed above
 
-    if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
+    if (Date.now() - start >= 250) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
 
   function toggleItems(index: number) {
@@ -2461,7 +2461,9 @@
     (document.querySelector("span.dots") as HTMLElement).style.display = showDotted ? "none" : "block";
     (document.querySelector("span.triangle") as HTMLElement).style.display = showDotted ? "block" : "none";
     document.querySelectorAll(".dotted").forEach((dotted) => {
-      (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
+      // we toggle "hidden" class which keeps item on page and allows height calculation
+      // (dotted as HTMLElement).style.display = showDotted ? "block" : "none";
+      (dotted as HTMLElement).classList.toggle("hidden", !showDotted);
     });
   }
 
@@ -2582,6 +2584,7 @@
   let initTime = 0; // set where initialize is invoked
   let processed = false;
   let initialized = false;
+  let heightsCalculated = false;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -2674,20 +2677,26 @@
     }
 
     processed = true;
-    init_log(`processed ${items.length} items`);
-    tryResolveInit();
-  }
-
-  function tryResolveInit() {
-    if (items.filter((item) => item.height == 0).length > 0) {
-      // console.log(items.filter((item) => item.height == 0).map((item) => item.name));
-      setTimeout(tryResolveInit, 250); // try again in 250 ms
-      return;
-    }
-    updateDotted(); // update (hide) dotted items
+    checkHeights(); // start checking heights, but do not wait for it
+    tick().then(updateDotted); // update (hide) dotted items
     init_log(`initialized ${items.length} items`);
     initialized = true;
     resolve_init();
+  }
+
+  function checkHeights() {
+    if (items.filter((item) => !item.dotted && item.height == 0).length > 0) {
+      if (Date.now() - initTime > 60000) {
+        console.warn(`failed to render ${items.length} items in 60s`);
+        heightsCalculated = true; // pretend calculated, so items can be truncated
+        return;
+      }
+      // console.log(items.filter((item) => item.height == 0).map((item) => item.name));
+      setTimeout(checkHeights, 250); // try again in 250 ms
+      return;
+    }
+    heightsCalculated = true;
+    init_log(`rendered ${items.length} items`);
   }
 
   let signingIn = false;
@@ -3209,8 +3218,9 @@
               {/each}
             {/if}
 
-            <!-- NOTE: pre-init render is to calculate initial heights and is not truncated at all  -->
-            {#if !initialized || item.index < Math.max(hideIndex, truncateIndex)}
+            <!-- NOTE: we put all items on page until all item heights are calculated  -->
+            <!-- NOTE: after that we truncate some items because it speeds up updates (see comments above) -->
+            {#if !heightsCalculated || item.index < Math.max(hideIndex, truncateIndex)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
@@ -3232,7 +3242,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
-                hidden={initialized && item.index >= hideIndex}
+                hidden={item.index >= hideIndex}
                 showLogs={item.showLogs}
                 height={item.height}
                 time={item.time}
@@ -3277,7 +3287,7 @@
   </div>
 {/if}
 
-{#if !user || !initialized || (items.length > 0 && totalItemHeight == 0) || signingIn || signingOut}
+{#if !user || !initialized || signingIn || signingOut}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
@@ -3422,7 +3432,7 @@
     color: #555;
   }
   :global(.console-info) {
-    color: #777;
+    color: #666;
   }
   :global(.console-log) {
     color: #999;
@@ -3458,6 +3468,9 @@
     text-align: left;
     overflow: hidden;
     padding-left: 4px;
+  }
+  #status .dots {
+    color: #666;
   }
   #status .counts {
     font-family: "Source Sans Pro", sans-serif;
