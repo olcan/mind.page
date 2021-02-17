@@ -206,6 +206,7 @@
     padding: 20px;
     color: black;
     font-size: 18px;
+    line-height: 24px;
     font-weight: 400;
   }
   input {
@@ -288,7 +289,6 @@
   :global(.modal code) {
     font-size: 16px; /* 2px smaller looks better */
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;

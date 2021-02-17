@@ -1340,8 +1340,8 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-size: 18px;
-    line-height: 28px;
+    font-size: 17px;
+    line-height: 26px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
@@ -1465,18 +1465,18 @@
     /* padding-left: 5px; */
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
-    font-size: 15px;
-    line-height: 24px;
+    font-size: 14px;
+    line-height: 23px;
     margin-top: 4px;
   }
   :global(.item pre:first-child) {
     margin-top: 0;
   }
   :global(.item code) {
-    font-size: 15px;
-    line-height: 24px;
+    font-size: 14px;
+    line-height: 23px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
+    font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1677,7 +1677,7 @@
     display: flex;
     font-size: 12px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
+    font-weight: 300;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
@@ -1855,14 +1855,14 @@
       padding-left: 0; /* assume no border issue, maximize space use */
     }
     .item {
-      font-size: 16px;
-      line-height: 25px;
+      font-size: 15px;
+      line-height: 24px;
       min-height: 45px; /* single line height */
     }
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
-      font-size: 13px;
-      line-height: 23px;
+      font-size: 12px;
+      line-height: 21px;
     }
   }
 </style>

@@ -3473,7 +3473,7 @@
     border-radius: 4px;
     border: 1px solid #222;
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
+    font-weight: 300;
     /* pointer-events: none; */
     text-align: left;
     -webkit-touch-callout: auto;
@@ -3501,7 +3501,7 @@
     height: 20px;
     text-align: center;
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
+    font-weight: 300;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3604,7 +3604,7 @@
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
+    font-weight: 300;
     font-size: 20px;
   }
   .section-separator hr {

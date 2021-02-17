@@ -671,9 +671,9 @@
   .backdrop,
   textarea {
     font-family: "Source Code Pro", monospace;
-    font-weight: 400;
-    font-size: 15px;
-    line-height: 24px;
+    font-weight: 300;
+    font-size: 14px;
+    line-height: 23px;
     caret-color: red;
   }
   .backdrop {
@@ -753,6 +753,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
+    font-weight: 500;
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;
@@ -803,8 +804,8 @@
   @media only screen and (max-width: 600px) {
     .backdrop,
     textarea {
-      font-size: 13px;
-      line-height: 23px;
+      font-size: 12px;
+      line-height: 21px;
     }
   }
 </style>
