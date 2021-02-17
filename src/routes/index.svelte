@@ -835,8 +835,12 @@
   let hideIndexForSession = 0;
 
   function onEditorChange(text: string) {
-    window["_mindboxLastModified"] = Date.now(); // for highlighting
-    window["_highlight_counts"] = {};
+    editorText = text; // in case invoked without setting editorText
+    const editorTextModified = text != history.state.editorText; // e.g. not just editing/time change
+    if (editorTextModified) {
+      window["_mindboxLastModified"] = Date.now(); // for highlighting
+      window["_highlight_counts"] = {};
+    }
 
     // keep history entry 0 updated, reset index on changes
     if (text != sessionHistory[sessionHistoryIndex]) {
@@ -1113,7 +1117,7 @@
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, (item) => item.editing) + 1);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndexFromRanking = tailIndex;
-    hideIndex = hideIndexFromRanking;
+    if (editorTextModified) hideIndex = hideIndexFromRanking;
 
     // update layout (used below, e.g. aboveTheFold)
     updateItemLayout();
@@ -1149,9 +1153,11 @@
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
-    // auto-show session items if no index-based toggles
-    if (toggles.length == 0) hideIndex = hideIndexForSession;
-    else hideIndex = toggles[0].end;
+    if (editorTextModified) {
+      // auto-show session items if no index-based toggles
+      if (toggles.length == 0) hideIndex = hideIndexForSession;
+      else hideIndex = toggles[0].end;
+    }
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
         start: hideIndexFromRanking,
@@ -1186,7 +1192,7 @@
     // console.debug(toggles);
 
     // update history, replace unless current state is final (from tag click)
-    if (history.state.editorText != editorText) {
+    if (editorTextModified) {
       // need to update history
       const state = {
         editorText: editorText,
@@ -1668,7 +1674,7 @@
         setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = ""));
+        onEditorChange("");
       }
       return;
     }
@@ -1828,7 +1834,7 @@
         inverted = !inverted;
         localStorage.setItem("mindpage_inverted", inverted ? "true" : "false");
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = ""));
+        onEditorChange("");
         return;
       }
       default: {
@@ -1868,9 +1874,9 @@
               )
                 .then((obj) => {
                   if (!obj) {
-                    onEditorChange((editorText = ""));
+                    onEditorChange("");
                   } else if (typeof obj == "string") {
-                    onEditorChange((editorText = obj));
+                    onEditorChange(obj);
                     textArea(-1).focus(); // refocus on non-empty editor
                   } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                     alert(
@@ -2367,7 +2373,7 @@
     saveItem(items[index].id);
     lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText); // item time has changed
-    // onEditorChange((editorText = "")); // item time has changed, and editor cleared
+    // onEditorChange(""); // item time has changed, and editor cleared
   }
 
   function editItem(index: number) {
@@ -2406,7 +2412,7 @@
         sessionHistoryIndex++;
         // console.debug("sessionHistoryIndex", sessionHistoryIndex);
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = sessionHistory[sessionHistoryIndex]));
+        onEditorChange(sessionHistory[sessionHistoryIndex]);
         setTimeout(() => {
           textArea(-1).selectionStart = textArea(-1).selectionEnd = editorText.length;
         });
@@ -2432,7 +2438,7 @@
       sessionHistoryIndex--;
       // console.debug("sessionHistoryIndex", sessionHistoryIndex);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
-      onEditorChange((editorText = sessionHistory[sessionHistoryIndex]));
+      onEditorChange(sessionHistory[sessionHistoryIndex]);
       setTimeout(() => {
         const endOfFirstLine = editorText.match(/^[^\n]*/)[0].length;
         textArea(-1).selectionStart = textArea(-1).selectionEnd = endOfFirstLine;
@@ -2655,11 +2661,11 @@
       if (index != undefined) {
         replaceStateOnEditorChange = true; // replace state
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = items[index].name));
+        onEditorChange(items[index].name);
       } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
         replaceStateOnEditorChange = true; // replace state
         lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange((editorText = tag));
+        onEditorChange(tag);
       }
     }
 
