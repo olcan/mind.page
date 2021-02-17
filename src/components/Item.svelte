@@ -40,7 +40,7 @@
   export let depsString: string;
   export let dependentsString: string;
   export let dotted: boolean;
-  export let pinned: boolean;
+  export let aboveTheFold: boolean;
   export let runnable: boolean;
   export let scripted: boolean;
   export let macroed: boolean;
@@ -169,9 +169,6 @@
   if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
   if (window["_html_cache"] == undefined) window["_html_cache"] = {};
 
-  // items above this index (+ pinned items) are given priority
-  let priorityIndex = 10;
-
   function toHTML(
     text: string,
     id: string,
@@ -184,7 +181,8 @@
     depsString: string,
     dependentsString: string
   ) {
-    hiddenPendingUpdate = !pinned && index >= priorityIndex;
+    hiddenPendingUpdate = !aboveTheFold; // do not hide above the fold for a more responsive feel
+
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
     if (window["_html_cache"].hasOwnProperty(cache_key)) {
@@ -617,7 +615,7 @@
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
-  import { onMount, beforeUpdate, afterUpdate } from "svelte";
+  import { afterUpdate } from "svelte";
   let container: HTMLDivElement;
   let itemdiv: HTMLDivElement;
 
@@ -660,10 +658,6 @@
 
   let hiddenPendingUpdate = false;
   let highlightDispatchCount = 0;
-  // NOTE: for some reason this does not seem to be reliably paired with afterUpdate
-  // beforeUpdate(() => {
-  //   hiddenPendingUpdate = true;
-  // });
 
   afterUpdate(() => {
     hiddenPendingUpdate = false; // can be set back to true below pending highlights
@@ -718,10 +712,9 @@
     // highlight matching terms in item text
     const mindboxModifiedAtDispatch = window["_mindboxLastModified"];
     const highlightDispatchIndex = highlightDispatchCount++;
-    const hasPriority = pinned || index < priorityIndex;
     // NOTE: because highlights can be out-of-order, we always highlight priority items
-    const maxHighlightsPerTerm = hasPriority ? Infinity : 100;
-    hiddenPendingUpdate = !hasPriority;
+    const maxHighlightsPerTerm = aboveTheFold ? Infinity : Infinity; // no limit for now
+    hiddenPendingUpdate = !aboveTheFold;
 
     const highlightClosure = () => {
       if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) {
@@ -736,9 +729,10 @@
       if (highlightDispatchIndex != highlightDispatchCount - 1) return; // cancelled
       let highlight_counts = window["_highlight_counts"];
 
-      // if mindbox was modified recently, we postpone for 500ms
-      if (!hasPriority && Date.now() - window["_mindboxLastModified"] < 500) {
-        setTimeout(highlightClosure, 500);
+      // if mindbox was modified recently, postpone up to 500ms
+      const timeSinceMindboxModified = Date.now() - window["_mindboxLastModified"];
+      if (timeSinceMindboxModified < 500) {
+        setTimeout(highlightClosure, 500 - timeSinceMindboxModified);
         return;
       }
 
@@ -913,9 +907,9 @@
         node.nodeValue = text;
       }
     };
-    // highlight priority items immediately, otherwise dispatch with index-proportional delay
-    if (hasPriority) highlightClosure();
-    else setTimeout(highlightClosure, (index - priorityIndex) * 100);
+    // if (aboveTheFold) highlightClosure();
+    // else setTimeout(highlightClosure);
+    setTimeout(highlightClosure);
 
     // indicate errors/warnings and context/target items
     error = itemdiv.querySelector(".console-error,.macro-error,mark.missing") != null;
@@ -1210,10 +1204,7 @@
   /* hiding ALL items below any pending-update items is important to avoid expensive layout updates */
   :global(.hiddenPendingUpdate ~ .super-container) {
     position: absolute;
-    visibility: hidden !important;
-    opacity: 0 !important; /* necessary to hide some child elements on android */
-    pointer-events: none !important; /* apparently necessary on the mac, even with just visibility:hidden */
-    z-index: -10;
+    right: -100000px; /* off-screen to avoid any interactions */
     width: 100%;
   }
 

@@ -473,6 +473,11 @@
     promise(func) {
       return new Promise(this.attach(func));
     }
+
+    // invalidate element cache for item
+    invalidate_cache() {
+      invalidateElemCache(this.id);
+    }
   }
 
   function itemTimeString(time: number, round_up = false) {
@@ -513,7 +518,8 @@
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
-    let columnItems = new Array(columnCount).fill(-1);
+    let columnLastItem = new Array(columnCount).fill(-1);
+    let columnItemCount = new Array(columnCount).fill(0);
     let columnTopMovers = new Array(columnCount).fill(items.length);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
     let lastTimeString = "";
@@ -581,24 +587,37 @@
           columnHeights[lastColumn] += 40; // .section-separator height including margins
         }
       }
+      // mark item as aboveTheFold if it is pinned or item is visible on first screen
+      // if item heights are not available, then we use item index in column and assume top 5 are above fold
+      item.aboveTheFold =
+        item.pinned ||
+        (totalItemHeight > 0 ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5);
+      // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveTheFold
+      item.prominence = item.pinned
+        ? 0
+        : totalItemHeight > 0
+        ? columnHeights[item.column] / outerHeight
+        : columnItemCount[item.column] / 5;
+      columnItemCount[item.column]++;
+
       // record item as top mover if it is lowest-index item that moved in its column
       const moved = item.index != item.lastIndex || item.column != item.lastColumn;
       if (moved && item.index < columnTopMovers[item.column]) columnTopMovers[item.column] = item.index;
 
       // if non-dotted item is first in its column or section and missing time string, add it now
-      if (!item.dotted && (columnItems[item.column] < 0 || item.column != lastItem.column) && !item.timeString) {
+      if (!item.dotted && (columnLastItem[item.column] < 0 || item.column != lastItem.column) && !item.timeString) {
         item.timeString = timeString;
         lastTimeString = timeString; // for grouping of subsequent items
         // add time string height now, assuming we are not ignoring item height
         if (item.outerHeight > 0) item.outerHeight += 24;
       }
       columnHeights[item.column] += item.outerHeight;
-      if (columnItems[item.column] >= 0) {
-        items[columnItems[item.column]].nextItemInColumn = index;
+      if (columnLastItem[item.column] >= 0) {
+        items[columnLastItem[item.column]].nextItemInColumn = index;
         // if item is below section-separator and has timeString, discount -24px negative margin
-        if (columnItems[item.column] != index - 1 && item.timeString) columnHeights[item.column] -= 24;
+        if (columnLastItem[item.column] != index - 1 && item.timeString) columnHeights[item.column] -= 24;
       }
-      columnItems[item.column] = index;
+      columnLastItem[item.column] = index;
     });
 
     if (focusedItem >= 0) {
@@ -796,20 +815,15 @@
     return prefixes;
   }
 
-  function stableSort(array, compare) {
-    return array
-      .map((item, index) => ({ item, index }))
-      .sort((a, b) => compare(a.item, b.item) || a.index - b.index)
-      .map(({ item }) => item);
-  }
-
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
   //       Invoke updateItemLayout directly if only item sizes have changed.
+  const sessionTime = Date.now();
   const editorDebounceTime = 500;
   let lastEditorChangeTime = 0;
   let matchingItemCount = 0;
   let textLength = 0;
   let editorChangePending = false;
+  let forceNewStateOnEditorChange = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
   let hideIndex = 0;
@@ -1036,8 +1050,7 @@
     //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
     //       (afterUpdate is also triggered by the various assignments above)
     // NOTE: undefined values produce NaN, which is treated as 0
-    items = stableSort(
-      items,
+    items = items.sort(
       (a, b) =>
         // dotted? (contains #_pin/dot or #_pin/dot/*)
         b.dotted - a.dotted ||
@@ -1094,17 +1107,46 @@
     items.splice(tailIndex, 1);
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, (item) => item.editing) + 1);
     let tailTime = items[tailIndex]?.time || 0;
-    hideIndex = tailIndex;
-    hideIndexFromRanking = hideIndex;
+    hideIndexFromRanking = tailIndex;
+    hideIndex = hideIndexFromRanking;
+
+    // update layout (used below, e.g. aboveTheFold)
+    updateItemLayout();
+    lastEditorChangeTime = Infinity; // force minimum wait for next change
 
     // determine "toggle" indices (ranges) where item visibility can be toggled
     toggles = [];
 
-    // initial (shown) toggle point is the "session toggle" for items "touched" in this session (since first ranking)
+    // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
+    const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
+    const belowFoldIndex = _.findLastIndex(items, (item) => item.aboveTheFold) + 1;
+    if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
+      toggles.push({
+        start: unpinnedIndex,
+        end: belowFoldIndex,
+        positionBased: true,
+      });
+    }
+    if (belowFoldIndex < hideIndexFromRanking) {
+      let lastToggleIndex = belowFoldIndex;
+      [0, 10, 30, 50, 100, 200, 500, 1000].forEach((toggleIndex) => {
+        toggleIndex += belowFoldIndex; // exclude indices aboveTheFold
+        if (toggleIndex >= hideIndexFromRanking) return;
+        toggles.push({
+          start: lastToggleIndex,
+          end: toggleIndex,
+          positionBased: true,
+        });
+        lastToggleIndex = toggleIndex;
+      });
+    }
+
+    // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
-    if (initTime == 0) console.warn("onEditorChange before init");
-    hideIndex = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > initTime) + 1);
-    hideIndexForSession = hideIndex; // used to determine where to show "hide older items"
+    hideIndexForSession = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
+    // auto-show session items if no index-based toggles
+    if (toggles.length == 0) hideIndex = hideIndexForSession;
+    else hideIndex = toggles[0].end;
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
         start: hideIndexFromRanking,
@@ -1150,15 +1192,13 @@
         final: !editorText || finalizeStateOnEditorChange,
       };
       // console.debug(history.state.final ? "push" : "replace", state);
-      if (history.state.final && !replaceStateOnEditorChange) history.pushState(state, editorText);
+      if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange))
+        history.pushState(state, editorText);
       else history.replaceState(state, editorText);
     }
+    forceNewStateOnEditorChange = false; // processed above
     finalizeStateOnEditorChange = false; // processed above
     replaceStateOnEditorChange = false; // processed above
-
-    updateItemLayout();
-    lastEditorChangeTime = Infinity; // force minimum wait for next change
-    setTimeout(updateDotted, 0); // show/hide dotted/undotted items
 
     if (Date.now() - start >= 100) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
@@ -1221,6 +1261,7 @@
     // }
     editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
     // editorText = tag + " ";
+    forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
@@ -1255,7 +1296,7 @@
   function onPopState(e) {
     readonly = anonymous && !admin();
     if (!e?.state) return; // for fragment (#id) hrefs
-    if (!initTime) {
+    if (!initialized) {
       // NOTE: this can happen when tab is restored, seems harmless so far
       // console.warn("onPopState before init");
       return;
@@ -2537,7 +2578,9 @@
     });
   }
 
-  let initTime = 0;
+  let initTime = 0; // set where initialize is invoked
+  let processed = false;
+  let initialized = false;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -2548,7 +2591,6 @@
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
     if (signingOut) return; // encryption error
-    initTime = Date.now();
 
     // filter hidden items on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
@@ -2577,6 +2619,8 @@
       // state from updateItemLayout
       item.index = index;
       item.lastIndex = index;
+      item.aboveTheFold = false;
+      item.prominence = 0;
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
@@ -2627,7 +2671,20 @@
       }
     }
 
+    processed = true;
+    init_log(`processed ${items.length} items`);
+    tryResolveInit();
+  }
+
+  function tryResolveInit() {
+    if (items.filter((item) => item.height == 0).length > 0) {
+      // console.log(items.filter((item) => item.height == 0).map((item) => item.name));
+      setTimeout(tryResolveInit, 250); // try again in 250 ms
+      return;
+    }
+    updateDotted(); // update (hide) dotted items
     init_log(`initialized ${items.length} items`);
+    initialized = true;
     resolve_init();
   }
 
@@ -2723,6 +2780,7 @@
           items = [];
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
+          initTime = Date.now(); // indicate initialization started
           initialize();
         }
       }
@@ -2821,8 +2879,11 @@
               if (firstSnapshot) {
                 setTimeout(async () => {
                   init_log(`synchronized ${items.length} items`);
-                  if (!initTime) await initialize();
-                  if (!initTime) return; // initialization failed, we should be signing out ...
+                  if (!initTime) {
+                    initTime = Date.now();
+                    await initialize();
+                  }
+                  if (!initialized) return; // initialization failed, we should be signing out ...
 
                   firstSnapshot = false;
                   // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
@@ -2849,7 +2910,7 @@
                 //  from a local cache so that it is cheap and worse than the server snapshot)
                 if (firstSnapshot) {
                   if (change.type != "added") console.warn("unexpected change type: ", change.type);
-                  if (!initTime) {
+                  if (initTime == 0) {
                     // NOTE: snapshot items do not have updateTime/createTime available
                     items.push(Object.assign(doc.data(), { id: doc.id }));
                   }
@@ -2982,7 +3043,6 @@
         });
 
         setInterval(checkLayout, 250); // check layout every 250ms
-        updateDotted(); // update dotted items
 
         if (readonly) {
           modal.show({
@@ -3009,7 +3069,7 @@
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
 
-    if (!initTime) return; // not yet initialized
+    if (!initialized) return;
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;
@@ -3063,8 +3123,8 @@
   const favicon_version = 1;
 </script>
 
-<!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
-{#if user && initTime}
+<!-- NOTE: we put the items on the page as soon as items are processed, but #loading overlay remains until heights are calculated (initialized = true) -->
+{#if user && processed}
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
       <div class="column">
@@ -3129,7 +3189,9 @@
               {#each toggles as toggle}
                 {#if hideIndex < toggle.end}
                   <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
-                    ▼ {itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
+                    ▼ {toggle.positionBased
+                      ? ""
+                      : itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
                     <span class="count">show {toggle.end - toggle.start} items</span>
                   </div>
                 {/if}
@@ -3138,14 +3200,15 @@
               {#each toggles as toggle}
                 {#if item.index == toggle.start}
                   <div class="toggle hide" on:click={() => toggleItems(toggle.start)}>
-                    ▲ {itemTimeString(items[toggle.start].time)}
+                    ▲ {toggle.positionBased ? "" : itemTimeString(items[toggle.start].time)}
                     <span class="count">hide {Math.min(hideIndex, items.length) - toggle.start} items</span>
                   </div>
                 {/if}
               {/each}
             {/if}
 
-            {#if item.index < Math.max(hideIndex, truncateIndex)}
+            <!-- NOTE: pre-init render is to calculate initial heights and is not truncated at all  -->
+            {#if !initialized || item.index < Math.max(hideIndex, truncateIndex)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
@@ -3167,7 +3230,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
-                hidden={item.index >= hideIndex}
+                hidden={initialized && item.index >= hideIndex}
                 showLogs={item.showLogs}
                 height={item.height}
                 time={item.time}
@@ -3188,7 +3251,7 @@
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
                 dotted={item.dotted}
-                pinned={item.pinned}
+                aboveTheFold={item.aboveTheFold}
                 runnable={item.runnable}
                 scripted={item.scripted}
                 macroed={item.macroed}
@@ -3212,7 +3275,7 @@
   </div>
 {/if}
 
-{#if !user || !initTime || (items.length > 0 && totalItemHeight == 0) || signingIn || signingOut}
+{#if !user || !initialized || (items.length > 0 && totalItemHeight == 0) || signingIn || signingOut}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
