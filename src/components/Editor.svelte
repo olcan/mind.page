@@ -757,7 +757,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    font-weight: 500; /* 500 feels too thin with light background, but 600 feels too thick */
+    font-weight: 600;
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;
