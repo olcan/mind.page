@@ -671,7 +671,7 @@
   .backdrop,
   textarea {
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     font-size: 15px;
     line-height: 24px;
     caret-color: red;

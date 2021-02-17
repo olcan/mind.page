@@ -288,7 +288,7 @@
   :global(.modal code) {
     font-size: 16px; /* 2px smaller looks better */
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;

@@ -1481,7 +1481,7 @@
     font-size: 15px;
     line-height: 24px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1511,7 +1511,7 @@
   :global(.item mark) {
     color: black;
     background: #999;
-    font-weight: 600;
+    font-weight: 500;
     padding: 0 4px;
     margin: 0;
   }
@@ -1525,6 +1525,7 @@
   :global(.item .menu a),
   :global(.item .menu mark) {
     padding: 4px;
+    font-weight: 600;
   }
   :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
@@ -1586,7 +1587,6 @@
     /* background: #9f9; */
     border: 1px solid #9b9;
     border-radius: 4px;
-    /* font-weight: 600; */
     /* NOTE: we do not pad highlights as it can overlap non-highlighted text */
     margin: -1px;
   }
@@ -1682,7 +1682,7 @@
     display: flex;
     font-size: 12px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
@@ -1831,7 +1831,7 @@
     color: black;
     background: #f55;
     border-radius: 4px;
-    font-weight: 600;
+    font-weight: 500;
     padding: 0 4px;
   }
 

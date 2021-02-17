@@ -3329,6 +3329,43 @@
 
 <!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
 <style>
+  @import "@fontsource/source-code-pro/300.css";
+  @import "@fontsource/source-code-pro/300-italic.css";
+  @import "@fontsource/source-code-pro/400.css";
+  @import "@fontsource/source-code-pro/400-italic.css";
+  @import "@fontsource/source-code-pro/500.css";
+  @import "@fontsource/source-code-pro/500-italic.css";
+  @import "@fontsource/source-code-pro/600.css";
+  @import "@fontsource/source-code-pro/600-italic.css";
+  @import "@fontsource/source-code-pro/700.css";
+  @import "@fontsource/source-code-pro/700-italic.css";
+  @import "@fontsource/source-code-pro/800.css";
+  @import "@fontsource/source-code-pro/800-italic.css";
+
+  @import "@fontsource/source-sans-pro/300.css";
+  @import "@fontsource/source-sans-pro/300-italic.css";
+  @import "@fontsource/source-sans-pro/400.css";
+  @import "@fontsource/source-sans-pro/400-italic.css";
+  @import "@fontsource/source-sans-pro/500.css";
+  @import "@fontsource/source-sans-pro/500-italic.css";
+  @import "@fontsource/source-sans-pro/600.css";
+  @import "@fontsource/source-sans-pro/600-italic.css";
+  @import "@fontsource/source-sans-pro/700.css";
+  @import "@fontsource/source-sans-pro/700-italic.css";
+  @import "@fontsource/source-sans-pro/800.css";
+  @import "@fontsource/source-sans-pro/800-italic.css";
+
+  :global(html) {
+    /* set default font globally */
+    font-family: "Source Sans Pro", sans-serif;
+    font-weight: 400;
+    /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
+    /* font-kerning: none; */
+    -webkit-font-smoothing: antialiased;
+    /* specify color scheme matching meta tag (see https://web.dev/color-scheme/) */
+    /* color-scheme: dark light; */
+  }
+
   #loading {
     position: absolute;
     top: 0;
@@ -3405,7 +3442,7 @@
     border-radius: 4px;
     border: 1px solid #222;
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     /* pointer-events: none; */
     text-align: left;
     -webkit-touch-callout: auto;
@@ -3433,7 +3470,7 @@
     height: 20px;
     text-align: center;
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3524,7 +3561,7 @@
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
     font-family: "Source Code Pro", monospace;
-    font-weight: 500;
+    font-weight: 400;
     font-size: 20px;
   }
   .section-separator hr {
