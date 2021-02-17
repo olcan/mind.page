@@ -494,8 +494,6 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
-  // NOTE: truncation removes items from the page completely and speeds up updates (e.g. when searching or tapping tags). It is safe to do as long as the truncation index does not vary too much, which can trigger problems with async scripts that are not implemented properly, e.g. that do not use resume/defer/etc and throw errors or invoke invalidate_cache when target elements go missing. Currently truncation index is fixed but can still effectively vary when hideIndex > truncateIndex, which seems relative safe as it concerns items lower on the page, and larger indices which are unlikely to be toggled as frequently as smaller indices.
-  const truncateIndex = 50;
   let toggles = [];
   let newestTime = 0;
   let oldestTime = Infinity;
@@ -529,7 +527,11 @@
     totalItemHeight = 0;
     lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
-    // showDotted = false;
+    // showDotted = false; // auto-hide dotted
+    // // programmatically size hidden column to match first column
+    // if (document.querySelector(".column.hidden"))
+    //   (document.querySelector(".column.hidden") as HTMLElement).style.width =
+    //     (document.querySelector(".column:not(.hidden)") as HTMLElement).offsetWidth + "px";
 
     items.forEach((item, index) => {
       item.lastIndex = index;
@@ -2665,7 +2667,10 @@
     // init_log(`processed ${items.length} items`);
 
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
-    renderRange(0, truncateIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(() => {
+
+    const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
+    renderRange(0, unpinnedIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(() => {
+      // renderRange(0, 0, 10, items.length, 0 /*delay*/).then(() => {
       init_log(`initialized ${items.length} items`);
       initialized = true;
       resolve_init();
@@ -2684,7 +2689,6 @@
         (item) =>
           new Promise((resolve) => {
             if (item.height > 0) resolve(item.height);
-            // resolve immediately
             else item.resolve_render = resolve; // resolve later in onItemResized
           })
       )
@@ -2692,7 +2696,8 @@
       renderStart = renderEnd; // can remove items again (note: this is critical for responsiveness)
       if (renderEnd < cutoff) {
         // init_log(`rendered items ${renderStart}-${renderEnd}`);
-        if (renderEnd % 100 == 0) init_log(`rendered ${renderEnd}/${items.length} items`);
+        if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
+          init_log(`rendered ${renderEnd}/${items.length} items`);
         tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay));
       } else {
         init_log(`rendered ${cutoff}/${items.length} items`);
@@ -3143,7 +3148,7 @@
 {#if user && processed}
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount } as _, column}
-      <div class="column">
+      <div class="column" class:multi-column={columnCount > 1}>
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused>
@@ -3206,29 +3211,33 @@
 
         {#each items as item (item.id)}
           {#if item.column == column}
-            {#if item.index == hideIndex}
-              {#each toggles as toggle}
-                {#if hideIndex < toggle.end}
-                  <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
-                    ▼ {toggle.positionBased
-                      ? ""
-                      : itemTimeString(items[Math.min(toggle.end, items.length - 1)].time, toggle.end == items.length)}
-                    <span class="count">show {toggle.end - toggle.start} items</span>
-                  </div>
-                {/if}
-              {/each}
-            {:else if item.index < hideIndex}
-              {#each toggles as toggle}
-                {#if item.index == toggle.start}
-                  <div class="toggle hide" on:click={() => toggleItems(toggle.start)}>
-                    ▲ {toggle.positionBased ? "" : itemTimeString(items[toggle.start].time)}
-                    <span class="count">hide {Math.min(hideIndex, items.length) - toggle.start} items</span>
-                  </div>
-                {/if}
-              {/each}
+            {#if column < columnCount}
+              {#if item.index == hideIndex}
+                {#each toggles as toggle}
+                  {#if hideIndex < toggle.end}
+                    <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
+                      ▼ {toggle.positionBased
+                        ? ""
+                        : itemTimeString(
+                            items[Math.min(toggle.end, items.length - 1)].time,
+                            toggle.end == items.length
+                          )}
+                      <span class="count">show {toggle.end - toggle.start} items</span>
+                    </div>
+                  {/if}
+                {/each}
+              {:else if item.index < hideIndex}
+                {#each toggles as toggle}
+                  {#if item.index == toggle.start}
+                    <div class="toggle hide" on:click={() => toggleItems(toggle.start)}>
+                      ▲ {toggle.positionBased ? "" : itemTimeString(items[toggle.start].time)}
+                      <span class="count">hide {Math.min(hideIndex, items.length) - toggle.start} items</span>
+                    </div>
+                  {/if}
+                {/each}
+              {/if}
             {/if}
-
-            {#if item.index < Math.max(hideIndex, truncateIndex) || (item.index >= renderStart && item.index < renderEnd)}
+            {#if item.index < hideIndex || (item.index >= renderStart && item.index < renderEnd)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
@@ -3568,10 +3577,22 @@
     position: relative;
     /* prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
     min-height: 100%;
+    /* margin-right ensures absolute-positioned elements can use width:100% to get same width as regular elements */
+    /* also ensures consistent width as items switch columns (conditional left/right-margins would also work) */
+    /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
+    margin-right: 8px;
   }
-  .column:not(:last-child) {
-    padding-right: 8px;
+  /* single-column layout can remove margin since there is no concern of having columns w/ same width */
+  .column:not(.multi-column) {
+    margin-right: 0;
   }
+  /* .column:last-child {
+    margin-right: 0;
+  } */
+  /* .column:last-child {
+    margin-right: 0;
+  } */
+
   .section-separator {
     display: flex;
     align-items: center;
@@ -3646,12 +3667,6 @@
   }
 
   .toggle + .toggle {
-    display: none;
-  }
-
-  /* hide section separators and toggles after any items hiddenPendingUpdate */
-  :global(.super-container.hiddenPendingUpdate ~ .section-separator),
-  :global(.super-container.hiddenPendingUpdate ~ .toggle) {
     display: none;
   }
 

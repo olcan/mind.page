@@ -180,8 +180,6 @@
     depsString: string,
     dependentsString: string
   ) {
-    hiddenPendingUpdate = !aboveTheFold; // do not hide above the fold for a more responsive feel
-
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
     if (window["_html_cache"].hasOwnProperty(cache_key)) {
@@ -655,12 +653,9 @@
       .catch(console.error);
   }
 
-  let hiddenPendingUpdate = false;
   let highlightDispatchCount = 0;
 
   afterUpdate(() => {
-    hiddenPendingUpdate = false; // can be set back to true below pending highlights
-
     // always report container height for potential changes
     setTimeout(() => onResized(id, container, "afterUpdate"), 0);
 
@@ -713,7 +708,7 @@
     const highlightDispatchIndex = highlightDispatchCount++;
     // NOTE: because highlights can be out-of-order, we always highlight priority items
     const maxHighlightsPerTerm = aboveTheFold ? Infinity : Infinity; // no limit for now
-    hiddenPendingUpdate = !aboveTheFold;
+
     // remove previous highlights or related elements
     itemdiv.querySelectorAll("span.highlight").forEach((span: HTMLElement) => {
       // span.replaceWith(span.firstChild); // seems to scale beter
@@ -737,7 +732,6 @@
       }
 
       // show item again, but cancel highlights if itemdiv is missing or mindbox modified
-      hiddenPendingUpdate = false;
       if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) return;
 
       let terms = highlightTerms.split(" ").filter((t) => t);
@@ -1092,7 +1086,6 @@
   id={"super-container-" + id}
   class:editing
   class:hidden
-  class:hiddenPendingUpdate
   class:timed={timeString.length > 0}
 >
   {#if timeString}
@@ -1190,16 +1183,14 @@
   .super-container.editing:not(.timed) {
     padding-top: 24px; /* extra space for .edit-menu */
   }
-  .hidden,
-  .hiddenPendingUpdate,
-  /* hiding ALL items below any pending-update items is important to avoid expensive layout updates */
-  :global(.hiddenPendingUpdate ~ .super-container) {
+  .hidden {
     position: absolute;
-    right: -100000px; /* off-screen to avoid any interactions */
+    right: -100000px;
     /* the following (when used together) work even if item is on screen */
-    /* opacity: 0 !important; */
-    /* pointer-events: none !important; */
-    /* z-index: -10; */
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -10;
     width: 100%;
   }
 
