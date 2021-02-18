@@ -48,7 +48,7 @@
   export let hash: string;
   export let deephash: string;
   export let height = 0;
-  const placeholder = " ";
+  let placeholder = " ";
   let error = false;
   let warning = false;
   export let target = false;
@@ -627,11 +627,16 @@
         elem.replaceWith(window["_elem_cache"][key]);
         elem = window["_elem_cache"][key];
         // resize all children w/ _resize attribute (and property)
-        elem.querySelectorAll("[_resize]").forEach((e) => e["_resize"]());
+        try {
+          elem.querySelectorAll("[_resize]").forEach((e) => e["_resize"]());
+        } catch (e) {
+          console.error("_resize error", e);
+        }
       } else {
         if (elem.querySelector("script")) return; // contains script; must be cached after script is executed
         elem.setAttribute("_cached", Date.now().toString());
         // console.debug("caching element", key, elem.tagName);
+        // (elem as HTMLElement).style.width = window.getComputedStyle(elem).width;
         window["_elem_cache"][key] = elem; //.cloneNode(true);
       }
       elem.setAttribute("_item", id); // for invalidating cached elems on errors
@@ -690,10 +695,6 @@
       highlightTerms == itemdiv.firstElementChild.getAttribute("_highlightTerms")
     ) {
       // console.debug("afterUpdate skipped");
-      // update all children w/ _update attribute (and property)
-      // TODO: move this above if disappearing charts continues to be a problem
-      //       (actually it may have something to do with opening the web inspector so rule that out)
-      itemdiv.querySelectorAll("[_update]").forEach((e) => e["_update"]());
       return;
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
@@ -1183,12 +1184,6 @@
   }
   .hidden {
     position: absolute;
-    right: -100000px;
-    /* the following (when used together) work even if item is on screen */
-    visibility: hidden;
-    opacity: 0;
-    pointer-events: none;
-    z-index: -10;
     width: 100%;
   }
 

@@ -489,6 +489,13 @@
     return round(time / (24 * 3600)).toString() + "d";
   }
 
+  function resizeHiddenColumn() {
+    // programmatically size hidden column to match first column
+    if (document.querySelector(".column.hidden"))
+      (document.querySelector(".column.hidden") as HTMLElement).style.width =
+        (document.querySelector(".column:not(.hidden)") as HTMLElement).offsetWidth + "px";
+  }
+
   let indexFromId;
   let headerdiv;
   let consolediv;
@@ -528,10 +535,7 @@
     lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
     // showDotted = false; // auto-hide dotted
-    // // programmatically size hidden column to match first column
-    // if (document.querySelector(".column.hidden"))
-    //   (document.querySelector(".column.hidden") as HTMLElement).style.width =
-    //     (document.querySelector(".column:not(.hidden)") as HTMLElement).offsetWidth + "px";
+    resizeHiddenColumn();
 
     items.forEach((item, index) => {
       item.lastIndex = index;
@@ -633,9 +637,9 @@
         setTimeout(() => {
           textarea = textArea(focusedItem);
           if (!textarea) return;
-          textarea.focus();
           textarea.selectionStart = selectionStart;
           textarea.selectionEnd = selectionEnd;
+          textarea.focus();
         }); // allow dom update before refocus
       }
     }
@@ -837,17 +841,19 @@
 
   function onEditorChange(text: string) {
     editorText = text; // in case invoked without setting editorText
-    const editorTextModified = text != history.state.editorText; // e.g. not just editing/time change
-    if (editorTextModified) {
-      window["_mindboxLastModified"] = Date.now(); // for highlighting
-      window["_highlight_counts"] = {};
-    }
+
+    // editor text is considered modified if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates
+    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText;
 
     // keep history entry 0 updated, reset index on changes
+    // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
     if (text != sessionHistory[sessionHistoryIndex]) {
       sessionHistoryIndex = 0;
       if (sessionHistory.length == 0) sessionHistory = [text];
       else sessionHistory[0] = text;
+      // update highlighting state used in Item.svelte
+      window["_mindboxLastModified"] = Date.now(); // for highlighting
+      window["_highlight_counts"] = {};
     }
 
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
@@ -898,6 +904,7 @@
     let termsContext = _.flatten(tags.all.map(tagPrefixes));
 
     matchingItemCount = 0;
+    let targetItemCount = 0;
     textLength = 0;
     let listing = [];
     let context = [];
@@ -1002,6 +1009,7 @@
 
       // listing item and id-matching items are considered "target" items
       item.target = listingItemIndex == index || idMatchTerms.length > 0;
+      if (item.target) targetItemCount++;
 
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
@@ -1168,9 +1176,10 @@
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
     if (editorTextModified) {
-      // auto-show session items if no index-based toggles
+      // auto-show session items if no position-based toggles
+      // otherwise show first position-based toggle, unless there are targets
       if (toggles.length == 0) hideIndex = hideIndexForSession;
-      else hideIndex = toggles[0].end;
+      else hideIndex = targetItemCount > 0 ? toggles[0].start : toggles[0].end;
     }
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -1206,7 +1215,7 @@
     // console.debug(toggles);
 
     // update history, replace unless current state is final (from tag click)
-    if (editorTextModified) {
+    if (text != history.state.editorText) {
       // need to update history
       const state = {
         editorText: editorText,
@@ -1985,6 +1994,7 @@
       if (text != origText) selectionStart = selectionEnd = 0;
       setTimeout(() => {
         let textarea = textArea(indexFromId.get(item.id));
+        if (!textarea) return;
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
         textarea.focus();
@@ -2264,6 +2274,10 @@
         // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
       }
       setTimeout(() => {
+        if (!textArea(item.index)) {
+          console.warn("missing editor");
+          return;
+        }
         textArea(item.index).focus();
       }, 0); // trigger resort
     } else {
@@ -2278,6 +2292,7 @@
         // delete
         itemTextChanged(index, ""); // clears label, deps, etc
         items.splice(index, 1);
+        if (index < hideIndex) hideIndex--; // back up hide index
         // update indices as needed by onEditorChange
         indexFromId = new Map<string, number>();
         items.forEach((item, index) => indexFromId.set(item.id, index));
@@ -2701,6 +2716,7 @@
   let rendered = false;
   let renderStart = 0;
   let renderEnd = 0;
+  let keepOnPageDuringDelay = false;
 
   function renderRange(start, end, chunk, cutoff, delay) {
     renderStart = start;
@@ -2714,7 +2730,7 @@
           })
       )
     ).then(() => {
-      renderStart = renderEnd; // can remove items again (note: this is critical for responsiveness)
+      if (!keepOnPageDuringDelay) renderStart = renderEnd;
       if (renderEnd < cutoff) {
         // init_log(`rendered items ${renderStart}-${renderEnd}`);
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
@@ -2982,6 +2998,7 @@
                     let item = items[index];
                     itemTextChanged(index, ""); // clears label, deps, etc
                     items.splice(index, 1);
+                    if (index < hideIndex) hideIndex--; // back up hide index
                     // update indices as needed by onEditorChange
                     indexFromId = new Map<string, number>();
                     items.forEach((item, index) => indexFromId.set(item.id, index));
@@ -3168,8 +3185,8 @@
 
 {#if user && processed}
   <div class="items" class:multi-column={columnCount > 1}>
-    {#each { length: columnCount } as _, column}
-      <div class="column" class:multi-column={columnCount > 1}>
+    {#each { length: columnCount + 1 } as _, column}
+      <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount}>
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused>
@@ -3231,7 +3248,7 @@
         {/if}
 
         {#each items as item (item.id)}
-          {#if item.column == column}
+          {#if item.column == column || (item.index >= hideIndex && column == columnCount)}
             {#if column < columnCount}
               {#if item.index == hideIndex}
                 {#each toggles as toggle}
@@ -3258,7 +3275,7 @@
                 {/each}
               {/if}
             {/if}
-            {#if item.index < hideIndex || (item.index >= renderStart && item.index < renderEnd)}
+            {#if item.index < hideIndex || (column == columnCount && item.index >= renderStart && item.index < renderEnd)}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
@@ -3585,6 +3602,16 @@
   /* .column:last-child {
     margin-right: 0;
   } */
+  .column.hidden {
+    position: absolute;
+    right: 0;
+    /* right: 750px; */
+    /* the following (when used together) work even if column is on screen */
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -10;
+  }
 
   .section-separator {
     display: flex;
