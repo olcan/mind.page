@@ -251,7 +251,7 @@
     border-radius: 5px;
     padding: 20px;
     color: black;
-    font-size: 18px;
+    font-size: 17px;
     line-height: 24px;
     font-weight: 400;
   }
@@ -333,7 +333,7 @@
 
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
-    font-size: 16px; /* 2px smaller looks better */
+    font-size: 15px; /* 2px smaller looks better */
     font-family: monospace;
     background: #ddd;
     white-space: pre-wrap;

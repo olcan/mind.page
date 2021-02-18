@@ -3413,15 +3413,16 @@
 <style>
   :global(html) {
     /* set default font globally */
-    font-family: "Source Sans Pro", sans-serif;
+    /* font-family: "Source Sans Pro", sans-serif; */
+    font-family: "Open Sans", sans-serif;
+    /* font-family: "Avenir Next", sans-serif; */
+
     /* font-synthesis: none; */
     /* text-rendering: optimizeLegibility; */
     /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
     /* font-kerning: none; */
     /* this makes fonts much smoother (compare to none) in Safari */
     /* -webkit-font-smoothing: subpixel-antialiased; */
-    /* specify color scheme matching meta tag (see https://web.dev/color-scheme/) */
-    /* color-scheme: dark light; */
   }
   :global(b, strong) {
     font-weight: 700;

@@ -756,6 +756,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
+    /* tags have 600 weight in item; unfortunately Safari displays this too heavy and Android too light, but for now seems best to just match to .item and move on, especially given other problems we have had with custom monospace fonts, BUT the bold is really annoying in Safari so ... */
     font-weight: 500;
     border-radius: 4px;
     padding: 0 2px;

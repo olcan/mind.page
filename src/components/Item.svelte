@@ -1356,8 +1356,8 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-size: 18px;
-    line-height: 27px;
+    font-size: 17px;
+    line-height: 28px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
@@ -1869,7 +1869,7 @@
       padding-left: 0; /* assume no border issue, maximize space use */
     }
     .item {
-      font-size: 16px;
+      font-size: 15px;
       line-height: 25px;
       min-height: 45px; /* single line height */
     }
@@ -1882,7 +1882,7 @@
   /* adapt to smaller iPhones (e.g. iPhone 12 mini) and Androids (even large ones like Galaxy S21 Ultra) */
   @media only screen and (max-width: 400px) {
     .item {
-      font-size: 15px;
+      font-size: 14px;
       line-height: 24px;
       min-height: 45px; /* single line height */
     }
