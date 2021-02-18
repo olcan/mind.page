@@ -12,6 +12,7 @@
     renderTag,
     numberWithCommas,
     invalidateElemCache,
+    adoptCachedElem,
   } from "../util.js";
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
@@ -612,7 +613,7 @@
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
-  import { afterUpdate } from "svelte";
+  import { afterUpdate, onDestroy } from "svelte";
   let container: HTMLDivElement;
   let itemdiv: HTMLDivElement;
 
@@ -624,8 +625,15 @@
       if (window["_elem_cache"].hasOwnProperty(key)) {
         // console.debug("reusing cached element", key, elem.tagName, elem.id);
         // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
-        elem.replaceWith(window["_elem_cache"][key]);
-        elem = window["_elem_cache"][key];
+        let cached = window["_elem_cache"][key];
+        if (document.getElementById("cache").contains(cached)) {
+          cached.remove();
+          cached.style.width = cached["_width"];
+          cached.style.height = cached["_height"];
+          cached.style.position = cached["_position"];
+        }
+        elem.replaceWith(cached);
+        elem = cached;
         // resize all children w/ _resize attribute (and property)
         try {
           elem.querySelectorAll("[_resize]").forEach((e) => e["_resize"]());
@@ -1034,6 +1042,14 @@
     });
   });
 
+  onDestroy(() => {
+    // move cached elements into dom to prevent offloading by browser
+    Object.values(window["_elem_cache"]).forEach((elem: HTMLElement) => {
+      if (elem.getAttribute("_item") != id) return;
+      adoptCachedElem(elem);
+    });
+  });
+
   if (!window["_dot_rendered"]) {
     window["_dot_rendered"] = function (dot) {
       // render "stack" clusters (subgraphs)
@@ -1184,6 +1200,7 @@
   }
   .hidden {
     position: absolute;
+    right: -100000px;
     width: 100%;
   }
 
