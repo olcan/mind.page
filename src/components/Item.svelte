@@ -1863,4 +1863,12 @@
       line-height: 21px;
     }
   }
+  /* adapt to smaller iPhones (e.g. iPhone 12 mini) and Androids (even large ones like Galaxy S21 Ultra) */
+  @media only screen and (max-width: 400px) {
+    .item {
+      font-size: 15px;
+      line-height: 24px;
+      min-height: 45px; /* single line height */
+    }
+  }
 </style>
