@@ -3557,7 +3557,7 @@
     color: #666;
   }
   #status .counts {
-    font-family: "Source Sans Pro", sans-serif;
+    font-family: "Open Sans", sans-serif;
     font-size: 14px;
     position: absolute;
     right: 0;
