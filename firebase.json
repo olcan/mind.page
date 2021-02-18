@@ -5,7 +5,8 @@
   },
   "functions": {
     "predeploy": [],
-    "source": "."
+    "source": ".",
+    "ignore": ["node_modules", "__sapper__"]
   },
   "hosting": {
     "public": "static",
