@@ -1475,7 +1475,6 @@
     font-size: 14px;
     line-height: 23px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1539,7 +1538,7 @@
     background: #ddd;
   }
   :global(.item mark.label.unique) {
-    font-weight: 900;
+    font-weight: 700;
   }
   :global(.item mark.missing) {
     background: #f88;
@@ -1585,7 +1584,7 @@
     margin: -1px;
   }
   :global(.item mark.label.unique span.highlight) {
-    font-weight: 900; /* match weight of mark.label.unique */
+    font-weight: 700; /* match weight of mark.label.unique */
   }
 
   :global(.item mark span.highlight) {
@@ -1676,7 +1675,6 @@
     display: flex;
     font-size: 12px;
     font-family: "Source Code Pro", monospace;
-    font-weight: 300;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
