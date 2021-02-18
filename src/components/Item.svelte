@@ -1491,7 +1491,7 @@
   :global(.item code) {
     font-size: 14px;
     line-height: 23px;
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1691,7 +1691,7 @@
   :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     align-items: bottom;
     justify-content: center;
     /* background: red; */

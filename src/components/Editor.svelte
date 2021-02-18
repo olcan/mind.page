@@ -670,7 +670,7 @@
   }
   .backdrop,
   textarea {
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     font-size: 14px;
     line-height: 23px;
     caret-color: red;
@@ -756,7 +756,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    font-weight: 600;
+    font-weight: 500;
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;

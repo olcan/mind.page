@@ -842,8 +842,8 @@
   function onEditorChange(text: string) {
     editorText = text; // in case invoked without setting editorText
 
-    // editor text is considered modified if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates
-    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText;
+    // editor text is considered "modified" and triggers hideIndex update if it is empty or if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates
+    const editorTextModified = !text || text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText;
 
     // keep history entry 0 updated, reset index on changes
     // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
@@ -3371,10 +3371,16 @@
 />
 
 <!-- increase list item padding on android, otherwise too small -->
+<!-- also hack for custom font wrapping issue (if needed) -->
 {#if android}
   <style>
     span.list-item {
       margin-left: 0 !important;
+    }
+    .editor textarea,
+    .editor .backdrop {
+      /* padding-right: 11px !important; */
+      /* font-family: monospace !important; */
     }
   </style>
 {/if}
@@ -3496,7 +3502,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -3522,7 +3528,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3634,7 +3640,7 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: "Source Code Pro", monospace;
+    font-family: monospace;
     font-size: 20px;
   }
   .section-separator hr {
