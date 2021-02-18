@@ -1810,7 +1810,7 @@
   :global(.item .deps-and-dependents .dependents-title) {
     color: black;
     background: #bbb;
-    font-weight: 600;
+    font-weight: 700;
 
     /* border: 1px solid #999; */
     padding: 0 4px;
