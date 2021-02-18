@@ -1001,7 +1001,7 @@
       if (item.matching) matchingItemCount++;
 
       // listing item and id-matching items are considered "target" items
-      item.target = (listingItemIndex == index || idMatchTerms.length > 0)
+      item.target = listingItemIndex == index || idMatchTerms.length > 0;
 
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
@@ -1142,7 +1142,7 @@
     }
     if (belowFoldIndex < hideIndexFromRanking) {
       let lastToggleIndex = belowFoldIndex;
-      [0, 10, 30, 50, 100, 200, 500, 1000].forEach((toggleIndex) => {
+      [10, 30, 50, 100, 200, 500, 1000].forEach((toggleIndex) => {
         if (lastToggleIndex >= hideIndexFromRanking) return;
         toggles.push({
           start: lastToggleIndex,
@@ -1151,7 +1151,17 @@
         });
         lastToggleIndex = belowFoldIndex + toggleIndex;
       });
-      if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking;
+    }
+
+    // ensure contiguity of position-based toggles up to hideIndexFromRanking
+    if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking;
+
+    // merge position-based toggles smaller than 10 indices
+    for (let i = 1; i < toggles.length; i++) {
+      if (toggles[i - 1].end - toggles[i - 1].start < 10 || toggles[i].end - toggles[i].start < 10) {
+        toggles[i - 1].end = toggles[i].end;
+        toggles.splice(i--, 1); // merged into last
+      }
     }
 
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
