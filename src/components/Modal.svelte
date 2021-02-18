@@ -7,7 +7,9 @@
   let confirm = "";
   let cancel = "";
   let input = null;
-  let password = true;
+  let password = false;
+  let username = "";
+  let autocomplete = "";
   let images = false;
   let canConfirm = (input: string) => input.length > 0;
   let onConfirm = (input = null) => {};
@@ -22,13 +24,29 @@
     (input == null || canConfirm(input)) &&
     (!images || (selected_images.length > 0 && ready_image_count == selected_images.length));
 
-  const defaults = { content, confirm, cancel, input, password, images, canConfirm, onConfirm, onCancel, background };
+  const defaults = {
+    content,
+    confirm,
+    cancel,
+    input,
+    password,
+    username,
+    autocomplete,
+    images,
+    canConfirm,
+    onConfirm,
+    onCancel,
+    background,
+  };
 
+  let inputelem: HTMLInputElement;
   let _promise, _resolve;
+  let dispatchTime;
   export function show(options) {
     const last_promise = _promise;
     return (_promise = new Promise((resolve) => {
       _resolve = resolve;
+      dispatchTime = Date.now();
       Promise.resolve(last_promise).then(() => {
         ({
           content,
@@ -36,6 +54,8 @@
           cancel,
           input,
           password,
+          username,
+          autocomplete,
           images,
           canConfirm,
           onConfirm,
@@ -46,6 +66,19 @@
         selected_images = [];
         ready_image_count = 0;
         visible = true;
+
+        // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
+        const origDispatchTime = dispatchTime;
+        const chromeCheckInterval = setInterval(() => {
+          if (!visible || dispatchTime != origDispatchTime) {
+            clearInterval(chromeCheckInterval);
+            return;
+          }
+          if (inputelem?.matches(":-internal-autofill-selected")) {
+            input = inputelem.value; // did not work in experiments but just in case
+            enabled = true;
+          }
+        }, 1000);
       });
     }).finally(() => (_promise = null)));
   }
@@ -130,20 +163,33 @@
     <div class="modal">
       {#if content}{@html marked(content)}{/if}
       {#if input != null}
-        {#if password}
-          <input type="password" bind:value={input} on:keydown={onKeyDown} />
-        {:else}
-          <input bind:value={input} on:keydown={onKeyDown} />
-        {/if}
+        <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
+        <form>
+          {#if password}
+            <input type="text" name="username" value={username} autocomplete="username" style="display:none" />
+            <input
+              type="password"
+              name="password"
+              bind:value={input}
+              bind:this={inputelem}
+              {autocomplete}
+              on:keydown={onKeyDown}
+            />
+          {:else}
+            <input bind:value={input} on:keydown={onKeyDown} bind:this={inputelem} {autocomplete} />
+          {/if}
+        </form>
         <script>
           setTimeout(() => document.querySelector(".modal input").focus());
         </script>
       {/if}
       {#if images}
-        <label class="button">
-          Select Images
-          <input type="file" accept="image/*" multiple on:input={onFilesSelected} />
-        </label>
+        <form>
+          <label class="button">
+            Select Images
+            <input type="file" accept="image/*" multiple on:input={onFilesSelected} />
+          </label>
+        </form>
         {#if selected_images.length > 0}
           <div class="uploads">
             {#each selected_images as image (image.url)}

@@ -1594,6 +1594,9 @@
             confirm: "Continue",
             cancel: "Sign Out",
             input: "",
+            password: true,
+            username: user.email,
+            autocomplete: "new-password",
           });
         }
         if (phrase == null) break;
@@ -1602,6 +1605,9 @@
           confirm: "Confirm",
           cancel: "Sign Out",
           input: "",
+          password: true,
+          username: user.email,
+          autocomplete: "new-password",
         });
         if (confirmed == null) break;
         if (confirmed != phrase) {
@@ -1619,6 +1625,9 @@
         confirm: "Continue",
         cancel: "Sign Out",
         input: "",
+        password: true,
+        username: user.email,
+        autocomplete: "current-password",
       });
     }
     if (phrase == null || confirmed == null) throw new Error("secret phrase cancelled");
@@ -2580,7 +2589,7 @@
     parseTags,
     renderTag,
     invalidateElemCache,
-    checkElemCache
+    checkElemCache,
   } from "../util.js";
 
   let consoleLog = [];
@@ -3103,7 +3112,7 @@
           replay = false;
         });
 
-        setInterval(checkLayout, 250);     // check layout every 250ms
+        setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
 
         if (readonly) {

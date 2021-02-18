@@ -487,7 +487,11 @@
         classNames = classNames.trim();
         return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`;
       }
-      return `<a target="_blank" title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+      // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
+      // NOTE: rel="opener" is required by Chrome for target="_blank" to work. rel="external" is said to replace target=_blank but does NOT open a new window (in Safari or chrome), so we are forced to used _blank+opener.
+      let attribs = "";
+      if (!href.startsWith("javascript:")) attribs = ` target="_blank" rel="opener"`;
+      return `<a${attribs} title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
     // marked.use({ renderer });
     marked.setOptions({

@@ -131,6 +131,7 @@ export function renderTag(tag) {
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
+  if (!window["_elem_cache"]) window["_elem_cache"] = {};
   Object.values(window["_elem_cache"]).forEach((elem) => {
     if (elem.getAttribute("_item") == id) {
       delete window["_elem_cache"][elem.getAttribute("_cache_key")];
@@ -153,6 +154,7 @@ export function adoptCachedElem(elem) {
 }
 
 export function checkElemCache() {
+  if (!window["_elem_cache"]) window["_elem_cache"] = {};
   Object.values(window["_elem_cache"]).forEach((elem) => {
     if (document.contains(elem)) return;
     console.warn("orphaned cached element", elem.getAttribute("_cache_key"));
