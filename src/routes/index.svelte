@@ -653,6 +653,7 @@
             return (div as HTMLElement).offsetTop;
           })
         );
+        // console.debug(itemTop, window.scrollY);
         if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
       });
     }
@@ -999,6 +1000,9 @@
       item.matching = item.matchingTerms.length > 0;
       if (item.matching) matchingItemCount++;
 
+      // listing item and id-matching items are considered "target" items
+      item.target = (listingItemIndex == index || idMatchTerms.length > 0)
+
       // calculate missing tags (excluding certain special tags from consideration)
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       // NOTE: tagCounts include prefix tags, deduplicated at item level
@@ -1119,7 +1123,7 @@
     hideIndexFromRanking = tailIndex;
     if (editorTextModified) hideIndex = hideIndexFromRanking;
 
-    // update layout (used below, e.g. aboveTheFold)
+    // update layout (used below, e.g. aboveTheFold, editingItems, etc)
     updateItemLayout();
     lastEditorChangeTime = Infinity; // force minimum wait for next change
 
@@ -1127,8 +1131,8 @@
     toggles = [];
 
     // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
-    const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned || item.editing) + 1;
-    const belowFoldIndex = _.findLastIndex(items, (item) => item.aboveTheFold || item.editing) + 1;
+    let unpinnedIndex = _.findLastIndex(items, (item) => item.pinned || item.editing || item.target) + 1;
+    let belowFoldIndex = _.findLastIndex(items, (item) => item.aboveTheFold || item.editing || item.target) + 1;
     if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
       toggles.push({
         start: unpinnedIndex,
@@ -1152,7 +1156,7 @@
 
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
-    hideIndexForSession = Math.max(hideIndex, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
+    hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
     if (editorTextModified) {
       // auto-show session items if no index-based toggles
       if (toggles.length == 0) hideIndex = hideIndexForSession;
@@ -2602,6 +2606,7 @@
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
       item.matching = false;
+      item.target = false;
       item.tagMatches = 0;
       item.labelMatch = false;
       item.prefixMatch = false;
@@ -3279,6 +3284,7 @@
                 missingTags={item.missingTags.join(" ")}
                 matchingTerms={item.matchingTerms.join(" ")}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+                target={item.target}
                 timeString={item.timeString}
                 timeOutOfOrder={item.timeOutOfOrder}
                 updateTime={item.updateTime}
@@ -3313,11 +3319,6 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
-{:else}
-  <script>
-    // restore overflow visibility, which was hidden to work around an odd iOS scroll bug (see global.css)
-    document.documentElement.style.overflow = "visible";
-  </script>
 {/if}
 
 <Modal bind:this={modal} {onPastedImage} />

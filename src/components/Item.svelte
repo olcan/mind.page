@@ -51,7 +51,7 @@
   const placeholder = " ";
   let error = false;
   let warning = false;
-  let target = false;
+  export let target = false;
   let context = false;
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
@@ -900,7 +900,8 @@
     error = itemdiv.querySelector(".console-error,.macro-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
     context = itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
-    target = itemdiv.querySelector("mark.selected.label.unique") != null;
+    // NOTE: targeting may also be indicated from ranking, e.g. for id:* queries
+    target = target || itemdiv.querySelector("mark.selected.label.unique") != null;
 
     // trigger typesetting of any math elements
     // NOTE: we do this async to see if we can load MathJax async in template.html
@@ -1339,8 +1340,8 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-size: 17px;
-    line-height: 26px;
+    font-size: 18px;
+    line-height: 27px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
@@ -1852,8 +1853,8 @@
       padding-left: 0; /* assume no border issue, maximize space use */
     }
     .item {
-      font-size: 15px;
-      line-height: 24px;
+      font-size: 16px;
+      line-height: 25px;
       min-height: 45px; /* single line height */
     }
     /* NOTE: these font sizes should match those in Editor */
