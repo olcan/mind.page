@@ -3413,9 +3413,13 @@
 <style>
   :global(html) {
     /* set default font globally */
-    /* font-family: "Source Sans Pro", sans-serif; */
-    font-family: "Open Sans", sans-serif;
     /* font-family: "Avenir Next", sans-serif; */
+    /* font-family: "Source Sans Pro", sans-serif; */
+    /* font-family: "Open Sans", sans-serif; */
+    font-family: "Roboto", sans-serif;
+
+    /* light fonts feel easier to read, and allow tags to pop out as they should */
+    font-weight: 300;
 
     /* font-synthesis: none; */
     /* text-rendering: optimizeLegibility; */
@@ -3503,7 +3507,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -3529,7 +3533,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3557,7 +3561,7 @@
     color: #666;
   }
   #status .counts {
-    font-family: "Open Sans", sans-serif;
+    font-family: "Roboto", sans-serif;
     font-size: 14px;
     position: absolute;
     right: 0;
@@ -3641,7 +3645,7 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     font-size: 20px;
   }
   .section-separator hr {
@@ -3673,7 +3677,7 @@
     background: #222;
     /* color: black; */
     /* background: #666; */
-    font-weight: 600;
+    font-weight: 500;
     border-radius: 4px;
     cursor: pointer;
     width: fit-content;

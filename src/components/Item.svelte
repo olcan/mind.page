@@ -1231,7 +1231,7 @@
     /* overflow: hidden; */
     color: black;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 500;
     /* outer border causes odd cutoff on right side, so we cut off at the buttons */
     /* border-radius: 5px; */
     /* overflow: hidden; */
@@ -1283,7 +1283,7 @@
     opacity: 1;
     color: black;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 500;
     box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1357,7 +1357,7 @@
     /* white-space: pre-wrap; */
     word-wrap: break-word;
     font-size: 17px;
-    line-height: 28px;
+    line-height: 27px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
@@ -1491,7 +1491,7 @@
   :global(.item code) {
     font-size: 14px;
     line-height: 23px;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1521,7 +1521,7 @@
   :global(.item mark) {
     color: black;
     background: #999;
-    font-weight: 600;
+    font-weight: 500;
     padding: 0 4px;
     margin: 0;
   }
@@ -1535,7 +1535,7 @@
   :global(.item .menu a),
   :global(.item .menu mark) {
     padding: 4px;
-    font-weight: 600;
+    font-weight: 500;
   }
   :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
@@ -1555,7 +1555,7 @@
     background: #ddd;
   }
   :global(.item mark.label.unique) {
-    font-weight: 700;
+    font-weight: 900;
   }
   :global(.item mark.missing) {
     background: #f88;
@@ -1601,7 +1601,7 @@
     margin: -1px;
   }
   :global(.item mark.label.unique span.highlight) {
-    font-weight: 700; /* match weight of mark.label.unique */
+    font-weight: 900; /* match weight of mark.label.unique */
   }
 
   :global(.item mark span.highlight) {
@@ -1691,7 +1691,7 @@
   :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
@@ -1840,7 +1840,7 @@
     color: black;
     background: #f55;
     border-radius: 4px;
-    font-weight: 600;
+    font-weight: 500;
     padding: 0 4px;
   }
 
@@ -1870,7 +1870,7 @@
     }
     .item {
       font-size: 15px;
-      line-height: 25px;
+      line-height: 24px;
       min-height: 45px; /* single line height */
     }
     /* NOTE: these font sizes should match those in Editor */

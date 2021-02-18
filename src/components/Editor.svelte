@@ -670,7 +670,7 @@
   }
   .backdrop,
   textarea {
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     font-size: 14px;
     line-height: 23px;
     caret-color: red;
@@ -720,7 +720,7 @@
     justify-content: center;
     cursor: pointer;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 500;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -756,7 +756,6 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    /* tags have 600 weight in item; unfortunately Safari displays this too heavy and Android too light, but for now seems best to just match to .item and move on, especially given other problems we have had with custom monospace fonts, BUT the bold is really annoying in Safari so ... */
     font-weight: 500;
     border-radius: 4px;
     padding: 0 2px;
