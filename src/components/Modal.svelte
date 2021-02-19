@@ -68,17 +68,19 @@
         visible = true;
 
         // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
-        const origDispatchTime = dispatchTime;
-        const chromeCheckInterval = setInterval(() => {
-          if (!visible || dispatchTime != origDispatchTime) {
-            clearInterval(chromeCheckInterval);
-            return;
-          }
-          if (inputelem?.matches(":-internal-autofill-selected")) {
-            input = inputelem.value; // did not work in experiments but just in case
-            enabled = true;
-          }
-        }, 1000);
+        if (input && autocomplete) {
+          const origDispatchTime = dispatchTime;
+          const chromeCheckInterval = setInterval(() => {
+            if (!visible || dispatchTime != origDispatchTime) {
+              clearInterval(chromeCheckInterval);
+              return;
+            }
+            if (inputelem?.matches(":-internal-autofill-selected")) {
+              input = inputelem.value; // did not work in experiments but just in case
+              enabled = true;
+            }
+          }, 1000);
+        }
       });
     }).finally(() => (_promise = null)));
   }
@@ -97,7 +99,9 @@
     return visible;
   }
 
-  function _onConfirm() {
+  function _onConfirm(e) {
+    e.stopPropagation();
+    e.preventDefault();
     if (!enabled) return;
     visible = false;
     const out = images ? selected_images : input != null ? input : true;
@@ -105,7 +109,9 @@
     _resolve(out);
   }
 
-  function _onCancel() {
+  function _onCancel(e) {
+    e.stopPropagation();
+    e.preventDefault();
     if (!cancel) return;
     visible = false;
     const out = images ? [] : input != null ? null : false;
@@ -113,17 +119,23 @@
     _resolve(out);
   }
 
-  function onBackgroundClick(e: MouseEvent) {
+  function onBackgroundClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
     if ((e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
-    if (background.toLowerCase() == "confirm") _onConfirm();
-    else if (background.toLowerCase() == "cancel") _onCancel();
+    if (background.toLowerCase() == "confirm") _onConfirm(e);
+    else if (background.toLowerCase() == "cancel") _onCancel(e);
   }
 
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
     if (!visible) return;
-    if (key == "Enter") _onConfirm();
-    else if (key == "Escape") _onCancel();
+    if (key == "Enter") _onConfirm(e);
+    else if (key == "Escape") {
+      // treat escape like background click
+      if (background.toLowerCase() == "confirm") _onConfirm(e);
+      else if (background.toLowerCase() == "cancel") _onCancel(e);
+    }
     if (key == "Enter") {
       e.stopPropagation(); // stop enter propagation
       e.preventDefault();
@@ -209,9 +221,9 @@
       {/if}
       {#if confirm || cancel}
         <div class="buttons">
-          {#if cancel}<div class="button cancel" on:click={_onCancel}>{cancel}</div>{/if}
+          {#if cancel}<div class="button cancel" on:mousedown={_onCancel} on:touchend={_onCancel}>{cancel}</div>{/if}
           {#if confirm}
-            <div class="button confirm" class:enabled on:click={_onConfirm}>
+            <div class="button confirm" class:enabled on:mousedown={_onConfirm} on:touchend={_onConfirm}>
               {confirm}
             </div>
           {/if}
@@ -219,11 +231,6 @@
       {/if}
     </div>
   </div>
-  {#if input == null}
-    <script>
-      setTimeout(() => document.activeElement?.blur());
-    </script>
-  {/if}
 {/if}
 
 <svelte:window on:keydown={onKeyDown} />
