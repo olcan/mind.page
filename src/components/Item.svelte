@@ -1535,6 +1535,7 @@
   :global(.item .menu a),
   :global(.item .menu mark) {
     padding: 4px;
+    font-size: 110%;
     font-weight: 500;
   }
   :global(.item .menu p a, .item .menu p mark) {
@@ -1877,6 +1878,11 @@
     :global(.item pre, .item code) {
       font-size: 12px;
       line-height: 21px;
+    }
+    /* smaller menu fonts can take a little more weight */
+    :global(.item .menu a),
+    :global(.item .menu mark) {
+      font-weight: 700;
     }
   }
   /* adapt to smaller iPhones (e.g. iPhone 12 mini) and Androids (even large ones like Galaxy S21 Ultra) */
