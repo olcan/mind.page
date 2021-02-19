@@ -131,17 +131,17 @@ export function renderTag(tag) {
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
-  if (!window["_elem_cache"]) window["_elem_cache"] = {};
-  Object.values(window["_elem_cache"]).forEach((elem) => {
-    if (elem.getAttribute("_item") == id) {
-      delete window["_elem_cache"][elem.getAttribute("_cache_key")];
-      // destroy all children w/ _destroy attribute (and property)
-      elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
-    }
+  if (!window["_elem_cache"][id]) return;
+  Object.values(window["_elem_cache"][id]).forEach((elem) => {
+    delete window["_elem_cache"][elem.getAttribute("_cache_key")];
+    // destroy all children w/ _destroy attribute (and property)
+    elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
   });
 }
 
 export function adoptCachedElem(elem) {
+  let cachediv = document.getElementById("cache");
+  if (cachediv.contains(elem)) return;
   elem["_width"] = elem.style.width;
   elem["_height"] = elem.style.height;
   elem["_position"] = elem.style.position;
@@ -150,21 +150,25 @@ export function adoptCachedElem(elem) {
   elem.style.height = computed.height;
   elem.style.position = "absolute";
   elem.remove();
-  document.getElementById("cache").appendChild(elem);
+  cachediv.appendChild(elem);
 }
 
 export function checkElemCache() {
   if (!window["_elem_cache"]) window["_elem_cache"] = {};
-  Object.values(window["_elem_cache"]).forEach((elem) => {
-    if (document.contains(elem)) return;
-    console.warn("orphaned cached element", elem.getAttribute("_cache_key"));
-    // if element has zero-width, destroy it, otherwise adopt it
-    if (elem.offsetWidth == 0) {
-      delete window["_elem_cache"][elem.getAttribute("_cache_key")];
-      // destroy all children w/ _destroy attribute (and property)
-      elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
-      console.warn("destroyed zero-width orphaned cached element", elem.getAttribute("_cache_key"));
-    }
-    adoptCachedElem(elem);
+  Object.keys(window["_elem_cache"]).forEach((id) => {
+    Object.values(window["_elem_cache"][id]).forEach((elem) => {
+      if (document.contains(elem)) return;
+      const key = elem.getAttribute("_cache_key");
+      console.warn("orphaned cached element", key, "from item", window["_item"](id).name);
+      // if element has zero-width, destroy it, otherwise adopt it
+      if (elem.offsetWidth == 0) {
+        delete window["_elem_cache"][id][key];
+        // destroy all children w/ _destroy attribute (and property)
+        elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
+        console.warn("destroyed zero-width orphaned cached element", key, "from item", window["_item"](id).name);
+      } else {
+        adoptCachedElem(elem);
+      }
+    });
   });
 }

@@ -166,8 +166,10 @@
       e.stopPropagation();
     };
 
-  if (window["_elem_cache"] == undefined) window["_elem_cache"] = {};
-  if (window["_html_cache"] == undefined) window["_html_cache"] = {};
+  if (!window["_elem_cache"]) window["_elem_cache"] = {};
+  if (!window["_elem_cache"][id]) window["_elem_cache"][id] = {};
+  if (!window["_html_cache"]) window["_html_cache"] = {};
+  if (!window["_html_cache"][id]) window["_html_cache"][id] = {};
 
   function toHTML(
     text: string,
@@ -183,9 +185,9 @@
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
-    if (window["_html_cache"].hasOwnProperty(cache_key)) {
+    if (window["_html_cache"][id].hasOwnProperty(cache_key)) {
       // console.debug("toHTML skipped");
-      return window["_html_cache"][cache_key];
+      return window["_html_cache"][id][cache_key];
     }
     // console.debug("toHTML");
 
@@ -613,7 +615,7 @@
 
     // do not cache with macro errors
     if (hasMacroErrors) return text;
-    return (window["_html_cache"][cache_key] = text);
+    return (window["_html_cache"][id][cache_key] = text);
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
@@ -626,10 +628,10 @@
     itemdiv.querySelectorAll("[_cache_key]").forEach((elem) => {
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
-      if (window["_elem_cache"].hasOwnProperty(key)) {
+      if (window["_elem_cache"][id].hasOwnProperty(key)) {
         // console.debug("reusing cached element", key, elem.tagName, elem.id);
-        // if (window["_elem_cache"][key].querySelector("script")) console.warn("cached element contains script(s)");
-        let cached = window["_elem_cache"][key];
+        // if (window["_elem_cache"][id][key].querySelector("script")) console.warn("cached element contains script(s)");
+        let cached = window["_elem_cache"][id][key];
         if (document.getElementById("cache").contains(cached)) {
           cached.remove();
           cached.style.width = cached["_width"];
@@ -649,9 +651,8 @@
         elem.setAttribute("_cached", Date.now().toString());
         // console.debug("caching element", key, elem.tagName);
         // (elem as HTMLElement).style.width = window.getComputedStyle(elem).width;
-        window["_elem_cache"][key] = elem; //.cloneNode(true);
+        window["_elem_cache"][id][key] = elem; //.cloneNode(true);
       }
-      elem.setAttribute("_item", id); // for invalidating cached elems on errors
     });
   }
 
@@ -676,7 +677,11 @@
     // always report container height for potential changes
     setTimeout(() => onResized(id, container, "afterUpdate"), 0);
 
-    if (!itemdiv) return; // itemdiv is null if editing
+    // itemdiv can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
+    if (!itemdiv) {
+      Object.values(window["_elem_cache"][id]).forEach(adoptCachedElem);
+      return; // itemdiv is null if editing
+    }
 
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
@@ -1048,10 +1053,7 @@
 
   onDestroy(() => {
     // move cached elements into dom to prevent offloading by browser
-    Object.values(window["_elem_cache"]).forEach((elem: HTMLElement) => {
-      if (elem.getAttribute("_item") != id) return;
-      adoptCachedElem(elem);
-    });
+    Object.values(window["_elem_cache"][id]).forEach(adoptCachedElem);
   });
 
   if (!window["_dot_rendered"]) {
