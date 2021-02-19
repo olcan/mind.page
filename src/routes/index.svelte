@@ -1221,7 +1221,7 @@
     // console.debug(toggles);
 
     // update history, replace unless current state is final (from tag click)
-    if (text != history.state.editorText) {
+    if (editorText != history.state.editorText) {
       // need to update history
       const state = {
         editorText: editorText,
