@@ -120,9 +120,9 @@
   }
 
   function onBackgroundClick(e) {
+    if ((e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
     e.stopPropagation();
     e.preventDefault();
-    if ((e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
     if (background.toLowerCase() == "confirm") _onConfirm(e);
     else if (background.toLowerCase() == "cancel") _onCancel(e);
   }

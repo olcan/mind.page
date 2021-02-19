@@ -1704,6 +1704,7 @@
   let sessionHistoryIndex = 0;
   let tempIdFromSavedId = new Map<string, string>();
   let editorText = "";
+  let editor;
   function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false, editing = null) {
     editorText = text; // in case invoked without setting editorText
     const key = e?.code || e?.key;
@@ -3184,12 +3185,16 @@
       e.preventDefault();
       textArea(-1).focus();
       window.top.scrollTo(0, 0);
-      // just create/run new item on create/save shortcuts
+      // create/run new item on create/save shortcuts
       if (
         (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
         (key == "KeyS" && (e.metaKey || e.ctrlKey))
       ) {
         onEditorDone(editorText, e, false, e.metaKey || e.ctrlKey /*run*/);
+      }
+      // create new image item on image shortcut
+      if (key == "KeyI" && e.metaKey && e.shiftKey) {
+        editor.insertImages(true);
       }
     }
   }
@@ -3227,6 +3232,7 @@
               <div id="editor">
                 <Editor
                   id="mindbox"
+                  bind:this={editor}
                   bind:text={editorText}
                   bind:focused
                   showButtons={true}
