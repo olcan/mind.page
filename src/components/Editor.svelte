@@ -261,9 +261,6 @@
     lastKeyDownPosition = textarea.selectionStart;
     // console.debug("Editor.onKeyDown:", e, key);
 
-    // backspace should not propagate up to window
-    if (key == "Backspace") e.stopPropagation();
-
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();

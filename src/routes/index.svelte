@@ -3173,8 +3173,8 @@
       (key == "KeyI" && e.metaKey && e.shiftKey) ||
       (key == "ArrowUp" && e.metaKey && e.altKey) ||
       (key == "ArrowDown" && e.metaKey && e.altKey) ||
-      key == "Backspace" ||
-      key == "Tab" ||
+      // key == "Backspace" ||
+      // key == "Tab" ||
       key == "Escape"
     ) {
       e.preventDefault();
