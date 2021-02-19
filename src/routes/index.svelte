@@ -1327,8 +1327,8 @@
 
   function admin() {
     return (
-      user &&
-      user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+      firebase().auth().currentUser &&
+      firebase().auth().currentUser.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
       (location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/))
     );
   }
