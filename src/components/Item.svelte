@@ -166,10 +166,9 @@
       e.stopPropagation();
     };
 
+  // create cache objects (subobjects are created on first entry)
   if (!window["_elem_cache"]) window["_elem_cache"] = {};
-  if (!window["_elem_cache"][id]) window["_elem_cache"][id] = {};
   if (!window["_html_cache"]) window["_html_cache"] = {};
-  if (!window["_html_cache"][id]) window["_html_cache"][id] = {};
 
   function toHTML(
     text: string,
@@ -185,6 +184,7 @@
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
+    if (!window["_html_cache"][id]) window["_html_cache"][id] = {};
     if (window["_html_cache"][id].hasOwnProperty(cache_key)) {
       // console.debug("toHTML skipped");
       return window["_html_cache"][id][cache_key];
@@ -626,6 +626,7 @@
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
     itemdiv.querySelectorAll("[_cache_key]").forEach((elem) => {
+      if (!window["_elem_cache"][id]) window["_elem_cache"][id] = {};
       if (elem.hasAttribute("_cached")) return; // already cached/restored
       const key = elem.getAttribute("_cache_key");
       if (window["_elem_cache"][id].hasOwnProperty(key)) {
@@ -679,7 +680,7 @@
 
     // itemdiv can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
     if (!itemdiv) {
-      Object.values(window["_elem_cache"][id]).forEach(adoptCachedElem);
+      Object.values(window["_elem_cache"][id] || {}).forEach(adoptCachedElem);
       return; // itemdiv is null if editing
     }
 
@@ -1053,7 +1054,7 @@
 
   onDestroy(() => {
     // move cached elements into dom to prevent offloading by browser
-    Object.values(window["_elem_cache"][id]).forEach(adoptCachedElem);
+    Object.values(window["_elem_cache"][id] || {}).forEach(adoptCachedElem);
   });
 
   if (!window["_dot_rendered"]) {
