@@ -3147,8 +3147,10 @@
   let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
-
+    // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
+    if (modal.isVisible()) return;
+
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;

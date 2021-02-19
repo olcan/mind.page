@@ -129,15 +129,20 @@
 
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
-    if (!visible) return;
+    // NOTE: modal is on top of the page and handles ALL key events
+    if (!visible) return; // ignore if not visible
     if (key == "Enter") _onConfirm(e);
     else if (key == "Escape") {
-      // treat escape like background click
-      if (background.toLowerCase() == "confirm") _onConfirm(e);
-      else if (background.toLowerCase() == "cancel") _onCancel(e);
+      // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
+      setTimeout(() => {
+        // treat escape like background click
+        if (background.toLowerCase() == "confirm") _onConfirm(e);
+        else if (background.toLowerCase() == "cancel") _onCancel(e);
+      });
     }
-    if (key == "Enter") {
-      e.stopPropagation(); // stop enter propagation
+    // stop all non-modal key events as a modal should
+    if (!(e.target as HTMLElement).closest(".modal")) {
+      e.stopPropagation();
       e.preventDefault();
     }
   }
