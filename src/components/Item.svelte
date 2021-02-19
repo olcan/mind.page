@@ -1423,7 +1423,7 @@
   :global(.item ul),
   :global(.item ol) {
     padding-left: 20px;
-    color: #666;
+    color: #999;
   }
   :global(.item span.list-item) {
     display: block;
@@ -1883,7 +1883,7 @@
   @media only screen and (max-width: 400px) {
     .item {
       font-size: 14px;
-      line-height: 24px;
+      line-height: 23px;
       min-height: 45px; /* single line height */
     }
   }

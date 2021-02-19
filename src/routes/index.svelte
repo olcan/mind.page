@@ -3418,8 +3418,9 @@
     /* font-family: "Open Sans", sans-serif; */
     font-family: "Roboto", sans-serif;
 
-    /* light fonts feel easier to read, and allow tags to pop out as they should */
-    font-weight: 300;
+    /* light fonts feel sharper, and allow tags to pop out as they should */
+    /* font-weight: 300; */
+    font-weight: 400;
 
     /* font-synthesis: none; */
     /* text-rendering: optimizeLegibility; */
