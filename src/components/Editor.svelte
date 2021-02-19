@@ -251,6 +251,8 @@
     });
   }
 
+  import { tick } from "svelte";
+
   let enterStart = -1;
   let enterIndentation = "";
   let lastKeyDown;
@@ -361,10 +363,10 @@
         let selectionStart = textarea.selectionStart;
         let selectionEnd = textarea.selectionEnd;
         onRun();
-        setTimeout(() => {
+        tick().then(() => {
           textarea.selectionStart = selectionStart;
           textarea.selectionEnd = selectionEnd;
-        }, 0);
+        });
         return;
       }
     }

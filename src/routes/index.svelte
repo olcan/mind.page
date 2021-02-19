@@ -634,7 +634,7 @@
       if (textarea) {
         let selectionStart = textarea.selectionStart;
         let selectionEnd = textarea.selectionEnd;
-        setTimeout(() => {
+        tick().then(() => {
           textarea = textArea(focusedItem);
           if (!textarea) return;
           textarea.selectionStart = selectionStart;
@@ -647,7 +647,7 @@
     if (_.min(columnTopMovers) < items.length) {
       // allow dom update before calculating scroll position
       const lastLayoutTimeAtDispatch = lastLayoutTime;
-      setTimeout(() => {
+      tick().then(() => {
         if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancel
         const itemTop = _.min(
           columnTopMovers.map((index) => {
@@ -1373,7 +1373,7 @@
 
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
-    setTimeout(() => (document.activeElement as HTMLElement).blur());
+    tick().then(() => (document.activeElement as HTMLElement).blur());
 
     localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
     resetUser();
@@ -1710,7 +1710,7 @@
     const key = e?.code || e?.key;
     if (cancelled) {
       if (key == "Escape") {
-        setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
+        tick().then(() => textArea(-1).blur()); // requires dispatch on chrome
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
@@ -2010,7 +2010,8 @@
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
       // if (text != origText) selectionStart = selectionEnd = text.length;
       if (text != origText) selectionStart = selectionEnd = 0;
-      setTimeout(() => {
+      // NOTE: this was first evidence that tick() is much more reliable than setTimeout, because using setTimeout iOS would fail to focus on the new item using the "create" button when editor is not already focused
+      tick().then(() => {
         let textarea = textArea(indexFromId.get(item.id));
         if (!textarea) return;
         textarea.selectionStart = selectionStart;
@@ -2044,7 +2045,7 @@
 
             if (focusedItem == index)
               // maintain focus (and caret placement) through id/element change
-              setTimeout(() => {
+              tick().then(() => {
                 let index = indexFromId.get(item.id);
                 if (index == undefined) return;
                 let textarea = textArea(index);
@@ -2074,10 +2075,7 @@
     if (near == Infinity) near = Math.max(...[-1, ...editingItems.filter((i) => i < hideIndex)]);
     focusedItem = near;
     if (near == -1) return; // do not auto-focus on editor
-    setTimeout(() => {
-      textArea(near).focus();
-      // console.debug("focused on item", near);
-    }, 0);
+    tick().then(() => textArea(near).focus());
   }
 
   function onItemSaved(id: string, savedItem) {
@@ -2286,18 +2284,17 @@
       editingItems.push(index);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
-      // NOTE: setTimeout is required for editor to be added to the Dom
       if (ios) {
         textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
         // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
       }
-      setTimeout(() => {
+      tick().then(() => {
         if (!textArea(item.index)) {
           console.warn("missing editor");
           return;
         }
         textArea(item.index).focus();
-      }, 0); // trigger resort
+      });
     } else {
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
@@ -2352,7 +2349,7 @@
       } else {
         // scroll up if needed, allowing dom update before calculating new position
         // (particularly important for items that are much taller when editing)
-        setTimeout(() => {
+        tick().then(() => {
           const div = document.querySelector("#super-container-" + item.id);
           if (!div) return; // item deleted or hidden
           const itemTop = (div as HTMLElement).offsetTop;
@@ -2440,7 +2437,7 @@
     editItem(index);
     lastEditorChangeTime = 0; // force immediate update
     onEditorChange(editorText); // since edit state changed
-    setTimeout(() => {
+    tick().then(() => {
       let index = indexFromId.get(lastEditItem);
       if (index == undefined) return;
       textArea(index).focus();
@@ -2460,7 +2457,7 @@
         // console.debug("sessionHistoryIndex", sessionHistoryIndex);
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(sessionHistory[sessionHistoryIndex]);
-        setTimeout(() => {
+        tick().then(() => {
           textArea(-1).selectionStart = textArea(-1).selectionEnd = editorText.length;
         });
       }
@@ -2476,7 +2473,7 @@
         } // skip if pinned
         editItem(index + inc);
       }
-      setTimeout(() => textArea(index + inc).focus(), 0);
+      tick().then(() => textArea(index + inc).focus());
     }
   }
 
@@ -2486,7 +2483,7 @@
       // console.debug("sessionHistoryIndex", sessionHistoryIndex);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(sessionHistory[sessionHistoryIndex]);
-      setTimeout(() => {
+      tick().then(() => {
         const endOfFirstLine = editorText.match(/^[^\n]*/)[0].length;
         textArea(-1).selectionStart = textArea(-1).selectionEnd = endOfFirstLine;
       });
@@ -2501,7 +2498,7 @@
       } // skip if pinned, saving, or running
       editItem(index + inc);
     }
-    setTimeout(() => textArea(index + inc).focus(), 0);
+    tick().then(() => textArea(index + inc).focus());
   }
 
   let lastScrollTime = 0;
@@ -2771,7 +2768,7 @@
 
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
-    setTimeout(() => (document.activeElement as HTMLElement).blur());
+    tick().then(() => (document.activeElement as HTMLElement).blur());
 
     resetUser();
     window.sessionStorage.setItem("mindpage_signin_pending", "1"); // prevents anonymous user on reload
