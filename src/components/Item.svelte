@@ -49,11 +49,13 @@
   export let hash: string;
   export let deephash: string;
   export let height = 0;
-  let placeholder = " ";
+  const placeholder = " ";
   let error = false;
   let warning = false;
   export let target = false;
   let context = false;
+  let saveable = false;
+  $: saveable = text.trim().length > 0; /* otherwise saving would delete, so just cancel */
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
@@ -105,6 +107,7 @@
   }
 
   function onSaveClick(e) {
+    if (!saveable) return;
     e.stopPropagation();
     e.preventDefault();
     onEditing(index, (editing = false));
@@ -1135,6 +1138,7 @@
     class:showLogs
     class:bordered={error || warning || running}
     class:runnable
+    class:saveable
     class:scripted
     class:macroed
     class:timeOutOfOrder
@@ -1207,7 +1211,7 @@
   }
   .hidden {
     position: absolute;
-    right: -100000px;
+    left: -100000px;
     width: 100%;
   }
 
@@ -1311,20 +1315,25 @@
     background: #b66;
     /* padding-left: 15px; */
   }
+  .save {
+    background: #7a7;
+  }
+  .container:not(.saveable) .save,
+  .saving .save {
+    background: #444;
+    cursor: not-allowed;
+  }
   .run {
     /* color: #0b0; */
     background: #4ae;
-  }
-  .save {
-    background: #7a7;
   }
   .container:not(.runnable) .run {
     display: none;
   }
   .runnable.running .run,
   .runnable.saving .run {
-    /* visibility: false; */
-    background: #333;
+    background: #444;
+    cursor: not-allowed;
   }
 
   .time {

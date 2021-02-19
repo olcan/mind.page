@@ -223,7 +223,7 @@
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
 
-  export function insertImages() {
+  export function insertImages(create: boolean = false) {
     window["_modal"]({
       content:
         window["_user"].uid == "anonymous"
@@ -246,6 +246,7 @@
         textarea.focus();
         document.execCommand("insertText", false, tags);
         onInput();
+        if (create) onDone(text, { code: "Enter" });
       },
     });
   }
@@ -259,6 +260,9 @@
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
     // console.debug("Editor.onKeyDown:", e, key);
+
+    // backspace should not propagate up to window
+    if (key == "Backspace") e.stopPropagation();
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
@@ -575,16 +579,22 @@
   function onClear(e) {
     e.stopPropagation();
     e.preventDefault();
-    textarea.selectionStart = 0;
-    textarea.selectionEnd = textarea.value.length;
-    document.execCommand("forwardDelete");
-    onInput();
+    if (textarea.value) {
+      if (focused) {
+        textarea.selectionStart = 0;
+        textarea.selectionEnd = textarea.value.length;
+        document.execCommand("forwardDelete");
+      } else {
+        textarea.value = "";
+      }
+      onInput();
+    }
   }
 
   function onImage(e) {
     e.stopPropagation();
     e.preventDefault();
-    insertImages();
+    insertImages(!focused); // create new item if not focused
   }
 
   // function used to cancel click events below
@@ -648,11 +658,12 @@
     spellcheck={false}
     autocapitalize="off">{text}</textarea>
 {#if showButtons}
-  <div class="buttons" class:focused>
+  <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->
+  <div class="buttons" class:focused on:click={cancel}>
     <!-- on:mousedown keeps focus on textarea and generally works better (e.g. allows us to refocus on iOS without going outside of scope of click handler) but we have to cancel subsequent click to avoid side effects (e.g. focus going back to editor after creating a new item) -->
-    <div class="button create" on:mousedown={onCreate} on:click={cancel}>create</div>
-    <div class="button image" on:mousedown={onImage} on:click={cancel}>+img</div>
-    <div class="button clear" on:mousedown={onClear} on:click={cancel}>clear</div>
+    <div class="button create" on:mousedown={onCreate}>create</div>
+    <div class="button image" on:mousedown={onImage}>+img</div>
+    <div class="button clear" class:clearable={text.length} on:mousedown={onClear}>clear</div>
   </div>
 {/if}
 </div>
@@ -724,33 +735,35 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    /* radius is at the buttons (same reason as .item-menu and .edit-menu in Item.svelte)
-    /* border-radius: 5px; */ /* round all borders if leaving space on top */
-    /* border-radius: 0 0 5px 5px; */
-    /* overflow: hidden; */
-  }
-  .buttons:not(.focused) {
-    opacity: 0; /* allow completion of click events */
+    border-radius: 0 0 5px 5px;
+    overflow: hidden;
   }
   .button {
     height: 23px;
     padding: 0 8px;
     display: inline-flex;
-    background: #666;
+    background: #999;
     cursor: pointer;
     align-items: center;
   }
-  .button:first-child {
-    border-bottom-left-radius: 5px;
-  }
-  .button:last-child {
-    border-bottom-right-radius: 5px;
-  }
-  .button:not(:last-child) {
-    border-right: 1px solid black;
+  .button:not(:first-child) {
+    border-left: 1px solid black;
   }
   .create {
     background: #7a7;
+  }
+  .clear:not(.clearable) {
+    /* NOTE: display: none leaks click on "create" to #header as create button moves right */
+    /* display: none; */
+    background: #444;
+    cursor: not-allowed;
+  }
+  .buttons:not(.focused) .image {
+    display: none;
+  }
+  /* disable +img for now, seems unnecessary at the top */
+  .image {
+    display: none;
   }
 
   :global(mark) {

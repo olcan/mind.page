@@ -318,7 +318,7 @@
     background: #ddd;
     border-color: #ddd;
     color: #999;
-    cursor: default;
+    cursor: not-allowed;
   }
 
   .cancel {
