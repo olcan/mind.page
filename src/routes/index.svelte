@@ -2723,12 +2723,14 @@
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
 
     const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
-    renderRange(0, unpinnedIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(() => {
-      // renderRange(0, 0, 10, items.length, 0 /*delay*/).then(() => {
-      init_log(`initialized ${items.length} items`);
-      initialized = true;
-      resolve_init();
-    });
+    await renderRange(0, unpinnedIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(
+      () => {
+        // renderRange(0, 0, 10, items.length, 0 /*delay*/).then(() => {
+        init_log(`initialized ${items.length} items`);
+        initialized = true;
+        resolve_init();
+      }
+    );
   }
 
   let rendered = false;
