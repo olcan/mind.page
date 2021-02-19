@@ -180,6 +180,7 @@
           {#if password}
             <input type="text" name="username" value={username} autocomplete="username" style="display:none" />
             <input
+              id="modal-input"
               type="password"
               name="password"
               bind:value={input}
@@ -188,11 +189,11 @@
               on:keydown={onKeyDown}
             />
           {:else}
-            <input bind:value={input} on:keydown={onKeyDown} bind:this={inputelem} {autocomplete} />
+            <input id="modal-input" bind:value={input} on:keydown={onKeyDown} bind:this={inputelem} {autocomplete} />
           {/if}
         </form>
         <script>
-          setTimeout(() => document.querySelector(".modal input").focus());
+          setTimeout(() => document.querySelector("#modal-input").focus());
         </script>
       {/if}
       {#if images}
