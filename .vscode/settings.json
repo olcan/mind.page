@@ -7,7 +7,6 @@
   "breadcrumbs.enabled": true,
   "workbench.activityBar.visible": true,
   "workbench.statusBar.visible": true,
-  "window.zoomLevel": 0,
   "editor.formatOnSave": true,
   "editor.formatOnPaste": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
