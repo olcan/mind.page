@@ -1359,7 +1359,7 @@
 
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
-    tick().then(() => (document.activeElement as HTMLElement).blur());
+    setTimeout(() => (document.activeElement as HTMLElement).blur());
 
     localStorage.removeItem("mindpage_secret"); // also remove secret when signing out
     resetUser();
@@ -1696,7 +1696,7 @@
     const key = e?.code || e?.key;
     if (cancelled) {
       if (key == "Escape") {
-        tick().then(() => textArea(-1).blur()); // requires dispatch on chrome
+        setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
@@ -2749,7 +2749,7 @@
 
     // blur active element as caret can show through loading div
     // (can require dispatch on chrome if triggered from active element)
-    tick().then(() => (document.activeElement as HTMLElement).blur());
+    setTimeout(() => (document.activeElement as HTMLElement).blur());
 
     resetUser();
     window.sessionStorage.setItem("mindpage_signin_pending", "1"); // prevents anonymous user on reload
