@@ -2916,6 +2916,7 @@
       // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
       //       (also window.outerWidth can be stale after device rotation in iOS Safari)
       let lastDocumentWidth = 0;
+      let lastWindowHeight = 0;
       function checkLayout() {
         if (Date.now() - lastScrollTime < 250) return; // will be invoked again via setInterval
         const documentWidth = document.documentElement.clientWidth;
@@ -2929,6 +2930,12 @@
           lastDocumentWidth = documentWidth;
           return;
         }
+        // on android, if window height grows enough, assume keyboard is closed and blur active element
+        // (otherwise e.g. tapping of tags with editor focused will scroll back up)
+        if (android && outerHeight > lastWindowHeight + 200) {
+          (document.activeElement as HTMLElement).blur();
+        }
+        lastWindowHeight = outerHeight;
         // update time strings every 10 seconds
         // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
         if (Date.now() - lastTimeStringUpdateTime > 10000) {
