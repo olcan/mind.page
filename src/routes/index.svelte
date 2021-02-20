@@ -1720,13 +1720,16 @@
 
     // reset history index, update entry 0 and unshift duplicate entry
     // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
+    // NOTE: if event (e) is missing, this is considered a "synthetic" call not added to history
+    // NOTE: if new entry would be blank or same as previous, we do not create a new entry
     if (e) {
-      // otherwise it is a "synthetic" call that is not added to history
       sessionHistoryIndex = 0;
-      if (sessionHistory[0] != text.trim())
+      if (sessionHistory[0] != text.trim()) {
         if (sessionHistory.length == 0) sessionHistory = [text.trim()];
         else sessionHistory[0] = text.trim();
-      sessionHistory.unshift(sessionHistory[0]);
+      }
+      if (sessionHistory[0].trim() && (sessionHistory.length == 1 || sessionHistory[0] != sessionHistory[1]))
+        sessionHistory.unshift(sessionHistory[0]);
     }
 
     let origText = text; // if text is modified, caret position will be lost
@@ -2002,11 +2005,18 @@
       text = itemToSave.text = item.text; // no need to update editorText
     }
 
+    // if editor was not focused, focus now and move to end
+    // (focusing on existing editor is required on iOS for shifting focus to another item)
     let textarea = textArea(-1);
-    textarea.focus(); // refocus (necessary on iOS for shifting focus to another item)
+    let selectionStart = textarea.selectionStart;
+    let selectionEnd = textarea.selectionEnd;
+    if (!document.activeElement?.isSameNode(textarea)) {
+      // NOTE: setting selection here is not reliable (likely due to editorText being modified above)
+      // textarea.selectionStart = textarea.selectionEnd = text.length;
+      selectionStart = selectionEnd = text.length;
+      textarea.focus();
+    }
     if (editing) {
-      let selectionStart = textarea.selectionStart;
-      let selectionEnd = textarea.selectionEnd;
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
       // if (text != origText) selectionStart = selectionEnd = text.length;
       if (text != origText) selectionStart = selectionEnd = 0;
