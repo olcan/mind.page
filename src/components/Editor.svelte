@@ -541,13 +541,13 @@
         window["_modal"]({ content: "Inserting pasted image ..." });
         Promise.resolve(
           onPastedImage(url, file, (size) => {
-            window["_update_modal"]({
+            window["_modal_update"]({
               content: `Inserting pasted image (${numberWithCommas(Math.ceil(size / 1024))} KB) ...`,
             });
           })
         )
           .then((fname) => {
-            setTimeout(window["_close_modal"], 0); // increase delay for testing
+            setTimeout(window["_modal_close"], 0); // increase delay for testing
             const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`;
             textarea.focus();
             document.execCommand("insertText", false, img);

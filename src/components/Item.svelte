@@ -47,7 +47,6 @@
   export let runnable: boolean;
   export let scripted: boolean;
   export let macroed: boolean;
-  export let raw: boolean;
 
   export let text: string;
   export let hash: string;
@@ -990,7 +989,7 @@
             Promise.resolve(
               onPastedImage(URL.createObjectURL(file), file, (size) => {
                 total_size += size;
-                window["_update_modal"]({
+                window["_modal_update"]({
                   content: `Inserting selected images (${numberWithCommas(Math.ceil(total_size / 1024))} KB) ...`,
                 });
               })
@@ -998,7 +997,7 @@
           )
         )
           .then((fnames: any) => {
-            setTimeout(window["_close_modal"], 0); // increase delay for testing
+            setTimeout(window["_modal_close"], 0); // increase delay for testing
             const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
             const images = fnames
               .map((fname) => {
@@ -1115,109 +1114,94 @@
   }
 </script>
 
-{#if raw}
-  <div class="raw-item" style="padding:10px; max-width:750px;">
-    <pre style="white-space: pre-wrap; word-wrap: break-word;">{text}</pre>
-    {#each extractImages(text) as src}
-      {@html ((src) => {
-        let _src = src;
-        src = onImageRendering(src);
-        if (src == _src) _src = "";
-        else _src = `_src="${_src}"`;
-        return `<img src="${onImageRendering(src)}" ${_src} style="max-width:100%" />`;
-      })(src)}
-    {/each}
-  </div>
-{:else}
+<div
+  class="super-container"
+  id={"super-container-" + id}
+  class:editing
+  class:hidden
+  class:timed={timeString.length > 0}
+>
+  {#if timeString}
+    <div class="time" class:timeOutOfOrder>{timeString}</div>
+  {/if}
+  {#if showDebugString}
+    <div class="debug">{debugString}</div>
+  {/if}
   <div
-    class="super-container"
-    id={"super-container-" + id}
+    bind:this={container}
+    on:click={onClick}
+    class="container"
     class:editing
-    class:hidden
-    class:timed={timeString.length > 0}
+    class:focused
+    class:saving
+    class:error
+    class:warning
+    class:context
+    class:target
+    class:running
+    class:admin
+    class:showLogs
+    class:bordered={error || warning || running}
+    class:runnable
+    class:saveable
+    class:scripted
+    class:macroed
+    class:timeOutOfOrder
   >
-    {#if timeString}
-      <div class="time" class:timeOutOfOrder>{timeString}</div>
-    {/if}
-    {#if showDebugString}
-      <div class="debug">{debugString}</div>
-    {/if}
-    <div
-      bind:this={container}
-      on:click={onClick}
-      class="container"
-      class:editing
-      class:focused
-      class:saving
-      class:error
-      class:warning
-      class:context
-      class:target
-      class:running
-      class:admin
-      class:showLogs
-      class:bordered={error || warning || running}
-      class:runnable
-      class:saveable
-      class:scripted
-      class:macroed
-      class:timeOutOfOrder
-    >
-      {#if editing}
-        <div class="edit-menu">
-          {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-          <div class="button save" on:click={onSaveClick}>save</div>
-          <div class="button image" on:click={onImageClick}>+img</div>
-          <div class="button cancel" on:click={onCancelClick}>cancel</div>
-          <div class="button delete" on:click={onDeleteClick}>delete</div>
-        </div>
+    {#if editing}
+      <div class="edit-menu">
+        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+        <div class="button save" on:click={onSaveClick}>save</div>
+        <div class="button image" on:click={onImageClick}>+img</div>
+        <div class="button cancel" on:click={onCancelClick}>cancel</div>
+        <div class="button delete" on:click={onDeleteClick}>delete</div>
+      </div>
 
-        <Editor
-          {id}
-          bind:this={editor}
-          bind:text
-          bind:focused
-          {onRun}
-          {onPrev}
-          {onNext}
-          onFocused={(focused) => onFocused(index, focused)}
-          onEdited={(text) => onEdited(index, text)}
-          {onPastedImage}
-          {onDone}
-        />
-      {:else}
-        <div class="item-menu">
-          {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-          <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
-        </div>
-        <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-        <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
-          <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-          {@html toHTML(
-            text || placeholder,
-            id,
-            deephash,
-            labelUnique,
-            missingTags,
-            matchingTerms,
-            matchingTermsSecondary,
-            depsString,
-            dependentsString
-          )}
-        </div>
-      {/if}
-      {#if running}
-        <div class="loading">
-          <Circle2 size="40" unit="px" />
-        </div>
-      {:else if saving}
-        <div class="loading">
-          <Circle size="25" unit="px" />
-        </div>
-      {/if}
-    </div>
+      <Editor
+        {id}
+        bind:this={editor}
+        bind:text
+        bind:focused
+        {onRun}
+        {onPrev}
+        {onNext}
+        onFocused={(focused) => onFocused(index, focused)}
+        onEdited={(text) => onEdited(index, text)}
+        {onPastedImage}
+        {onDone}
+      />
+    {:else}
+      <div class="item-menu">
+        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+        <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
+      </div>
+      <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
+      <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
+        <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
+        {@html toHTML(
+          text || placeholder,
+          id,
+          deephash,
+          labelUnique,
+          missingTags,
+          matchingTerms,
+          matchingTermsSecondary,
+          depsString,
+          dependentsString
+        )}
+      </div>
+    {/if}
+    {#if running}
+      <div class="loading">
+        <Circle2 size="40" unit="px" />
+      </div>
+    {:else if saving}
+      <div class="loading">
+        <Circle size="25" unit="px" />
+      </div>
+    {/if}
   </div>
-{/if}
+</div>
 
 <style>
   .super-container {

@@ -24,7 +24,6 @@
   let anonymous = false;
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
-  let raw = isClient && location.href.match(/output=raw/) != null;
   let modal;
 
   let evalStack = [];
@@ -63,8 +62,9 @@
   }
 
   // _items returns any number of matches, most recent first
-  function _items(label: string) {
-    return _.sortBy((idsFromLabel.get(label.toLowerCase()) || []).map(_item), (item) => -item.time);
+  function _items(label: string = "") {
+    const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map((item) => item.id)) || [];
+    return _.sortBy(ids.map(_item), (item) => -item.time);
   }
 
   // _modal shows a modal dialog
@@ -72,14 +72,19 @@
     return modal.show(options);
   }
 
-  // _close_modal closes modal manually
-  function _close_modal(options) {
+  // _modal_close closes modal manually
+  function _modal_close(options) {
     return modal.hide();
   }
 
-  // _update_modal updates existing modal without closing it
-  function _update_modal(options) {
+  // _modal_update updates existing modal without closing it
+  function _modal_update(options) {
     return modal.update(options);
+  }
+
+  // _delay is just setTimeout wrapped in a promise
+  function _delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // define window properties and functions
@@ -107,8 +112,9 @@
     window["_item"] = _item;
     window["_items"] = _items;
     window["_modal"] = _modal;
-    window["_close_modal"] = _close_modal;
-    window["_update_modal"] = _update_modal;
+    window["_modal_close"] = _modal_close;
+    window["_modal_update"] = _modal_update;
+    window["_delay"] = _delay;
   }
 
   // private function for looking up item given its id
@@ -475,6 +481,112 @@
       return new Promise(this.attach(func));
     }
 
+    // delay = promise resolved after specified time
+    delay(ms) {
+      return this.promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    // return array of uploaded image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
+    // returns promise for urls or blobs as they require download and decryption
+    images(options = {}) {
+      let srcs = _.uniq(
+        Array.from(
+          (this.text
+            .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
+            // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
+            .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
+            .replace(/(^|[^\\])`.*?`/g, "$1") as any).matchAll(/<img .*?src\s*=\s*"(.*?)".*?>/gi),
+          (m) => m[1]
+        ).map((src) =>
+          src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "")
+        )
+      ).filter((src) => src.match(/^\d+$/) || src.startsWith(user.uid + "/images/"));
+      const output = options["output"] || "src";
+      if (!["src", "url", "blob"].includes(output)) {
+        console.error(`images: invalid output '${output}', should be src, url, or blob`);
+        return srcs;
+      }
+      if (output == "src") return srcs;
+      return Promise.all(
+        srcs.map((src) => {
+          if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
+          return new Promise((resolve, reject) => {
+            if (images.has(src)) {
+              // already available locally, convert to blob
+              const url = images.get(src);
+              if (output == "url") {
+                resolve(url);
+                return;
+              }
+              let start = Date.now();
+              let xhr = new XMLHttpRequest();
+              xhr.responseType = "blob";
+              xhr.onload = (event) => {
+                const blob = xhr.response;
+                console.debug(`retrieved image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`);
+                resolve(blob);
+              };
+              xhr.onerror = console.error;
+              xhr.open("GET", url);
+              xhr.send();
+              return;
+            }
+            const ref = firebase().storage().ref().child(src);
+            ref
+              .getDownloadURL()
+              .then((url) => {
+                let start = Date.now();
+                let xhr = new XMLHttpRequest();
+                xhr.responseType = "blob";
+                xhr.onload = (event) => {
+                  const blob = xhr.response;
+                  console.debug(
+                    `downloaded image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
+                  );
+                  if (src.startsWith("anonymous/")) {
+                    resolve(output == "blob" ? blob : URL.createObjectURL(blob));
+                    return;
+                  }
+                  start = Date.now();
+                  const reader = new FileReader();
+                  reader.readAsBinaryString(blob);
+                  reader.onload = (e) => {
+                    const cipher = e.target.result as string;
+                    decrypt(cipher)
+                      .then((str) => {
+                        const type = str.substring(0, str.indexOf(";"));
+                        str = str.substring(str.indexOf(";") + 1);
+                        console.debug(
+                          `decrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
+                        );
+                        const array = new Uint8Array(
+                          [].map.call(str, function (x) {
+                            return x.charCodeAt(0);
+                          })
+                        );
+                        const blob = new Blob([array], { type: type });
+                        resolve(output == "blob" ? blob : URL.createObjectURL(blob));
+                      })
+                      .catch((e) => {
+                        console.error(e);
+                        reject(e);
+                      });
+                  };
+                  reader.onerror = console.error;
+                };
+                xhr.onerror = console.error;
+                xhr.open("GET", url);
+                xhr.send();
+              })
+              .catch((e) => {
+                console.error(e);
+                reject(e);
+              });
+          });
+        })
+      );
+    }
+
     // invalidate element cache for item
     invalidate_cache() {
       invalidateElemCache(this.id);
@@ -523,7 +635,6 @@
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
-    if (raw) columnCount = 1;
     let columnHeights = new Array(columnCount).fill(0);
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
@@ -718,6 +829,7 @@
   function onImageRendering(src: string): string {
     if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
     if (!src.startsWith(user.uid + "/images/") && !src.startsWith("anonymous/images/")) return src; // external image
+    if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
     if (images.has(src)) return images.get(src); // image ready
     return "/loading.gif"; // image must be loaded
   }
@@ -728,7 +840,7 @@
     let src = img.getAttribute("_src");
     if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
     if (images.has(src)) {
-      img.src = images.get(src);
+      if (img.src != images.get(src)) img.src = images.get(src);
       img.removeAttribute("_loading");
       return Promise.resolve();
     }
@@ -1219,10 +1331,6 @@
       });
     }
     // console.debug(toggles);
-    if (raw) {
-      toggles = [];
-      hideIndex = Infinity;
-    }
 
     // update history, replace unless current state is final (from tag click)
     if (editorText != history.state.editorText) {
@@ -2719,12 +2827,6 @@
     processed = true;
     // init_log(`processed ${items.length} items`);
 
-    if (raw) {
-      initialized = true;
-      resolve_init();
-      return;
-    }
-
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
 
     const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
@@ -3074,7 +3176,6 @@
       }
 
       onMount(() => {
-        if (raw) return;
         Promise.resolve(initialization).then(() => {
           let replay = true; // true until replay below
           log_levels.forEach(function (verb) {
@@ -3165,7 +3266,6 @@
     // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
     if (modal.isVisible()) return;
-    if (raw) return; // ignore keyboard events
 
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
@@ -3239,7 +3339,7 @@
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount + 1 } as _, column}
       <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount}>
-        {#if column == 0 && !raw}
+        {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused>
               <div id="editor">
@@ -3377,7 +3477,6 @@
                 runnable={item.runnable}
                 scripted={item.scripted}
                 macroed={item.macroed}
-                {raw}
               />
               {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
                 <div class="section-separator">
@@ -3402,18 +3501,6 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
-{:else if raw}
-  <script>
-    Promise.all(Array.from(document.querySelectorAll("img")).map(_onImageRendered))
-      .then(() => {
-        let raw_items = document.querySelectorAll(".raw-item");
-        document.head.remove();
-        document.body.innerHTML = "";
-        raw_items.forEach((item) => document.body.appendChild(item));
-        alert("Your page is ready. ");
-      })
-      .catch((e) => alert("Error downloading images: " + e));
-  </script>
 {/if}
 
 <Modal bind:this={modal} {onPastedImage} />
