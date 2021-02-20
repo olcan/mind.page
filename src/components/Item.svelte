@@ -7,6 +7,7 @@
   import {
     highlight,
     extractBlock,
+    extractImages,
     hashCode,
     parseTags,
     renderTag,
@@ -46,6 +47,7 @@
   export let runnable: boolean;
   export let scripted: boolean;
   export let macroed: boolean;
+  export let raw: boolean;
 
   export let text: string;
   export let hash: string;
@@ -65,7 +67,9 @@
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
   export let onResized = (id, container, trigger: string) => {};
-  export let onImageRendering = (src: string) => {};
+  export let onImageRendering = (src: string): string => {
+    return "";
+  };
   export let onImageRendered = (img: HTMLImageElement) => {};
   export let onPrev = () => {};
   export let onNext = () => {};
@@ -545,7 +549,7 @@
         return m;
       }
       // convert dropbox image src urls to direct download
-      src = src.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "");
+      src = src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "");
       m = m.replace(/ src=[^> ]*/, "");
       const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // allow onImageRendering() to change src, and if so, put original as _src and add loading class
@@ -1111,95 +1115,109 @@
   }
 </script>
 
-<div
-  class="super-container"
-  id={"super-container-" + id}
-  class:editing
-  class:hidden
-  class:timed={timeString.length > 0}
->
-  {#if timeString}
-    <div class="time" class:timeOutOfOrder>{timeString}</div>
-  {/if}
-  {#if showDebugString}
-    <div class="debug">{debugString}</div>
-  {/if}
-  <div
-    bind:this={container}
-    on:click={onClick}
-    class="container"
-    class:editing
-    class:focused
-    class:saving
-    class:error
-    class:warning
-    class:context
-    class:target
-    class:running
-    class:admin
-    class:showLogs
-    class:bordered={error || warning || running}
-    class:runnable
-    class:saveable
-    class:scripted
-    class:macroed
-    class:timeOutOfOrder
-  >
-    {#if editing}
-      <div class="edit-menu">
-        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-        <div class="button save" on:click={onSaveClick}>save</div>
-        <div class="button image" on:click={onImageClick}>+img</div>
-        <div class="button cancel" on:click={onCancelClick}>cancel</div>
-        <div class="button delete" on:click={onDeleteClick}>delete</div>
-        <!-- <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div> -->
-      </div>
-
-      <Editor
-        {id}
-        bind:this={editor}
-        bind:text
-        bind:focused
-        {onRun}
-        {onPrev}
-        {onNext}
-        onFocused={(focused) => onFocused(index, focused)}
-        onEdited={(text) => onEdited(index, text)}
-        {onPastedImage}
-        {onDone}
-      />
-    {:else}
-      <div class="item-menu">
-        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-        <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
-      </div>
-      <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
-        <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
-        {@html toHTML(
-          text || placeholder,
-          id,
-          deephash,
-          labelUnique,
-          missingTags,
-          matchingTerms,
-          matchingTermsSecondary,
-          depsString,
-          dependentsString
-        )}
-      </div>
-    {/if}
-    {#if running}
-      <div class="loading">
-        <Circle2 size="40" unit="px" />
-      </div>
-    {:else if saving}
-      <div class="loading">
-        <Circle size="25" unit="px" />
-      </div>
-    {/if}
+{#if raw}
+  <div class="raw-item" style="padding:10px; max-width:750px;">
+    <pre style="white-space: pre-wrap; word-wrap: break-word;">{text}</pre>
+    {#each extractImages(text) as src}
+      {@html ((src) => {
+        let _src = src;
+        src = onImageRendering(src);
+        if (src == _src) _src = "";
+        else _src = `_src="${_src}"`;
+        return `<img src="${onImageRendering(src)}" ${_src} style="max-width:100%" />`;
+      })(src)}
+    {/each}
   </div>
-</div>
+{:else}
+  <div
+    class="super-container"
+    id={"super-container-" + id}
+    class:editing
+    class:hidden
+    class:timed={timeString.length > 0}
+  >
+    {#if timeString}
+      <div class="time" class:timeOutOfOrder>{timeString}</div>
+    {/if}
+    {#if showDebugString}
+      <div class="debug">{debugString}</div>
+    {/if}
+    <div
+      bind:this={container}
+      on:click={onClick}
+      class="container"
+      class:editing
+      class:focused
+      class:saving
+      class:error
+      class:warning
+      class:context
+      class:target
+      class:running
+      class:admin
+      class:showLogs
+      class:bordered={error || warning || running}
+      class:runnable
+      class:saveable
+      class:scripted
+      class:macroed
+      class:timeOutOfOrder
+    >
+      {#if editing}
+        <div class="edit-menu">
+          {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+          <div class="button save" on:click={onSaveClick}>save</div>
+          <div class="button image" on:click={onImageClick}>+img</div>
+          <div class="button cancel" on:click={onCancelClick}>cancel</div>
+          <div class="button delete" on:click={onDeleteClick}>delete</div>
+        </div>
+
+        <Editor
+          {id}
+          bind:this={editor}
+          bind:text
+          bind:focused
+          {onRun}
+          {onPrev}
+          {onNext}
+          onFocused={(focused) => onFocused(index, focused)}
+          onEdited={(text) => onEdited(index, text)}
+          {onPastedImage}
+          {onDone}
+        />
+      {:else}
+        <div class="item-menu">
+          {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+          <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
+        </div>
+        <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
+        <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
+          <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
+          {@html toHTML(
+            text || placeholder,
+            id,
+            deephash,
+            labelUnique,
+            missingTags,
+            matchingTerms,
+            matchingTermsSecondary,
+            depsString,
+            dependentsString
+          )}
+        </div>
+      {/if}
+      {#if running}
+        <div class="loading">
+          <Circle2 size="40" unit="px" />
+        </div>
+      {:else if saving}
+        <div class="loading">
+          <Circle size="25" unit="px" />
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .super-container {

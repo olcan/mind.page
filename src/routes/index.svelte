@@ -24,6 +24,7 @@
   let anonymous = false;
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
+  let raw = isClient && location.href.match(/output=raw/) != null;
   let modal;
 
   let evalStack = [];
@@ -522,6 +523,7 @@
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
+    if (raw) columnCount = 1;
     let columnHeights = new Array(columnCount).fill(0);
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
@@ -713,7 +715,7 @@
     });
   }
 
-  function onImageRendering(src: string) {
+  function onImageRendering(src: string): string {
     if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
     if (!src.startsWith(user.uid + "/images/") && !src.startsWith("anonymous/images/")) return src; // external image
     if (images.has(src)) return images.get(src); // image ready
@@ -722,60 +724,71 @@
 
   function onImageRendered(img: HTMLImageElement) {
     // console.debug("image rendered", img.src);
-    if (!img.hasAttribute("_src")) return; // nothing to do
+    if (!img.hasAttribute("_src")) return Promise.resolve(); // nothing to do
     let src = img.getAttribute("_src");
     if (src.match(/^\d+$/)) src = user.uid + "/images/" + src; // prefix {uid}/images/ automatically
     if (images.has(src)) {
       img.src = images.get(src);
       img.removeAttribute("_loading");
-      return;
+      return Promise.resolve();
     }
-    // image must be downloaded and decrypted if user is not anonymous
-    const ref = firebase().storage().ref().child(src);
-    ref
-      .getDownloadURL()
-      .then((url) => {
-        if (src.startsWith("anonymous/")) {
-          img.src = url;
-          img.removeAttribute("_loading");
-        } else {
-          // download data
-          const start = Date.now();
-          // console.debug(`downloading encrypted image ${src} ...`);
-          let xhr = new XMLHttpRequest();
-          xhr.responseType = "blob";
-          xhr.onload = (event) => {
-            const blob = xhr.response;
-            const reader = new FileReader();
-            reader.readAsBinaryString(blob);
-            reader.onload = (e) => {
-              const cipher = e.target.result as string;
-              decrypt(cipher)
-                .then((str) => {
-                  const type = str.substring(0, str.indexOf(";"));
-                  str = str.substring(str.indexOf(";") + 1);
-                  console.debug(
-                    `downloaded encrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
-                  );
-                  const array = new Uint8Array(
-                    [].map.call(str, function (x) {
-                      return x.charCodeAt(0);
-                    })
-                  );
-                  img.src = URL.createObjectURL(new Blob([array], { type: type }));
-                  img.removeAttribute("_loading");
-                })
-                .catch(console.error);
+    return new Promise((resolve, reject) => {
+      // image must be downloaded and decrypted if user is not anonymous
+      const ref = firebase().storage().ref().child(src);
+      ref
+        .getDownloadURL()
+        .then((url) => {
+          if (src.startsWith("anonymous/")) {
+            img.src = url;
+            img.removeAttribute("_loading");
+            resolve(img.src);
+          } else {
+            // download data
+            const start = Date.now();
+            // console.debug(`downloading encrypted image ${src} ...`);
+            let xhr = new XMLHttpRequest();
+            xhr.responseType = "blob";
+            xhr.onload = (event) => {
+              const blob = xhr.response;
+              const reader = new FileReader();
+              reader.readAsBinaryString(blob);
+              reader.onload = (e) => {
+                const cipher = e.target.result as string;
+                decrypt(cipher)
+                  .then((str) => {
+                    const type = str.substring(0, str.indexOf(";"));
+                    str = str.substring(str.indexOf(";") + 1);
+                    console.debug(
+                      `downloaded encrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
+                    );
+                    const array = new Uint8Array(
+                      [].map.call(str, function (x) {
+                        return x.charCodeAt(0);
+                      })
+                    );
+                    img.src = URL.createObjectURL(new Blob([array], { type: type }));
+                    img.removeAttribute("_loading");
+                    resolve(img.src);
+                  })
+                  .catch((e) => {
+                    console.error(e);
+                    reject(e);
+                  });
+              };
+              reader.onerror = console.error;
             };
-            reader.onerror = console.error;
-          };
-          xhr.onerror = console.error;
-          xhr.open("GET", url);
-          xhr.send();
-        }
-      })
-      .catch(console.error);
+            xhr.onerror = console.error;
+            xhr.open("GET", url);
+            xhr.send();
+          }
+        })
+        .catch((e) => {
+          console.error(e);
+          reject(e);
+        });
+    });
   }
+  if (isClient) window["_onImageRendered"] = onImageRendered;
 
   function onEditorFocused(focused: boolean) {}
 
@@ -1206,6 +1219,10 @@
       });
     }
     // console.debug(toggles);
+    if (raw) {
+      toggles = [];
+      hideIndex = Infinity;
+    }
 
     // update history, replace unless current state is final (from tag click)
     if (editorText != history.state.editorText) {
@@ -2702,6 +2719,12 @@
     processed = true;
     // init_log(`processed ${items.length} items`);
 
+    if (raw) {
+      initialized = true;
+      resolve_init();
+      return;
+    }
+
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
 
     const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
@@ -3044,6 +3067,7 @@
       }
 
       onMount(() => {
+        if (raw) return;
         Promise.resolve(initialization).then(() => {
           let replay = true; // true until replay below
           log_levels.forEach(function (verb) {
@@ -3134,6 +3158,7 @@
     // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
     if (modal.isVisible()) return;
+    if (raw) return; // ignore keyboard events
 
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
@@ -3207,7 +3232,7 @@
   <div class="items" class:multi-column={columnCount > 1}>
     {#each { length: columnCount + 1 } as _, column}
       <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount}>
-        {#if column == 0}
+        {#if column == 0 && !raw}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused>
               <div id="editor">
@@ -3345,6 +3370,7 @@
                 runnable={item.runnable}
                 scripted={item.scripted}
                 macroed={item.macroed}
+                {raw}
               />
               {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
                 <div class="section-separator">
@@ -3369,6 +3395,18 @@
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
+{:else if raw}
+  <script>
+    Promise.all(Array.from(document.querySelectorAll("img")).map(_onImageRendered))
+      .then(() => {
+        let raw_items = document.querySelectorAll(".raw-item");
+        document.head.remove();
+        document.body.innerHTML = "";
+        raw_items.forEach((item) => document.body.appendChild(item));
+        alert("Your page is ready. ");
+      })
+      .catch((e) => alert("Error downloading images: " + e));
+  </script>
 {/if}
 
 <Modal bind:this={modal} {onPastedImage} />
