@@ -33,6 +33,7 @@
   export let missingTags: any;
   export let matchingTerms: any;
   export let matchingTermsSecondary: any;
+  export let matching: boolean;
   export let time: number;
   export let timeString: string;
   export let timeOutOfOrder: boolean;
@@ -41,6 +42,7 @@
   export let depsString: string;
   export let dependentsString: string;
   export let aboveTheFold: boolean;
+  export let leader: boolean;
   export let runnable: boolean;
   export let scripted: boolean;
   export let macroed: boolean;
@@ -1150,7 +1152,7 @@
         <div class="button image" on:click={onImageClick}>+img</div>
         <div class="button cancel" on:click={onCancelClick}>cancel</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
-        <div class="button index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
+        <!-- <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div> -->
       </div>
 
       <Editor
@@ -1169,7 +1171,7 @@
     {:else}
       <div class="item-menu">
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-        <div class="button index" class:matching={matchingTerms.length > 0} on:click={onIndexClick}>{index + 1}</div>
+        <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div class="item" id={"item-" + id} bind:this={itemdiv} class:saving>
@@ -1301,11 +1303,11 @@
     padding: 0 4px;
     border: 0;
   }
-  .runnable .index,
+  /* .runnable .index,
   .scripted .index,
   .macroed .index {
     background: #468;
-  }
+  } */
 
   .index.matching {
     background: #9f9;
@@ -1334,6 +1336,23 @@
   .runnable.saving .run {
     background: #444;
     cursor: not-allowed;
+  }
+
+  .item-menu > .index {
+    background: transparent;
+    color: #444;
+  }
+
+  .item-menu > .index.leader {
+    color: #999;
+  }
+
+  .item-menu > .index.matching {
+    color: #9f9;
+  }
+
+  .item-menu > .run {
+    border-bottom-right-radius: 5px;
   }
 
   .time {

@@ -159,13 +159,13 @@ export function checkElemCache() {
     Object.values(window["_elem_cache"][id]).forEach((elem) => {
       if (document.contains(elem)) return;
       const key = elem.getAttribute("_cache_key");
-      console.warn("orphaned cached element", key, "from item", window["_item"](id).name);
+      // console.warn("orphaned cached element", key, "from item", window["_item"](id).name);
       // if element has zero-width, destroy it, otherwise adopt it
       if (elem.offsetWidth == 0) {
         delete window["_elem_cache"][id][key];
         // destroy all children w/ _destroy attribute (and property)
         elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
-        console.warn("destroyed zero-width orphaned cached element", key, "from item", window["_item"](id).name);
+        // console.warn("destroyed zero-width orphaned cached element", key, "from item", window["_item"](id).name);
       } else {
         adoptCachedElem(elem);
       }

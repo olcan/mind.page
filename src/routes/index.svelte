@@ -600,20 +600,22 @@
       item.aboveTheFold =
         item.pinned ||
         (totalItemHeight > 0 ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5);
-      // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveTheFold
-      item.prominence = item.pinned
-        ? 0
-        : totalItemHeight > 0
-        ? columnHeights[item.column] / outerHeight
-        : columnItemCount[item.column] / 5;
-      columnItemCount[item.column]++;
+      // // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveTheFold
+      // item.prominence = item.pinned
+      //   ? 0
+      //   : totalItemHeight > 0
+      //   ? columnHeights[item.column] / outerHeight
+      //   : columnItemCount[item.column] / 5;
+      // columnItemCount[item.column]++;
 
       // record item as top mover if it is lowest-index item that moved in its column
       const moved = item.index != item.lastIndex || item.column != item.lastColumn;
       if (moved && item.index < columnTopMovers[item.column]) columnTopMovers[item.column] = item.index;
 
       // if non-dotted item is first in its column or section and missing time string, add it now
-      if (!item.dotted && (columnLastItem[item.column] < 0 || item.column != lastItem.column) && !item.timeString) {
+      // also mark it as a "leader" for styling its index number
+      item.leader = !item.dotted && (columnLastItem[item.column] < 0 || item.column != lastItem.column);
+      if (item.leader && !item.timeString) {
         item.timeString = timeString;
         lastTimeString = timeString; // for grouping of subsequent items
         // add time string height now, assuming we are not ignoring item height
@@ -2644,7 +2646,8 @@
       item.index = index;
       item.lastIndex = index;
       item.aboveTheFold = false;
-      item.prominence = 0;
+      // item.prominence = 0;
+      item.leader = false;
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
@@ -3329,6 +3332,7 @@
                 missingTags={item.missingTags.join(" ")}
                 matchingTerms={item.matchingTerms.join(" ")}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
+                matching={item.matching}
                 target={item.target}
                 timeString={item.timeString}
                 timeOutOfOrder={item.timeOutOfOrder}
@@ -3337,6 +3341,7 @@
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
                 aboveTheFold={item.aboveTheFold}
+                leader={item.leader}
                 runnable={item.runnable}
                 scripted={item.scripted}
                 macroed={item.macroed}
@@ -3697,6 +3702,7 @@
     font-size: 80%;
     font-weight: 400;
     color: #777;
+    display: none;
   }
   .toggle.show {
     font-size: 20px;
