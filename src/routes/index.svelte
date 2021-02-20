@@ -2005,21 +2005,17 @@
       text = itemToSave.text = item.text; // no need to update editorText
     }
 
-    // if editor was not focused, focus now and move to end
-    // (focusing on existing editor is required on iOS for shifting focus to another item)
-    let textarea = textArea(-1);
-    let selectionStart = textarea.selectionStart;
-    let selectionEnd = textarea.selectionEnd;
-    if (!document.activeElement?.isSameNode(textarea)) {
-      // NOTE: setting selection here is not reliable (likely due to editorText being modified above)
-      // textarea.selectionStart = textarea.selectionEnd = text.length;
-      selectionStart = selectionEnd = text.length;
-      textarea.focus();
-    }
     if (editing) {
+      let textarea = textArea(-1);
+      // textarea.focus();
+      let selectionStart = textarea.selectionStart;
+      let selectionEnd = textarea.selectionEnd;
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
-      // if (text != origText) selectionStart = selectionEnd = text.length;
+      // otherwise keep selection, or move to end if editor is not focused
       if (text != origText) selectionStart = selectionEnd = 0;
+      // NOTE: this can fail and even cause a LOSS of focus on the iPad for mysterious reasons which appear to be related to "tap to click" behavior on the trackpad and/or visibility of the bottom keyboard toolbar; it does not happen when using touch or when "clicking" on the trackpad, and seems tricky to fix so we just ignore for now!
+      else if (!focused) selectionStart = selectionEnd = text.length;
+
       // NOTE: this was first evidence that tick() is much more reliable than setTimeout, because using setTimeout iOS would fail to focus on the new item using the "create" button when editor is not already focused
       tick().then(() => {
         let textarea = textArea(indexFromId.get(item.id));
