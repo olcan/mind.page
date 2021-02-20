@@ -223,6 +223,14 @@
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
 
+  export function setSelection(start: number, end: number) {
+    const wasFocused = document.activeElement.isSameNode(textarea);
+    textarea.selectionStart = start;
+    textarea.selectionEnd = end;
+    // on Safari, setting the selection can auto-focus so we have to blur
+    if (!wasFocused) textarea.blur();
+  }
+
   export function insertImages(create: boolean = false) {
     window["_modal"]({
       content:
@@ -632,8 +640,7 @@
     document.addEventListener("selectionchange", onSelectionChange);
     // standardize initial position at 0; can be value.length (e.g. on android)
     // 0 works better for longer items since top of item provides much better context
-    textarea.selectionStart = textarea.selectionEnd = 0;
-    textarea.blur(); // prevent auto-focus in Safari due to selectionStart set
+    setSelection(0, 0);
   });
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>

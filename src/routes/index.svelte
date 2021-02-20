@@ -628,21 +628,6 @@
       columnLastItem[item.column] = index;
     });
 
-    if (focusedItem >= 0) {
-      // maintain focus/selection
-      let textarea = textArea(focusedItem);
-      if (textarea) {
-        let selectionStart = textarea.selectionStart;
-        let selectionEnd = textarea.selectionEnd;
-        tick().then(() => {
-          textarea = textArea(focusedItem);
-          if (!textarea) return;
-          textarea.selectionStart = selectionStart;
-          textarea.selectionEnd = selectionEnd;
-          textarea.focus();
-        }); // allow dom update before refocus
-      }
-    }
     // scroll up to top moved item if necessary
     if (_.min(columnTopMovers) < items.length) {
       // allow dom update before calculating scroll position
@@ -1303,6 +1288,7 @@
     // editorText = tag + " ";
     forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
+    tick().then(() => editor.setSelection(editorText.length, editorText.length));
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
   }
@@ -2005,24 +1991,28 @@
       text = itemToSave.text = item.text; // no need to update editorText
     }
 
+    // maintain selection on created textarea if editing
     if (editing) {
       let textarea = textArea(-1);
-      // textarea.focus();
       let selectionStart = textarea.selectionStart;
       let selectionEnd = textarea.selectionEnd;
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
-      // otherwise keep selection, or move to end if editor is not focused
       if (text != origText) selectionStart = selectionEnd = 0;
-      // NOTE: this can fail and even cause a LOSS of focus on the iPad for mysterious reasons which appear to be related to "tap to click" behavior on the trackpad and/or visibility of the bottom keyboard toolbar; it does not happen when using touch or when "clicking" on the trackpad, and seems tricky to fix so we just ignore for now!
-      else if (!focused) selectionStart = selectionEnd = text.length;
-
-      // NOTE: this was first evidence that tick() is much more reliable than setTimeout, because using setTimeout iOS would fail to focus on the new item using the "create" button when editor is not already focused
       tick().then(() => {
         let textarea = textArea(indexFromId.get(item.id));
         if (!textarea) return;
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
         textarea.focus();
+        // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
+        if (selectionStart > 0 || selectionEnd > 0) {
+          setTimeout(() => {
+            if (textarea.selectionStart == 0 && textarea.selectionEnd == 0) {
+              textarea.selectionStart = selectionStart;
+              textarea.selectionEnd = selectionEnd;
+            }
+          }, 100);
+        }
       });
     }
 
@@ -2035,31 +2025,16 @@
           .then((doc) => {
             let index = indexFromId.get(item.id); // since index can change
             tempIdFromSavedId.set(doc.id, item.id);
-            item = items[index];
             if (index == undefined) {
               // item was deleted before it could be saved
               doc.delete().catch(console.error);
               return;
             }
-            let textarea = textArea(index);
-            let selectionStart = textarea ? textarea.selectionStart : 0;
-            let selectionEnd = textarea ? textarea.selectionEnd : 0;
             item.savedId = doc.id;
+
             // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
             if (!item.editing) onItemSaved(item.id, itemToSave);
-            else items[index] = item; // trigger dom update
 
-            if (focusedItem == index)
-              // maintain focus (and caret placement) through id/element change
-              tick().then(() => {
-                let index = indexFromId.get(item.id);
-                if (index == undefined) return;
-                let textarea = textArea(index);
-                if (!textarea) return;
-                textarea.selectionStart = selectionStart;
-                textarea.selectionEnd = selectionEnd;
-                textarea.focus();
-              });
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
               firestore()
