@@ -3478,7 +3478,7 @@
                 scripted={item.scripted}
                 macroed={item.macroed}
               />
-              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
+              {#if item.nextColumn >= 0 && item.index <= hideIndex - 1}
                 <div class="section-separator">
                   <hr />
                   {item.index + 2}<span class="arrows">{item.arrows}</span
