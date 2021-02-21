@@ -35,6 +35,15 @@
       .join("\n");
   }
 
+  function update_dom() {
+    return new Promise((resolve) => {
+      // skip animation frame to ensure DOM is updated for running=true
+      // (otherwise only option is an arbitrary delay since polling DOM does not work)
+      // (see https://stackoverflow.com/a/57659371 and other answers to that question)
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+  }
+
   function _item(name: string): any {
     if (!name) return null;
     let item;
@@ -422,26 +431,21 @@
     start(async_func) {
       item(this.id).running = true;
       return new Promise((resolve, reject) => {
-        // skip animation frame to ensure DOM is updated for running=true
-        // (otherwise only option is an arbitrary delay since polling DOM does not work)
-        // (see https://stackoverflow.com/a/57659371 and other answers to that question)
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() =>
-            Promise.resolve(async_func())
-              .then((output) => {
-                if (output) this.write(output);
-                this.write_log_any(); // customized via _this.log_options
-                item(this.id).running = false;
-                resolve(output);
-              })
-              .catch((e) => {
-                console.error(e);
-                invalidateElemCache(this.id);
-                this.write_log_any(); // customized via _this.log_options
-                item(this.id).running = false;
-                reject(e);
-              })
-          )
+        update_dom().then(() =>
+          Promise.resolve(async_func())
+            .then((output) => {
+              if (output) this.write(output);
+              this.write_log_any(); // customized via _this.log_options
+              item(this.id).running = false;
+              resolve(output);
+            })
+            .catch((e) => {
+              console.error(e);
+              invalidateElemCache(this.id);
+              this.write_log_any(); // customized via _this.log_options
+              item(this.id).running = false;
+              reject(e);
+            })
         );
       });
     }
@@ -623,6 +627,7 @@
   let totalItemHeight = 0;
   let lastLayoutTime = 0;
   let lastTimeStringUpdateTime = 0;
+  let showDotted = false;
 
   function updateItemLayout() {
     // console.debug("updateItemLayout");
@@ -638,7 +643,6 @@
     let columnHeights = new Array(columnCount).fill(0);
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
-    let columnTopMovers = new Array(columnCount).fill(items.length);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
     let lastTimeString = "";
     newestTime = 0;
@@ -651,7 +655,6 @@
     resizeHiddenColumn();
 
     items.forEach((item, index) => {
-      item.lastIndex = index;
       item.index = index;
       indexFromId.set(item.id, index);
       if (item.dotted) dotCount++;
@@ -686,7 +689,6 @@
       item.nextColumn = -1;
       item.nextItemInColumn = -1;
 
-      item.lastColumn = item.column;
       if (index == 0) item.column = 0;
       else {
         // stay on same column unless column height would exceed minimum column height by 90% of screen height
@@ -722,8 +724,9 @@
       // columnItemCount[item.column]++;
 
       // record item as top mover if it is lowest-index item that moved in its column
-      const moved = item.index != item.lastIndex || item.column != item.lastColumn;
-      if (moved && item.index < columnTopMovers[item.column]) columnTopMovers[item.column] = item.index;
+      item.moved = item.index != item.lastIndex || item.column != item.lastColumn;
+      item.lastIndex = item.index;
+      item.lastColumn = item.column;
 
       // if non-dotted item is first in its column or section and missing time string, add it now
       // also mark it as a "leader" for styling its index number
@@ -743,23 +746,26 @@
       columnLastItem[item.column] = index;
     });
 
-    // scroll up to top moved item if necessary
-    if (_.min(columnTopMovers) < items.length) {
-      // allow dom update before calculating scroll position
-      const lastLayoutTimeAtDispatch = lastLayoutTime;
-      tick().then(() => {
-        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancel
-        const itemTop = _.min(
-          columnTopMovers.map((index) => {
-            if (index == items.length) return Infinity;
-            const div = document.querySelector("#super-container-" + items[index].id);
-            if (!div) return Infinity; // item hidden
-            return (div as HTMLElement).offsetTop;
-          })
-        );
-        // console.debug(itemTop, window.scrollY);
-        if (itemTop < window.scrollY) window.top.scrollTo(0, itemTop < outerHeight / 2 ? 0 : itemTop);
-      });
+    // scroll up if needed to keep top movers visible
+    if (items.findIndex((item) => item.moved) >= 0) {
+      tick()
+        .then(update_dom)
+        .then(() => {
+          // determine top mover/target in each column (so we don't have to look up all movers)
+          let topMovers = new Array(columnCount).fill(items.length);
+          items.forEach((item, index) => {
+            if (item.moved && index < topMovers[item.column]) topMovers[item.column] = index;
+          });
+          const itemTop = _.min(
+            topMovers.map((index) => {
+              if (index == items.length) return Infinity; // nothing in this column
+              const div = document.querySelector("#super-container-" + items[index].id);
+              if (!div) return Infinity; // item hidden, have to ignore
+              return (div as HTMLElement).offsetTop;
+            })
+          );
+          if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
+        });
     }
   }
 
@@ -1357,10 +1363,7 @@
 
   function toggleItems(index: number) {
     hideIndex = index;
-    // also update history
-    const state = history.state;
-    state.hideIndex = index;
-    history.replaceState(state, editorText);
+    history.replaceState(Object.assign(history.state, { hideIndex }), editorText);
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -1418,6 +1421,27 @@
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
+
+    // scroll top target item (if any) to middle of screen
+    if (items.findIndex((item) => item.target) >= 0) {
+      tick()
+        .then(update_dom)
+        .then(() => {
+          let topTargets = new Array(columnCount).fill(items.length);
+          items.forEach((item, index) => {
+            if (item.target && index < topTargets[item.column]) topTargets[item.column] = index;
+          });
+          const itemTop = _.min(
+            topTargets.map((index) => {
+              if (index == items.length) return Infinity; // nothing in this column
+              const div = document.querySelector("#super-container-" + items[index].id);
+              if (!div) return Infinity; // item hidden, have to ignore
+              return (div as HTMLElement).offsetTop;
+            })
+          );
+          if (itemTop < Infinity) top.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
+        });
+    }
   }
 
   function onLinkClick(id: string, href: string, e: MouseEvent) {
@@ -1454,7 +1478,7 @@
       // console.warn("onPopState before init");
       return;
     }
-    // console.debug("pop", e.state);
+    // console.debug("onPopState", e.state);
     // restore editor text and unsaved times
     editorText = e.state.editorText || "";
     if (e.state.unsavedTimes) {
@@ -1467,8 +1491,12 @@
     }
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
-    // restore hide index _after_ onEditorChange which sets it to default index given query
-    if (typeof e.state.hideIndex == "number") hideIndex = e.state.hideIndex;
+    // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
+    if (typeof e.state.hideIndex == "number") hideIndex = Math.max(hideIndex, e.state.hideIndex);
+    // scroll to last recorded scroll position at this state
+    tick()
+      .then(update_dom)
+      .then(() => top.scrollTo(0, e.state.scrollPosition || 0));
   }
 
   function resetUser() {
@@ -2392,16 +2420,21 @@
       editingItems.push(index);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
-      if (ios) {
-        textArea(-1).focus(); // temporary, allows focus to be set ("shifted") within setTimout, outside click event
-        // See https://stackoverflow.com/questions/12204571/mobile-safari-javascript-focus-method-on-inputfield-only-works-with-click.
-      }
+      if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       tick().then(() => {
         if (!textArea(item.index)) {
           console.warn("missing editor");
           return;
         }
         textArea(item.index).focus();
+        // scroll up to top of item, allowing dom update before calculating new position
+        // (particularly important for items that are much taller when editing)
+        update_dom().then(() => {
+          const div = document.querySelector("#super-container-" + item.id);
+          if (!div) return; // item deleted or hidden
+          const itemTop = (div as HTMLElement).offsetTop;
+          top.scrollTo(0, Math.max(0, itemTop - 100));
+        });
       });
     } else {
       // stopped editing
@@ -2452,20 +2485,8 @@
 
       // NOTE: we do not focus back up on the editor unless we are already at the top
       //       (especially bad on iphone due to lack of keyboard focus benefit)
-      if (editingItems.length > 0 || window.scrollY == 0) {
+      if (editingItems.length > 0 || scrollY == 0) {
         focusOnNearestEditingItem(index);
-      } else {
-        // scroll up if needed, allowing dom update before calculating new position
-        // (particularly important for items that are much taller when editing)
-        tick().then(() => {
-          const div = document.querySelector("#super-container-" + item.id);
-          if (!div) return; // item deleted or hidden
-          const itemTop = (div as HTMLElement).offsetTop;
-          if (itemTop < window.scrollY) {
-            // console.debug("scrolling up", itemTop, window.scrollY);
-            window.top.scrollTo(0, itemTop);
-          }
-        });
       }
     }
   }
@@ -2610,10 +2631,16 @@
   }
 
   let lastScrollTime = 0;
-  let showDotted = false;
+  let historyUpdatePending = false;
   function onScroll() {
     lastScrollTime = Date.now();
-    return;
+    if (!historyUpdatePending) {
+      historyUpdatePending = true;
+      setTimeout(() => {
+        history.replaceState(Object.assign(history.state, { scrollPosition: scrollY }), editorText);
+        historyUpdatePending = false;
+      }, 250);
+    }
   }
 
   function onStatusClick(e) {
@@ -2773,6 +2800,7 @@
       item.aboveTheFold = false;
       // item.prominence = 0;
       item.leader = false;
+      item.moved = false;
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
@@ -3297,7 +3325,7 @@
     ) {
       e.preventDefault();
       textArea(-1).focus();
-      window.top.scrollTo(0, 0);
+      top.scrollTo(0, 0);
       // create/run new item on create/save shortcuts
       if (
         (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
@@ -3477,7 +3505,7 @@
                 scripted={item.scripted}
                 macroed={item.macroed}
               />
-              {#if item.nextColumn >= 0 && item.index <= hideIndex - 1}
+              {#if item.nextColumn >= 0 && item.index < hideIndex}
                 <div class="section-separator">
                   <hr />
                   {item.index + 2}<span class="arrows">{item.arrows}</span
