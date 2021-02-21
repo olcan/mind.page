@@ -3407,12 +3407,7 @@
                 {#each toggles as toggle}
                   {#if hideIndex < toggle.end}
                     <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
-                      ▼ {toggle.positionBased
-                        ? ""
-                        : itemTimeString(
-                            items[Math.min(toggle.end, items.length - 1)].time,
-                            toggle.end == items.length
-                          )}
+                      ▼ {toggle.positionBased ? "" : itemTimeString(items[toggle.start].time)}
                       <span class="count">show {toggle.end - toggle.start} items</span>
                     </div>
                   {/if}
