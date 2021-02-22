@@ -1,4 +1,5 @@
 export const firebaseConfig = {
+  // firebase api key is NOT a secret, see https://stackoverflow.com/a/37484053 and https://firebase.google.com/docs/projects/api-keys#api-keys-for-firebase-are-different
   apiKey: "AIzaSyArfytkqMVwd_5TdIaKSun0iSxzjEbaRkU",
   // authDomain: "olcanswiki.firebaseapp.com",
   // NOTE: (sub-)domain must be added under OAuth settings on Google Cloud console:
