@@ -3580,25 +3580,10 @@
   <link rel="manifest" href="/manifest.json?v={favicon_version}" />
 </svelte:head>
 
-<!-- NOTE: we put the items on the page as soon as they are initialized, but #loading overlay remains until heights are calculated -->
 <style>
   :global(html) {
-    /* set default font globally */
-    /* font-family: "Avenir Next", sans-serif; */
-    /* font-family: "Source Sans Pro", sans-serif; */
-    /* font-family: "Open Sans", sans-serif; */
     font-family: "Roboto", sans-serif;
-
-    /* light fonts feel sharper, and allow tags to pop out as they should */
-    /* font-weight: 300; */
     font-weight: 400;
-
-    /* font-synthesis: none; */
-    /* text-rendering: optimizeLegibility; */
-    /* prevents shifting when highlighting, see https://stackoverflow.com/a/53568803 */
-    /* font-kerning: none; */
-    /* this makes fonts much smoother (compare to none) in Safari */
-    /* -webkit-font-smoothing: subpixel-antialiased; */
   }
   :global(b, strong) {
     font-weight: 700;
