@@ -17,21 +17,13 @@
 
   import _ from "lodash";
   // import he from "he";
-  import { highlight, parseTags, numberWithCommas } from "../util.js";
+  import { highlight, parseTags, numberWithCommas, escapeHTML, unescapeHTML } from "../util.js";
 
   const placeholder = " ";
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
   let textarea: HTMLTextAreaElement;
-  // let escapeHTML = (t) => he.encode(t);
-  // let unescapeHTML = (t) => he.decode(t);
-  // let escapeHTML = (t) => _.escape(t);
-  // let unescapeHTML = (t) => _.unescape(t);
-  // NOTE: we intentionally do not escape/unescape quotes since it does not appear necessary and simplifies the regex below
-  //       (if we decide to escape later we can try &#39; and &quot; for single and double quotes respectively)
-  let escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
   function highlightTags(text, tags) {
@@ -135,7 +127,7 @@
     return text.substring(0, pos) + `${text[pos]}%%_highlight_open_${type}_%%` + text.substring(pos + 1);
   }
   function highlightClose(text, pos, type) {
-    return text.substring(0, pos) + `%%_highlight_close_${type}_%%${text[pos]}` + text.substring(pos + 1);
+    return text.substring(0, pos) + `\|%%_highlight_close_${type}_%%${text[pos]}` + text.substring(pos + 1);
   }
 
   function updateTextDivs() {
@@ -217,7 +209,7 @@
     html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>');
     // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
-    html = html.replace(/%%_highlight_close_(\w+?)_%%(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
+    html = html.replace(/\|%%_highlight_close_(\w+?)_%%(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
     html = html.replace(/([({\[])([^({\[]*?)%%_highlight_open_(\w+?)_%%/g, '<span class="highlight $3">$1</span>$2');
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";

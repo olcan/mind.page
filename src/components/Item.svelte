@@ -7,7 +7,7 @@
   import {
     highlight,
     extractBlock,
-    extractImages,
+    unescapeHTML,
     hashCode,
     parseTags,
     renderTag,
@@ -507,7 +507,7 @@
     marked.setOptions({
       renderer: renderer,
       highlight: (code, language) => {
-        // leave _html(_*) block as is so we don't have to he.decode below
+        // leave _html(_*) block as is to be "unwrapped" (and unescaped) below
         if (language.match(/^_html(_|$)/)) {
           return code
             .replace(/(^|[^\\])\$id/g, "$1" + id)
@@ -523,7 +523,7 @@
     text = marked(text);
 
     // unwrap _html(_*) blocks
-    text = text.replace(/<pre><code class="_html_?.*?">(.*?)<\/code><\/pre>/gs, (m, _html) => _html);
+    text = text.replace(/<pre><code class="_html_?.*?">(.*?)<\/code><\/pre>/gs, (m, _html) => unescapeHTML(_html));
 
     // replace _math blocks, preserving whitespace
     text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
