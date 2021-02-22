@@ -34,8 +34,7 @@
   let unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
-  function highlightTags(text) {
-    const tags = parseTags(unescapeHTML(text)).raw;
+  function highlightTags(text, tags) {
     if (tags.length == 0) return text;
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length);
     const regex = new RegExp(
@@ -176,6 +175,7 @@
     let language = "";
     let code = "";
     let html = "";
+    const tags = parseTags(unescapeHTML(text)).raw;
     text.split("\n").map((line) => {
       if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
         insideBlock = true;
@@ -198,11 +198,11 @@
         code += line + "\n";
       } else {
         if (line.match(/^    \s*[^-*+]/)) html += escapeHTML(line) + "\n";
-        else html += highlightOther(highlightTags(escapeHTML(line))) + "\n";
+        else html += highlightOther(highlightTags(escapeHTML(line), tags)) + "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock) html += highlightOther(highlightTags(escapeHTML(code)));
+    if (insideBlock) html += highlightOther(highlightTags(escapeHTML(code), tags));
 
     // wrap hidden/removed sections
     html = html.replace(
