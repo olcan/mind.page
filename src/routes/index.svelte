@@ -21,6 +21,7 @@
   let focusedItem = -1;
   let focused = false;
   let signedin = false;
+  let admin = false;
   let anonymous = false;
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
@@ -1464,16 +1465,8 @@
     items[index].showLogsTime = Date.now(); // invalidates auto-hide
   }
 
-  function admin() {
-    return (
-      firebase().auth().currentUser &&
-      firebase().auth().currentUser.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
-      (location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/))
-    );
-  }
-
   function onPopState(e) {
-    readonly = anonymous && !admin();
+    readonly = anonymous && !admin;
     if (!e?.state) return; // for fragment (#id) hrefs
     if (!initialized) {
       // NOTE: this can happen when tab is restored, seems harmless so far
@@ -2931,6 +2924,13 @@
     }
   }
 
+  function isAdmin() {
+    return (
+      user?.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+      (location.host == "mindbox.io" || location.href.match(/user=(?:anonymous|admin)/) != null)
+    );
+  }
+
   function useAnonymousAccount() {
     user = {
       photoURL: "/incognito.png",
@@ -2976,9 +2976,10 @@
       } else {
         useAnonymousAccount();
       }
+      admin = isAdmin();
+      if (admin) useAnonymousAccount(); // become anonymous for item checks below
       anonymous = user?.uid == "anonymous";
-      readonly = anonymous && !admin();
-      if (admin()) useAnonymousAccount(); // become anonymous for item checks
+      readonly = anonymous && !admin;
 
       // if items were returned from server, confirm user, then initialize if valid
       if (items.length > 0) {
@@ -2988,6 +2989,7 @@
         } else if (user && user.uid != items[0].user) {
           // items are for wrong user, usually anonymous, due to missing/expired cookie
           // (you can test this with document.cookie='__session=;max-age=0' in console)
+          // can also happen when admin is logged in but acting as anonymous
           if (items[0].user != "anonymous")
             console.warn(`ignoring ${items.length} items for wrong user (${items[0].user})`);
           items = [];
@@ -3025,7 +3027,8 @@
 
               // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
               //       (this is the only case where user != firebase().auth().currentUser)
-              if (admin()) {
+              admin = isAdmin();
+              if (admin) {
                 useAnonymousAccount();
               } else {
                 // set up server-side session cookie
@@ -3096,38 +3099,9 @@
           .orderBy("time", "desc")
           .onSnapshot(
             function (snapshot) {
-              if (firstSnapshot) {
-                setTimeout(async () => {
-                  init_log(`synchronized ${items.length} items`);
-                  if (!initTime) {
-                    initTime = Date.now();
-                    await initialize();
-                  }
-                  if (!initialized) return; // initialization failed, we should be signing out ...
-
-                  firstSnapshot = false;
-                  // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
-                  if (items.length == 0) onEditorDone("/_welcome");
-
-                  // if necessary, init secret by triggering a test encryption/decryption
-                  if (!secret) {
-                    const hello_item = { user: user.uid, time: Date.now(), text: "hello" };
-                    encryptItem(hello_item)
-                      .then(decryptItem)
-                      .then((item) => {
-                        if (JSON.stringify(item) != JSON.stringify(hello_item))
-                          throw new Error("encryption test failed");
-                      })
-                      .catch(encryptionError);
-                  }
-                });
-              }
               snapshot.docChanges().forEach(function (change) {
                 const doc = change.doc;
-                // on first snapshot, we only need to append for initalize (see above)
-                // and only if items were not returned by server (and initialized) already
-                // (otherwise we can just skip the first snapshot, which is hopefully coming
-                //  from a local cache so that it is cheap and worse than the server snapshot)
+                // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
                 if (firstSnapshot) {
                   if (change.type != "added") console.warn("unexpected change type: ", change.type);
                   if (initTime == 0) {
@@ -3186,7 +3160,36 @@
                     onEditorChange(editorText); // item time/text has changed
                   }
                 });
-              });
+              }); // snapshot.docChanges().forEach
+
+              // if this is first snapshot and initialization has not started (initTime = 0), start it now
+              // either way set up callback to complete "synchronization" and set up welcome item if needed
+              if (firstSnapshot) {
+                if (!initTime) {
+                  initTime = Date.now();
+                  initialize();
+                }
+                Promise.resolve(initialization).then(() => {
+                  if (!initialized) return; // initialization failed, we should be signing out ...
+                  init_log(`synchronized ${items.length} items`);
+                  firstSnapshot = false;
+
+                  // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
+                  if (items.length == 0) onEditorDone("/_welcome");
+
+                  // if necessary, init secret by triggering a test encryption/decryption
+                  if (!secret) {
+                    const hello_item = { user: user.uid, time: Date.now(), text: "hello" };
+                    encryptItem(hello_item)
+                      .then(decryptItem)
+                      .then((item) => {
+                        if (JSON.stringify(item) != JSON.stringify(hello_item))
+                          throw new Error("encryption test failed");
+                      })
+                      .catch(encryptionError);
+                  }
+                });
+              }
             },
             (error) => {
               console.error(error);
