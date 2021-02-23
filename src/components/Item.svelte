@@ -27,6 +27,7 @@
   export let showLogs = false;
   // NOTE: required props should not have default values
   export let index: number;
+  export let name: string;
   export let id: string;
   export let label: string;
   export let labelText: string;
@@ -544,7 +545,7 @@
     // process images to transform src and add _cache_key attribute
     text = text.replace(/<img .*?src\s*=\s*"(.*?)".*?>/gi, function (m, src) {
       if (m.match(/_cache_key/i)) {
-        console.warn("img with self-assigned _cache_key in item at index", index + 1);
+        console.warn("img with self-assigned _cache_key in item", name);
         return m;
       }
       // convert dropbox image src urls to direct download
@@ -561,17 +562,27 @@
     // process divs with item-unique id to add _cache_key="<id>-$deephash-$pos" automatically
     text = text.replace(/<div .*?id\s*=\s*"(.*?)".*?>/gi, function (m, divid) {
       if (m.match(/_cache_key/i)) {
-        console.warn("div with self-assigned _cache_key in item at index", index + 1);
+        console.warn("div with self-assigned _cache_key in item", name);
         return m;
       }
       if (!divid.includes(id)) {
-        console.warn("div without proper id (that includes $id) in item at index", index + 1);
+        console.warn("div without proper id (that includes $id) in item", name);
         return m;
       }
       // m = m.replace(/ _cache_key=[^> ]*/, "");
       // console.debug("img src", src, m);
       const key = divid + "-" + deephash;
       return m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`;
+    });
+
+    // process any html tags with _cached attribute to effectively replace it with _cache_key="$cid"
+    text = text.replace(/<\w+.*? _cached\b.*?>/gi, function (m) {
+      if (m.match(/_cache_key/i)) {
+        console.warn("ignoring _cached attribute due to self-assigned _cache_key", name);
+        return m;
+      }
+      m = m.replace(/ _cached/, "");
+      return m.substring(0, m.length - 1) + ` _cache_key="${id}-${deephash}-${++cacheIndex}">`;
     });
 
     // add onclick handler to html links
@@ -1028,7 +1039,7 @@
       let pendingScripts = scripts.length;
       let scriptErrors = [];
       // console.debug(
-      //   `executing ${pendingScripts} scripts in item ${index + 1} ...`
+      //   `executing ${pendingScripts} scripts in item ${name} ...`
       // );
       scripts.forEach((script, scriptIndex) => {
         // console.debug(script.parentElement);
@@ -1050,7 +1061,7 @@
 
         pendingScripts--;
         if (pendingScripts > 0) return;
-        // console.debug(`all scripts done in item ${index + 1}`);
+        // console.debug(`all scripts done in item ${name}`);
         setTimeout(() => onResized(id, container, "scripts done"), 0);
         // if no errors, cache elems with _cache_key that had scripts in them
         if (scriptErrors.length == 0) cacheElems();

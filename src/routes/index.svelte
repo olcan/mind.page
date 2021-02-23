@@ -3483,6 +3483,7 @@
                 time={item.time}
                 index={item.index}
                 id={item.id}
+                name={item.name}
                 label={item.label}
                 labelUnique={item.labelUnique}
                 labelText={item.labelText}
