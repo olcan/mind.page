@@ -916,6 +916,7 @@
       tag == "#menu" ||
       tag == "#context" ||
       tag == "#init" ||
+      tag == "#welcome" ||
       tag == "#async" ||
       tag == "#debug" ||
       tag.match(/^#pin(?:\/|$)/) ||
@@ -930,6 +931,7 @@
     else if (tag == "#menu") return ["#features/_menu"];
     else if (tag == "#context") return ["#features/_context"];
     else if (tag == "#init") return ["#features/_init"];
+    else if (tag == "#welcome") return ["#features/_welcome"];
     else if (tag == "#async") return ["#features/_async"];
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ["#features/_pin"];
     else return [];
@@ -1590,6 +1592,7 @@
     item.log = item.tagsRaw.includes("#_log"); // can also be visible label #log, see below
     item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
+    item.welcome = item.tagsRaw.includes("#_welcome");
     item.async = item.tagsRaw.includes("#_async");
     item.debug = item.tagsRaw.includes("#_debug");
     const pintags = item.tagsRaw.filter((t) => t.match(/^#_pin(?:\/|$)/));
@@ -3267,18 +3270,31 @@
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
 
+        let welcome = null;
         if (readonly) {
-          modal.show({
+          welcome = modal.show({
             content:
               "Welcome to MindPage! This is an **anonymous** demo account. Your edits are visible **only to you** and are discarded when you close this page, not sent or stored anywhere but your own device (and not even that if you use private browsing). Once signed in, your items will be saved securely so that they are always readable **only by you, on your devices**.",
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: "Stay Anonymous",
             cancel: "Sign In",
             onCancel: signIn,
-            // onConfirm: () => textArea(-1).focus(),
             background: "confirm",
           });
         }
+
+        // evaluate _welcome items once initialization is done, welcome dialog is dismissed, dom is fully updated
+        Promise.all([initialization, welcome])
+          .then(update_dom)
+          .then(() => {
+            items.forEach((item) => {
+              if (!item.welcome) return;
+              try {
+                _item(item.id).eval("_welcome()", { trigger: "welcome" });
+              } catch (e) {} // already logged, just continue welcome eval
+            });
+          });
+
         init_log("initialized document");
       });
 
