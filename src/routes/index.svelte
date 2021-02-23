@@ -1425,7 +1425,7 @@
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
 
-    // scroll top target item (if any) to middle of screen
+    // scroll up (or down) to target item if needed
     if (items.findIndex((item) => item.target) >= 0) {
       tick()
         .then(update_dom)
@@ -1442,7 +1442,10 @@
               return (div as HTMLElement).offsetTop;
             })
           );
-          if (itemTop < Infinity) top.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
+          if (itemTop == Infinity) return; // nothing to scroll to
+          // if item is too far up, or too far down, bring it to ~middle of page
+          if (itemTop - 100 < scrollY || itemTop + 200 > scrollY + innerHeight)
+            top.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
         });
     }
   }
@@ -2423,13 +2426,13 @@
           return;
         }
         textArea(item.index).focus();
-        // scroll up to top of item, allowing dom update before calculating new position
+        // scroll up to top of item if needed, allowing dom update before calculating new position
         // (particularly important for items that are much taller when editing)
         update_dom().then(() => {
           const div = document.querySelector("#super-container-" + item.id);
           if (!div) return; // item deleted or hidden
           const itemTop = (div as HTMLElement).offsetTop;
-          top.scrollTo(0, Math.max(0, itemTop - 100));
+          if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
         });
       });
     } else {
