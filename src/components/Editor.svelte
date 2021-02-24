@@ -680,8 +680,8 @@
   .backdrop,
   textarea {
     font-family: "Roboto Mono", monospace;
-    font-size: 14px;
-    line-height: 23px;
+    font-size: 15px;
+    line-height: 25px;
     caret-color: red;
   }
   .backdrop {

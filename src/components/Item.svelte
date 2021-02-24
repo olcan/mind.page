@@ -1400,8 +1400,8 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-size: 17px;
-    line-height: 27px;
+    font-size: 18px;
+    line-height: 30px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
@@ -1525,16 +1525,16 @@
     /* padding-left: 5px; */
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
-    font-size: 14px;
-    line-height: 23px;
+    font-size: 15px;
+    line-height: 25px;
     margin-top: 4px;
   }
   :global(.item pre:first-child) {
     margin-top: 0;
   }
   :global(.item code) {
-    font-size: 14px;
-    line-height: 23px;
+    font-size: 15px;
+    line-height: 25px;
     font-family: "Roboto Mono", monospace;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;

@@ -3606,7 +3606,7 @@
 <style>
   :global(html) {
     font-family: "Roboto", sans-serif;
-    font-weight: 400;
+    font-weight: 300;
   }
   :global(b, strong) {
     font-weight: 700;
