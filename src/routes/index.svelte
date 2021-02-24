@@ -3688,7 +3688,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -3714,7 +3714,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3826,7 +3826,7 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: monospace;
+    font-family: "Roboto Mono", monospace;
     font-size: 20px;
   }
   .section-separator hr {
