@@ -1253,7 +1253,7 @@
     /* overflow: hidden; */
     color: black;
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 600;
     /* outer border causes odd cutoff on right side, so we cut off at the buttons */
     /* border-radius: 5px; */
     /* overflow: hidden; */
@@ -1305,7 +1305,7 @@
     opacity: 1;
     color: black;
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 600;
     box-sizing: border-box;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1400,7 +1400,7 @@
     box-sizing: border-box;
     /* white-space: pre-wrap; */
     word-wrap: break-word;
-    font-size: 18px;
+    font-size: 17px;
     line-height: 30px;
     /* cursor: pointer; */
     -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
@@ -1535,7 +1535,7 @@
   :global(.item code) {
     font-size: 15px;
     line-height: 25px;
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1565,7 +1565,7 @@
   :global(.item mark) {
     color: black;
     background: #999;
-    font-weight: 500;
+    font-weight: 600;
     padding: 0 4px;
     margin: 0;
   }
@@ -1580,7 +1580,7 @@
   :global(.item .menu mark) {
     padding: 4px;
     font-size: 110%;
-    font-weight: 500;
+    font-weight: 600;
   }
   :global(.item .menu p a, .item .menu p mark) {
     flex: 1 1 auto;
@@ -1600,7 +1600,7 @@
     background: #ddd;
   }
   :global(.item mark.label.unique) {
-    font-weight: 900;
+    font-weight: 700;
   }
   :global(.item mark.missing) {
     background: #f88;
@@ -1646,7 +1646,7 @@
     margin: -1px;
   }
   :global(.item mark.label.unique span.highlight) {
-    font-weight: 900; /* match weight of mark.label.unique */
+    font-weight: 700; /* match weight of mark.label.unique */
   }
 
   :global(.item mark span.highlight) {
@@ -1736,7 +1736,7 @@
   :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
@@ -1885,7 +1885,7 @@
     color: black;
     background: #f55;
     border-radius: 4px;
-    font-weight: 500;
+    font-weight: 600;
     padding: 0 4px;
   }
 
@@ -1924,10 +1924,10 @@
       line-height: 21px;
     }
     /* smaller menu fonts can take a little more weight */
-    :global(.item .menu a),
+    /* :global(.item .menu a),
     :global(.item .menu mark) {
       font-weight: 700;
-    }
+    } */
   }
   /* adapt to smaller iPhones (e.g. iPhone 12 mini) and Androids (even large ones like Galaxy S21 Ultra) */
   @media only screen and (max-width: 400px) {

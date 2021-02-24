@@ -3605,8 +3605,10 @@
 
 <style>
   :global(html) {
-    font-family: "Roboto", sans-serif;
-    font-weight: 300;
+    font-family: "Open Sans", sans-serif;
+    font-weight: 400;
+    /* Safari renders heavier fonts under default subpixel-antialiasing */
+    -webkit-font-smoothing: antialiased;
   }
   :global(b, strong) {
     font-weight: 700;
@@ -3686,7 +3688,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -3712,7 +3714,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -3740,7 +3742,7 @@
     color: #666;
   }
   #status .counts {
-    font-family: "Roboto", sans-serif;
+    font-family: sans-serif;
     font-size: 14px;
     position: absolute;
     right: 0;
@@ -3824,7 +3826,7 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     font-size: 20px;
   }
   .section-separator hr {
@@ -3856,7 +3858,7 @@
     background: #222;
     /* color: black; */
     /* background: #666; */
-    font-weight: 500;
+    font-weight: 600;
     border-radius: 4px;
     cursor: pointer;
     width: fit-content;
