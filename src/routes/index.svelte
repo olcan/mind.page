@@ -2649,7 +2649,7 @@
       return;
     }
     e.stopPropagation();
-    if (showDotted && editingItems.map((index) => items[index].editing).includes(true)) {
+    if (showDotted && editingItems.map((index) => items[index].dotted).includes(true)) {
       alert("can not minimize items while editing");
       return;
     }
