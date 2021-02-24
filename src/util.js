@@ -54,15 +54,6 @@ export function extractImages(text) {
   );
 }
 
-// export const escapeHTML = (t) => he.encode(t);
-// export const unescapeHTML = (t) => he.decode(t);
-// export const escapeHTML = (t) => _.escape(t);
-// export const unescapeHTML = (t) => _.unescape(t);
-// NOTE: we intentionally do not escape/unescape quotes since it does not appear necessary and simplifies regexes
-//       (if we decide to escape later we can try &#39; and &quot; for single and double quotes respectively)
-export const escapeHTML = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-export const unescapeHTML = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-
 import "highlight.js/styles/sunburst.css";
 import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
 // custom registration function that can extend highlighting for all languages
