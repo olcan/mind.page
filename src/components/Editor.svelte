@@ -17,7 +17,7 @@
 
   import _ from "lodash";
   // import he from "he";
-  import { highlight, parseTags, numberWithCommas, escapeHTML, unescapeHTML } from "../util.js";
+  import { highlight, parseTags, numberWithCommas } from "../util.js";
 
   const placeholder = " ";
   let editor: HTMLDivElement;
@@ -40,38 +40,38 @@
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
     // https://www.w3schools.com/jsref/jsref_obj_regexp.asp
     return text.replace(
-      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|[\w'"]&gt;(?:(?!&gt;|&lt;)|$))/g,
+      /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|(?:\w|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
       (m, pfx, begin, content, end) => {
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
         else if ((begin == "$`" && end == "`$") || (begin == "$$`" && end == "`$$"))
-          return pfx + `<span class="math">` + highlight(unescapeHTML(begin + content + end), "latex") + `</span>`;
+          return pfx + `<span class="math">` + highlight(_.unescape(begin + content + end), "latex") + `</span>`;
         else if ((begin == "&lt;&lt;" && end == "&gt;&gt;") || (begin == "@{" && end == "}@"))
           return (
             pfx +
             `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
-            highlight(unescapeHTML(content), "js") +
+            highlight(_.unescape(content), "js") +
             `<span class="macro-delimiter">${end}</span></span>`
           );
         else if (begin.match(/&lt;script.*?&gt;/) && end.match(/&lt;\/script&gt;/))
           return (
             pfx +
-            highlight(unescapeHTML(begin), "html") +
-            highlight(unescapeHTML(content), "js") +
-            highlight(unescapeHTML(end), "html")
+            highlight(_.unescape(begin), "html") +
+            highlight(_.unescape(content), "js") +
+            highlight(_.unescape(end), "html")
           );
         else if (begin.match(/&lt;style&gt;/) && end.match(/&lt;\/style&gt;/))
           return (
             pfx +
-            highlight(unescapeHTML(begin), "html") +
-            highlight(unescapeHTML(content), "css") +
-            highlight(unescapeHTML(end), "html")
+            highlight(_.unescape(begin), "html") +
+            highlight(_.unescape(content), "css") +
+            highlight(_.unescape(end), "html")
           );
         else if (
-          (begin.match(/&lt;[/\w]/) && end.match(/[\w'"]&gt;/)) ||
+          (begin.match(/&lt;[/\w]/) && end.match(/(?:\w|&#39;|&quot;)&gt;/)) ||
           (begin.match(/&lt;!--/) && end.match(/--&gt;/))
         )
-          return pfx + highlight(unescapeHTML(begin + content + end), "html");
+          return pfx + highlight(_.unescape(begin + content + end), "html");
         else return m;
       }
     );
@@ -167,14 +167,14 @@
     let language = "";
     let code = "";
     let html = "";
-    const tags = parseTags(unescapeHTML(text)).raw;
+    const tags = parseTags(_.unescape(text)).raw;
     text.split("\n").map((line) => {
       if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
         insideBlock = true;
         language = line.match(/^\s*```(\w*)(?:_removed|_hidden|_tmp)?$/)[1];
         code = "";
         html += '<span class="block-delimiter">';
-        html += escapeHTML(line);
+        html += _.escape(line);
         html += "</span>\n";
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
@@ -184,17 +184,17 @@
         html += "</div>";
         insideBlock = false;
         html += '<span class="block-delimiter">';
-        html += escapeHTML(line);
+        html += _.escape(line);
         html += "</span>\n";
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^-*+]/)) html += escapeHTML(line) + "\n";
-        else html += highlightOther(highlightTags(escapeHTML(line), tags)) + "\n";
+        if (line.match(/^    \s*[^-*+]/)) html += _.escape(line) + "\n";
+        else html += highlightOther(highlightTags(_.escape(line), tags)) + "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock) html += highlightOther(highlightTags(escapeHTML(code), tags));
+    if (insideBlock) html += highlightOther(highlightTags(_.escape(code), tags));
 
     // wrap hidden/removed sections
     html = html.replace(
