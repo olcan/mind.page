@@ -679,7 +679,7 @@
   }
   .backdrop,
   textarea {
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     font-size: 15px;
     line-height: 25px;
     caret-color: red;
@@ -729,7 +729,7 @@
     justify-content: center;
     cursor: pointer;
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 600;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -767,7 +767,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    font-weight: 500;
+    font-weight: 600;
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;

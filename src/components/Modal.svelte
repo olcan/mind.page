@@ -287,7 +287,7 @@
     width: 100%;
     box-sizing: border-box;
     margin-top: 15px;
-    font-weight: 500;
+    font-weight: 600;
     font-size: 20px;
   }
   .uploads {
@@ -301,7 +301,7 @@
     margin-left: auto;
     width: fit-content;
     padding-top: 15px;
-    font-weight: 500;
+    font-weight: 600;
   }
   .button {
     display: inline-flex;
@@ -347,7 +347,7 @@
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
     font-size: 15px; /* 2px smaller looks better */
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;
