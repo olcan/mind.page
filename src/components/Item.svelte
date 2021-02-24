@@ -576,14 +576,14 @@
     });
 
     // process any html tags with _cached attribute to effectively replace it with _cache_key="$cid"
-    // text = text.replace(/<\w+.*? _cached\b.*?>/gi, function (m) {
-    //   if (m.match(/_cache_key/i)) {
-    //     console.warn("ignoring _cached attribute due to self-assigned _cache_key", name);
-    //     return m;
-    //   }
-    //   m = m.replace(/ _cached/, "");
-    //   return m.substring(0, m.length - 1) + ` _cache_key="${id}-${deephash}-${++cacheIndex}">`;
-    // });
+    text = text.replace(/<\w+.*? _cached\b.*?>/gi, function (m) {
+      if (m.match(/_cache_key/i)) {
+        console.warn("ignoring _cached attribute due to self-assigned _cache_key", name);
+        return m;
+      }
+      m = m.replace(/ _cached/, "");
+      return m.substring(0, m.length - 1) + ` _cache_key="${id}-${deephash}-${++cacheIndex}">`;
+    });
 
     // add onclick handler to html links
     text = text.replace(/<a .*?href\s*=\s*"(.*?)".*?>/gi, function (m, href) {
