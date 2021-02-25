@@ -1382,7 +1382,7 @@
   }
   .time.timeOutOfOrder {
     color: #aaa;
-    background: #111;
+    /* background: #111; */
     /* color: black; */
     border-radius: 4px;
     /* display: block; */
