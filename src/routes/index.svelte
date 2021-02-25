@@ -3618,6 +3618,7 @@
   <style>
     ::-webkit-scrollbar {
       background: transparent;
+      width: 0; /* also remove its space to avoid shifting */
     }
     .column {
       /* adjust max-width to be closer to what people would usually see */
@@ -3839,9 +3840,9 @@
   } */
   .column.hidden {
     position: absolute;
-    right: 0;
+    left: -100000px;
     /* right: 750px; */
-    /* the following (when used together) work even if column is on screen */
+    /* the following (when used together) work even if hidden column is on screen */
     visibility: hidden;
     opacity: 0;
     pointer-events: none;
