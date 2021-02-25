@@ -421,6 +421,7 @@
     if (key == "Escape") {
       onDone(text /* maintain text */, e, true /* cancelled */);
       e.preventDefault();
+      e.stopPropagation();
       return;
     }
 
