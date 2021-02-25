@@ -1,5 +1,6 @@
 /* NOTE: this "static" file is not hot-reloaded by development server and may require a cache purge on clients that can be painful on iOS devices. Thus, putting global styles in svelte files (e.g. index.svelte) is preferable. */
-html {
+html,
+body {
   /* fix truncation of elements such as console, and avoid weird zoom/scroll effects on iOS */
   height: 100% !important;
 
