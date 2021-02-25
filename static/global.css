@@ -13,10 +13,4 @@ body {
   margin: 0; /* eliminate default margins around body */
   /* limit zoom gestures, see https://developer.mozilla.org/en-US/docs/Web/CSS/touch-action */
   touch-action: manipulation;
-
-  /* this fixes an odd initial scroll-down-on opening new tab from an existing tab */
-  /* however it also breaks scrolling unless we set overflow:"visible" from javascript */
-  /* it also does not fix an odd issue of initial render behind safari header on clicked tabs only */
-  /* inspired by https://stackoverflow.com/a/35675094 though not the same problem */
-  overflow: auto !important;
 }

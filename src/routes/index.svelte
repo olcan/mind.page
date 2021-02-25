@@ -3806,8 +3806,8 @@
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
     min-height: 100%;
 
-    /* bottom padding for easier tapping on last item; turns out this also helps avoid unwanted zooming/scrolling effects related to bottom toolbar (which is related to external keyboard focus), as long as it is larger than bottom toolbar and is on top of the 100% height, i.e. box-sizing is content-box not border-box; to reproduce issue, set box-sizing to border-box, zoom/unzoom page once, focus external keyboard on editor, then toggle page height to cross 100% (e.g. toggle items at index 1) */
-    padding-bottom: 200px;
+    /* bottom padding for easier tapping on last item */
+    /* padding-bottom: 200px; */
     /* box-sizing: border-box; */
   }
   /* .items.multi-column {
