@@ -25,6 +25,8 @@
   let anonymous = false;
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
+  let narrating = isClient && localStorage.getItem("mindpage_narrating") == "true";
+  let single = isClient && localStorage.getItem("mindpage_single") == "true";
   let modal;
 
   let evalStack = [];
@@ -641,6 +643,7 @@
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
+    if (single) columnCount = 1; // single column mode
     let columnHeights = new Array(columnCount).fill(0);
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
@@ -747,6 +750,7 @@
       columnLastItem[item.column] = index;
     });
 
+    if (narrating) return;
     // scroll up if needed to keep top movers visible
     if (items.findIndex((item) => item.moved) >= 0) {
       tick()
@@ -1425,6 +1429,7 @@
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
 
+    if (narrating) return;
     // scroll up (or down) to target item if needed
     if (items.findIndex((item) => item.target) >= 0) {
       tick()
@@ -1491,6 +1496,7 @@
     onEditorChange(editorText);
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof e.state.hideIndex == "number") hideIndex = Math.max(hideIndex, e.state.hideIndex);
+    if (narrating) return;
     // scroll to last recorded scroll position at this state
     tick()
       .then(update_dom)
@@ -2021,6 +2027,21 @@
         onEditorChange("");
         return;
       }
+      case "/_narrate": {
+        single = narrating = !narrating;
+        localStorage.setItem("mindpage_narrating", narrating ? "true" : "false");
+        localStorage.setItem("mindpage_single", single ? "true" : "false");
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange("");
+        return;
+      }
+      case "/_single": {
+        single = !single;
+        localStorage.setItem("mindpage_single", single ? "true" : "false");
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange("");
+        return;
+      }
       default: {
         if (text.match(/^\/\w+/)) {
           const cmd = text.match(/^\/\w+/)[0];
@@ -2426,14 +2447,16 @@
           return;
         }
         textArea(item.index).focus();
-        // scroll up to top of item if needed, allowing dom update before calculating new position
-        // (particularly important for items that are much taller when editing)
-        update_dom().then(() => {
-          const div = document.querySelector("#super-container-" + item.id);
-          if (!div) return; // item deleted or hidden
-          const itemTop = (div as HTMLElement).offsetTop;
-          if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
-        });
+        if (!narrating) {
+          // scroll up to top of item if needed, allowing dom update before calculating new position
+          // (particularly important for items that are much taller when editing)
+          update_dom().then(() => {
+            const div = document.querySelector("#super-container-" + item.id);
+            if (!div) return; // item deleted or hidden
+            const itemTop = (div as HTMLElement).offsetTop;
+            if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
+          });
+        }
       });
     } else {
       // stopped editing
@@ -3386,7 +3409,7 @@
 </script>
 
 {#if user && processed}
-  <div class="items" class:multi-column={columnCount > 1}>
+  <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating}>
     {#each { length: columnCount + 1 } as _, column}
       <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount}>
         {#if column == 0}
@@ -3581,14 +3604,27 @@
 
 {#if inverted}
   <style>
-    html {
-      filter: invert(100%);
-    }
+    html,
     img {
       filter: invert(100%);
     }
     textarea {
       caret-color: #0ff !important; /* maintain red (#f00) caret */
+    }
+  </style>
+{/if}
+
+{#if narrating}
+  <style>
+    ::-webkit-scrollbar {
+      background: transparent;
+    }
+    .column {
+      /* adjust max-width to be closer to what people would usually see */
+      max-width: 600px !important;
+    }
+    .items {
+      justify-content: center;
     }
   </style>
 {/if}
@@ -3785,7 +3821,7 @@
     flex: 1;
     /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
     min-width: 0px;
-    max-width: 750px;
+    max-width: 750px; /* see minColumnWidth for effective min-width */
     /* allow absolute-positioned .hidden items */
     position: relative;
     /* prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
