@@ -3624,7 +3624,9 @@
     }
     .column {
       /* adjust max-width to be closer to what people would usually see */
-      max-width: 600px !important;
+      max-width: 640px !important;
+      /* remove right margin since no scrollbar */
+      margin-right: 0 !important;
     }
     .items {
       /* center items to for easier manual zooming */
