@@ -3616,6 +3616,15 @@
   </style>
 {/if}
 
+{#if single}
+  <style>
+    .column {
+      /* remove right margin since screen should be large in voluntary single-column mode */
+      margin-right: 0 !important;
+    }
+  </style>
+{/if}
+
 {#if narrating}
   <style>
     ::-webkit-scrollbar {
@@ -3625,8 +3634,6 @@
     .column {
       /* adjust max-width to be closer to what people would usually see */
       max-width: 640px !important;
-      /* remove right margin since no scrollbar */
-      margin-right: 0 !important;
     }
     .items {
       /* center items to for easier manual zooming */
