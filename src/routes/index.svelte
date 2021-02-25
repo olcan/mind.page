@@ -1041,7 +1041,7 @@
     if (terms[0] != "#log" && idsFromLabel.get(terms[0])?.length == 1) {
       listingItemIndex = indexFromId.get(idsFromLabel.get(terms[0])[0]);
       let item = items[listingItemIndex];
-      context = [item.label].concat(item.labelPrefixes);
+      context = [item.label].concat(item.labelPrefixes); // lower index means lower in ranking
       // expand context to include "context" items that visibly tag the top item in context
       // (also add their label to context terms so they are highlighted as context as well)
       while (true) {
@@ -1055,7 +1055,9 @@
             _.intersection(ctxitem.tagsVisible, context).length > 0
           ) {
             context.push(ctxitem.label);
-            if (ctxitem.labelPrefixes.length > 0) context = _.uniq(context.concat(ctxitem.labelPrefixes));
+            // NOTE: "context of context" should be at the end (top), so we do difference + concat
+            if (ctxitem.labelPrefixes.length > 0)
+              context = _.difference(context, ctxitem.labelPrefixes).concat(ctxitem.labelPrefixes);
           }
         });
         if (context.length == lastContextLength) break;
@@ -1496,7 +1498,7 @@
     onEditorChange(editorText);
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof e.state.hideIndex == "number") hideIndex = Math.max(hideIndex, e.state.hideIndex);
-    if (narrating) return;
+    // if (narrating) return;
     // scroll to last recorded scroll position at this state
     tick()
       .then(update_dom)
@@ -3627,6 +3629,9 @@
     .items {
       /* center items to for easier manual zooming */
       justify-content: center;
+      /* add full-height bottom padding to prevent any jumping when page is zoomed significantly at the bottom */
+      padding-bottom: 100vh;
+      box-sizing: border-box; /* include padding */
     }
   </style>
 {/if}
