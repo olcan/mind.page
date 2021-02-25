@@ -1444,7 +1444,7 @@
           );
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up, or too far down, bring it to ~middle of page
-          if (itemTop - 100 < scrollY || itemTop + 200 > scrollY + innerHeight)
+          if (itemTop - 100 < scrollY || itemTop + 100 > scrollY + innerHeight)
             top.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
         });
     }
