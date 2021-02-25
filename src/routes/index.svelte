@@ -3632,8 +3632,8 @@
       /* center items to for easier manual zooming */
       justify-content: center;
       /* add full-height bottom padding to prevent any jumping when page is zoomed significantly at the bottom */
-      padding-bottom: 100vh;
-      box-sizing: border-box; /* include padding */
+      /* padding-bottom: 100vh; */
+      /* box-sizing: border-box; */
     }
   </style>
 {/if}
@@ -3816,8 +3816,8 @@
     min-height: 100%;
 
     /* bottom padding for easier tapping on last item */
-    /* padding-bottom: 200px; */
-    /* box-sizing: border-box; */
+    padding-bottom: 200px;
+    box-sizing: border-box;
   }
   /* .items.multi-column {
     padding-bottom: 0;
