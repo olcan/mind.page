@@ -3795,10 +3795,6 @@
     /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
     margin-right: 8px;
   }
-  /* single-column layout can remove margin since there is no concern of having columns w/ same width */
-  .column:not(.multi-column) {
-    margin-right: 0;
-  }
   /* .column:last-child {
     margin-right: 0;
   } */
@@ -3910,6 +3906,10 @@
       height: 55px; /* 45px = height of single-line editor (on narrow window) */
       width: 55px;
       min-width: 55px;
+    }
+    /* single-column layout can remove margin since there is no concern of having columns w/ same width */
+    .column:not(.multi-column) {
+      margin-right: 0;
     }
   }
 </style>
