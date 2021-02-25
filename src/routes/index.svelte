@@ -3625,6 +3625,7 @@
       max-width: 600px !important;
     }
     .items {
+      /* center items to for easier manual zooming */
       justify-content: center;
     }
   </style>
