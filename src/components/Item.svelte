@@ -472,7 +472,7 @@
       '<div style="display:none">$1</div>\n'
     );
 
-    // replace #item between style tags for use in item-specific css-styles
+    // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
     text = text.replace(/(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs, `$1$2#item-${id}$3`);
 
@@ -542,43 +542,30 @@
     // wrap list items in span to control spacing from bullets
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
 
-    // process images to transform src and add _cache_key attribute
+    // process images to transform src and add _cached attribute (skip if caching managed manually)
     text = text.replace(/<img .*?src\s*=\s*"(.*?)".*?>/gi, function (m, src) {
-      if (m.match(/_cache_key/i)) {
-        console.warn("img with self-assigned _cache_key in item", name);
-        return m;
-      }
+      if (m.match(/_cached|_uncached|_cache_key/i)) return m;
       // convert dropbox image src urls to direct download
       src = src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "");
       m = m.replace(/ src=[^> ]*/, "");
-      const key = hashCode(m + src).toString(); // cache key includes full tag + src
       // allow onImageRendering() to change src, and if so, put original as _src and add loading class
       const _src = src;
       src = onImageRendering(src);
       if (src != _src) m = m.substring(0, m.length - 1) + ` _src="${_src}" _loading>`;
-      return m.substring(0, m.length - 1) + ` src="${src}" _cache_key="${key}-${id}-${cacheIndex++}">`;
+      return m.substring(0, m.length - 1) + ` src="${src}" _cached>`;
     });
 
-    // process divs with item-unique id to add _cache_key="<id>-$deephash-$pos" automatically
-    text = text.replace(/<div .*?id\s*=\s*"(.*?)".*?>/gi, function (m, divid) {
-      if (m.match(/_cache_key/i)) {
-        console.warn("div with self-assigned _cache_key in item", name);
-        return m;
-      }
-      if (!divid.includes(id)) {
-        console.warn("div without proper id (that includes $id) in item", name);
-        return m;
-      }
-      // m = m.replace(/ _cache_key=[^> ]*/, "");
-      // console.debug("img src", src, m);
-      const key = divid + "-" + deephash;
-      return m.substring(0, m.length - 1) + ` _cache_key="${key}-${cacheIndex++}">`;
+    // process any tags with item-unique id to add _cached attribute (skip if caching managed manually)
+    text = text.replace(/<\w+.*? id\s*=\s*"(.*?)".*?>/gi, function (m, elemid) {
+      if (m.match(/_cached|_uncached|_cache_key/i)) return m;
+      if (!elemid.includes(id)) return m;
+      return m.substring(0, m.length - 1) + ` _cached>`;
     });
 
-    // process any html tags with _cached attribute to effectively replace it with _cache_key="$cid"
+    // process any tags with _cached attribute to replace it with _cache_key="$cid"
     text = text.replace(/<\w+.*? _cached\b.*?>/gi, function (m) {
-      if (m.match(/_cache_key/i)) {
-        console.warn("ignoring _cached attribute due to self-assigned _cache_key", name);
+      if (m.match(/_uncached|_cache_key/i)) {
+        console.warn("_cached used together with _uncached or _cache_key in item", name);
         return m;
       }
       m = m.replace(/ _cached/, "");
