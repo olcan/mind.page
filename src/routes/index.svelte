@@ -26,7 +26,6 @@
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
   let narrating = isClient && localStorage.getItem("mindpage_narrating") == "true";
-  let single = isClient && localStorage.getItem("mindpage_single") == "true";
   let modal;
 
   let evalStack = [];
@@ -643,7 +642,6 @@
     const documentWidth = document.documentElement.clientWidth;
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
-    if (single) columnCount = 1; // single column mode
     let columnHeights = new Array(columnCount).fill(0);
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
@@ -2030,16 +2028,8 @@
         return;
       }
       case "/_narrate": {
-        single = narrating = !narrating;
+        narrating = !narrating;
         localStorage.setItem("mindpage_narrating", narrating ? "true" : "false");
-        localStorage.setItem("mindpage_single", single ? "true" : "false");
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
-        return;
-      }
-      case "/_single": {
-        single = !single;
-        localStorage.setItem("mindpage_single", single ? "true" : "false");
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
         return;
@@ -3616,33 +3606,35 @@
   </style>
 {/if}
 
-{#if single}
-  <style>
-    .column {
-      /* remove right margin since screen should be large in voluntary single-column mode */
-      margin-right: 0 !important;
-    }
-  </style>
-{/if}
-
 {#if narrating}
   <style>
-    ::-webkit-scrollbar {
-      background: transparent;
-      width: 0; /* also remove its space to avoid shifting */
-    }
-    .column {
-      /* adjust max-width to be closer to what people would usually see */
-      max-width: 640px !important;
-    }
-    .items {
-      /* center items to for easier manual zooming */
-      justify-content: center;
-      /* add full-height bottom padding to prevent any jumping when page is zoomed significantly at the bottom */
-      /* padding-bottom: 100vh; */
-      /* box-sizing: border-box; */
+    #webcam {
+      width: 400px;
+      height: 400px;
+      border-radius: 50%;
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 10;
+      box-shadow: 0px 0px 20px 5px black;
+      border: 5px solid white;
     }
   </style>
+  <!-- svelte-ignore a11y-media-has-caption -->
+  <video id="webcam" autoplay={true} />
+  <script>
+    if (navigator?.mediaDevices?.getUserMedia) {
+      let video = document.querySelector("#webcam");
+      navigator.mediaDevices
+        .getUserMedia({ video: { width: 400, height: 400, facingMode: "user" } })
+        .then((stream) => {
+          video.srcObject = stream;
+        })
+        .catch(console.error);
+    } else {
+      alert("unable to access webcam for narration mode.");
+    }
+  </script>
 {/if}
 
 <svelte:head>
@@ -3664,6 +3656,15 @@
   }
   :global(b, strong) {
     font-weight: 700;
+  }
+  /* disable scrollbars to save space (see https://stackoverflow.com/a/56926685) */
+  :global(html, body) {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+    overflow: auto; /* necessary on iOS */
+  }
+  :global(body::-webkit-scrollbar) {
+    display: none;
   }
 
   #loading {
