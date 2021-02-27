@@ -3653,7 +3653,7 @@
     if (navigator?.mediaDevices?.getUserMedia) {
       let video = document.querySelector("#webcam");
       navigator.mediaDevices
-        .getUserMedia({ video: { width: 800, height: 800, facingMode: "user" } })
+        .getUserMedia({ video: { width: 720, height: 720, facingMode: "user" } })
         .then((stream) => {
           video.srcObject = stream;
         })
