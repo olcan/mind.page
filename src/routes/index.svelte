@@ -3673,7 +3673,7 @@
       max-height: 20vw;
       position: fixed;
       bottom: 0;
-      right: 10px;
+      right: 0;
       z-index: 1000; /* above modal */
       /* box-shadow: 0px 0px 20px 5px black; */
       /* border: 5px solid white; */
@@ -3686,8 +3686,6 @@
       height: 50vw;
       max-width: 68.75vw;
       max-height: 50vw;
-      right: 50%;
-      margin-right: -34.375vw;
     }
   </style>
 
@@ -3762,9 +3760,8 @@
           if (!video.requestVideoFrameCallback) {
             video.style.visibility = "visible";
             video.style.zIndex = 1000;
-            video.style.borderRadius = "50%";
-            video.style.border = "5px solid white";
-            video.style.bottom = "10px";
+            video.style.borderTopLeftRadius = "10px";
+            // video.style.borderLeft = "5px solid white";
             return;
           }
           function processFrame(now, metadata) {
