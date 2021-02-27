@@ -921,6 +921,7 @@
       tag == "#context" ||
       tag == "#init" ||
       tag == "#welcome" ||
+      tag == "#listen" ||
       tag == "#async" ||
       tag == "#debug" ||
       tag.match(/^#pin(?:\/|$)/) ||
@@ -936,6 +937,7 @@
     else if (tag == "#context") return ["#features/_context"];
     else if (tag == "#init") return ["#features/_init"];
     else if (tag == "#welcome") return ["#features/_welcome"];
+    else if (tag == "#listen") return ["#features/_listen"];
     else if (tag == "#async") return ["#features/_async"];
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ["#features/_pin"];
     else return [];
@@ -1366,6 +1368,16 @@
     finalizeStateOnEditorChange = false; // processed above
     replaceStateOnEditorChange = false; // processed above
 
+    // invoke _on_search on all _listen items
+    setTimeout(() => {
+      items.forEach((item) => {
+        if (!item.listen) return;
+        try {
+          _item(item.id).eval(`_on_search(\`${editorText}\`)`, { trigger: "listen" });
+        } catch (e) {} // already logged, just continue
+      });
+    });
+
     if (Date.now() - start >= 250) console.warn("onEditorChange took", Date.now() - start, "ms");
   }
 
@@ -1596,6 +1608,7 @@
     item.context = item.tagsRaw.includes("#_context");
     item.init = item.tagsRaw.includes("#_init");
     item.welcome = item.tagsRaw.includes("#_welcome");
+    item.listen = item.tagsRaw.includes("#_listen");
     item.async = item.tagsRaw.includes("#_async");
     item.debug = item.tagsRaw.includes("#_debug");
     const pintags = item.tagsRaw.filter((t) => t.match(/^#_pin(?:\/|$)/));
@@ -1980,14 +1993,8 @@
           .collection("items")
           .doc("QbtH06q6y6GY4ONPzq8N")
           .get()
-          .then((doc) => {
-            // _item("#Welcome").write(doc.data().text, "" /*whole item*/);
-            onEditorDone(doc.data().text);
-          })
+          .then((doc) => onEditorDone(doc.data().text))
           .catch(console.error);
-        // text = "#Welcome";
-        // editing = false;
-        // break;
         return;
       }
       case "/_tweet": {
@@ -2191,6 +2198,16 @@
         }
       });
     }
+
+    // invoke _on_create on all _listen items
+    setTimeout(() => {
+      items.forEach((item) => {
+        if (!item.listen) return;
+        try {
+          _item(item.id).eval(`_on_create(\`${text}\`)`, { trigger: "listen" });
+        } catch (e) {} // already logged, just continue
+      });
+    });
 
     encryptItem(itemToSave)
       .then((itemToSave) => {
@@ -3313,14 +3330,14 @@
           });
         }
 
-        // evaluate _welcome items once initialization is done, welcome dialog is dismissed, dom is fully updated
+        // evaluate _on_welcome items once initialization is done, welcome dialog is dismissed, dom is fully updated
         Promise.all([initialization, welcome])
           .then(update_dom)
           .then(() => {
             items.forEach((item) => {
               if (!item.welcome) return;
               try {
-                _item(item.id).eval("_welcome()", { trigger: "welcome" });
+                _item(item.id).eval("_on_welcome()", { trigger: "welcome" });
               } catch (e) {} // already logged, just continue welcome eval
             });
           });
@@ -3661,7 +3678,7 @@
       /* box-shadow: 0px 0px 20px 5px black; */
       /* border: 5px solid white; */
       /* border-radius: 50%; */
-      border-bottom: 1px solid #222;
+      /* border-bottom: 1px solid #222; */
       transition: all 1s ease;
     }
     .webcam.intro {
