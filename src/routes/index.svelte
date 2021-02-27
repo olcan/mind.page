@@ -3760,6 +3760,14 @@
         .then((stream) => {
           video.srcObject = stream;
           video.play();
+          // if we can not process the video, show it directly
+          if (!video.requestVideoFrameCallback) {
+            video.style.visibility = "visible";
+            video.style.zIndex = 1000;
+            video.style.borderRadius = "50%";
+            video.style.border = "5px solid white";
+            return;
+          }
           function processFrame(now, metadata) {
             canvas.width = metadata.width;
             canvas.height = metadata.height;
