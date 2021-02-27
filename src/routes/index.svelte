@@ -3623,6 +3623,10 @@
 
 {#if narrating}
   <style>
+    .items {
+      /* horizontal padding to make it easier to crop video */
+      padding: 0 10px;
+    }
     .webcam-background {
       position: fixed;
       z-index: 100;
