@@ -3650,9 +3650,9 @@
     }
     .webcam {
       /* background: #333; */
-      width: 600px;
+      width: 550px;
       height: 400px;
-      max-width: 30vw;
+      max-width: 27.5vw;
       max-height: 20vw;
       position: fixed;
       bottom: 10px;
@@ -3665,14 +3665,14 @@
       transition: all 1s ease;
     }
     .webcam.intro {
-      width: 75vw;
+      width: 68.75vw;
       height: 50vw;
-      max-width: 75vw;
+      max-width: 68.75vw;
       max-height: 50vw;
       right: 50%;
       bottom: 50%;
       margin-bottom: -25vw;
-      margin-right: -37.5vw;
+      margin-right: -34.375vw;
     }
   </style>
 
@@ -3733,7 +3733,7 @@
         .getUserMedia({
           video: _.merge(
             {
-              width: 1200,
+              width: 1100,
               height: 800,
               facingMode: "user",
             },
