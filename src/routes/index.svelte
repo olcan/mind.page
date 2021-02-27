@@ -3672,7 +3672,7 @@
       max-width: 27.5vw;
       max-height: 20vw;
       position: fixed;
-      bottom: 10px;
+      bottom: 0;
       right: 10px;
       z-index: 1000; /* above modal */
       /* box-shadow: 0px 0px 20px 5px black; */
@@ -3687,8 +3687,6 @@
       max-width: 68.75vw;
       max-height: 50vw;
       right: 50%;
-      bottom: 50%;
-      margin-bottom: -25vw;
       margin-right: -34.375vw;
     }
   </style>
@@ -3766,6 +3764,7 @@
             video.style.zIndex = 1000;
             video.style.borderRadius = "50%";
             video.style.border = "5px solid white";
+            video.style.bottom = "10px";
             return;
           }
           function processFrame(now, metadata) {
