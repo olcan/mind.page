@@ -25,7 +25,7 @@
   let anonymous = false;
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
-  let narrating = isClient && localStorage.getItem("mindpage_narrating") == "true";
+  let narrating = isClient && localStorage.getItem("mindpage_narrating") != null;
   let modal;
 
   let evalStack = [];
@@ -2035,13 +2035,6 @@
         onEditorChange("");
         return;
       }
-      case "/_narrate": {
-        narrating = !narrating;
-        localStorage.setItem("mindpage_narrating", narrating ? "true" : "false");
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
-        return;
-      }
       default: {
         if (text.match(/^\/\w+/)) {
           const cmd = text.match(/^\/\w+/)[0];
@@ -2049,7 +2042,14 @@
             .replace(/^\/\w+/, "")
             .trim()
             .replace(/`/g, "\\`");
-          if (cmd == "/_example") {
+          if (cmd == "/_narrate") {
+            narrating = !narrating;
+            if (narrating) localStorage.setItem("mindpage_narrating", args);
+            else localStorage.removeItem("mindpage_narrating");
+            lastEditorChangeTime = 0; // disable debounce even if editor focused
+            onEditorChange("");
+            return;
+          } else if (cmd == "/_example") {
             firestore()
               .collection("items")
               .where("user", "==", "anonymous")
@@ -3651,9 +3651,26 @@
   <video id="webcam" class="intro" autoplay={true} on:click|self={onWebcamClick} />
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
+      if (navigator.mediaDevices.enumerateDevices) {
+        console.log(`initializing webcam, config: '${localStorage.getItem("mindpage_narrating")}'; available devices:`);
+        navigator.mediaDevices.enumerateDevices().then((devices) => {
+          devices.forEach((device) => {
+            if (device.kind == "videoinput") console.log(device.deviceId, device.label);
+          });
+        });
+      }
       let video = document.querySelector("#webcam");
       navigator.mediaDevices
-        .getUserMedia({ video: { width: 720, height: 720, facingMode: "user" } })
+        .getUserMedia({
+          video: _.merge(
+            {
+              width: 720,
+              height: 720,
+              facingMode: "user",
+            },
+            JSON.parse(localStorage.getItem("mindpage_narrating") || "{}")
+          ),
+        })
         .then((stream) => {
           video.srcObject = stream;
         })
