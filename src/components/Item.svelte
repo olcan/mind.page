@@ -543,7 +543,7 @@
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
 
     // process images to transform src and add _cached attribute (skip if caching managed manually)
-    text = text.replace(/<img .*?src\s*=\s*"(.*?)".*?>/gi, function (m, src) {
+    text = text.replace(/<img [^>]*?src\s*=\s*"([^>]*?)".*?>/gi, (m, src) => {
       if (m.match(/_cached|_uncached|_cache_key/i)) return m;
       // convert dropbox image src urls to direct download
       src = src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "");
@@ -556,16 +556,16 @@
     });
 
     // process any tags with item-unique id to add _cached attribute (skip if caching managed manually)
-    text = text.replace(/<\w+.*? id\s*=\s*"(.*?)".*?>/gi, function (m, elemid) {
+    text = text.replace(/<\w+[^>]*? id\s*=\s*"(.*?)".*?>/gi, (m, elemid) => {
       if (m.match(/_cached|_uncached|_cache_key/i)) return m;
       if (!elemid.includes(id)) return m;
       return m.substring(0, m.length - 1) + ` _cached>`;
     });
 
     // process any tags with _cached attribute to replace it with _cache_key="$cid"
-    text = text.replace(/<\w+.*? _cached\b.*?>/gi, function (m) {
+    text = text.replace(/<\w+[^>]*? _cached\b.*?>/gi, (m) => {
       if (m.match(/_uncached|_cache_key/i)) {
-        console.warn("_cached used together with _uncached or _cache_key in item", name);
+        console.warn("_cached used together with _uncached or _cache_key in item", name, ", tag:", m);
         return m;
       }
       m = m.replace(/ _cached/, "");
@@ -573,7 +573,7 @@
     });
 
     // add onclick handler to html links
-    text = text.replace(/<a .*?href\s*=\s*"(.*?)".*?>/gi, function (m, href) {
+    text = text.replace(/<a [^>]*?href\s*=\s*"(.*?)".*?>/gi, function (m, href) {
       if (m.match(/onclick/i)) return m; // link has custom onclick handler
       const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
       return m.substring(0, m.length - 1) + ` onclick="handleLinkClick('${id}','${href_escaped}',event)">`;

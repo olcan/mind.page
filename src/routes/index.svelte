@@ -1631,13 +1631,21 @@
       if (prevLabel) {
         const ids = idsFromLabel.get(prevLabel).filter((id) => id != item.id);
         idsFromLabel.set(prevLabel, ids);
-        if (ids.length == 1) items[indexFromId.get(ids[0])].labelUnique = true;
+        if (ids.length == 1) {
+          let other = items[indexFromId.get(ids[0])];
+          other.labelUnique = true;
+          other.name = other.labelUnique ? other.labelText : "id:" + other.id;
+        }
       }
       if (item.label) {
         const ids = (idsFromLabel.get(item.label) || []).concat(item.id);
         idsFromLabel.set(item.label, ids);
         item.labelUnique = ids.length == 1;
-        if (ids.length == 2) items[indexFromId.get(ids[0])].labelUnique = false;
+        if (ids.length == 2) {
+          let other = items[indexFromId.get(ids[0])];
+          other.labelUnique = false;
+          other.name = other.labelUnique ? other.labelText : "id:" + other.id;
+        }
       }
       item.labelPrefixes = [];
       let label = item.label;
