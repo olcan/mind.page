@@ -3398,6 +3398,11 @@
     console.error(msg);
   }
 
+  function onWebcamClick(e) {
+    e.stopPropagation();
+    (e.target as HTMLElement).classList.toggle("intro");
+  }
+
   // retrieve host name, in globalThis.request on server side (see server.ts)
   const hostname = typeof location == "undefined" ? globalThis.hostname : location.hostname;
 
@@ -3617,30 +3622,44 @@
 {#if narrating}
   <style>
     #webcam {
+      background: #333;
       width: 400px;
       height: 400px;
+      max-width: 20vw;
+      max-height: 20vw;
       border-radius: 50%;
       position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 10;
+      bottom: 10px;
+      right: 10px;
+      z-index: 1000; /* above modal */
       box-shadow: 0px 0px 20px 5px black;
       border: 5px solid white;
+      transition: all 1s ease;
+    }
+    #webcam.intro {
+      width: 50vw;
+      height: 50vw;
+      max-width: 50vw;
+      max-height: 50vw;
+      right: 50%;
+      bottom: 50%;
+      margin-bottom: -25vw;
+      margin-right: -25vw;
     }
   </style>
   <!-- svelte-ignore a11y-media-has-caption -->
-  <video id="webcam" autoplay={true} />
+  <video id="webcam" class="intro" autoplay={true} on:click|self={onWebcamClick} />
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
       let video = document.querySelector("#webcam");
       navigator.mediaDevices
-        .getUserMedia({ video: { width: 400, height: 400, facingMode: "user" } })
+        .getUserMedia({ video: { width: 800, height: 800, facingMode: "user" } })
         .then((stream) => {
           video.srcObject = stream;
         })
         .catch(console.error);
     } else {
-      alert("unable to access webcam for narration mode.");
+      alert("unable to access webcam");
     }
   </script>
 {/if}
