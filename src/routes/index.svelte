@@ -3045,7 +3045,7 @@
           // (you can test this with document.cookie='__session=;max-age=0' in console)
           // can also happen when admin is logged in but acting as anonymous
           if (items[0].user != "anonymous")
-            console.warn(`ignoring ${items.length} items for wrong user (${items[0].user})`);
+            console.warn(`ignoring ${items.length} items (${items[0].user})`);
           items = [];
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
