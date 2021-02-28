@@ -26,6 +26,8 @@
   let readonly = false;
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
   let narrating = isClient && localStorage.getItem("mindpage_narrating") != null;
+  let green_screen = isClient && localStorage.getItem("mindpage_green_screen") == "true";
+  if (isClient) window["_green_screen"] = green_screen;
   let intro = true; // larger centered narration window
   let modal;
 
@@ -2043,6 +2045,11 @@
         onEditorChange("");
         return;
       }
+      case "/_green_screen": {
+        window["_green_screen"] = green_screen = !green_screen;
+        localStorage.setItem("mindpage_green_screen", green_screen ? "true" : "false");
+        return;
+      }
       default: {
         if (text.match(/^\/\w+/)) {
           const cmd = text.match(/^\/\w+/)[0];
@@ -2052,8 +2059,11 @@
             .replace(/`/g, "\\`");
           if (cmd == "/_narrate") {
             narrating = !narrating;
-            if (narrating) localStorage.setItem("mindpage_narrating", args);
-            else localStorage.removeItem("mindpage_narrating");
+            if (narrating) {
+              localStorage.setItem("mindpage_narrating", args);
+              localStorage.setItem("mindpage_green_screen", "true");
+              window["_green_screen"] = green_screen = true;
+            } else localStorage.removeItem("mindpage_narrating");
             lastEditorChangeTime = 0; // disable debounce even if editor focused
             onEditorChange("");
             return;
@@ -3740,6 +3750,7 @@
       const similarityLoc = gl.getUniformLocation(prog, "similarity");
       const smoothnessLoc = gl.getUniformLocation(prog, "smoothness");
       const spillLoc = gl.getUniformLocation(prog, "spill");
+      const toggleLoc = gl.getUniformLocation(prog, "toggle");
 
       // start webcam video
       navigator.mediaDevices
@@ -3774,7 +3785,7 @@
             gl.uniform1f(texHeightLoc, metadata.height);
             gl.uniform3f(keyColorLoc, 0, 1, 0);
             // see sliders at https://jameshfisher.com/2020/08/11/production-ready-green-screen-in-the-browser/
-            gl.uniform1f(similarityLoc, 0.49);
+            gl.uniform1f(similarityLoc, _green_screen ? 0.49 : 0);
             gl.uniform1f(smoothnessLoc, 0.0);
             gl.uniform1f(spillLoc, 0.05);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
