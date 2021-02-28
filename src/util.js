@@ -149,7 +149,8 @@ export function renderTag(tag) {
 export function invalidateElemCache(id) {
   if (!window["_elem_cache"][id]) return;
   Object.values(window["_elem_cache"][id]).forEach((elem) => {
-    delete window["_elem_cache"][elem.getAttribute("_cache_key")];
+    const key = elem.getAttribute("_cache_key");
+    delete window["_elem_cache"][id][key];
     // destroy all children w/ _destroy attribute (and property)
     elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
   });

@@ -1064,7 +1064,7 @@
   });
 
   if (!window["_dot_rendered"]) {
-    window["_dot_rendered"] = function (dot) {
+    window["_dot_rendered"] = function (item, dot) {
       // render "stack" clusters (subgraphs)
       dot.querySelectorAll(".cluster.stack").forEach((cluster) => {
         let path = cluster.children[1]; // first child is title
@@ -1089,6 +1089,11 @@
       });
       renderMath(math, function () {
         dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
+          if (!item.elem?.contains(elem)) {
+            // console.error("detached _graph elem in item", item.name)
+            item.invalidate_cache();
+            return;
+          }
           let math = elem as SVGGraphicsElement;
           let dot = elem.parentNode.parentNode.parentNode.parentNode;
           // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
