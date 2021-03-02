@@ -129,6 +129,7 @@
     window["_modal_close"] = _modal_close;
     window["_modal_update"] = _modal_update;
     window["_delay"] = _delay;
+    window["_update_dom"] = update_dom;
   }
 
   // private function for looking up item given its id
@@ -200,6 +201,8 @@
       return item(this.id).dependents;
     }
     get elem(): HTMLElement {
+      // NOTE: we return the super-container as it is available even when editing
+      // return document.getElementById("item-" + this.id);
       return document.getElementById("super-container-" + this.id);
     }
     // log options for write_log and write_log_any, reset in eval()
@@ -3044,8 +3047,7 @@
           // items are for wrong user, usually anonymous, due to missing/expired cookie
           // (you can test this with document.cookie='__session=;max-age=0' in console)
           // can also happen when admin is logged in but acting as anonymous
-          if (items[0].user != "anonymous")
-            console.warn(`ignoring ${items.length} items (${items[0].user})`);
+          if (items[0].user != "anonymous") console.warn(`ignoring ${items.length} items (${items[0].user})`);
           items = [];
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
