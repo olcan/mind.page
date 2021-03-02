@@ -150,6 +150,9 @@ export function invalidateElemCache(id) {
   if (!window["_elem_cache"][id]) return;
   Object.values(window["_elem_cache"][id]).forEach((elem) => {
     const key = elem.getAttribute("_cache_key");
+    // we allow some items to skip invalidation, e.g. to be intentionally reused across runs
+    if (elem.hasAttribute("_skip_invalidation")) return;
+    // console.warn("deleting from _elem_cache", key);
     delete window["_elem_cache"][id][key];
     // destroy all children w/ _destroy attribute (and property)
     elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
