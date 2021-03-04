@@ -773,7 +773,7 @@
               return (div as HTMLElement).offsetTop;
             })
           );
-          if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
+          if (itemTop - 100 < scrollY) document.body.scrollTo(0, Math.max(0, itemTop - 100));
         });
     }
   }
@@ -1468,7 +1468,7 @@
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up, or too far down, bring it to ~middle of page
           if (itemTop - 100 < scrollY || itemTop + 100 > scrollY + innerHeight)
-            top.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
         });
     }
   }
@@ -1518,7 +1518,7 @@
     // scroll to last recorded scroll position at this state
     tick()
       .then(update_dom)
-      .then(() => top.scrollTo(0, e.state.scrollPosition || 0));
+      .then(() => document.body.scrollTo(0, e.state.scrollPosition || 0));
   }
 
   function resetUser() {
@@ -2485,7 +2485,7 @@
             const div = document.querySelector("#super-container-" + item.id);
             if (!div) return; // item deleted or hidden
             const itemTop = (div as HTMLElement).offsetTop;
-            if (itemTop - 100 < scrollY) top.scrollTo(0, Math.max(0, itemTop - 100));
+            if (itemTop - 100 < scrollY) document.body.scrollTo(0, Math.max(0, itemTop - 100));
           });
         }
       });
@@ -3400,7 +3400,7 @@
     ) {
       e.preventDefault();
       textArea(-1).focus();
-      top.scrollTo(0, 0);
+      document.body.scrollTo(0, 0);
       // create/run new item on create/save shortcuts
       if (
         (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
