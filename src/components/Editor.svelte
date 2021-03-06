@@ -524,7 +524,7 @@
           text = text.replace(/\t/g, "  ");
           document.execCommand("insertText", false, text);
         });
-      } else if (item.type.startsWith("image")) {
+      } else if (item.type.startsWith("image/") || item.type == "application/pdf") {
         const file = item.getAsFile();
         const url = URL.createObjectURL(file);
         const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
