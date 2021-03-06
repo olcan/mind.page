@@ -205,7 +205,7 @@
         <form>
           <label class="button">
             Select Images
-            <input type="file" accept="image/*" multiple on:input={onFilesSelected} />
+            <input type="file" accept="image/*,application/pdf" multiple on:input={onFilesSelected} />
           </label>
         </form>
         {#if selected_images.length > 0}

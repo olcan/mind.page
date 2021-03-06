@@ -325,7 +325,7 @@
         url = url.replace("?dl=0", "");
         try {
           let obj = new URL(url);
-          if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
+          if (url.match(/\.(jpeg|jpg|png|gif|svg|pdf)$/i)) {
             return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`;
           }
           return `${pfx}[${obj.host}](${url})${sfx}`;
@@ -978,7 +978,7 @@
     // set up file inputs to insert images into item
     // NOTE: only the first file input is accepted and replaces all inputs
     itemdiv.querySelectorAll("input[type=file]").forEach((input: HTMLInputElement) => {
-      input.accept = "image/*"; // accept only images
+      input.accept = "image/*,application/pdf"; // accept only images
       input.onchange = function (e: InputEvent) {
         window["_modal"]({ content: "Inserting selected images ..." });
         let total_size = 0;
