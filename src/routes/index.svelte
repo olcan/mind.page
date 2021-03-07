@@ -1262,9 +1262,8 @@
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, (item) => item.editing) + 1);
     let tailTime = items[tailIndex]?.time || 0;
     hideIndexFromRanking = tailIndex;
-    // if editor text is not modified, we can only show more items
-    if (editorTextModified) hideIndex = hideIndexFromRanking;
-    else hideIndex = Math.max(hideIndex, hideIndexFromRanking);
+    const prevHideIndex = hideIndex; // to possibly take max later (see below)
+    hideIndex = hideIndexFromRanking;
 
     // update layout (used below, e.g. aboveTheFold, editingItems, etc)
     updateItemLayout();
@@ -1310,16 +1309,13 @@
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
+    // auto-show session items if no position-based toggles
+    // otherwise show first position-based toggle, unless there are targets
+    if (toggles.length == 0) hideIndex = hideIndexForSession;
+    else hideIndex = targetItemCount > 0 ? toggles[0].start : toggles[0].end;
     // if editor text is not modified, we can only show more items
-    if (editorTextModified) {
-      // auto-show session items if no position-based toggles
-      // otherwise show first position-based toggle, unless there are targets
-      if (toggles.length == 0) hideIndex = hideIndexForSession;
-      else hideIndex = targetItemCount > 0 ? toggles[0].start : toggles[0].end;
-    } else {
-      if (toggles.length == 0) hideIndex = Math.max(hideIndex, hideIndexForSession);
-      else hideIndex = Math.max(hideIndex, targetItemCount > 0 ? toggles[0].start : toggles[0].end);
-    }
+    if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
+
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
         start: hideIndexFromRanking,
