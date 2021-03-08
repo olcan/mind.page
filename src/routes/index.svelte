@@ -1361,6 +1361,7 @@
           items.map((item) => (item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null))
         ),
         hideIndex: hideIndex,
+        scrollPosition: document.body.scrollTop,
         final: !editorText || finalizeStateOnEditorChange,
       };
       // console.debug(history.state.final ? "push" : "replace", state);
@@ -2532,6 +2533,8 @@
           lastEditSelectionStart = textarea.selectionStart;
           lastEditSelectionEnd = textarea.selectionEnd;
         }
+        // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
+        if (altKey && metaKey) item.time = item.savedTime;
         if (!cancelled && (item.time != item.savedTime || item.text != item.savedText)) saveItem(item.id);
         onEditorChange(editorText); // item time and/or text may have changed
       }
