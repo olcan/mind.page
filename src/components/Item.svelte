@@ -56,7 +56,7 @@
   let error = false;
   let warning = false;
   export let target = false;
-  let context = false;
+  export let target_context = false;
   let saveable = false;
   $: saveable = text.trim().length > 0; /* otherwise saving would delete, so just cancel */
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
@@ -82,7 +82,13 @@
     if (run && !cancelled) invalidateElemCache(id);
     onEditing(index, (editing = false), cancelled, run);
   }
+  let mouseDownTime = 0;
+  function onMouseDown() {
+    mouseDownTime = Date.now();
+  }
   function onClick(e) {
+    // reject click without mousedown within 250ms (can happen due to tags shifting during click)
+    if (Date.now() - mouseDownTime > 250) return;
     // ignore clicks on loading div
     if ((e.target as HTMLElement).closest(".loading")) return;
     // ignore clicks on inputs
@@ -197,7 +203,7 @@
       // console.debug("toHTML skipped");
       return window["_html_cache"][id][cache_key];
     }
-    // console.debug("toHTML");
+    // console.debug("toHTML", name);
 
     // evaluate inline <<macros>>|@{macros}@ first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
@@ -399,8 +405,6 @@
               if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
-              if (matchingTerms.has(lctag)) classNames += " selected";
-              else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
               if (missingTags.has(lctag)) classNames += " missing";
               if (tag.startsWith("#_")) classNames += " hidden";
               if (lctag == label) {
@@ -492,8 +496,6 @@
         if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
         const lctag = tag.toLowerCase();
         let classNames = "link";
-        if (matchingTerms.has(lctag)) classNames += " selected";
-        else if (matchingTermsSecondary.has(lctag)) classNames += " secondary-selected";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
         return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`;
@@ -723,10 +725,20 @@
     }
     itemdiv.firstElementChild.setAttribute("_hash", hash);
     itemdiv.firstElementChild.setAttribute("_highlightTerms", highlightTerms);
-    // console.debug("afterUpdate");
+    // console.debug("afterUpdate", name);
 
     // cache any elements with _cache_key (invoked again later for elements with scripts)
     cacheElems();
+
+    // highlight matching tags using selected/secondary-selected classes
+    const matchingTermSet = new Set<string>(matchingTerms.split(" ").filter((t) => t));
+    const matchingTermSecondarySet = new Set<string>(matchingTermsSecondary.split(" ").filter((t) => t));
+    itemdiv.querySelectorAll("mark").forEach((mark) => {
+      const selected = matchingTermSet.has(mark.title.toLowerCase());
+      const secondary_selected = !selected && matchingTermSecondarySet.has(mark.title.toLowerCase());
+      mark.classList.toggle("selected", selected);
+      mark.classList.toggle("secondary-selected", secondary_selected);
+    });
 
     // highlight matching terms in item text
     const mindboxModifiedAtDispatch = window["_mindboxLastModified"];
@@ -749,9 +761,9 @@
     const highlightClosure = () => {
       if (highlightDispatchIndex != highlightDispatchCount - 1) return; // cancelled due to other dispatch
 
-      // if mindbox was modified recently, postpone up to 500ms
+      // if mindbox was modified AND debounced recently, also postpone highlights up to 500ms
       const timeSinceMindboxModified = Date.now() - window["_mindboxLastModified"];
-      if (timeSinceMindboxModified < 500) {
+      if (timeSinceMindboxModified < 500 && window["_mindboxDebounced"]) {
         setTimeout(highlightClosure, 500 - timeSinceMindboxModified);
         return;
       }
@@ -805,12 +817,8 @@
         terms = terms.filter((t) => !(highlight_counts[t] >= maxHighlightsPerTerm));
         if (terms.length == 0) continue; // nothing left to highlight
         let regex = new RegExp(`^(.*?)(${terms.map(_.escapeRegExp).join("|")})`, "si");
-        // if we are highlighting inside a non-selected tag, then we expand the regex to allow shortening and rendering adjustments ...
-        if (
-          node.parentElement.tagName == "MARK" &&
-          !node.parentElement.classList.contains("selected") &&
-          !node.parentElement.classList.contains("secondary-selected")
-        ) {
+        // if we are highlighting inside tag, we expand the regex to allow shortening and rendering adjustments ...
+        if (node.parentElement.tagName == "MARK") {
           let tagTerms = terms
             .concat(highlight_counts["#…"] + highlight_counts["…"] >= maxHighlightsPerTerm ? [] : ["#…"])
             .map(_.escapeRegExp);
@@ -924,9 +932,6 @@
     // indicate errors/warnings and context/target items
     error = itemdiv.querySelector(".console-error,.macro-error,mark.missing") != null;
     warning = itemdiv.querySelector(".console-warn") != null;
-    context = itemdiv.querySelector("mark.secondary-selected.label.unique") != null;
-    // NOTE: targeting may also be indicated from ranking, e.g. for id:* queries
-    target = target || itemdiv.querySelector("mark.selected.label.unique") != null;
 
     // trigger typesetting of any math elements
     // NOTE: we do this async to see if we can load MathJax async in template.html
@@ -1132,6 +1137,7 @@
   {/if}
   <div
     bind:this={container}
+    on:mousedown={onMouseDown}
     on:click={onClick}
     class="container"
     class:editing
@@ -1139,8 +1145,8 @@
     class:saving
     class:error
     class:warning
-    class:context
     class:target
+    class:target_context
     class:running
     class:admin
     class:showLogs
@@ -1401,16 +1407,16 @@
     /* overflow: auto; */
   }
 
-  .context {
-    border-left-color: #242;
-  }
   .target {
     border-color: #484;
   }
-  .context {
+  .target_context {
+    border-left-color: #242;
+  }
+  .target_context {
     border-radius: 0 5px 5px 0;
   }
-  .context.editing {
+  .target_context.editing {
     border-radius: 5px;
   }
   .warning {

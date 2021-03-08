@@ -773,7 +773,7 @@
               return (div as HTMLElement).offsetTop;
             })
           );
-          if (itemTop - 100 < scrollY) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+          if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
         });
     }
   }
@@ -983,7 +983,8 @@
       if (sessionHistory.length == 0) sessionHistory = [text];
       else sessionHistory[0] = text;
       // update highlighting state used in Item.svelte
-      window["_mindboxLastModified"] = Date.now(); // for highlighting
+      window["_mindboxLastModified"] = Date.now();
+      window["_mindboxDebounced"] = true;
       window["_highlight_counts"] = {};
     }
 
@@ -1006,6 +1007,7 @@
       return;
     }
     lastEditorChangeTime = Infinity; // force minimum wait for next change
+    window["_mindboxDebounced"] = false;
     const start = Date.now();
 
     text = text.toLowerCase().trim();
@@ -1142,6 +1144,7 @@
 
       // listing item and id-matching items are considered "target" items
       item.target = listingItemIndex == index || idMatchTerms.length > 0;
+      item.target_context = !item.target && context.includes(item.uniqueLabel);
       if (item.target) targetItemCount++;
 
       // calculate missing tags (excluding certain special tags from consideration)
@@ -1394,6 +1397,7 @@
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log)
       items[index].time = Date.now();
+    // console.debug(e.pageX, e.pageY, document.documentElement.scrollLeft, document.documentElement.scrollTop);
 
     // NOTE: Rendered form of tag should be renderTag(reltag). We use common suffix to map click position.
     const rendered = renderTag(reltag);
@@ -1435,7 +1439,7 @@
     //   history.back();
     //   return;
     // }
-    editorText = editorText.trim() == tag ? "" : tag + " "; // space in case more text is added
+    editorText = editorText.trim().toLowerCase() == tag.toLowerCase() ? "" : tag + " "; // space in case more text is added
     // editorText = tag + " ";
     forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
@@ -1463,7 +1467,7 @@
           );
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up, or too far down, bring it to ~middle of page
-          if (itemTop - 100 < scrollY || itemTop + 100 > scrollY + innerHeight)
+          if (itemTop - 100 < document.body.scrollTop || itemTop + 100 > document.body.scrollTop + innerHeight)
             document.body.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
         });
     }
@@ -2481,7 +2485,7 @@
             const div = document.querySelector("#super-container-" + item.id);
             if (!div) return; // item deleted or hidden
             const itemTop = (div as HTMLElement).offsetTop;
-            if (itemTop - 100 < scrollY) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+            if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
           });
         }
       });
@@ -2534,7 +2538,7 @@
 
       // NOTE: we do not focus back up on the editor unless we are already at the top
       //       (especially bad on iphone due to lack of keyboard focus benefit)
-      if (editingItems.length > 0 || scrollY == 0) {
+      if (editingItems.length > 0 || document.body.scrollTop == 0) {
         focusOnNearestEditingItem(index);
       }
     }
@@ -2686,7 +2690,8 @@
     if (!historyUpdatePending) {
       historyUpdatePending = true;
       setTimeout(() => {
-        history.replaceState(Object.assign(history.state, { scrollPosition: scrollY }), editorText);
+        // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
+        history.replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }), editorText);
         historyUpdatePending = false;
       }, 250);
     }
@@ -2832,6 +2837,7 @@
       // state used in onEditorChange
       item.matching = false;
       item.target = false;
+      item.target_context = false;
       item.tagMatches = 0;
       item.labelMatch = false;
       item.prefixMatch = false;
@@ -3136,7 +3142,7 @@
         }
       }
       visualViewport.addEventListener("resize", checkLayout);
-      visualViewport.addEventListener("scroll", onScroll);
+      document.body.addEventListener("scroll", onScroll);
 
       let firstSnapshot = true;
       function initFirebaseRealtime() {
@@ -3571,6 +3577,7 @@
                 matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
                 matching={item.matching}
                 target={item.target}
+                target_context={item.target_context}
                 timeString={item.timeString}
                 timeOutOfOrder={item.timeOutOfOrder}
                 updateTime={item.updateTime}
@@ -3616,7 +3623,6 @@
   on:error={onError}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
-  on:scroll={onScroll}
 />
 
 <!-- increase list item padding on android, otherwise too small -->
