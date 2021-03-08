@@ -331,7 +331,7 @@
         url = url.replace("?dl=0", "");
         try {
           let obj = new URL(url);
-          if (url.match(/\.(jpeg|jpg|png|gif|svg|pdf)$/i)) {
+          if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`;
           }
           return `${pfx}[${obj.host}](${url})${sfx}`;
