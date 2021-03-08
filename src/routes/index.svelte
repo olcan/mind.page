@@ -2067,7 +2067,14 @@
               localStorage.setItem("mindpage_narrating", args);
               localStorage.setItem("mindpage_green_screen", "true");
               window["_green_screen"] = green_screen = true;
-            } else localStorage.removeItem("mindpage_narrating");
+            } else {
+              const video = document.querySelector("#webcam-video") as HTMLVideoElement;
+              if (video) {
+                (video.srcObject as any)?.getTracks().forEach((track) => track.stop());
+                video.srcObject = null;
+              }
+              localStorage.removeItem("mindpage_narrating");
+            }
             lastEditorChangeTime = 0; // disable debounce even if editor focused
             onEditorChange("");
             return;
@@ -3778,8 +3785,6 @@
           if (!video.requestVideoFrameCallback) {
             video.style.visibility = "visible";
             video.style.zIndex = 1000;
-            video.style.borderTopLeftRadius = "10px";
-            // video.style.borderLeft = "5px solid white";
             return;
           }
           function processFrame(now, metadata) {
