@@ -211,18 +211,11 @@
     let macroIndex = 0;
     const replaceMacro = (m, pfx, js) => {
       try {
-        js = js.replace(/(^|[^\\])\$id/g, "$1" + id);
-        js = js.replace(/(^|[^\\])\$hash/g, "$1" + hash);
-        js = js.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        js = js.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro input
-        js = js.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
-        let out = window["_item"](id).eval(js, { trigger: "macro_" + macroIndex++ });
-        // NOTE: replacing macro output would deviate from treatment as typed-in content
-        // out = out?.replace(/(^|[^\\])\$id/g, "$1" + id);
-        // out = out?.replace(/(^|[^\\])\$hash/g, "$1" + hash);
-        // out = out?.replace(/(^|[^\\])\$deephash/g, "$1" + deephash);
-        // out = out?.replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex); // same cacheIndex for whole macro output
-        // out = out?.replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
+        let out = window["_item"](id).eval(js, {
+          trigger: "macro_" + macroIndex++,
+          cid: `${id}-${deephash}-${++cacheIndex}`,
+        });
+        // NOTE: replacing $id/etc in macro output would deviate from treatment as typed-in content
         // console.debug("macro output: ", out);
         return pfx + out;
       } catch (e) {
@@ -516,8 +509,7 @@
             .replace(/(^|[^\\])\$id/g, "$1" + id)
             .replace(/(^|[^\\])\$hash/g, "$1" + hash)
             .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
-            .replace(/(^|[^\\])\$pos/g, "$1" + ++cacheIndex) // same cacheIndex for whole _html block
-            .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${cacheIndex}`);
+            .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${++cacheIndex}`);
         }
         return highlight(code, language);
       },

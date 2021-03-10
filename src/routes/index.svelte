@@ -401,6 +401,8 @@
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
       evaljs = evaljs.replace(/(^|[^\\])\$hash/g, "$1" + this.hash);
       evaljs = evaljs.replace(/(^|[^\\])\$deephash/g, "$1" + this.deephash);
+      if (options["cid"]) evaljs = evaljs.replace(/(^|[^\\])\$cid/g, "$1" + options["cid"]);
+
       // store eval text under item.debug_store[trigger] for debugging, including a reverse stack string
       let stack = evalStack
         .map((id) => item(id).name)
