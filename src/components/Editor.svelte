@@ -178,8 +178,8 @@
         html += "</span>\n";
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">';
-        if (language.match(/^_math(_|$)/)) language = "math"; // editor-only
-        if (language.match(/^_html(_|$)/)) language = "html"; // editor-only
+        // drop any underscore (_+) prefix (treated as editor-only highlighting)
+        language = language.replace(/^_+/, "");
         html += highlight(code, language);
         html += "</div>";
         insideBlock = false;

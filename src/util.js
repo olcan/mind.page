@@ -80,6 +80,8 @@ import json from "highlight.js/lib/languages/json.js";
 registerLanguage("json", json);
 import xml from "highlight.js/lib/languages/xml.js";
 registerLanguage("xml", xml); // includes html
+import glsl from "highlight.js/lib/languages/glsl.js";
+registerLanguage("glsl", glsl);
 import latex from "highlight.js/lib/languages/latex.js";
 registerLanguage("latex", latex); // includes tex
 hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
@@ -102,10 +104,8 @@ export function highlight(code, language) {
       )
       .join("\n");
   }
-  if (language.match(/^html(_|$)/)) language = "html";
-  if (language.match(/^_?js(_|$)/)) language = "js";
-  // if (language.match(/^_html(_|$)/)) language = "html"; // editor-only
-  // if (language.match(/^_math(_|$)/)) language = "math"; // editor-only
+  // drop any _suffix if language does not start with _ (_lang is editor-only)
+  if (!language.startsWith("_")) language = language.replace(/(^\w+?)_.+$/, "$1");
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
 }
