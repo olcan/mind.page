@@ -140,8 +140,8 @@
         else if (background.toLowerCase() == "cancel") _onCancel(e);
       });
     }
-    // stop all non-modal key events as a modal should
-    if (!(e.target as HTMLElement).closest(".modal")) {
+    // stop all non-modal non-modifier key events as a modal should
+    if (!(e.target as HTMLElement).closest(".modal") && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.stopPropagation();
       e.preventDefault();
     }
