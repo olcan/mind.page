@@ -517,6 +517,9 @@
     });
     text = marked(text);
 
+    // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
+    text = text.replace(/\s+<\/code><\/pre>/gs, "</code></pre>");
+
     // unwrap _html(_*) blocks
     text = text.replace(/<pre><code class="_html_?.*?">(.*?)<\/code><\/pre>/gs, (m, _html) => _.unescape(_html));
 
