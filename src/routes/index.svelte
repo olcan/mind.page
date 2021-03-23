@@ -2383,8 +2383,8 @@
     // check js_input
     const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
     let jsin = extractBlock(item.text, "js_input");
-    // if js_input is missing but item is runnable, then evaluate "return (await) _run()"
-    if (!jsin && item.runnable) jsin = async ? "return await _run()" : "return _run()";
+    // if js_input is missing but item is runnable, then evaluate "(await) _run()"
+    if (!jsin && item.runnable) jsin = async ? "await _run()" : "_run()";
     if (!jsin) return item.text; // missing or empty, ignore
     let jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
     // ignore output if Promise
