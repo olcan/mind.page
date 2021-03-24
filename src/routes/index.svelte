@@ -628,6 +628,7 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
+  let topMovers = [];
   let toggles = [];
   let newestTime = 0;
   let oldestTime = Infinity;
@@ -654,6 +655,8 @@
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
+    // reset topMovers if number of columns changes
+    if (topMovers.length != columnCount) topMovers = new Array(columnCount).fill(items.length);
     let lastTimeString = "";
     newestTime = 0;
     oldestTime = Infinity;
@@ -733,8 +736,9 @@
       //   : columnItemCount[item.column] / 5;
       // columnItemCount[item.column]++;
 
-      // record item as top mover if it is lowest-index item that moved in its column
-      item.moved = item.index != item.lastIndex || item.column != item.lastColumn;
+      // mark item as "mover" if it changes index and/or column
+      item.mover = item.index != item.lastIndex || item.column != item.lastColumn;
+      if (item.mover && index < topMovers[item.column]) topMovers[item.column] = index;
       item.lastIndex = item.index;
       item.lastColumn = item.column;
 
@@ -757,16 +761,14 @@
     });
 
     if (narrating) return;
-    // scroll up if needed to keep top movers visible
-    if (items.findIndex((item) => item.moved) >= 0) {
+
+    // trigger scroll up if needed to keep top movers visible
+    if (_.min(topMovers) < items.length) {
+      const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
       tick()
         .then(update_dom)
         .then(() => {
-          // determine top mover/target in each column (so we don't have to look up all movers)
-          let topMovers = new Array(columnCount).fill(items.length);
-          items.forEach((item, index) => {
-            if (item.moved && index < topMovers[item.column]) topMovers[item.column] = index;
-          });
+          if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
           const itemTop = _.min(
             topMovers.map((index) => {
               if (index == items.length) return Infinity; // nothing in this column
@@ -775,7 +777,9 @@
               return (div as HTMLElement).offsetTop;
             })
           );
+          // console.log(itemTop, document.body.scrollTop, topMovers.toString());
           if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+          topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
         });
     }
   }
@@ -2872,7 +2876,7 @@
       item.aboveTheFold = false;
       // item.prominence = 0;
       item.leader = false;
-      item.moved = false;
+      item.mover = false;
       item.timeString = "";
       item.timeOutOfOrder = false;
       item.height = 0;
