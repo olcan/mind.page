@@ -1040,7 +1040,8 @@
         } else {
           try {
             // NOTE: we wrap scripts inside function to provide internal scope and allow (empty) returns
-            window["_item"](id).eval(["(function(){", script.innerHTML, "})()"].join("\n"), {
+            //       (prefix ; prevents parser confusion when previous line is not colon-terminated)
+            window["_item"](id).eval([";(function(){", script.innerHTML, "})()"].join("\n"), {
               trigger: "script_" + scriptIndex,
             });
           } catch (e) {
