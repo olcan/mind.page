@@ -1039,7 +1039,10 @@
           console.error("script src not supported yet");
         } else {
           try {
-            window["_item"](id).eval(script.innerHTML, { trigger: "script_" + scriptIndex });
+            // NOTE: we wrap scripts inside function to provide internal scope and allow (empty) returns
+            window["_item"](id).eval(["(function(){", script.innerHTML, "})()"].join("\n"), {
+              trigger: "script_" + scriptIndex,
+            });
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
             scriptErrors.push(e);
