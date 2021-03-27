@@ -385,6 +385,9 @@
       initItems(); // initialize items if not already done, usually due to macros at first render
       let prefix = this.read_deep(
         options["type"] || "js",
+        // NOTE: by default, async deps are excluded unless async:true in options
+        //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
+        //       notable exceptions are async 'run' and async 'command' evals
         Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
       );
       let evaljs = [prefix, js].join("\n").trim();
