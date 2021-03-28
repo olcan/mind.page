@@ -66,7 +66,7 @@
     } else {
       // item is specified by id
       const index = indexFromId.get(name);
-      if (index == undefined) {
+      if (index === undefined) {
         console.error(`_item '${name}' not found`);
         return null;
       }
@@ -136,7 +136,7 @@
   // (throws "deleted" error if item has been deleted)
   function item(id: string) {
     const index = indexFromId.get(id);
-    if (index == undefined) throw new Error(`item ${id} deleted`);
+    if (index === undefined) throw new Error(`item ${id} deleted`);
     return items[index];
   }
 
@@ -323,10 +323,10 @@
     }
 
     write(text: string, type: string = "_output") {
-      text = typeof text == "string" ? text : JSON.stringify(text);
+      text = typeof text == "string" ? text : "" + JSON.stringify(text);
       // confirm if write is too big
       const writeConfirmLength = 16 * 1024;
-      if (text && text.length >= writeConfirmLength) {
+      if (text.length >= writeConfirmLength) {
         if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return; // cancel write
       }
       // if writing *_log, clear any existing *_log blocks
@@ -398,7 +398,9 @@
           else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
         }
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
-        evaljs = ["'use strict';null;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join("\n");
+        evaljs = ["'use strict';undefined;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join(
+          "\n"
+        );
       }
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
@@ -447,7 +449,7 @@
         update_dom().then(() =>
           Promise.resolve(async_func())
             .then((output) => {
-              if (output) this.write(output);
+              if (output !== undefined) this.write(output);
               this.write_log_any(); // customized via _this.log_options
               item(this.id).running = false;
               resolve(output);
@@ -1402,7 +1404,7 @@
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
     const index = indexFromId.get(id);
-    if (index == undefined) return; // deleted
+    if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log)
@@ -1485,7 +1487,7 @@
 
   function onLinkClick(id: string, href: string, e: MouseEvent) {
     const index = indexFromId.get(id);
-    if (index == undefined) return; // deleted
+    if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
     if (items[index].time > newestTime) console.warn("invalid item time");
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log) {
@@ -1496,7 +1498,7 @@
 
   function onLogSummaryClick(id: string) {
     let index = indexFromId.get(id);
-    if (index == undefined) return;
+    if (index === undefined) return;
     items[index].showLogs = !items[index].showLogs;
     items[index].showLogsTime = Date.now(); // invalidates auto-hide
   }
@@ -1516,7 +1518,7 @@
       items.forEach((item) => (item.time = item.savedTime));
       e.state.unsavedTimes.forEach((entry) => {
         const index = indexFromId.get(entry.id);
-        if (index == undefined) return;
+        if (index === undefined) return;
         items[index].time = entry.time;
       });
     }
@@ -2400,11 +2402,11 @@
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined;
     const outputConfirmLength = 16 * 1024;
-    if (jsout && jsout.length >= outputConfirmLength) {
+    if (jsout !== undefined && ("" + JSON.stringify(jsout)).length >= outputConfirmLength) {
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined;
     }
     // append _output and _log and update for changes
-    if (jsout) item.text = appendBlock(item.text, "_output", jsout);
+    if (jsout !== undefined) item.text = appendBlock(item.text, "_output", jsout);
     _item(item.id).write_log(); // auto-write log
     // NOTE: index can change during JS eval due to _writes
     itemTextChanged(indexFromId.get(item.id), item.text);
@@ -2637,7 +2639,7 @@
   function resumeLastEdit() {
     if (!lastEditItem) return;
     let index = indexFromId.get(lastEditItem);
-    if (index == undefined) return;
+    if (index === undefined) return;
     if (index >= hideIndex) return;
     if (items[index].editing) return;
     editItem(index);
@@ -2645,7 +2647,7 @@
     onEditorChange(editorText); // since edit state changed
     tick().then(() => {
       let index = indexFromId.get(lastEditItem);
-      if (index == undefined) return;
+      if (index === undefined) return;
       textArea(index).focus();
       textArea(index).selectionStart = lastEditSelectionStart;
       textArea(index).selectionEnd = lastEditSelectionEnd;
@@ -2920,7 +2922,7 @@
       const tag = decodeURI(location.href.match(/#.+$/)[0]);
       // if it is a valid item id, then we convert it to name
       const index = indexFromId.get(tag.substring(1));
-      if (index != undefined) {
+      if (index !== undefined) {
         replaceStateOnEditorChange = true; // replace state
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(items[index].name);
@@ -3215,7 +3217,7 @@
                     // NOTE: remote remove is similar to onItemEditing (deletion case)
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                    if (index == undefined) return; // nothing to remove
+                    if (index === undefined) return; // nothing to remove
                     let item = items[index];
                     itemTextChanged(index, ""); // clears label, deps, etc
                     items.splice(index, 1);
@@ -3233,7 +3235,7 @@
                     // NOTE: remote modify is similar to _write without saving
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
-                    if (index == undefined) return; // nothing to modify
+                    if (index === undefined) return; // nothing to modify
                     let item = items[index];
                     item.text = item.savedText = savedItem.text;
                     item.time = item.savedTime = savedItem.time;
