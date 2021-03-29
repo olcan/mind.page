@@ -130,6 +130,7 @@
     window["_modal_update"] = _modal_update;
     window["_delay"] = _delay;
     window["_update_dom"] = update_dom;
+    window["_decrypt_item"] = decryptItem;
   }
 
   // private function for looking up item given its id
