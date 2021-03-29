@@ -2197,6 +2197,7 @@
         ? items[0].labelText + " "
         : "";
 
+    hideIndex++; // show one more item
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
 
@@ -3212,6 +3213,7 @@
                     items.forEach((item, index) => indexFromId.set(item.id, index));
                     itemTextChanged(0, item.text);
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
+                    hideIndex++; // show one more item
                     onEditorChange(editorText); // integrate new item at index 0
                   } else if (change.type == "removed") {
                     // NOTE: remote remove is similar to onItemEditing (deletion case)
