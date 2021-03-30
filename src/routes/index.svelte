@@ -2615,10 +2615,10 @@
   }
 
   function onItemTouch(index: number) {
-    if (items[index].log) {
-      alert("#log item can not be moved");
-      return;
-    } // ignore
+    // if (items[index].log) {
+    //   alert("#log item can not be moved");
+    //   return;
+    // } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
     if (altKey && metaKey) {
       // move item time back 1 day
