@@ -381,6 +381,15 @@
       itemShowLogs(this.id, autohide_after);
     }
 
+    // "touches" item by updating its time
+    // if save=false, change is not saved, a.k.a. "soft touch"
+    touch(save = false) {
+      item(this.id).time = Date.now();
+      lastEditorChangeTime = 0; // force immediate update
+      onEditorChange(editorText); // item time has changed
+      if (save) saveItem(this.id);
+    }
+
     // evaluates given code in context of this item
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
