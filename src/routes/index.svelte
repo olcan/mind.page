@@ -978,6 +978,7 @@
   let forceNewStateOnEditorChange = false;
   let finalizeStateOnEditorChange = false;
   let replaceStateOnEditorChange = false;
+  let ignoreStateOnEditorChange = false;
   let hideIndex = 0;
   let hideIndexFromRanking = 0;
   let hideIndexForSession = 0;
@@ -1364,26 +1365,29 @@
     }
     // console.debug(toggles);
 
-    // update history, replace unless current state is final (from tag click)
-    if (editorText != history.state.editorText) {
-      // need to update history
-      const state = {
-        editorText: editorText,
-        unsavedTimes: _.compact(
-          items.map((item) => (item.time != item.savedTime ? _.pick(item, ["id", "time"]) : null))
-        ),
-        hideIndex: hideIndex,
-        scrollPosition: document.body.scrollTop,
-        final: !editorText || finalizeStateOnEditorChange,
-      };
-      // console.debug(history.state.final ? "push" : "replace", state);
-      if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange))
-        history.pushState(state, editorText);
-      else history.replaceState(state, editorText);
+    if (!ignoreStateOnEditorChange) {
+      // update history, replace unless current state is final (from tag click)
+      const orderHash = hashCode(items.map((item) => item.id).join());
+      if (editorText != history.state.editorText || orderHash != history.state.orderHash) {
+        // need to update history
+        const state = {
+          editorText,
+          unsavedTimes: items.filter((item) => item.time != item.savedTime).map((item) => _.pick(item, ["id", "time"])),
+          orderHash,
+          hideIndex,
+          scrollPosition: document.body.scrollTop,
+          final: !editorText || finalizeStateOnEditorChange,
+        };
+        // console.debug(history.state.final ? "push" : "replace", state);
+        if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange))
+          history.pushState(state, editorText);
+        else history.replaceState(state, editorText);
+      }
     }
     forceNewStateOnEditorChange = false; // processed above
     finalizeStateOnEditorChange = false; // processed above
     replaceStateOnEditorChange = false; // processed above
+    ignoreStateOnEditorChange = false; // processed above
 
     // invoke _on_search on all _listen items
     setTimeout(() => {
@@ -1519,11 +1523,12 @@
       items.forEach((item) => (item.time = item.savedTime));
       e.state.unsavedTimes.forEach((entry) => {
         const index = indexFromId.get(entry.id);
-        if (index === undefined) return;
+        if (index === undefined) return; // item was deleted
         items[index].time = entry.time;
       });
     }
     lastEditorChangeTime = 0; // disable debounce even if editor focused
+    ignoreStateOnEditorChange = true; // do not update history when going back
     onEditorChange(editorText);
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof e.state.hideIndex == "number") hideIndex = Math.max(hideIndex, e.state.hideIndex);
