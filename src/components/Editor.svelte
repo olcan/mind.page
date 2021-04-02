@@ -69,7 +69,7 @@
           );
         else if (
           (begin.match(/&lt;[/\w]/) && end.match(/(?:\w|&#39;|&quot;)&gt;/)) ||
-          (begin.match(/&lt;!--/) && end.match(/--&gt;/))
+          (begin.match(/&lt;!--/) && end.match(/--&gt;/) && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
         )
           return pfx + highlight(_.unescape(begin + content + end), "html");
         else return m;
