@@ -258,6 +258,7 @@
   let lastKeyDown;
   let lastKeyDownPosition;
   function onKeyDown(e: any) {
+    e.stopPropagation(); // ALWAYS stop propagation in editor
     let key = e.code || e.key; // for android compatibility
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
@@ -266,7 +267,6 @@
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      e.stopPropagation();
       return;
     }
 
@@ -281,7 +281,6 @@
     const tabShouldIndent = true; // always indent
     if ((key == "Tab" && tabShouldIndent) || (key == "Slash" && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
-      e.stopPropagation(); // do not propagate to window
       const oldStart = textarea.selectionStart;
       let oldEnd = textarea.selectionEnd;
       let oldLength = textarea.value.length;
@@ -340,7 +339,6 @@
         (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
       ) {
         e.preventDefault();
-        e.stopPropagation(); // do not propagate to window
         onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
         return;
       }
@@ -351,7 +349,6 @@
         (key == "KeyS" && (e.metaKey || e.ctrlKey) && !e.shiftKey)
       ) {
         e.preventDefault();
-        e.stopPropagation(); // do not propagate to window
         onDone((text = textarea.value), e, false, key == "Enter" && (e.metaKey || e.ctrlKey) /*run*/);
         return;
       }
@@ -359,7 +356,6 @@
       // run item with Alt/Option+Enter
       if (key == "Enter" && e.altKey && !(e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        e.stopPropagation(); // do not propagate to window
         let selectionStart = textarea.selectionStart;
         let selectionEnd = textarea.selectionEnd;
         onRun();
@@ -386,13 +382,11 @@
     }
 
     if (key == "ArrowUp" && e.metaKey && e.altKey) {
-      e.stopPropagation();
       e.preventDefault();
       onPrev();
       return;
     }
     if (key == "ArrowDown" && e.metaKey && e.altKey) {
-      e.stopPropagation();
       e.preventDefault();
       onNext();
       return;
@@ -421,7 +415,6 @@
     if (key == "Escape") {
       onDone(text /* maintain text */, e, true /* cancelled */);
       e.preventDefault();
-      e.stopPropagation();
       return;
     }
 
@@ -470,6 +463,7 @@
   }
 
   function onKeyUp(e: any) {
+    e.stopPropagation(); // ALWAYS stop propagation in editor
     const key = e.code || e.key; // for android compatibility
     // console.debug("Editor.onKeyUp", e, key);
 
