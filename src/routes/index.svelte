@@ -309,6 +309,13 @@
         console.error(`console_log: item '${name}' not found`);
         return [];
       }
+      const filter = options["filter"];
+      if (filter !== undefined && typeof filter != "function") {
+        console.error(
+          `console_log: invalid filter '${filter}', should be function(entry) and return true|false to accept|reject entries with fields {time,level,stack,type,text}`
+        );
+        return [];
+      }
       let log = [];
       const filter_id = name == "self" ? this.id : name == "any" ? "" : item(name).id;
       for (let i = consoleLog.length - 1; i >= 0; --i) {
@@ -316,6 +323,7 @@
         if (entry.time < since) break;
         if (entry.level < level) continue;
         if (filter_id && !entry.stack.includes(filter_id)) continue;
+        if (filter && !filter(entry)) continue;
         let prefix = entry.type == "log" ? "" : entry.type.toUpperCase() + ": ";
         if (prefix == "WARN: ") prefix = "WARNING: ";
         log.push(prefix + entry.text);
