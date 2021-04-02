@@ -491,13 +491,31 @@
       }
     }
 
-    // "attaches" given function to item such that it will go through _this.invoke()
-    // useful for passing callback functions, e.g. into Promise.then(...)
-    attach(func) {
-      const _item = this; // capture for deferred function
-      return function (...args) {
-        _item.invoke(() => func(...args));
-      };
+    // "attaches" given function or promise to item such that it will go through _this.invoke()
+    // promises are wrapped to auto-attach any functions passed to then/catch/finally
+    attach(thing: any) {
+      if (thing instanceof Promise) {
+        const promise = thing;
+        const _item = this; // for use in functions below
+        promise.then = function (onFulfilled, onRejected) {
+          return _item.attach(Promise.prototype.then.call(this, _item.attach(onFulfilled), _item.attach(onRejected)));
+        };
+        // Promise.catch internally calls Promise.then(undefined, onRejected) so no need to double-wrap
+        // promise.catch = function (onRejected) {
+        //   return _item.attach(Promise.prototype.catch.call(this, _item.attach(onRejected)));
+        // };
+        promise.finally = function (onFinally) {
+          return _item.attach(Promise.prototype.finally.call(this, _item.attach(onFinally)));
+        };
+        return promise;
+      } else if (typeof thing == "function") {
+        const func = thing;
+        return function (...args) {
+          this.invoke(() => func(...args));
+        }.bind(this);
+      } else {
+        return thing; // return as is
+      }
     }
 
     // dispatch = setTimeout on attached function
@@ -505,9 +523,15 @@
       setTimeout(this.attach(func), ms, ...args);
     }
 
-    // promise = new Promise on attached executor function (resolve, reject) => {...}
+    // promise = new Promise attached (see above) to item
+    // the given executor function (resolve[,reject])=>{} is also attached
     promise(func) {
-      return new Promise(this.attach(func));
+      return this.attach(new Promise(this.attach(func)));
+    }
+
+    // resolve = same as Promise.resolve but with the returns promise attached
+    resolve(thing) {
+      return this.attach(Promise.resolve(thing));
     }
 
     // delay = promise resolved after specified time
