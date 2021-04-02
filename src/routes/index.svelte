@@ -488,7 +488,14 @@
     invoke(func) {
       evalStack.push(this.id);
       try {
-        const out = func();
+        let out = func();
+        // if function returns promise, attach it and set up default rejection handler
+        if (out instanceof Promise) {
+          out = this.attach(out).catch((e) => {
+            console.error(e);
+            invalidateElemCache(this.id);
+          });
+        }
         if (evalStack.pop() != this.id) console.error("invalid stack");
         return out;
       } catch (e) {
@@ -506,6 +513,7 @@
         const promise = thing;
         const _item = this; // for use in functions below
         promise.then = function (onFulfilled, onRejected) {
+          // if (!onRejected) onRejected = console.error; // log errors by default
           return _item.attach(Promise.prototype.then.call(this, _item.attach(onFulfilled), _item.attach(onRejected)));
         };
         // Promise.catch internally calls Promise.then(undefined, onRejected) so no need to double-wrap
