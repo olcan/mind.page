@@ -949,6 +949,22 @@
       renderMath(math);
     });
 
+    // add click handler to links that do not already trigger _handleLinkClick
+    // (e.g. if they implement custom onclick and do not go through marked.Renderer)
+    itemdiv.querySelectorAll("a").forEach((a) => {
+      if (a.hasAttribute("onclick") && a.getAttribute("onclick").includes("_handleLinkClick")) return;
+      const prevOnClick: any = a.onclick;
+      a.onclick = function (e) {
+        const ret = prevOnClick(e);
+        try {
+          window["_handleLinkClick"](id, a.href, e);
+        } catch (e) {
+          console.error(e);
+        }
+        return ret; // preserve return value to avoid confusion
+      };
+    });
+
     // set up img tags to enable caching and invoke onResized onload
     itemdiv.querySelectorAll("img").forEach((img) => {
       if (img.hasAttribute("_loaded")) return; // already loaded (and presumably restored from cache)
