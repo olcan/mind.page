@@ -145,36 +145,36 @@
   }
 
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {};
-  if (!window["handleTagClick"])
-    window["handleTagClick"] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
+  if (!window["_handleTagClick"])
+    window["_handleTagClick"] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
       e.stopPropagation();
       e.preventDefault(); // disables handler for onmousedown, prevents change of focus, text selection, etc
       onTagClick(id, tag, reltag, e);
     };
 
   export let onLinkClick = (id: string, href: string, e: MouseEvent) => {};
-  if (!window["handleLinkClick"])
-    window["handleLinkClick"] = (id: string, href: string, e: MouseEvent) => {
+  if (!window["_handleLinkClick"])
+    window["_handleLinkClick"] = (id: string, href: string, e: MouseEvent) => {
       e.stopPropagation();
       onLinkClick(id, href, e);
     };
 
   export let onLogSummaryClick = (id: string) => {};
-  if (!window["handleLogSummaryClick"])
-    window["handleLogSummaryClick"] = (id: string, e: MouseEvent) => {
+  if (!window["_handleLogSummaryClick"])
+    window["_handleLogSummaryClick"] = (id: string, e: MouseEvent) => {
       e.stopPropagation();
       onLogSummaryClick(id);
     };
 
-  if (!window["handleDepsSummaryClick"])
-    window["handleDepsSummaryClick"] = (id: string, e: MouseEvent) => {
+  if (!window["_handleDepsSummaryClick"])
+    window["_handleDepsSummaryClick"] = (id: string, e: MouseEvent) => {
       const div = document.querySelector(`#super-container-${id} .container`);
       if (div) div.classList.toggle("showDeps");
       e.stopPropagation();
     };
 
-  if (!window["handleDependentsSummaryClick"])
-    window["handleDependentsSummaryClick"] = (id: string, e: MouseEvent) => {
+  if (!window["_handleDependentsSummaryClick"])
+    window["_handleDependentsSummaryClick"] = (id: string, e: MouseEvent) => {
       const div = document.querySelector(`#super-container-${id} .container`);
       if (div) div.classList.toggle("showDependents");
       e.stopPropagation();
@@ -262,7 +262,7 @@
           return `<span class="${spanclass}"> ${
             dep.startsWith("#")
               ? dep
-              : `<mark onclick="MindBox.toggle('${dep}');handleLinkClick('${id}','javascript:MindBox.toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
+              : `<mark onclick="MindBox.toggle('${dep}');_handleLinkClick('${id}','javascript:MindBox.toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
           } </span>`;
         })
         .join(" ");
@@ -274,13 +274,13 @@
       text += `\n<div class="deps-and-dependents">`;
       if (depsString) {
         depsTitle = `${depsString.split(" ").length} dependencies`;
-        text += `<span class="deps"><span class="deps-title" onclick="handleDepsSummaryClick('${id}',event)">${depsTitle}</span> ${depsStringToHtml(
+        text += `<span class="deps"><span class="deps-title" onclick="_handleDepsSummaryClick('${id}',event)">${depsTitle}</span> ${depsStringToHtml(
           depsString
         )}</span> `;
       }
       if (dependentsString) {
         dependentsTitle = `${dependentsString.split(" ").length} dependents`;
-        text += `<span class="dependents"><span class="dependents-title" onclick="handleDependentsSummaryClick('${id}',event)">${dependentsTitle}</span> ${depsStringToHtml(
+        text += `<span class="dependents"><span class="dependents-title" onclick="_handleDependentsSummaryClick('${id}',event)">${dependentsTitle}</span> ${depsStringToHtml(
           dependentsString
         )}</span>`;
       }
@@ -433,7 +433,7 @@
                 reltag = "#…" + tag.substring(firstTerm.length);
               return (
                 `${pfx}<mark${classNames} title="${tag}" onmousedown=` +
-                `"handleTagClick('${id}','${tag}','${reltag}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
+                `"_handleTagClick('${id}','${tag}','${reltag}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
                 `${renderTag(reltag)}</mark>`
               );
             });
@@ -476,12 +476,12 @@
     // convert markdown to html
     let renderer = new marked.Renderer();
     renderer.link = (href, title, text) => {
-      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
-      const text_escaped = text.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
+      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to _handleLinkClick
+      const text_escaped = text.replace(/'/g, "\\'"); // escape single-quotes for argument to _handleLinkClick
       if (href.startsWith("##")) {
         // fragment link
         const fragment = href.substring(1);
-        return `<a href="${fragment}" title="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+        return `<a href="${fragment}" title="${href}" onclick="_handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
       } else if (href.startsWith("#")) {
         // tag link
         let tag = href;
@@ -491,13 +491,13 @@
         let classNames = "link";
         if (missingTags.has(lctag)) classNames += " missing";
         classNames = classNames.trim();
-        return `<mark class="${classNames}" title="${tag}" onmousedown="handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`;
+        return `<mark class="${classNames}" title="${tag}" onmousedown="_handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`;
       }
       // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
       // NOTE: rel="opener" is required by Chrome for target="_blank" to work. rel="external" is said to replace target=_blank but does NOT open a new window (in Safari or chrome), so we are forced to used _blank+opener.
       let attribs = "";
       if (!href.startsWith("javascript:")) attribs = ` target="_blank" rel="opener"`;
-      return `<a${attribs} title="${href}" href="${href}" onclick="handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
+      return `<a${attribs} title="${href}" href="${href}" onclick="_handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`;
     };
     // marked.use({ renderer });
     marked.setOptions({
@@ -572,8 +572,8 @@
     // add onclick handler to html links
     text = text.replace(/<a [^>]*?href\s*=\s*"(.*?)".*?>/gi, function (m, href) {
       if (m.match(/onclick/i)) return m; // link has custom onclick handler
-      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to handleLinkClick
-      return m.substring(0, m.length - 1) + ` onclick="handleLinkClick('${id}','${href_escaped}',event)">`;
+      const href_escaped = href.replace(/'/g, "\\'"); // escape single-quotes for argument to _handleLinkClick
+      return m.substring(0, m.length - 1) + ` onclick="_handleLinkClick('${id}','${href_escaped}',event)">`;
     });
 
     // append log summary div
@@ -592,7 +592,7 @@
           : "log";
         summary += `<span class="log-dot console-${type}">⸱</span>`;
       });
-      text += `\n<div class="log-summary" onclick="handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`;
+      text += `\n<div class="log-summary" onclick="_handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`;
     }
 
     // append dependencies ("deps") summary
@@ -603,7 +603,7 @@
           .split(" ")
           .map((dep) => `<span class="deps-dot${dep.endsWith("(async)") ? " async" : ""}">⸱</span>`)
           .join("");
-      text += `\n<div class="deps-summary" onclick="handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`;
+      text += `\n<div class="deps-summary" onclick="_handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`;
     }
     // append dependents ("deps") summary
     if (dependentsString) {
@@ -613,7 +613,7 @@
           .split(" ")
           .map((dep) => `<span class="dependents-dot${dep.endsWith("(visible)") ? " visible" : ""}">⸱</span>`)
           .join("");
-      text += `\n<div class="dependents-summary" onclick="handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
+      text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
 
     // do not cache with macro errors
