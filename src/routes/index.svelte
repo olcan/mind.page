@@ -304,30 +304,28 @@
     // levels are listed below, default level ("info") excludes debug messages
     // since can be "run" (default), "eval", or any epoch time (same as Date.now)
     // item can be "self" (default), specific item name (label or id), or "any"
-    console_log(options = {}) {
+    get_log(options = {}) {
       let since = options["since"] || "run";
       if (since == "run") since = item(this.id).lastRunTime;
       else if (since == "eval") since = item(this.id).lastEvalTime;
       else if (typeof since != "number") {
-        console.error(
-          `console_log: invalid since time '${since}', should be "run", "eval", or number (ms since epoch)`
-        );
+        console.error(`get_log: invalid since time '${since}', should be "run", "eval", or number (ms since epoch)`);
         return [];
       }
       const level = log_levels.indexOf(options["level"] || "info");
       if (level < 0) {
-        console.error(`console_log: invalid level '${options["level"]}', should be one of: ${log_levels}`);
+        console.error(`get_log: invalid level '${options["level"]}', should be one of: ${log_levels}`);
         return [];
       }
       const name = options["item"] || "self";
       if (name != "self" && name != "any" && !item(name)) {
-        console.error(`console_log: item '${name}' not found`);
+        console.error(`get_log: item '${name}' not found`);
         return [];
       }
       const filter = options["filter"];
       if (filter !== undefined && typeof filter != "function") {
         console.error(
-          `console_log: invalid filter '${filter}', should be function(entry) and return true|false to accept|reject entries with fields {time,level,stack,type,text}`
+          `get_log: invalid filter '${filter}', should be function(entry) and return true|false to accept|reject entries with fields {time,level,stack,type,text}`
         );
         return [];
       }
@@ -392,7 +390,7 @@
         item(this.id).log_options, // may be undefined
         options
       );
-      this.write(this.console_log(options).join("\n"), options["type"]);
+      this.write(this.get_log(options).join("\n"), options["type"]);
       if (options["type"] == "_log" || options["show_logs"]) this.show_logs();
     }
 
@@ -563,6 +561,23 @@
     // resolve = same as Promise.resolve but with the returns promise attached
     resolve(thing) {
       return this.attach(Promise.resolve(thing));
+    }
+
+    // console logging functions pre-attached to this item
+    debug(...args) {
+      this.invoke(() => console.debug(...args));
+    }
+    info(...args) {
+      this.invoke(() => console.info(...args));
+    }
+    log(...args) {
+      this.invoke(() => console.log(...args));
+    }
+    warn(...args) {
+      this.invoke(() => console.warn(...args));
+    }
+    error(...args) {
+      this.invoke(() => console.warn(...args));
     }
 
     // delay = promise resolved after specified time
@@ -2172,7 +2187,7 @@
             return;
           } else if (_item("#commands" + cmd)) {
             function handleError(e) {
-              const log = _item("#commands" + cmd).console_log({ since: "eval", level: "error" });
+              const log = _item("#commands" + cmd).get_log({ since: "eval", level: "error" });
               let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
               alert(msg);
             }
@@ -2966,8 +2981,8 @@
       item.dependents = [];
       item.dependentsString = "";
       // other state
-      item.lastEvalTime = 0; // used for _item.console_log
-      item.lastRunTime = 0; // used for _item.console_log
+      item.lastEvalTime = 0; // used for _item.get_log
+      item.lastRunTime = 0; // used for _item.get_log
     });
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
