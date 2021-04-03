@@ -75,6 +75,20 @@
     return Object.freeze(new _Item(item.id)); // defined below
   }
 
+  // same as _item, but for existence checks, and allows multiple matches
+  function _exists(name: string, allow_multiple = true): any {
+    if (!name) return false;
+    if (name.startsWith("#")) {
+      // label
+      const ids = idsFromLabel.get(name.toLowerCase());
+      return allow_multiple ? ids?.length > 0 : ids?.length == 1;
+    } else {
+      // id
+      const index = indexFromId.get(name.startsWith("id:") ? name.substring(3) : name);
+      return index !== undefined;
+    }
+  }
+
   // _items returns any number of matches, most recent first
   function _items(label: string = "") {
     const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map((item) => item.id)) || [];
@@ -125,6 +139,7 @@
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
     window["_item"] = _item;
     window["_items"] = _items;
+    window["_exists"] = _exists;
     window["_modal"] = _modal;
     window["_modal_close"] = _modal_close;
     window["_modal_update"] = _modal_update;
