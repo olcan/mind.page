@@ -1473,7 +1473,7 @@
       items.forEach((item) => {
         if (!item.listen) return;
         try {
-          _item(item.id).eval(`_on_search(\`${editorText}\`)`, { trigger: "listen" });
+          _item(item.id).eval(`_on_search(\`${editorText.replace(/`/g, "\\`")}\`)`, { trigger: "listen" });
         } catch (e) {} // already logged, just continue
       });
     });
@@ -2322,7 +2322,7 @@
       items.forEach((item) => {
         if (!item.listen) return;
         try {
-          _item(item.id).eval(`_on_create(\`${text}\`)`, { trigger: "listen" });
+          _item(item.id).eval(`_on_create(\`${text.replace(/`/g, "\\`")}\`)`, { trigger: "listen" });
         } catch (e) {} // already logged, just continue
       });
     });
@@ -3481,14 +3481,15 @@
   let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
-    // console.debug(e, initialized, modal.isVisible());
-    if (!initialized) return;
-    if (modal.isVisible()) return;
-
     metaKey = e.metaKey;
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;
     shiftKey = e.shiftKey;
+    // console.debug(metaKey, ctrlKey, altKey, shiftKey);
+
+    // console.debug(e, initialized, modal.isVisible());
+    if (!initialized) return;
+    if (modal.isVisible()) return;
 
     // resume-edit items on Shift-(save shortcut)
     if (
@@ -3534,6 +3535,7 @@
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;
     shiftKey = e.shiftKey;
+    // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)

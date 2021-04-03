@@ -257,12 +257,16 @@
   let enterIndentation = "";
   let lastKeyDown;
   let lastKeyDownPosition;
+
   function onKeyDown(e: any) {
-    e.stopPropagation(); // ALWAYS stop propagation in editor
     let key = e.code || e.key; // for android compatibility
+    // console.debug("Editor.onKeyDown:", e, key);
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
-    // console.debug("Editor.onKeyDown:", e, key);
+
+    // ignore modifier keys, and otherwise stop propagation outside of editor
+    if (key.match(/^(Meta|Alt|Control|Shift)/)) return;
+    else e.stopPropagation();
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
@@ -463,9 +467,12 @@
   }
 
   function onKeyUp(e: any) {
-    e.stopPropagation(); // ALWAYS stop propagation in editor
     const key = e.code || e.key; // for android compatibility
     // console.debug("Editor.onKeyUp", e, key);
+
+    // ignore modifier keys, and otherwise stop propagation outside of editor
+    if (key.match(/^(Meta|Alt|Control|Shift)/)) return;
+    else e.stopPropagation();
 
     // indent lines created by Enter (based on state recorded in onKeyDown above)
     if (
