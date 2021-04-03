@@ -64,8 +64,8 @@
       }
       item = items[indexFromId.get(ids[0])];
     } else {
-      // item is specified by id
-      const index = indexFromId.get(name);
+      // item is specified by id, with optional id: prefix to be dropped
+      const index = indexFromId.get(name.startsWith("id:") ? name.substring(3) : name);
       if (index === undefined) {
         console.error(`_item '${name}' not found`);
         return null;
