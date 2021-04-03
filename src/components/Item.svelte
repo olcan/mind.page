@@ -1452,6 +1452,7 @@
     display: flex;
     visibility: hidden;
     position: absolute;
+    z-index: 2;
     padding: 1px;
     top: -1px;
     left: -1px;
