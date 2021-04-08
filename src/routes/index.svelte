@@ -2484,7 +2484,10 @@
       jsin = `if (typeof _run === 'undefined') { console.error('_run undefined; enabling #_tag may be missing for *_input block (e.g. #_typescript for ts_input)') } else { ${jsin} }`;
     }
     if (!jsin) return item.text; // missing or empty, ignore
-    let jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
+    let jsout;
+    try {
+      jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
+    } catch (e) {} // already logged, just continue
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined;
     const outputConfirmLength = 16 * 1024;
