@@ -1311,7 +1311,7 @@
     position: absolute;
     top: -20px;
     right: -1px;
-    z-index: 1;
+    z-index: 2;
     /* see comment above about issues with border-radius */
     /* border-radius: 4px 6px 4px 4px; */
     /* overflow: hidden; */
@@ -1452,7 +1452,7 @@
     display: flex;
     visibility: hidden;
     position: absolute;
-    z-index: 2;
+    z-index: 1;
     padding: 1px;
     top: -1px;
     left: -1px;
