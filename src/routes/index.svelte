@@ -2475,15 +2475,16 @@
 
   function appendJSOutput(index: number): string {
     let item = items[index];
+    if (!item.runnable) return item.text; // item not runnable, ignore
     // check js_input
     const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
     let jsin = extractBlock(item.text, "js_input");
-    // if js_input is missing but item is runnable, then evaluate "(return await) _run()"
-    if (!jsin && item.runnable) {
+    // if js_input block is missing entirely (not just empty), then evaluate "(return await) _run()"
+    if (!jsin && !item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/)) {
       jsin = async ? "return await _run()" : "_run()";
       jsin = `if (typeof _run === 'undefined') { console.error('_run undefined; enabling #_tag may be missing for *_input block (e.g. #_typescript for ts_input)') } else { ${jsin} }`;
     }
-    if (!jsin) return item.text; // missing or empty, ignore
+    if (!jsin) return item.text; // input missing or empty, ignore
     let jsout;
     try {
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: "run" /*|create*/ });
