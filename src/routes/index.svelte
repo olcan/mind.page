@@ -2654,10 +2654,21 @@
 
       // NOTE: we do not focus back up on the editor unless we are already at the top
       //       (especially bad on iphone due to lack of keyboard focus benefit)
-      if (editingItems.length > 0 || document.body.scrollTop == 0) {
-        focusOnNearestEditingItem(index);
-      }
+      if (editingItems.length > 0 || document.body.scrollTop == 0) focusOnNearestEditingItem(index);
     }
+
+    // scroll up to top of item if needed, allowing dom update before calculating new position
+    // (particularly important for items that are much taller when editing)
+    tick().then(() => {
+      if (!narrating) {
+        update_dom().then(() => {
+          const div = document.querySelector("#super-container-" + item.id);
+          if (!div) return; // item deleted or hidden
+          const itemTop = (div as HTMLElement).offsetTop;
+          if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+        });
+      }
+    });
   }
 
   // WARNING: onItemFocused may NOT be invoked when editor is destroyed
