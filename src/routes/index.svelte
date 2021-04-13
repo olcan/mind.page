@@ -433,6 +433,23 @@
           "\n"
         );
       }
+
+      // evaluate inline <<macros>>|@{macros}@ inside code
+      let macroIndex = 0;
+      const replaceMacro = (m, pfx, js) => {
+        try {
+          let out = this.eval(js, { trigger: "eval_macro_" + macroIndex++ });
+          // If output is an item, read(type) by default
+          if (out instanceof _Item) out = out.read(options["type"] || "js");
+          return pfx + out;
+        } catch (e) {
+          console.error(`eval_macro error in item ${this.label || "id:" + this.id}: ${e}`);
+          throw e;
+        }
+      };
+      evaljs = evaljs.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
+      evaljs = evaljs.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
+
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
       evaljs = evaljs.replace(/(^|[^\\])\$id/g, "$1" + this.id);
       evaljs = evaljs.replace(/(^|[^\\])\$hash/g, "$1" + this.hash);
