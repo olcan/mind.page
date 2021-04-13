@@ -124,10 +124,10 @@
   }
 
   function highlightOpen(text, pos, type) {
-    return text.substring(0, pos) + `${text[pos]}{%%_highlight_open_${type}_%%}` + text.substring(pos + 1);
+    return text.substring(0, pos) + `${text[pos]}{___highlight_open_${type}___}` + text.substring(pos + 1);
   }
   function highlightClose(text, pos, type) {
-    return text.substring(0, pos) + `{%%_highlight_close_${type}_%%}${text[pos]}` + text.substring(pos + 1);
+    return text.substring(0, pos) + `{___highlight_close_${type}___}${text[pos]}` + text.substring(pos + 1);
   }
 
   function updateTextDivs() {
@@ -209,8 +209,8 @@
     html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>');
     // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
-    html = html.replace(/{%%_highlight_close_(\w+?)_%%}(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
-    html = html.replace(/([({\[])([^({\[]*?){%%_highlight_open_(\w+?)_%%}/g, '<span class="highlight $3">$1</span>$2');
+    html = html.replace(/{___highlight_close_(\w+?)___}(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
+    html = html.replace(/([({\[])(.*?){___highlight_open_(\w+?)___}/g, '<span class="highlight $3">$1</span>$2');
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
   }
@@ -815,6 +815,10 @@
     background: #f99;
     border-radius: 4px;
   }
+  /* styling for hjls-custom-comment use for highlighting matching parens */
+  /* :global(.hljs-comment-custom) {
+    display: none;
+  } */
 
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
