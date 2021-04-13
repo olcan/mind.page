@@ -446,7 +446,7 @@
           });
           // If output is an item, read(*_macro) by default, where * is the prefix type
           // (using _macro suffix allow item to be a dependency without importing same code as prefix)
-          if (out instanceof _Item) out = out.read((options["type"] || "js") + "_macro");
+          if (out instanceof _Item) out = out.read_deep((options["type"] || "js") + "_macro");
           return pfx + out;
         } catch (e) {
           console.error(`eval_macro error in item ${this.label || "id:" + this.id}: ${e}`);

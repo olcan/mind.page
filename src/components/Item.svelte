@@ -1763,7 +1763,7 @@
     right: 0;
     /* 3px left padding aligns best with code block left border on iOS Safari */
     padding: 0 3px;
-    bottom: -7px; /* 3px remaining */
+    bottom: -5px; /* 5px remaining */
     margin-left: auto;
     margin-right: auto;
     width: fit-content;
@@ -1818,6 +1818,8 @@
     display: none;
     font-size: 10px;
     color: #999;
+    position: relative;
+    bottom: 2px; /* triangle can use 2px extra space below */
   }
 
   :global(.item .deps-dot) {
