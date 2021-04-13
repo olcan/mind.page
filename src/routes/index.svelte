@@ -414,13 +414,15 @@
     // evaluates given code in context of this item
     eval(js: string = "", options: object = {}) {
       initItems(); // initialize items if not already done, usually due to macros at first render
-      let prefix = this.read_deep(
-        options["type"] || "js",
-        // NOTE: by default, async deps are excluded unless async:true in options
-        //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
-        //       notable exceptions are async 'run' and async 'command' evals
-        Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
-      );
+      let prefix = options["exclude_prefix"]
+        ? ""
+        : this.read_deep(
+            options["type"] || "js",
+            // NOTE: by default, async deps are excluded unless async:true in options
+            //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
+            //       notable exceptions are async 'run' and async 'command' evals
+            Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
+          );
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
         if (options["async"]) {
@@ -438,7 +440,10 @@
       let macroIndex = 0;
       const replaceMacro = (m, pfx, js) => {
         try {
-          let out = this.eval(js, { trigger: "eval_macro_" + macroIndex++ });
+          let out = this.eval(js, {
+            trigger: "eval_macro_" + macroIndex++,
+            exclude_prefix: true /* avoid infinite recursion */,
+          });
           // If output is an item, read(type) by default
           if (out instanceof _Item) out = out.read(options["type"] || "js");
           return pfx + out;
