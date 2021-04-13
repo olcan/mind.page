@@ -1201,6 +1201,9 @@
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(item.tagsVisibleExpanded, terms).length;
 
+      // match query terms against item label
+      item.labelMatch = terms.includes(item.label);
+
       // prefix-match first query term against item header text
       // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
       item.prefixMatch =
@@ -1239,14 +1242,10 @@
             (t) =>
               item.tagsExpanded.includes(t) ||
               item.depsString.toLowerCase().includes(t) ||
-              item.dependentsString.toLowerCase().includes(t) ||
-              item.label.includes(t) // to prevent deps/dependent matches dominating labeled item
+              item.dependentsString.toLowerCase().includes(t)
           ),
           terms.filter(
-            (t) =>
-              item.depsString.toLowerCase().includes(t) ||
-              item.dependentsString.toLowerCase().includes(t) ||
-              item.label.includes(t) // to prevent deps/dependent matches dominating labeled item
+            (t) => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
           )
         )
       );
@@ -1356,6 +1355,8 @@
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // # of matching (visible) tags from query
         b.tagMatches - a.tagMatches ||
+        // label match (OR tag matches to prevent non-unique labels dominating tags)
+        Math.max(b.labelMatch, b.tagMatches.length) - Math.max(a.labelMatch, a.tagMatches.length) ||
         // // // position of longest matching label prefix in listing item
         // // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
         // //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
