@@ -338,6 +338,9 @@
       .sort((a, b) => b.length - a.length);
     let mathTermRegex = new RegExp(`\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`, "i");
 
+    const parentLabel = label.replace(/\/[^\/]*$/, "");
+    const parentLabelText = labelText.replace(/\/[^\/]*$/, "");
+
     let insideBlock = false;
     let lastLine = "";
     let wrapMath = (m) =>
@@ -394,8 +397,10 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag) => {
-              // make relative tag absolute
-              if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
+              // make relative tags absolute
+              if (label && tag.startsWith("#//")) tag = parentLabelText + tag.substring(2);
+              else if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
+
               const lctag = tag.toLowerCase().replace(/^#_/, "#");
               let classNames = "";
               if (missingTags.has(lctag)) classNames += " missing";
@@ -407,13 +412,23 @@
               classNames = classNames.trim();
               // if (depline) classNames = ""; // disable styling for deps/dependents
               if (classNames) classNames = ` class="${classNames}"`;
-              let reltag =
+              // shorten tag if possible
+              let reltag = tag;
+              if (
                 label &&
                 tag.length > label.length &&
                 tag[label.length] == "/" &&
                 tag.substring(0, label.length) == labelText
-                  ? "#" + tag.substring(label.length)
-                  : tag;
+              )
+                reltag = "#" + tag.substring(label.length);
+              else if (
+                parentLabel &&
+                tag.length > parentLabel.length &&
+                tag[parentLabel.length] == "/" &&
+                tag.substring(0, parentLabel.length) == parentLabelText
+              )
+                reltag = "#" + tag.substring(parentLabel.length);
+
               // shorten selected labels
               if (
                 lctag == label &&
@@ -486,7 +501,8 @@
         // tag link
         let tag = href;
         // make relative tag absolute
-        if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
+        if (label && tag.startsWith("#//")) tag = parentLabelText + tag.substring(2);
+        else if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
         const lctag = tag.toLowerCase();
         let classNames = "link";
         if (missingTags.has(lctag)) classNames += " missing";

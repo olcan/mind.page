@@ -1758,7 +1758,12 @@
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label) {
       // convert relative tags to absolute
-      const resolveTag = (tag) => (tag.startsWith("#/") ? item.label + tag.substring(1) : tag);
+      const resolveTag = (tag) =>
+        tag.startsWith("#//")
+          ? item.label.replace(/\/[^\/]*$/, "") + tag.substring(2)
+          : tag.startsWith("#/")
+          ? item.label + tag.substring(1)
+          : tag;
       item.tags = item.tags.map(resolveTag);
       item.tagsVisible = item.tagsVisible.map(resolveTag);
       item.tagsHidden = item.tagsHidden.map(resolveTag);
