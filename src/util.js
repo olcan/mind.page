@@ -60,9 +60,9 @@ import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.
 function registerLanguage(name, func) {
   const custom_func = function (hljs) {
     let def = func(hljs);
-    // interpret \\?{___...___} as custom comment for all languages, preventing other interpretations
+    // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
     // (e.g. the individual characters could be interpreted in latex)
-    const comment = hljs.COMMENT(/\\?{___/, /___}/, { className: "comment-custom", relevance: 0 });
+    const comment = hljs.COMMENT(/\\?;{___/, /___}/, { className: "comment-custom", relevance: 0 });
     if (!def.contains) def.contains = [comment];
     else def.contains.unshift(comment);
     return def;
