@@ -1763,7 +1763,7 @@
     right: 0;
     /* 3px left padding aligns best with code block left border on iOS Safari */
     padding: 0 3px;
-    bottom: -5px; /* 5px remaining */
+    bottom: -5px;
     margin-left: auto;
     margin-right: auto;
     width: fit-content;
@@ -1779,7 +1779,7 @@
     :global(.item .deps-summary),
     :global(.item .dependents-summary) {
       padding: 0 4px;
-      bottom: -6px; /* 4px remaining */
+      bottom: -3px; /* works better with fonts on non-iOS */
     }
   }
 
@@ -1939,6 +1939,12 @@
       font-size: 12px;
       line-height: 21px;
     }
+    :global(.item .log-summary),
+    :global(.item .deps-summary),
+    :global(.item .dependents-summary) {
+      bottom: -9px; /* works better with fonts on iPhone */
+    }
+
     /* smaller menu fonts can take a little more weight */
     /* :global(.item .menu a),
     :global(.item .menu mark) {

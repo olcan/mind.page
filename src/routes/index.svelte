@@ -2609,23 +2609,13 @@
       editingItems.push(index);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
-      if (ios) textArea(-1).focus(); // allows refocus outside of click handler
+      // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       tick().then(() => {
         if (!textArea(item.index)) {
           console.warn("missing editor");
           return;
         }
         textArea(item.index).focus();
-        if (!narrating) {
-          // scroll up to top of item if needed, allowing dom update before calculating new position
-          // (particularly important for items that are much taller when editing)
-          update_dom().then(() => {
-            const div = document.querySelector("#super-container-" + item.id);
-            if (!div) return; // item deleted or hidden
-            const itemTop = (div as HTMLElement).offsetTop;
-            if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
-          });
-        }
       });
     } else {
       // stopped editing
@@ -4142,8 +4132,8 @@
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
     min-height: 100%;
 
-    /* bottom padding for easier tapping on last item */
-    padding-bottom: 200px;
+    /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
+    padding-bottom: 50vh;
     box-sizing: border-box;
   }
   /* .items.multi-column {
