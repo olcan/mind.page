@@ -209,7 +209,7 @@
     html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>');
     // convert open/close parentheses highlight syntax into spans
     // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
-    html = html.replace(/{___highlight_close_(\w+?)___}(.*?)([)}\]])/g, '<span class="highlight $1">$3</span>$2');
+    html = html.replace(/{___highlight_close_(\w+?)___}(.*?)([)}\]])/g, '$2<span class="highlight $1">$3</span>');
     html = html.replace(/([({\[])([^({\[]*?){___highlight_open_(\w+?)___}/g, '<span class="highlight $3">$1</span>$2');
     highlights.innerHTML = html;
     textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
