@@ -76,6 +76,9 @@
       }
     );
   }
+  function highlightTitles(text) {
+    return text.replace(/^(\s{0,3}#{1,6}\s+)(.+)$/, (_, pfx, title) => pfx + `<span class="title">${title}</span>`);
+  }
 
   function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos];
@@ -190,11 +193,11 @@
         code += line + "\n";
       } else {
         if (line.match(/^    \s*[^-*+]/)) html += _.escape(line) + "\n";
-        else html += highlightOther(highlightTags(_.escape(line), tags)) + "\n";
+        else html += highlightTitles(highlightOther(highlightTags(_.escape(line), tags))) + "\n";
       }
     });
     // append unclosed block as regular markdown
-    if (insideBlock) html += highlightOther(highlightTags(_.escape(code), tags));
+    if (insideBlock) html += highlightTitles(highlightOther(highlightTags(_.escape(code), tags)));
 
     // wrap hidden/removed sections
     html = html.replace(
@@ -796,6 +799,14 @@
   }
   :global(.editor .macro .macro-delimiter) {
     color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
+  }
+  :global(.editor .title) {
+    padding: 2px 4px;
+    margin: -2px -4px;
+    background: rgba(255, 255, 255, 0.1);
+    /* background: rgba(0, 0, 0, 0.9); */
+    border-radius: 4px;
+    font-weight: bold;
   }
   :global(.section) {
     border: 1px dashed #444;
