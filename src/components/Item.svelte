@@ -423,6 +423,7 @@
                 reltag = "#" + tag.substring(label.length);
               else if (
                 parentLabel &&
+                tag != label &&
                 tag.length > parentLabel.length &&
                 tag[parentLabel.length] == "/" &&
                 tag.substring(0, parentLabel.length) == parentLabelText
