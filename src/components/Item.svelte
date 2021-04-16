@@ -378,7 +378,7 @@
           str = str + "<br>\n";
 
         // NOTE: some lines (e.g. html tag lines) require an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^\s*</)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```|^    \s*[^-*+]|^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
