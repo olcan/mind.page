@@ -263,7 +263,7 @@
 
   function onKeyDown(e: any) {
     let key = e.code || e.key; // for android compatibility
-    // console.debug("Editor.onKeyDown:", e, key);
+    console.debug("Editor.onKeyDown:", e, key);
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
 
@@ -273,6 +273,12 @@
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      return;
+    }
+
+    // disable Shift+Cmd+C which (usually accidentally) enables element targeting in Safari
+    if (key == "KeyC" && e.shiftKey && e.metaKey) {
       e.preventDefault();
       return;
     }
