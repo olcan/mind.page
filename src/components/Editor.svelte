@@ -263,7 +263,7 @@
 
   function onKeyDown(e: any) {
     let key = e.code || e.key; // for android compatibility
-    console.debug("Editor.onKeyDown:", e, key);
+    // console.debug("Editor.onKeyDown:", e, key);
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
 
