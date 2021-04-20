@@ -1743,16 +1743,11 @@
     item.dotted = pintags.findIndex((t) => t.match(/^#_pin\/dot(?:\/|$)/)) >= 0;
     item.dotTerm = pintags.filter((t) => t.match(/^#_pin\/dot(?:\/|$)/))[0] || "";
 
-    // if item stats with #tag or #_tag, it is taken as a "label" for the item
+    // if item stats with visible #tag, it is taken as a "label" for the item
     // (we allow some html tags/macros to precede the label tag for styling purposes)
-    // (we make starting #_label visible as #label in header to allow prefix matching)
     const prevLabel = item.label;
-    item.header = item.lctext
-      .replace(/^<.*>\s+#/, "#")
-      .replace(/^#_/, "#")
-      .match(/^.*?(?:\n|$)/)[0];
-    item.label = item.header.startsWith(item.tags[0]) ? item.tags[0] : "";
-    // if (item.label && item.label != item.tagsVisible[0]) console.warn("hidden label", item.label);
+    item.header = item.lctext.replace(/^<.*>\s+#/, "#").match(/^.*?(?:\n|$)/)[0];
+    item.label = item.header.startsWith(item.tagsVisible[0]) ? item.tagsVisible[0] : "";
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0] : "";
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
