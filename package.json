@@ -20,7 +20,7 @@
     "validate": "svelte-check --ignore src/node_modules/@sapper"
   },
   "engines": {
-    "node": "12"
+    "node": ">=12"
   },
   "main": "lib/firebase/functions.js",
   "dependencies": {
