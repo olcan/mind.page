@@ -111,6 +111,8 @@ export function highlight(code, language) {
   }
   // drop any _suffix if language does not start with _ (_lang is editor-only)
   if (!language.startsWith("_")) language = language.replace(/(^\w+?)_.+$/, "$1");
+  // highlight json as javascript so e.g. quotes are not required for keys
+  if (language == "json") language = "js";
   language = hljs.getLanguage(language) ? language : "plaintext";
   return hljs.highlight(language, code).value;
 }
