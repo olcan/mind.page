@@ -1555,12 +1555,12 @@
       // console.warn("could not find matching suffix", tag, rendered);
     }
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
-    // if (editorText.trim() == tag) {
-    //   history.back();
-    //   return;
-    // }
-    editorText = editorText.trim().toLowerCase() == tag.toLowerCase() ? "" : tag + " "; // space in case more text is added
-    // editorText = tag + " ";
+
+    if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
+      alert(`${tag} already selected`);
+      return;
+    }
+    editorText = tag + " "; // space in case more text is added
     forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
@@ -3519,6 +3519,17 @@
     // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
     if (modal.isVisible()) return;
+
+    // clear editor on backspace
+    if (key == "Backspace") {
+      // this follows onTagClick behavior
+      editorText = "";
+      forceNewStateOnEditorChange = true; // force new state
+      finalizeStateOnEditorChange = true; // finalize state
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange(editorText);
+      return;
+    }
 
     // resume-edit items on Shift-(save shortcut)
     if (
