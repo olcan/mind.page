@@ -3520,8 +3520,8 @@
     if (!initialized) return;
     if (modal.isVisible()) return;
 
-    // clear editor on backspace or escape with non-empty editor
-    if (key == "Backspace" || (key == "Escape" && editorText)) {
+    // clear non-empty editor on backspace or escape
+    if (editorText && (key == "Backspace" || key == "Escape")) {
       e.preventDefault();
       // this follows onTagClick behavior
       editorText = "";
@@ -3551,8 +3551,8 @@
       (key == "KeyI" && e.metaKey && e.shiftKey) ||
       (key == "ArrowUp" && e.metaKey && e.altKey) ||
       (key == "ArrowDown" && e.metaKey && e.altKey) ||
-      // key == "Backspace" ||
-      // key == "Tab" ||
+      key == "Backspace" ||
+      key == "Tab" ||
       key == "Escape"
     ) {
       e.preventDefault();
