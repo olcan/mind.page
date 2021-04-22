@@ -1523,6 +1523,7 @@
     const rendered = renderTag(reltag);
     let suffix = rendered;
     while (!tag.endsWith(suffix)) suffix = suffix.substring(1);
+    let prefix_click = false;
     if (suffix) {
       // calculate partial tag prefix (e.g. #tech for #tech/math) based on position of click
       let range = document.caretRangeFromPoint(
@@ -1543,6 +1544,7 @@
         // adjust pos from rendered to full tag ...
         pos = Math.max(pos, rendered.length - suffix.length);
         pos = tag.length - suffix.length + (pos - (rendered.length - suffix.length));
+        prefix_click = pos <= tag.length - suffix.length;
         // we only take partial tag if the current tag is "selected" (i.e. full exact match)
         // (makes it easier to click on tags without accidentally getting a partial tag)
         // if ((tagNode as HTMLElement).classList.contains("selected"))
@@ -1557,10 +1559,13 @@
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
 
     if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
-      alert(`${tag} already selected`);
-      return;
+      if (prefix_click) { // assuming trying to go to a parent/ancestor 
+        alert(`${tag} already selected`);
+        return;
+      } else editorText = ""; // assume intentional toggle
+    } else {
+      editorText = tag + " "; // space in case more text is added
     }
-    editorText = tag + " "; // space in case more text is added
     forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
