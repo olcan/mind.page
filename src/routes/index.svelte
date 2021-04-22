@@ -436,7 +436,7 @@
         );
       }
 
-      // evaluate inline <<macros>>|@{macros}@ inside code
+      // evaluate inline @{eval_macros}@
       let macroIndex = 0;
       const replaceMacro = (m, pfx, js) => {
         try {
@@ -453,7 +453,7 @@
           throw e;
         }
       };
-      evaljs = evaljs.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
+      // evaljs = evaljs.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
       evaljs = evaljs.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks

@@ -205,7 +205,7 @@
     }
     // console.debug("toHTML", name);
 
-    // evaluate inline <<macros>>|@{macros}@ first to ensure treatment just like non-macro content
+    // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
     let hasMacroErrors = false;
     let macroIndex = 0;
@@ -225,7 +225,7 @@
       }
     };
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
-    text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
+    //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : "";
     matchingTerms = new Set<string>(matchingTerms.split(" ").filter((t) => t));
@@ -397,14 +397,17 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag) => {
+              // drop hidden tag prefix
+              const hidden = tag.startsWith("#_");
+              tag = tag.replace(/^#_/, "#");
               // make relative tags absolute
               if (label && tag.startsWith("#//")) tag = parentLabelText + tag.substring(2);
               else if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
 
-              const lctag = tag.toLowerCase().replace(/^#_/, "#");
+              const lctag = tag.toLowerCase();
               let classNames = "";
               if (missingTags.has(lctag)) classNames += " missing";
-              if (tag.startsWith("#_")) classNames += " hidden";
+              if (hidden) classNames += " hidden";
               if (lctag == label) {
                 classNames += " label";
                 if (labelUnique) classNames += " unique";
