@@ -1559,7 +1559,8 @@
     tag = tag.replace(/^#_/, "#"); // ignore hidden tag prefix
 
     if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
-      if (prefix_click) { // assuming trying to go to a parent/ancestor 
+      if (prefix_click) {
+        // assuming trying to go to a parent/ancestor
         alert(`${tag} already selected`);
         return;
       } else editorText = ""; // assume intentional toggle
@@ -2895,10 +2896,7 @@
         : e.line
         ? `${e.message} (line:${e.line}, col:${e.column})`
         : e.stack // all we seem to have is a trace, so let's dump that ...
-        ? `${e.message}; STACK TRACE:\n${e.stack
-            .split("\n")
-            .map((s) => "ERROR: - " + s)
-            .join("\n")}`
+        ? `${e.message}; STACK: ${e.stack.split(/\n\s*/g).join(", ")}`
         : e.message
       : undefined;
   }
