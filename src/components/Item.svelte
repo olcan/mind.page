@@ -62,6 +62,7 @@
   export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
+  export let onEscape = () => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number) => {};
@@ -1211,6 +1212,7 @@
         {onNext}
         onFocused={(focused) => onFocused(index, focused)}
         onEdited={(text) => onEdited(index, text)}
+        {onEscape}
         {onPastedImage}
         {onDone}
       />

@@ -2418,6 +2418,16 @@
     }); // decryptItem(savedItem)
   }
 
+  function onItemEscape() {
+    if (!editorText) return true; // not handled
+    editorText = "";
+    forceNewStateOnEditorChange = true; // force new state
+    finalizeStateOnEditorChange = true; // finalize state
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
+    onEditorChange(editorText);
+    return false; // escape handled
+  }
+
   let lastEditTime = 0; // updated in onItemEdited
   let layoutPending = false;
   function onItemResized(id, container, trigger: string) {
@@ -3705,6 +3715,7 @@
                 onRun={onItemRun}
                 onTouch={onItemTouch}
                 onResized={onItemResized}
+                onEscape={onItemEscape}
                 {onImageRendering}
                 {onImageRendered}
                 {onPastedImage}
