@@ -1544,7 +1544,7 @@
         // adjust pos from rendered to full tag ...
         pos = Math.max(pos, rendered.length - suffix.length);
         pos = tag.length - suffix.length + (pos - (rendered.length - suffix.length));
-        prefix_click = pos <= tag.length - suffix.length;
+        prefix_click = pos > 1 && pos <= tag.length - suffix.length;
         // we only take partial tag if the current tag is "selected" (i.e. full exact match)
         // (makes it easier to click on tags without accidentally getting a partial tag)
         // if ((tagNode as HTMLElement).classList.contains("selected"))
