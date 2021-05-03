@@ -2464,19 +2464,17 @@
     ) {
       if (!layoutPending) {
         layoutPending = true;
-        const layoutInterval = setInterval(
-          () => {
-            // TODO: if this does not prevent the edit issues, consider waiting until no item editor has focus
-            // (also make sure it is related to item resizing, because sometimes it seems to happen w/o resizing and in that case would be more related to keyboard event handling in Editor)
-            if (Date.now() - lastEditTime >= 500) {
-              updateItemLayout();
-              layoutPending = false;
-              clearInterval(layoutInterval);
-            }
-          },
+        const tryLayout = () => {
+          // NOTE: this helps reduce editor issues (e.g. jumping of cursor) related to resizing while editing, but does NOT solve all issues, especially those not related to resizing
+          if (Date.now() - lastEditTime >= 500) {
+            updateItemLayout();
+            layoutPending = false;
+            return; // done!
+          }
           // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
-          totalItemHeight > 0 ? 250 : 50
-        );
+          setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 100);
+        };
+        tryLayout(); // try now
       }
     }
   }
