@@ -2471,10 +2471,10 @@
             layoutPending = false;
             return; // done!
           }
-          // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
-          setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 100);
+          setTimeout(tryLayout, 250);
         };
-        tryLayout(); // try now
+        // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
+        setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 50); // try now
       }
     }
   }
