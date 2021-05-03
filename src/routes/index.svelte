@@ -2466,13 +2466,14 @@
       if (!layoutPending) {
         layoutPending = true;
         const tryLayout = () => {
-          // NOTE: this helps reduce editor issues (e.g. jumping of cursor) related to resizing while editing, but does NOT solve all issues, especially those not related to resizing
-          if (Date.now() - lastEditTime >= 500) {
-            updateItemLayout();
-            layoutPending = false;
-            return; // done!
+          // NOTE: checking lastEditTime helps reduce editor issues (e.g. jumping of cursor) related to resizing while editing, but does NOT solve all issues, especially those not related to resizing.
+          if (Date.now() - lastEditTime < 500 || Date.now() - lastScrollTime < 500) {
+            // try again later
+            setTimeout(tryLayout, 250);
+            return;
           }
-          setTimeout(tryLayout, 250);
+          updateItemLayout();
+          layoutPending = false;
         };
         // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
         setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 50); // try now
