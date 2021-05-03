@@ -2965,6 +2965,7 @@
   let initTime = 0; // set where initialize is invoked
   let processed = false;
   let initialized = false;
+  let maxRenderedAtInit = 100;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -3067,14 +3068,17 @@
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
 
     const unpinnedIndex = _.findLastIndex(items, (item) => item.pinned) + 1;
-    await renderRange(0, unpinnedIndex /*initial chunk*/, 10 /*chunk*/, items.length /*cutoff*/, 100 /*delay*/).then(
-      () => {
-        // renderRange(0, 0, 10, items.length, 0 /*delay*/).then(() => {
-        init_log(`initialized ${items.length} items`);
-        initialized = true;
-        resolve_init();
-      }
-    );
+    await renderRange(
+      0,
+      unpinnedIndex /*initial chunk*/,
+      10 /*chunk*/,
+      maxRenderedAtInit /*cutoff*/,
+      100 /*delay*/
+    ).then(() => {
+      init_log(`initialized ${items.length} items`);
+      initialized = true;
+      resolve_init();
+    });
   }
 
   let rendered = false;
@@ -3098,10 +3102,10 @@
       if (renderEnd < cutoff) {
         // init_log(`rendered items ${renderStart}-${renderEnd}`);
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
-          init_log(`rendered ${renderEnd}/${items.length} items`);
+          init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`);
         tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay));
       } else {
-        init_log(`rendered ${cutoff}/${items.length} items`);
+        init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`);
         rendered = true;
       }
     });
