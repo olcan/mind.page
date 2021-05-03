@@ -742,6 +742,7 @@
   let oldestTime = Infinity;
   let oldestTimeString = "";
   let defaultHeaderHeight = 0;
+  // TODO: try maxColumns=1 during initial render if partial-height layouts prove problematic
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
   let lastLayoutTime = 0;
