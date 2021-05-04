@@ -665,9 +665,10 @@
         }
         elem.replaceWith(cached);
         elem = cached;
-        // resize all children w/ _resize attribute (and property)
+        // resize all children and SELF w/ _resize attribute (and property)
         try {
           elem.querySelectorAll("[_resize]").forEach((e) => e["_resize"]());
+          if (elem["_resize"]) elem["_resize"]();
         } catch (e) {
           console.error("_resize error", e);
         }

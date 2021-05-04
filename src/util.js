@@ -155,14 +155,17 @@ export function renderTag(tag) {
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
   if (!window["_elem_cache"][id]) return;
+  // console.warn("invalidateElemCache for ", id);
   Object.values(window["_elem_cache"][id]).forEach((elem) => {
     const key = elem.getAttribute("_cache_key");
     // we allow some items to skip invalidation, e.g. to be intentionally reused across runs
     if (elem.hasAttribute("_skip_invalidation")) return;
     // console.warn("deleting from _elem_cache", key);
     delete window["_elem_cache"][id][key];
-    // destroy all children w/ _destroy attribute (and property)
+    // destroy all children and SELF w/ _destroy attribute (and property)
     elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
+    if (elem._destroy) elem._destroy();
+    elem.remove(); // prevents any pending chart also
   });
 }
 
@@ -190,8 +193,10 @@ export function checkElemCache() {
       // if element has zero-width, destroy it, otherwise adopt it
       if (elem.offsetWidth == 0) {
         delete window["_elem_cache"][id][key];
-        // destroy all children w/ _destroy attribute (and property)
+        // destroy all children and SELF w/ _destroy attribute (and property)
         elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
+        if (elem._destroy) elem._destroy();
+        elem.remove(); // prevents any pending chart also
         // console.warn("destroyed zero-width orphaned cached element", key, "from item", window["_item"](id).name);
       } else {
         adoptCachedElem(elem);
