@@ -3574,17 +3574,17 @@
         );
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title); // drop duplicates to avoid cycles
         let selectedIndex = visibleTags?.findIndex((e) => e.matches(".selected"));
-        // filter to siblings of selected tag if it is nested under the context as its parent, and there are others!
-        // (otherwise we allow navigation of arbitrary "sibling" tags w/o nesting)
+        // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other tags that are also nested under contex
         const contextLabel = (lastContext.querySelector("mark.label") as any)?.title;
-        if (selectedIndex >= 0 && contextLabel && visibleTags[selectedIndex]["title"]?.startsWith(contextLabel + "/")) {
+        const contextBasedOnNesting = contextLabel && !item(_item(contextLabel).id).context;
+        if (
+          selectedIndex >= 0 &&
+          contextBasedOnNesting &&
+          visibleTags[selectedIndex]["title"]?.startsWith(contextLabel + "/")
+        ) {
           const selectedTag = visibleTags[selectedIndex]["title"];
-          const prefix = selectedTag.substring(0, selectedTag.lastIndexOf("/"));
-          const siblings = visibleTags.filter((t) => t["title"]?.startsWith(prefix));
-          if (siblings.length > 1) {
-            visibleTags = siblings;
-            selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
-          }
+          visibleTags = visibleTags.filter((t) => t["title"]?.startsWith(contextLabel + "/"));
+          selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
         }
         if (selectedIndex >= 0) {
           if (key == "KeyJ" && selectedIndex < visibleTags.length - 1)
