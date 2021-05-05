@@ -9,7 +9,7 @@
   export let allowCommandCtrlBracket = false;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
-  export let onEscape = () => true; // false means handled/ignore
+  export let onEscape = (e) => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onDone = (text: string, e: any, cancelled: boolean = false, run: boolean = false) => {};
   export let onRun = () => {};
@@ -428,7 +428,7 @@
     // cancel edit with escape
     if (key == "Escape") {
       e.preventDefault();
-      if (!onEscape()) return; // escape was handled, should be ignored
+      if (!onEscape(e)) return; // escape was handled, should be ignored
       onDone(text /* maintain text */, e, true /* cancelled */);
       return;
     }

@@ -2419,8 +2419,9 @@
     }); // decryptItem(savedItem)
   }
 
-  function onItemEscape() {
+  function onItemEscape(e) {
     if (!editorText) return true; // not handled
+    if (!e.shiftKey) return true; // not handled (want shift key also)
     editorText = "";
     forceNewStateOnEditorChange = true; // force new state
     finalizeStateOnEditorChange = true; // finalize state
@@ -3559,9 +3560,76 @@
       document.querySelector(".target .log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
+    // let unmodified J/K select next/prev visible non-label non-secondary-selected tag in last context item
+    if ((key == "KeyJ" || key == "KeyK") && !modified) {
+      // NOTE: this resolves ambiguities (e.g. when multiple context items link to the target) by always selecting the last context; there may be smarter ways to do this, but let's keep it simple for now!
+      const lastContext = Array.from(document.querySelectorAll(".target_context"))
+        .sort(
+          (a, b) => parseInt(a.querySelector(".index").textContent) - parseInt(b.querySelector(".index").textContent)
+        )
+        .pop();
+      if (lastContext) {
+        let visibleTags = Array.from(
+          lastContext.querySelectorAll("mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
+        );
+        visibleTags = _.uniqBy(visibleTags, (t: any) => t.title); // drop duplicates to avoid cycles
+        let selectedIndex = visibleTags?.findIndex((e) => e.matches(".selected"));
+        // filter to siblings of selected tag if it is nested under the context as its parent, and there are others!
+        // (otherwise we allow navigation of arbitrary "sibling" tags w/o nesting)
+        const contextLabel = (lastContext.querySelector("mark.label") as any)?.title;
+        if (selectedIndex >= 0 && contextLabel && visibleTags[selectedIndex]["title"]?.startsWith(contextLabel + "/")) {
+          const selectedTag = visibleTags[selectedIndex]["title"];
+          const prefix = selectedTag.substring(0, selectedTag.lastIndexOf("/"));
+          const siblings = visibleTags.filter((t) => t["title"]?.startsWith(prefix));
+          if (siblings.length > 1) {
+            visibleTags = siblings;
+            selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
+          }
+        }
+        if (selectedIndex >= 0) {
+          if (key == "KeyJ" && selectedIndex < visibleTags.length - 1)
+            visibleTags[selectedIndex + 1].dispatchEvent(new Event("mousedown"));
+          else if (key == "KeyK" && selectedIndex > 0)
+            visibleTags[selectedIndex - 1].dispatchEvent(new Event("mousedown"));
+        }
+      }
+      return;
+    }
+    // let unmodified Enter select first visible non-label non-secondary-selected "child" tag in target item
+    if (key == "Enter" && !modified) {
+      let targetLabel = (document.querySelector(".target mark.label") as any)?.title;
+      if (targetLabel) {
+        if (item(_item(targetLabel).id).context) {
+          // allow arbitrary child tag
+          document
+            .querySelector(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
+            ?.dispatchEvent(new Event("mousedown"));
+        } else {
+          // filter to children w/ nested labels
+          const childTags = Array.from(
+            document.querySelectorAll(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
+          ).filter((t) => t["title"]?.startsWith(targetLabel + "/"));
+          childTags[0]?.dispatchEvent(new Event("mousedown"));
+        }
+      }
+      return;
+    }
+    // let unmodified Backspace select label on last context item (i.e. move up to parent)
+    if (key == "Backspace" && !modified) {
+      const lastContext = Array.from(document.querySelectorAll(".target_context"))
+        .sort(
+          (a, b) => parseInt(a.querySelector(".index").textContent) - parseInt(b.querySelector(".index").textContent)
+        )
+        .pop();
+      if (lastContext) {
+        // otherwisce continue for potential handling below
+        lastContext.querySelector("mark.label")?.dispatchEvent(new Event("mousedown"));
+        return;
+      }
+    }
 
-    // clear non-empty editor on backspace or escape
-    if (editorText && (key == "Backspace" || key == "Escape")) {
+    // clear non-empty editor on escape or backspace (if not handled above)
+    if (editorText && (key == "Escape" || key == "Backspace")) {
       e.preventDefault();
       // this follows onTagClick behavior
       editorText = "";
