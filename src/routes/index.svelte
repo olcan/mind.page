@@ -2426,6 +2426,9 @@
     finalizeStateOnEditorChange = true; // finalize state
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
+    // restore focus (can be necessary e.g. if edited item was also "target" item)
+    const focusElement = document.activeElement as HTMLElement;
+    setTimeout(() => focusElement.focus());
     return false; // escape handled
   }
 
@@ -3531,11 +3534,31 @@
     ctrlKey = e.ctrlKey;
     altKey = e.altKey;
     shiftKey = e.shiftKey;
+    const modified = metaKey || ctrlKey || altKey || shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
 
     // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
     if (modal.isVisible()) return;
+
+    // let unmodified E edit target item
+    if (key == "KeyE" && !modified) {
+      // edit click requires mousedown first (see onClick in Item.svelte)
+      document.querySelector(".target")?.dispatchEvent(new Event("mousedown"));
+      document.querySelector(".target")?.dispatchEvent(new Event("click"));
+      e.preventDefault(); // avoid entering text into editor
+      return;
+    }
+    // let unmodified R run target item
+    if (key == "KeyR" && !modified) {
+      document.querySelector(".target .run")?.dispatchEvent(new Event("click"));
+      return;
+    }
+    // let unmodified T toggle logs on target item
+    if (key == "KeyT" && !modified) {
+      document.querySelector(".target .log-summary")?.dispatchEvent(new Event("click"));
+      return;
+    }
 
     // clear non-empty editor on backspace or escape
     if (editorText && (key == "Backspace" || key == "Escape")) {
