@@ -3611,6 +3611,11 @@
           ).filter((t) => t["title"]?.startsWith(targetLabel + "/"));
           childTags[0]?.dispatchEvent(new Event("mousedown"));
         }
+      } else if (items.find((item) => !item.pinned)?.labelUnique) {
+        // select first non-pinned item if has unique label
+        document
+          .querySelector("#super-container-" + items.find((item) => !item.pinned).id + " mark.label")
+          ?.dispatchEvent(new Event("mousedown"));
       }
       return;
     }
