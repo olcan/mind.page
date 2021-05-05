@@ -3611,11 +3611,10 @@
           ).filter((t) => t["title"]?.startsWith(targetLabel + "/"));
           childTags[0]?.dispatchEvent(new Event("mousedown"));
         }
-      } else if (items.find((item) => !item.pinned)?.labelUnique) {
-        // select first non-pinned item if has unique label
-        document
-          .querySelector("#super-container-" + items.find((item) => !item.pinned).id + " mark.label")
-          ?.dispatchEvent(new Event("mousedown"));
+      } else {
+        // select first non-pinned item w/ unique label if clickable
+        const id = items.find((item) => !item.pinned && item.labelUnique)?.id;
+        if (id) document.querySelector(`#super-container-${id} mark.label`)?.dispatchEvent(new Event("mousedown"));
       }
       return;
     }
