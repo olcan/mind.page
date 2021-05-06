@@ -3629,9 +3629,10 @@
     }
     // let unmodified Enter (or ArrowDown, or ArrowRight if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == "Enter" || key == "ArrowDown" || key == "ArrowRight") && !modified) {
-      // NOTE: target labels are unique by definition, so no ambiguity in _item(label)
+      // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector(".target mark.label") as any)?.title;
       if (targetLabel) {
+        // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context
         if (item(_item(targetLabel).id).context) {
           // allow arbitrary child tag
           document
