@@ -351,6 +351,18 @@
       if (text.length >= writeConfirmLength) {
         if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return; // cancel write
       }
+      // maintain selection on textarea if editing
+      if (item(this.id)?.editing) {
+        let textarea = textArea(item(this.id).index);
+        let selectionStart = textarea.selectionStart;
+        let selectionEnd = textarea.selectionEnd;
+        tick().then(() => {
+          let textarea = textArea(indexFromId.get(this.id));
+          if (!textarea) return;
+          textarea.selectionStart = selectionStart;
+          textarea.selectionEnd = selectionEnd;
+        });
+      }
       // if writing *_log, clear any existing *_log blocks
       // (and skip write if block is empty)
       let __item = item(this.id); // writeable item
@@ -367,6 +379,7 @@
       setTimeout(() => {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange(editorText); // item time/text has changed
+        // if (!item(this.id)?.editing) saveItem(this.id);
         saveItem(this.id);
       });
     }
@@ -2721,6 +2734,18 @@
   function onItemRun(index: number = -1) {
     if (index < 0) index = focusedItem;
     let item = items[index];
+    // maintain selection on textarea if editing
+    if (item.editing) {
+      let textarea = textArea(index);
+      let selectionStart = textarea.selectionStart;
+      let selectionEnd = textarea.selectionEnd;
+      tick().then(() => {
+        let textarea = textArea(indexFromId.get(item.id));
+        if (!textarea) return;
+        textarea.selectionStart = selectionStart;
+        textarea.selectionEnd = selectionEnd;
+      });
+    }
     // clear *_output blocks as they should be re-generated
     item.text = clearBlock(item.text, "\\w*?_output");
     // remove *_log blocks so errors do not leave empty blocks
@@ -2728,7 +2753,9 @@
     itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
     appendJSOutput(index);
     item.time = Date.now();
-    if (!item.editing) saveItem(item.id);
+    // we now save even if editing, for consistency with write() saving during edit
+    // if (!item.editing) saveItem(item.id);
+    saveItem(item.id);
     lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText); // item time/text has changed
   }
