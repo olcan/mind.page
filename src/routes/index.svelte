@@ -3542,6 +3542,9 @@
     if (!initialized) return;
     if (modal.isVisible()) return;
 
+    // disable arrow keys to prevent ambiguous behavior
+    if (key.startsWith("Arrow")) e.preventDefault();
+
     // let unmodified E edit target item
     if (key == "KeyE" && !modified) {
       // edit click requires mousedown first (see onClick in Item.svelte)
@@ -3560,43 +3563,46 @@
       document.querySelector(".target .log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
-    // let unmodified J/K select next/prev visible non-label non-secondary-selected tag in last context item
-    if ((key == "KeyJ" || key == "KeyK") && !modified) {
-      // NOTE: this resolves ambiguities (e.g. when multiple context items link to the target) by always selecting the last context; there may be smarter ways to do this, but let's keep it simple for now!
+    // let unmodified J/K (or ArrowLeft/Right) select next/prev visible non-label tag in last context item
+    if ((key == "KeyJ" || key == "KeyK" || key == "ArrowLeft" || key == "ArrowRight") && !modified) {
+      // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       const lastContext = Array.from(document.querySelectorAll(".target_context"))
-        .sort(
-          (a, b) => parseInt(a.querySelector(".index").textContent) - parseInt(b.querySelector(".index").textContent)
-        )
-        .pop();
+        .filter((e) => e.querySelector("mark.selected"))
+        .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
       if (lastContext) {
-        let visibleTags = Array.from(
-          lastContext.querySelectorAll("mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
-        );
-        visibleTags = _.uniqBy(visibleTags, (t: any) => t.title); // drop duplicates to avoid cycles
+        let visibleTags = Array.from(lastContext.querySelectorAll("mark:not(.hidden,.label,.deps-and-dependents *)"));
+        // drop duplicates to avoid ambiguities/cycles
+        visibleTags = _.uniqBy(visibleTags, (t: any) => t.title);
         let selectedIndex = visibleTags?.findIndex((e) => e.matches(".selected"));
-        // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other tags that are also nested under contex
+        // if context is based on nesting (vs _context tag) and selected tag is nested under it and there are siblings also nested under the context, then we only navigate among those siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
         const contextLabel = (lastContext.querySelector("mark.label") as any)?.title;
-        const contextBasedOnNesting = contextLabel && !item(_item(contextLabel).id).context;
+        // context labels can be non-unique, so we have to use item(lastContext.getAttribute("item-id"))
+        const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute("item-id")).context;
         if (
           selectedIndex >= 0 &&
           contextBasedOnNesting &&
           visibleTags[selectedIndex]["title"]?.startsWith(contextLabel + "/")
         ) {
           const selectedTag = visibleTags[selectedIndex]["title"];
-          visibleTags = visibleTags.filter((t) => t["title"]?.startsWith(contextLabel + "/"));
-          selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
+          const siblings = visibleTags.filter((t) => t["title"]?.startsWith(contextLabel + "/"));
+          // filter if there are others nested under context, giving preference to nesting
+          if (siblings.length > 1) {
+            visibleTags = siblings;
+            selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
+          }
         }
         if (selectedIndex >= 0) {
-          if (key == "KeyJ" && selectedIndex < visibleTags.length - 1)
+          if ((key == "KeyJ" || key == "ArrowRight") && selectedIndex < visibleTags.length - 1)
             visibleTags[selectedIndex + 1].dispatchEvent(new Event("mousedown"));
-          else if (key == "KeyK" && selectedIndex > 0)
+          else if ((key == "KeyK" || key == "ArrowLeft") && selectedIndex > 0)
             visibleTags[selectedIndex - 1].dispatchEvent(new Event("mousedown"));
         }
       }
       return;
     }
-    // let unmodified Enter select first visible non-label non-secondary-selected "child" tag in target item
-    if (key == "Enter" && !modified) {
+    // let unmodified Enter (or ArrowDown) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    if ((key == "Enter" || key == "ArrowDown") && !modified) {
+      // NOTE: target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector(".target mark.label") as any)?.title;
       if (targetLabel) {
         if (item(_item(targetLabel).id).context) {
@@ -3618,8 +3624,8 @@
       }
       return;
     }
-    // let unmodified Backspace select label on last context item (i.e. move up to parent)
-    if (key == "Backspace" && !modified) {
+    // let unmodified Backspace (or ArrowUp) select label on last context item (i.e. move up to parent)
+    if ((key == "Backspace" || key == "ArrowUp") && !modified) {
       const lastContext = Array.from(document.querySelectorAll(".target_context"))
         .sort(
           (a, b) => parseInt(a.querySelector(".index").textContent) - parseInt(b.querySelector(".index").textContent)
@@ -3632,8 +3638,8 @@
       }
     }
 
-    // clear non-empty editor on escape or backspace (if not handled above)
-    if (editorText && (key == "Escape" || key == "Backspace")) {
+    // clear non-empty editor on escape or backspace/arrowup (if not handled above)
+    if (editorText && (key == "Escape" || key == "Backspace" || key == "ArrowUp")) {
       e.preventDefault();
       // this follows onTagClick behavior
       editorText = "";

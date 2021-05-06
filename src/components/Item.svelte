@@ -1172,6 +1172,7 @@
   {#if showDebugString}
     <div class="debug">{debugString}</div>
   {/if}
+  <!-- we put item id in "item-id" attribute of .container because svelte allows custom attribute names w/ dashes -->
   <div
     bind:this={container}
     on:mousedown={onMouseDown}
@@ -1193,6 +1194,7 @@
     class:scripted
     class:macroed
     class:timeOutOfOrder
+    item-id={id}
   >
     {#if editing}
       <div class="edit-menu">
