@@ -3601,7 +3601,7 @@
         // drop duplicates to avoid ambiguities/cycles
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title);
         let selectedIndex = visibleTags?.findIndex((e) => e.matches(".selected"));
-        // if context is based on nesting (vs _context tag) and selected tag is nested under it and there are siblings also nested under the context, then we only navigate among those siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
+        // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
         const contextLabel = (lastContext.querySelector("mark.label") as any)?.title;
         // context labels can be non-unique, so we have to use item(lastContext.getAttribute("item-id"))
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute("item-id")).context;
@@ -3612,11 +3612,8 @@
         ) {
           const selectedTag = visibleTags[selectedIndex]["title"];
           const siblings = visibleTags.filter((t) => t["title"]?.startsWith(contextLabel + "/"));
-          // filter if there are others nested under context, giving preference to nesting
-          if (siblings.length > 1) {
-            visibleTags = siblings;
-            selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
-          }
+          visibleTags = siblings;
+          selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
         }
         if (selectedIndex >= 0) {
           if ((key == "KeyJ" || key == "ArrowRight") && selectedIndex < visibleTags.length - 1)
