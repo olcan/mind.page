@@ -162,6 +162,7 @@ export function invalidateElemCache(id) {
     if (elem.hasAttribute("_skip_invalidation")) return;
     // console.warn("deleting from _elem_cache", key);
     delete window["_elem_cache"][id][key];
+    if (elem.closest(".item")) return; // elem is live on .item
     // destroy all children and SELF w/ _destroy attribute (and property)
     elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
     if (elem._destroy) elem._destroy();
@@ -187,7 +188,7 @@ export function checkElemCache() {
   if (!window["_elem_cache"]) window["_elem_cache"] = {};
   Object.keys(window["_elem_cache"]).forEach((id) => {
     Object.values(window["_elem_cache"][id]).forEach((elem) => {
-      if (document.contains(elem)) return;
+      if (document.contains(elem)) return; // elem is already on the page
       const key = elem.getAttribute("_cache_key");
       // console.warn("orphaned cached element", key, "from item", window["_item"](id).name);
       // if element has zero-width, destroy it, otherwise adopt it
