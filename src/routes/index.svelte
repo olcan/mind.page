@@ -3781,11 +3781,12 @@
 </script>
 
 {#if user && processed}
-  <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating}>
+  <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating} class:focused>
     {#each { length: columnCount + 1 } as _, column}
       <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount} class:focused>
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div id="focus-indicator" class:focused />
             <div id="header-container" class:focused={editorFocused}>
               <div id="editor">
                 <Editor
@@ -4184,6 +4185,18 @@
   #header {
     max-width: 100%;
   }
+  #focus-indicator {
+    display: none;
+    position: absolute;
+    width: 100%;
+    height: 7px;
+    /* background: #7a7; */
+    background: white;
+    opacity: 0;
+  }
+  #focus-indicator.focused {
+    opacity: 0.05;
+  }
   #header-container {
     display: flex;
     padding: 10px;
@@ -4199,9 +4212,9 @@
   #editor {
     width: 100%;
     /* push editor down/left for more clearance for buttons and from profile picture */
-    margin-top: 5px;
+    margin-top: 4px;
     margin-bottom: -5px;
-    margin-left: 0px;
+    margin-left: -4px;
     margin-right: 5px;
   }
   /* remove dashed border when top editor is unfocused */
@@ -4217,7 +4230,7 @@
     flex-grow: 1;
   }
   #user {
-    height: 56px; /* 46px = focused height of single-line editor (also see @media query below) */
+    height: 56px; /* 45px = focused height of single-line editor (also see @media query below) */
     width: 56px;
     min-width: 56px; /* seems necessary to ensure full width inside flex */
     border-radius: 50%;
@@ -4226,6 +4239,9 @@
     background: #222;
     cursor: pointer;
     overflow: hidden;
+    /* shadow to cut into .focus-indicator */
+    /* box-shadow: 0px 0 0 4px black; */
+    z-index: 1;
   }
   #user.anonymous:not(.readonly).signedin {
     background: green;
@@ -4356,6 +4372,9 @@
   /* .column:last-child {
     margin-right: 0;
   } */
+  .items.focused {
+    background: rgb(7, 7, 7);
+  }
   .column:not(.focused) {
     opacity: 0.7;
   }
@@ -4461,9 +4480,9 @@
       padding-right: 6px; /* reduced padding to save space */
     }
     #user {
-      height: 55px; /* 45px = height of single-line editor (on narrow window) */
-      width: 55px;
-      min-width: 55px;
+      height: 52px; /* 41px = height of single-line editor (on narrow window) */
+      width: 52px;
+      min-width: 52px;
     }
     /* single-column layout can remove margin since there is no concern of having columns w/ same width */
     .column:not(.multi-column) {
