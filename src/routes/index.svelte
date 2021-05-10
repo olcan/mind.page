@@ -3307,6 +3307,10 @@
       let lastWindowHeight = 0;
       let lastFocusElem = null; // element that had focus on last recorded width/height
       function checkLayout() {
+        // on android, if window height grows enough, assume keyboard is closed and blur active element
+        // (otherwise e.g. tapping of tags with editor focused will scroll back up)
+        if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur();
+
         if (Date.now() - lastScrollTime < 250) return; // avoid layout during scroll
         if (Date.now() - lastResizeTime < 250) return; // avoid layout during resizing
 
@@ -3321,9 +3325,6 @@
           // resize of all elements w/ _resize attribute (and property)
           document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
         }
-        // on android, if window height grows enough, assume keyboard is closed and blur active element
-        // (otherwise e.g. tapping of tags with editor focused will scroll back up)
-        if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur();
 
         lastDocumentWidth = documentWidth;
         lastWindowHeight = outerHeight;
