@@ -1862,9 +1862,15 @@
         item.dependents = [];
         items.forEach((depitem, depindex) => {
           if (depindex == index) return; // skip self
-          // NOTE: we only need to update dependencies on first update_deps or if item label has changed
-          if (item.label != prevLabel) depitem.deps = itemDeps(depindex);
-          if (item.label != prevLabel || (depitem.deps.includes(item.id) && item.deephash != prevDeepHash)) {
+          const was_dependent = depitem.deps.includes(item.id); // was dependent w/ prevLabel?
+          let is_dependent = was_dependent;
+          if (item.label != prevLabel) {
+            // label changed, need to update dependencies
+            depitem.deps = itemDeps(depindex);
+            is_dependent = depitem.deps.includes(item.id);
+          }
+          // dependency is considered modified when dependency is added/removed
+          if ((is_dependent && item.deephash != prevDeepHash) || is_dependent != was_dependent) {
             // update deephash (triggers re-rendering and cache invalidation)
             depitem.deephash = hashCode(
               depitem.deps
