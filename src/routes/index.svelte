@@ -1057,6 +1057,7 @@
       tag == "#listen" ||
       tag == "#async" ||
       tag == "#debug" ||
+      tag == "#autorun" ||
       tag.match(/^#pin(?:\/|$)/) ||
       tag.match(/\/pin(?:\/|$)/)
     );
@@ -1072,6 +1073,8 @@
     else if (tag == "#welcome") return ["#features/_welcome"];
     else if (tag == "#listen") return ["#features/_listen"];
     else if (tag == "#async") return ["#features/_async"];
+    else if (tag == "#debug") return ["#features/_debug"];
+    else if (tag == "#autorun") return ["#features/_autorun"];
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ["#features/_pin"];
     else return [];
   }
@@ -1757,6 +1760,7 @@
     item.listen = item.tagsRaw.includes("#_listen");
     item.async = item.tagsRaw.includes("#_async");
     item.debug = item.tagsRaw.includes("#_debug");
+    item.autorun = item.tagsRaw.includes("#_autorun");
     const pintags = item.tagsRaw.filter((t) => t.match(/^#_pin(?:\/|$)/));
     item.pinned = pintags.length > 0;
     item.pinTerm = pintags[0] || "";
@@ -1868,6 +1872,11 @@
                 .concat(depitem.hash)
                 .join(",")
             );
+            // if item has _autorun, dispatch run (w/ sanity check for non-deletion)
+            if (depitem.autorun)
+              setTimeout(() => {
+                if (depitem.index == indexFromId.get(depitem.id)) onItemRun(depitem.index);
+              });
           }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
         });
