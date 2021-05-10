@@ -19,6 +19,7 @@
   let deletedItems = [];
   let editingItems = [];
   let focusedItem = -1;
+  let editorFocused = false;
   let focused = false;
   let signedin = false;
   let admin = false;
@@ -3751,6 +3752,11 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
+  focused = isClient && document.hasFocus();
+  function onFocus() {
+    focused = document.hasFocus();
+  }
+
   // redirect window.onerror to console.error (or alert if #console not set up yet)
   function onError(e) {
     if (!consolediv) return; // can happen during login process
@@ -3777,16 +3783,16 @@
 {#if user && processed}
   <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating}>
     {#each { length: columnCount + 1 } as _, column}
-      <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount}>
+      <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount} class:focused>
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-            <div id="header-container" class:focused>
+            <div id="header-container" class:focused={editorFocused}>
               <div id="editor">
                 <Editor
                   id="mindbox"
                   bind:this={editor}
                   bind:text={editorText}
-                  bind:focused
+                  bind:focused={editorFocused}
                   showButtons={true}
                   cancelOnDelete={true}
                   createOnAnyModifiers={true}
@@ -3949,6 +3955,8 @@
 <svelte:window
   on:keydown={onKeyDown}
   on:keyup={onKeyUp}
+  on:focus={onFocus}
+  on:blur={onFocus}
   on:error={onError}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
@@ -4348,6 +4356,9 @@
   /* .column:last-child {
     margin-right: 0;
   } */
+  .column:not(.focused) {
+    opacity: 0.7;
+  }
   .column.hidden {
     position: absolute;
     left: -100000px;
