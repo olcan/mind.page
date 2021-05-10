@@ -1737,7 +1737,7 @@
   }
 
   let tagCounts = new Map<string, number>();
-  function itemTextChanged(index: number, text: string, update_deps = true) {
+  function itemTextChanged(index: number, text: string, update_deps = true, run_deps = true) {
     // console.debug("itemTextChanged", index);
     let item = items[index];
     item.hash = hashCode(text);
@@ -1865,15 +1865,16 @@
           // NOTE: we only need to update dependencies on first update_deps or if item label has changed
           if (item.label != prevLabel) depitem.deps = itemDeps(depindex);
           if (item.label != prevLabel || (depitem.deps.includes(item.id) && item.deephash != prevDeepHash)) {
-            // NOTE: changes to deephash trigger re-rendering and cache invalidation
+            // update deephash (triggers re-rendering and cache invalidation)
             depitem.deephash = hashCode(
               depitem.deps
                 .map((id) => items[indexFromId.get(id)].hash)
                 .concat(depitem.hash)
                 .join(",")
             );
-            // if item has _autorun, dispatch run (w/ sanity check for non-deletion)
-            if (depitem.autorun)
+            // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
+            // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
+            if (run_deps && depitem.autorun)
               setTimeout(() => {
                 if (depitem.index == indexFromId.get(depitem.id)) onItemRun(depitem.index);
               });
@@ -3394,7 +3395,7 @@
                     items = [item, ...items];
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index));
-                    itemTextChanged(0, item.text);
+                    itemTextChanged(0, item.text, true /* update_deps */, false /* run_deps */);
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     hideIndex++; // show one more item
                     onEditorChange(editorText); // integrate new item at index 0
@@ -3404,7 +3405,7 @@
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
                     if (index === undefined) return; // nothing to remove
                     let item = items[index];
-                    itemTextChanged(index, ""); // clears label, deps, etc
+                    itemTextChanged(index, "", true /* update_deps */, false /* run_deps */);
                     items.splice(index, 1);
                     if (index < hideIndex) hideIndex--; // back up hide index
                     // update indices as needed by onEditorChange
@@ -3424,7 +3425,7 @@
                     let item = items[index];
                     item.text = item.savedText = savedItem.text;
                     item.time = item.savedTime = savedItem.time;
-                    itemTextChanged(index, item.text); // updates label, deps, etc
+                    itemTextChanged(index, item.text, true /* update_deps */, false /* run_deps */);
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     onEditorChange(editorText); // item time/text has changed
                   }
