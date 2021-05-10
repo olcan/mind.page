@@ -2885,6 +2885,11 @@
     }
   }
 
+  let lastResizeTime = 0;
+  function onResize() {
+    lastResizeTime = Date.now();
+  }
+
   function onStatusClick(e) {
     // ignore click if text is selected
     if (window.getSelection().type == "Range") {
@@ -3300,25 +3305,30 @@
       //       (also window.outerWidth can be stale after device rotation in iOS Safari)
       let lastDocumentWidth = 0;
       let lastWindowHeight = 0;
+      let lastFocusElem = null; // element that had focus on last recorded width/height
       function checkLayout() {
-        if (Date.now() - lastScrollTime < 250) return; // will be invoked again via setInterval
+        if (Date.now() - lastScrollTime < 250) return; // avoid layout during scroll
+        if (Date.now() - lastResizeTime < 250) return; // avoid layout during resizing
+
         const documentWidth = document.documentElement.clientWidth;
-        if (documentWidth != lastDocumentWidth) {
-          // console.debug(
-          //   `document width changed from ${lastDocumentWidth} to ${documentWidth}`
-          // );
+        if (
+          documentWidth != lastDocumentWidth ||
+          // ignore height change if active element also changed
+          // (to avoid responding to temporary virtual keyboards)
+          (outerHeight != lastWindowHeight && document.activeElement.isSameNode(lastFocusElem))
+        ) {
           updateItemLayout();
           // resize of all elements w/ _resize attribute (and property)
           document.querySelectorAll("[_resize]").forEach((elem) => elem["_resize"]());
-          lastDocumentWidth = documentWidth;
-          return;
         }
         // on android, if window height grows enough, assume keyboard is closed and blur active element
         // (otherwise e.g. tapping of tags with editor focused will scroll back up)
-        if (android && outerHeight > lastWindowHeight + 200) {
-          (document.activeElement as HTMLElement).blur();
-        }
+        if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur();
+
+        lastDocumentWidth = documentWidth;
         lastWindowHeight = outerHeight;
+        lastFocusElem = document.activeElement;
+
         // update time strings every 10 seconds
         // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
         if (Date.now() - lastTimeStringUpdateTime > 10000) {
@@ -3330,8 +3340,9 @@
           items = items; // trigger svelte render
         }
       }
-      visualViewport.addEventListener("resize", checkLayout);
+
       document.body.addEventListener("scroll", onScroll);
+      visualViewport.addEventListener("resize", onResize);
 
       let firstSnapshot = true;
       function initFirebaseRealtime() {
