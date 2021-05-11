@@ -4376,7 +4376,7 @@
     margin-right: 0;
   } */
   .items.focused {
-    background: rgb(7, 7, 7);
+    background: rgb(10, 10, 10);
   }
   .column:not(.focused) {
     opacity: 0.7;
