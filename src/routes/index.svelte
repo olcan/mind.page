@@ -3606,8 +3606,11 @@
     // disable arrow keys to prevent ambiguous behavior
     if (key.startsWith("Arrow")) e.preventDefault();
 
-    // let unmodified E edit target item
-    if (key == "KeyE" && !modified) {
+    // disable space bar page-scroll behavior
+    if (key == "Space") e.preventDefault();
+
+    // let unmodified Enter or E key edit target item
+    if (key == "Enter" || (key == "KeyE" && !modified)) {
       // edit click requires mousedown first (see onClick in Item.svelte)
       document.querySelector(".target")?.dispatchEvent(new Event("mousedown"));
       document.querySelector(".target")?.dispatchEvent(new Event("click"));
@@ -3658,40 +3661,63 @@
         return; // context exists, so J/K/ArrowLeft/Right assumed handled
       }
     }
-    // let unmodified Enter (or ArrowDown, or ArrowRight/J if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
-    if ((key == "Enter" || key == "ArrowDown" || key == "ArrowRight" || key == "KeyJ") && !modified) {
+    // let unmodified ArrowDown (or ArrowRight/J if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    if ((key == "ArrowDown" || key == "ArrowRight" || key == "KeyJ") && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector(".target mark.label") as any)?.title;
+      let nextTargetId;
       if (targetLabel) {
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context
+        let child;
         if (item(_item(targetLabel).id).context) {
           // allow arbitrary child tag
-          document
-            .querySelector(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
-            ?.dispatchEvent(new Event("mousedown"));
+          child = document.querySelector(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)");
         } else {
           // filter to children w/ nested labels
           const childTags = Array.from(
             document.querySelectorAll(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
           ).filter((t) => t["title"]?.startsWith(targetLabel + "/"));
-          childTags[0]?.dispatchEvent(new Event("mousedown"));
+          child = childTags[0];
+        }
+        if (child) {
+          child.dispatchEvent(new Event("mousedown"));
+        } else {
+          // no child found for target, search for next non-pinned item w/ unique label
+          const targetIndex = _item(targetLabel).index;
+          nextTargetId = items.find((item) => item.index > targetIndex && !item.pinned && item.labelUnique)?.id;
         }
       } else {
         // select first non-pinned item w/ unique label if clickable
-        const id = items.find((item) => !item.pinned && item.labelUnique)?.id;
-        if (id) document.querySelector(`#super-container-${id} mark.label`)?.dispatchEvent(new Event("mousedown"));
+        nextTargetId = items.find((item) => !item.pinned && item.labelUnique)?.id;
+      }
+      if (nextTargetId) {
+        let nextTarget = document.querySelector(`#super-container-${nextTargetId} mark.label`);
+        if (nextTarget) {
+          // click on next target since it is clickable
+          nextTarget.dispatchEvent(new Event("mousedown"));
+        } else {
+          // instead click on next toggle to reveal more items
+          document.querySelector(`.toggle.show`)?.dispatchEvent(new Event("click"));
+        }
       }
       return;
     }
     // let unmodified Backspace (or ArrowUp) select label on last context item (i.e. move up to parent)
+    // if there is a clickable hide toggle, we click on that first
     if ((key == "Backspace" || key == "ArrowUp") && !modified) {
-      // see comments above about lastContext
-      const lastContext = Array.from(document.querySelectorAll(".target_context"))
-        .filter((e) => e.querySelector("mark.selected"))
-        .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
-      if (lastContext) {
-        lastContext.querySelector("mark.label")?.dispatchEvent(new Event("mousedown"));
+      let hideToggle;
+      if ((hideToggle = document.querySelector(`.toggle.hide`))) {
+        hideToggle.dispatchEvent(new Event("click"));
         return;
+      } else {
+        // see comments above about lastContext
+        const lastContext = Array.from(document.querySelectorAll(".target_context"))
+          .filter((e) => e.querySelector("mark.selected"))
+          .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
+        if (lastContext) {
+          lastContext.querySelector("mark.label")?.dispatchEvent(new Event("mousedown"));
+          return;
+        }
       }
     }
 
