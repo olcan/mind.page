@@ -3756,10 +3756,11 @@
       }
     }
 
-    // clear non-empty editor on escape or backspace/arrowup/arrowleft/k (if not handled above)
+    // clear non-empty editor on unmodified escape or backspace/arrowup/arrowleft/k (if not handled above)
     if (
       editorText &&
-      (key == "Escape" || key == "Backspace" || key == "ArrowUp" || key == "ArrowLeft" || key == "KeyK")
+      (key == "Escape" || key == "Backspace" || key == "ArrowUp" || key == "ArrowLeft" || key == "KeyK") &&
+      !modified
     ) {
       e.preventDefault();
       // this follows onTagClick behavior
