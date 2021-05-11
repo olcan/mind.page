@@ -3619,25 +3619,25 @@
     // let unmodified Enter or E key edit target item
     if (key == "Enter" || (key == "KeyE" && !modified)) {
       // edit click requires mousedown first (see onClick in Item.svelte)
-      document.querySelector(".target")?.dispatchEvent(new Event("mousedown"));
-      document.querySelector(".target")?.dispatchEvent(new Event("click"));
+      document.querySelector(".container.target")?.dispatchEvent(new Event("mousedown"));
+      document.querySelector(".container.target")?.dispatchEvent(new Event("click"));
       e.preventDefault(); // avoid entering text into editor
       return;
     }
     // let unmodified R run target item
     if (key == "KeyR" && !modified) {
-      document.querySelector(".target .run")?.dispatchEvent(new Event("click"));
+      document.querySelector(".container.target .run")?.dispatchEvent(new Event("click"));
       return;
     }
     // let unmodified T toggle logs on target item
     if (key == "KeyT" && !modified) {
-      document.querySelector(".target .log-summary")?.dispatchEvent(new Event("click"));
+      document.querySelector(".container.target .log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
     // let unmodified J/K (or ArrowLeft/Right) select next/prev visible non-label tag in last context item
     if ((key == "KeyJ" || key == "KeyK" || key == "ArrowLeft" || key == "ArrowRight") && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
-      const lastContext = Array.from(document.querySelectorAll(".target_context"))
+      const lastContext = Array.from(document.querySelectorAll(".container.target_context"))
         .filter((e) => e.querySelector("mark.selected"))
         .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
       if (lastContext) {
@@ -3671,18 +3671,22 @@
     // let unmodified ArrowDown (or ArrowRight/J if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == "ArrowDown" || key == "ArrowRight" || key == "KeyJ") && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
-      let targetLabel = (document.querySelector(".target mark.label") as any)?.title;
+      let targetLabel = (document.querySelector(".container.target mark.label") as any)?.title;
       let nextTargetId;
       if (targetLabel) {
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context
         let child;
         if (item(_item(targetLabel).id).context) {
           // allow arbitrary child tag
-          child = document.querySelector(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)");
+          child = document.querySelector(
+            ".container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)"
+          );
         } else {
           // filter to children w/ nested labels
           const childTags = Array.from(
-            document.querySelectorAll(".target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)")
+            document.querySelectorAll(
+              ".container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)"
+            )
           ).filter((t) => t["title"]?.startsWith(targetLabel + "/"));
           child = childTags[0];
         }
@@ -3732,7 +3736,7 @@
         return;
       }
       // see comments above about lastContext
-      const lastContext = Array.from(document.querySelectorAll(".target_context"))
+      const lastContext = Array.from(document.querySelectorAll(".container.target_context"))
         .filter((e) => e.querySelector("mark.selected"))
         .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
       if (lastContext) {
@@ -4443,8 +4447,16 @@
   .column:not(.multi-column) {
     margin-right: 0;
   }
-  .column:not(.focused) {
-    opacity: 0.7;
+  :global(.column:not(.focused) #header),
+  :global(.column:not(.focused) .super-container),
+  :global(.column:not(.focused) .toggle) {
+    opacity: 0.25;
+  }
+  :global(.column:not(.focused) .super-container.target_context) {
+    opacity: 0.5;
+  }
+  :global(.column:not(.focused) .super-container.target) {
+    opacity: 0.8;
   }
   .column.hidden {
     position: absolute;

@@ -1167,6 +1167,8 @@
   id={"super-container-" + id}
   class:editing
   class:hidden
+  class:target
+  class:target_context
   class:timed={timeString.length > 0}
 >
   {#if timeString}
