@@ -4351,6 +4351,11 @@
   /* .items.multi-column {
     padding-bottom: 0;
   } */
+  .items.focused {
+    background: rgb(10, 10, 10);
+    /* border-left: 1px solid #333; */
+    /* border-right: 1px solid #333; */
+  }
   :global(#sapper) {
     min-height: 100%;
   }
@@ -4375,8 +4380,9 @@
   /* .column:last-child {
     margin-right: 0;
   } */
-  .items.focused {
-    background: rgb(10, 10, 10);
+  /* single-column layout can remove margin since there is no concern of having columns w/ same width */
+  .column:not(.multi-column) {
+    margin-right: 0;
   }
   .column:not(.focused) {
     opacity: 0.7;
@@ -4486,10 +4492,6 @@
       height: 52px; /* 41px = height of single-line editor (on narrow window) */
       width: 52px;
       min-width: 52px;
-    }
-    /* single-column layout can remove margin since there is no concern of having columns w/ same width */
-    .column:not(.multi-column) {
-      margin-right: 0;
     }
   }
 </style>
