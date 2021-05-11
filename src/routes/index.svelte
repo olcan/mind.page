@@ -442,8 +442,8 @@
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
         if (options["async"]) {
-          // NOTE: async commands use a light-weight wrapper without output/logging into item
-          if (options["trigger"] == "command") evaljs = ["(async () => {", evaljs, "})()"].join("\n");
+          if (options["simple_async"]) // use light-weight wrapper without output/logging into item
+            evaljs = [";(async () => {", evaljs, "})()"].join("\n");
           else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
         }
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
@@ -2262,6 +2262,7 @@
               Promise.resolve(
                 _item("#commands" + cmd).eval((async ? "return " : "") + `run(\`${args}\`)`, {
                   trigger: "command",
+                  async_simple: true, // use simple wrapper if async
                   async, // enables async command wrapper
                 })
               )
