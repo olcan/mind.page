@@ -1105,9 +1105,12 @@
   let hideIndex = 0;
   let hideIndexFromRanking = 0;
   let hideIndexForSession = 0;
+  let editorChangesWithTimeKept = new Set();
 
-  function onEditorChange(text: string) {
+  function onEditorChange(text: string, keep_times = false) {
     editorText = text; // in case invoked without setting editorText
+    if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim());
+    else editorChangesWithTimeKept.clear();
 
     // editor text is considered "modified" and if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
     const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText;
@@ -1302,14 +1305,16 @@
       if ((item.editing || item.running) && !item.log) item.time = now;
     });
 
-    // Update time for listing item (but not save yet, a.k.a. "soft touch")
-    // NOTE: we may add a few ms to the current time to dominate other recent touches (e.g. tag clicks)
-    if (listingItemIndex >= 0 && !items[listingItemIndex].log) items[listingItemIndex].time = now + 2; // prioritize
+    if (!keep_times) {
+      // Update time for listing item (but not save yet, a.k.a. "soft touch")
+      // NOTE: we may add a few ms to the current time to dominate other recent touches (e.g. tag clicks)
+      if (listingItemIndex >= 0 && !items[listingItemIndex].log) items[listingItemIndex].time = now + 2; // prioritize
 
-    // Update times for id-matching items (but not save yet, a.k.a. "soft touch")
-    idMatchItemIndices.forEach((index) => {
-      if (!items[index].log) items[index].time = now + 1; // prioritize
-    });
+      // Update times for id-matching items (but not save yet, a.k.a. "soft touch")
+      idMatchItemIndices.forEach((index) => {
+        if (!items[index].log) items[index].time = now + 1; // prioritize
+      });
+    }
 
     // insert dummy item with time=now to determine (below) index after which items are ranked purely by time
     items.push({
@@ -1535,10 +1540,13 @@
     const index = indexFromId.get(id);
     if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
-    if (items[index].time > newestTime) console.warn("invalid item time");
-    else if (items[index].time < newestTime && !items[index].pinned && !items[index].log)
-      items[index].time = Date.now();
-    // console.debug(e.pageX, e.pageY, document.documentElement.scrollLeft, document.documentElement.scrollTop);
+    // skip time change if alt is held
+    if (!e.altKey) {
+      if (items[index].time > newestTime) console.warn("invalid item time");
+      else if (items[index].time < newestTime && !items[index].pinned && !items[index].log)
+        items[index].time = Date.now();
+      // console.debug(e.pageX, e.pageY, document.documentElement.scrollLeft, document.documentElement.scrollTop);
+    }
 
     // NOTE: Rendered form of tag should be renderTag(reltag). We use common suffix to map click position.
     const rendered = renderTag(reltag);
@@ -1592,7 +1600,7 @@
     finalizeStateOnEditorChange = true; // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
     lastEditorChangeTime = 0; // disable debounce even if editor focused
-    onEditorChange(editorText);
+    onEditorChange(editorText, e.altKey /* keep_times */);
 
     if (narrating) return;
     // scroll up (or down) to target item if needed
@@ -1659,7 +1667,7 @@
     }
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     ignoreStateOnEditorChange = true; // do not update history when going back
-    onEditorChange(editorText);
+    onEditorChange(editorText, true /* keep_times */);
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof e.state.hideIndex == "number") hideIndex = Math.max(hideIndex, e.state.hideIndex);
     // if (narrating) return;
@@ -3654,9 +3662,9 @@
         }
         if (selectedIndex >= 0) {
           if ((key == "KeyJ" || key == "ArrowRight") && selectedIndex < visibleTags.length - 1)
-            visibleTags[selectedIndex + 1].dispatchEvent(new Event("mousedown"));
+            visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
           else if ((key == "KeyK" || key == "ArrowLeft") && selectedIndex > 0)
-            visibleTags[selectedIndex - 1].dispatchEvent(new Event("mousedown"));
+            visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
         }
         return; // context exists, so J/K/ArrowLeft/Right assumed handled
       }
@@ -3680,11 +3688,14 @@
           child = childTags[0];
         }
         if (child) {
-          child.dispatchEvent(new Event("mousedown"));
+          child.dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
         } else {
-          // no child found for target, search for next non-pinned item w/ unique label
-          const targetIndex = _item(targetLabel).index;
-          nextTargetId = items.find((item) => item.index > targetIndex && !item.pinned && item.labelUnique)?.id;
+          // no child found for target, so search for next non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
+          const targetIndex = item(_item(targetLabel).id).index;
+          nextTargetId = items.find(
+            (item) =>
+              item.index > targetIndex && !item.pinned && item.labelUnique && !editorChangesWithTimeKept.has(item.label)
+          )?.id;
         }
       } else {
         // select first non-pinned item w/ unique label if clickable
@@ -3692,32 +3703,53 @@
       }
       if (nextTargetId) {
         let nextTarget = document.querySelector(`#super-container-${nextTargetId} mark.label`);
-        if (nextTarget) {
-          // click on next target since it is clickable
-          nextTarget.dispatchEvent(new Event("mousedown"));
-        } else {
-          // instead click on next toggle to reveal more items
-          document.querySelector(`.toggle.show`)?.dispatchEvent(new Event("click"));
+        // if next target is not found, click on next show toggle and try again after dispatch
+        // if target is still not found, then we will have at least toggled new items into view
+        if (nextTarget) nextTarget.dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
+        else {
+          const showToggle = document.querySelector(`.toggle.show`);
+          if (showToggle) {
+            // if toggle is too far down, bring it to ~middle of page
+            const toggleTop = (showToggle as HTMLElement).offsetTop;
+            if (toggleTop + 100 > document.body.scrollTop + innerHeight)
+              document.body.scrollTo(0, Math.max(0, toggleTop - innerHeight / 2));
+            showToggle.dispatchEvent(new Event("click"));
+          }
+          // update_dom().then(() => {
+          //   document
+          //     .querySelector(`#super-container-${nextTargetId} mark.label`)
+          //     ?.dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
+          // });
         }
       }
       return;
     }
     // let unmodified Backspace (or ArrowUp) select label on last context item (i.e. move up to parent)
-    // if there is a clickable hide toggle, we click on that first
     if ((key == "Backspace" || key == "ArrowUp") && !modified) {
-      let hideToggle;
-      if ((hideToggle = document.querySelector(`.toggle.hide`))) {
+      // attempt to click on a hide toggle
+      const hideToggle = document.querySelector(`.toggle.hide`);
+      if (hideToggle) {
         hideToggle.dispatchEvent(new Event("click"));
         return;
+      }
+      // see comments above about lastContext
+      const lastContext = Array.from(document.querySelectorAll(".target_context"))
+        .filter((e) => e.querySelector("mark.selected"))
+        .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
+      if (lastContext) {
+        lastContext.querySelector("mark.label")?.dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
+        // also click on any hide toggle (which must be below new target)
+        update_dom().then(() => {
+          document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event("click"));
+        });
+        return;
       } else {
-        // see comments above about lastContext
-        const lastContext = Array.from(document.querySelectorAll(".target_context"))
-          .filter((e) => e.querySelector("mark.selected"))
-          .sort((a, b) => item(b.getAttribute("item-id")).time - item(a.getAttribute("item-id")).time)[0];
-        if (lastContext) {
-          lastContext.querySelector("mark.label")?.dispatchEvent(new Event("mousedown"));
-          return;
-        }
+        // // attempt to click on a hide toggle
+        // const hideToggle = document.querySelector(`.toggle.hide`);
+        // if (hideToggle) {
+        //   hideToggle.dispatchEvent(new Event("click"));
+        //   return;
+        // }
       }
     }
 
