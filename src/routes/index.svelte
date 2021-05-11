@@ -3819,7 +3819,9 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
-  focused = isClient && document.hasFocus();
+  // on ios, initial focus can be false for no apparent reason, so we assume it is true
+  // (also in general ios seems to be able to keep multiple windows responsive so focus may always be true)
+  focused = isClient && (ios || document.hasFocus());
   function onFocus() {
     focused = document.hasFocus();
   }
