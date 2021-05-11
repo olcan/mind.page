@@ -977,7 +977,8 @@
       if (a.hasAttribute("onclick") && a.getAttribute("onclick").includes("_handleLinkClick")) return;
       const prevOnClick: any = a.onclick;
       a.onclick = function (e) {
-        const ret = prevOnClick(e);
+        let ret;
+        if (prevOnClick) ret = prevOnClick(e);
         try {
           window["_handleLinkClick"](id, a.href, e);
         } catch (e) {

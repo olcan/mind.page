@@ -4456,7 +4456,8 @@
   :global(.column:not(.focused) .super-container.target_context) {
     opacity: 0.5;
   }
-  :global(.column:not(.focused) .super-container.target) {
+  :global(.column:not(.focused) .super-container.target),
+  :global(.column:not(.focused) .super-container.editing) {
     opacity: 0.8;
   }
   .column.hidden {
