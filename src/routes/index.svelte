@@ -2444,12 +2444,11 @@
   }
 
   function onItemSaved(id: string, savedItem) {
-    const index = indexFromId.get(id);
-    if (index == undefined) return; // item was deleted
-    // console.debug("saved item", index);
-    let item = items[index];
-
+    // console.debug("saved item", id);
     decryptItem(savedItem).then((savedItem) => {
+      const index = indexFromId.get(id);
+      if (index == undefined) return; // item was deleted
+      let item = items[index];
       item.savedText = savedItem.text;
       item.savedTime = savedItem.time;
       item.saving = false;
