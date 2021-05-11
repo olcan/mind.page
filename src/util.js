@@ -129,6 +129,7 @@ export function parseTags(text) {
         .replace(/(^|[^\\])<script.*?>.*?<\/script>/gs, "$1") // remove scripts (can be multi-line)
         .replace(/(^|[^\\])<style>.*?<\/style>/gs, "$1") // remove styles (can be multi-line)
         .replace(/(^|[^\\])<\/?\w.*?>/g, "$1") // remove html tags
+        .replace(/(^|[^\\])<!--.*?-->/g, "$1") // remove html comment tags
         .replace(/(^|[^\\])<<.*?>>/g, "$1") // remove macros
         .replace(/(^|[^\\])@\{.*?\}@/g, "$1") // remove macros
         //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
