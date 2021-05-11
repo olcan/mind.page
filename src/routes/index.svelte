@@ -285,7 +285,7 @@
       else if (type == "html") content.push(`<!-- ${type} @ ${item.name} -->`);
       let text = type ? extractBlock(item.text, type) : item.text;
       if (options["replace_ids"]) text = text.replace(/(^|[^\\])\$id/g, "$1" + item.id);
-      content.push(text);
+      if (!options["exclude_async"] || !item.deepasync) content.push(text);
       // console.debug(content);
       return content.filter((s) => s).join("\n");
     }
@@ -442,9 +442,10 @@
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
         if (options["async"]) {
-          if (options["simple_async"]) // use light-weight wrapper without output/logging into item
+          if (options["simple_async"]) {
+            // use light-weight wrapper without output/logging into item
             evaljs = [";(async () => {", evaljs, "})()"].join("\n");
-          else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
+          } else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
         }
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
         evaljs = ["'use strict';undefined;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join(

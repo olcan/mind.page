@@ -1081,6 +1081,9 @@
             //       (prefix ; prevents parser confusion when previous line is not colon-terminated)
             window["_item"](id).eval([";(function(){", script.innerHTML, "})()"].join("\n"), {
               trigger: "script_" + scriptIndex,
+              // if _exclude_async, then code from local item is excluded if deepasync
+              // (note code from deepasync deps are already excluded for sync eval)
+              exclude_async: script.hasAttribute("_exclude_async"),
             });
           } catch (e) {
             console.error(`<script> error in item ${label || "id:" + id}: ${e}`);
