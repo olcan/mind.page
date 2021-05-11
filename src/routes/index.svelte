@@ -193,6 +193,12 @@
     get deephash(): number {
       return item(this.id).deephash;
     }
+    get async(): boolean {
+      return item(this.id).async;
+    }
+    get deepasync(): boolean {
+      return item(this.id).deepasync;
+    }
     get index(): number {
       return item(this.id).index;
     }
@@ -224,7 +230,7 @@
     }
     // log options for write_log and write_log_any, reset in eval()
     get log_options(): object {
-      let _item = item(this.id);
+      const _item = item(this.id);
       if (!_item.log_options) _item.log_options = {};
       return _item.log_options;
     }
@@ -270,11 +276,7 @@
         item.deps.forEach((id) => {
           const dep = items[indexFromId.get(id)];
           // NOTE: we allow async dependents to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
-          if (
-            options["exclude_async_deps"] &&
-            (dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true))
-          )
-            return; // exclude async dependency chain
+          if (options["exclude_async_deps"] && dep.deepasync) return; // exclude async dependency chain
           content.push(_item(id).read(type, options));
         });
       }
@@ -1721,8 +1723,7 @@
     return item.deps
       .map((id) => {
         const dep = items[indexFromId.get(id)];
-        const async = dep.async || dep.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
-        return dep.name + (async ? "(async)" : "");
+        return dep.name + (dep.deepasync ? "(async)" : "");
       })
       .join(" ");
   }
@@ -1856,6 +1857,7 @@
           .join(",")
       );
       if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
+      item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
 
       // update deps and deephash as needed for all dependent items
       // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
@@ -1879,6 +1881,7 @@
                 .concat(depitem.hash)
                 .join(",")
             );
+            depitem.deepasync = depitem.async || depitem.deps.some((id) => items[indexFromId.get(id)].async);
             // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
@@ -2255,8 +2258,7 @@
             try {
               // NOTE: if command item is async (or has async dependents), we specify async:true for eval so that it provides (given "command" trigger) a light-weight async wrapper that does not output/log into the item
               let cmd_item = items[_item("#commands" + cmd).index];
-              const async =
-                cmd_item.async || cmd_item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
+              const async = cmd_item.deepasync;
               Promise.resolve(
                 _item("#commands" + cmd).eval((async ? "return " : "") + `run(\`${args}\`)`, {
                   trigger: "command",
@@ -2551,7 +2553,7 @@
     let item = items[index];
     if (!item.runnable) return item.text; // item not runnable, ignore
     // check js_input
-    const async = item.async || item.deps.map((id) => items[indexFromId.get(id)].async).includes(true);
+    const async = item.deepasync;
     let jsin = extractBlock(item.text, "js_input");
     // if js_input block is missing entirely (not just empty), then evaluate "(return await) _run()"
     if (!jsin && !item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/)) {
@@ -2914,7 +2916,7 @@
       return;
     }
     e.stopPropagation();
-    if (showDotted && editingItems.map((index) => items[index].dotted).includes(true)) {
+    if (showDotted && editingItems.some((index) => items[index].dotted)) {
       alert("can not minimize items while editing");
       return;
     }
@@ -3090,6 +3092,7 @@
           .concat(item.hash)
           .join()
       );
+      item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
       item.deps.forEach((id) => items[indexFromId.get(id)].dependents.push(item.id));
     });
     items.forEach((item) => {
