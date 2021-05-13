@@ -163,11 +163,12 @@ export function invalidateElemCache(id) {
     if (elem.hasAttribute("_skip_invalidation")) return;
     // console.warn("deleting from _elem_cache", key);
     delete window["_elem_cache"][id][key];
-    if (elem.closest(".item")) return; // elem is live on .item
     // destroy all children and SELF w/ _destroy attribute (and property)
     elem.querySelectorAll("[_destroy]").forEach((e) => e["_destroy"]());
     if (elem._destroy) elem._destroy();
-    elem.remove(); // prevents any pending chart also
+    // remove unless still live on item (then should be removed on svelte update)
+    // element removal also prevents any pending (via setTimeout) chart renders
+    if (!elem.closest(".item")) elem.remove();
   });
 }
 
