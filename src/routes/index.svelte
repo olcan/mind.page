@@ -2877,7 +2877,10 @@
     if (!lastEditItem) return;
     let index = indexFromId.get(lastEditItem);
     if (index === undefined) return;
-    if (index >= hideIndex) return;
+    if (index >= hideIndex) {
+      alert(`last edited item ${items[index].name} is currently hidden; try going back or revealing more items`);
+      return;
+    }
     if (items[index].editing) return;
     editItem(index);
     lastEditorChangeTime = 0; // force immediate update
