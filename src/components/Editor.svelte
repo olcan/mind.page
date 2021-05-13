@@ -284,6 +284,12 @@
       return;
     }
 
+    // disable Shift+Cmd/Ctrl+S, letting window handle it for "resume edit"
+    if (key == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
+
     // indent/comment selection or current line
     // NOTE: tab key will indent at bullet heads or when there is a selection
     // NOTE: an alternative is to indent anywhere on a bullet line
@@ -342,9 +348,6 @@
       onInput();
       return;
     }
-
-    // ignore resume shortcut Shift+Cmd/Ctrl+S, let window handle it
-    if (key == "KeyS" && (e.metaKey || e.ctrlKey) && e.shiftKey) return;
 
     // create item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
     if (createOnAnyModifiers) {
