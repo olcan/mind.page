@@ -54,7 +54,7 @@
     "eslint-plugin-promise": "^4.0.1",
     "firebase-functions-test": "^0.2.0",
     "highlight.js": "^10.3.2",
-    "lodash": "^4.17.20",
+    "lodash": "^4.17.21",
     "marked": ">=2.0.0",
     "rollup": "^2.3.4",
     "rollup-plugin-svelte": "^6.0.0",
