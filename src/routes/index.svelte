@@ -2695,6 +2695,8 @@
           return;
         }
         textArea(item.index).focus();
+        // click on hide toggle to help focus on edited item
+        document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event("click"));
       });
     } else {
       // stopped editing
@@ -3872,6 +3874,8 @@
   focused = isClient && (ios || document.hasFocus());
   function onFocus() {
     focused = document.hasFocus();
+    // click on hide toggle on loss of focus on window for a cleaner/faster multi-tab setup
+    if (!focused) document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event("click"));
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)
