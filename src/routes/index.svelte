@@ -888,8 +888,26 @@
 
     if (narrating) return;
 
-    // trigger scroll up if needed to keep top movers visible
-    if (_.min(topMovers) < items.length) {
+    // maintain focus and scroll to caret OR scroll to top mover
+    if (focusedItem >= 0) {
+      const div = document.querySelector("#super-container-" + items[focusedItem].id) as HTMLElement;
+      if (!div) console.warn("focusedItem missing on page");
+      else if (!div.contains(document.activeElement)) console.warn("focusedItem does not contain activeElement");
+      else {
+        const textarea = textArea(focusedItem);
+        let activeEditItem = focusedItem;
+        let activeEditSelectionStart = textarea.selectionStart;
+        let activeEditSelectionEnd = textarea.selectionEnd;
+
+        const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
+        tick()
+          .then(update_dom)
+          .then(() => {
+            if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
+            restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
+          });
+      }
+    } else if (_.min(topMovers) < items.length) {
       const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
       tick()
         .then(update_dom)
@@ -903,7 +921,7 @@
               return (div as HTMLElement).offsetTop;
             })
           );
-          // console.log(itemTop, document.body.scrollTop, topMovers.toString());
+          // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
           if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
         });
@@ -2823,6 +2841,35 @@
     editingItems.push(index);
   }
 
+  function restoreItemEditor(index, selectionStart = 0, selectionEnd = 0) {
+    const textarea = textArea(index);
+    textarea.focus();
+    textarea.selectionStart = selectionStart;
+    textarea.selectionEnd = selectionEnd;
+
+    // scroll to caret position if necessary
+    // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
+    const backdrop = textarea.closest(".editor")?.querySelector(".backdrop");
+    if (!backdrop) return; // unable to locate backdrop div for caret position
+    const clone = backdrop.cloneNode(true) as HTMLDivElement;
+    clone.style.visibility = "hidden";
+    backdrop.parentElement.insertBefore(clone, backdrop);
+    (clone.firstChild as HTMLElement).innerHTML =
+      _.escape(textarea.value.substring(0, textarea.selectionStart)) +
+      `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
+    const span = clone.querySelector("span");
+    let elem = span as HTMLElement;
+    let caretTop = span.offsetTop;
+    while (!elem.offsetParent.isSameNode(document.body)) {
+      elem = elem.offsetParent as HTMLElement;
+      caretTop += elem.offsetTop;
+    }
+    clone.remove();
+    // if caret is  is too far up, or too far down, bring it to ~middle of page
+    if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
+      document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 2));
+  }
+
   let lastEditItem;
   let lastEditSelectionStart;
   let lastEditSelectionEnd;
@@ -2836,11 +2883,9 @@
     lastEditorChangeTime = 0; // force immediate update
     onEditorChange(editorText); // since edit state changed
     tick().then(() => {
-      let index = indexFromId.get(lastEditItem);
+      const index = indexFromId.get(lastEditItem);
       if (index === undefined) return;
-      textArea(index).focus();
-      textArea(index).selectionStart = lastEditSelectionStart;
-      textArea(index).selectionEnd = lastEditSelectionEnd;
+      restoreItemEditor(index, lastEditSelectionStart, lastEditSelectionEnd);
     });
   }
 
