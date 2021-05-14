@@ -1478,6 +1478,8 @@
     else hideIndex = targetItemCount > 0 ? toggles[0].start : toggles[0].end;
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
+    // if ranking while unfocused, hide any session items
+    if (!focused) hideIndex = hideIndexFromRanking;
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
