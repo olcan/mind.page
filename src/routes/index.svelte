@@ -763,6 +763,7 @@
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
   let lastLayoutTime = 0;
+  let lastFocusedEditElement = null;
   let lastTimeStringUpdateTime = 0;
   let showDotted = false;
 
@@ -886,33 +887,32 @@
       columnLastItem[item.column] = index;
     });
 
-    if (narrating) return;
-
-    // maintain focus and scroll to caret OR scroll to top mover
+    // maintain focus and scroll to caret if edit element (textarea) changes
+    // OR scroll to top mover (if not narrating, since then we prefer manual scroll)
+    let activeEditElement = null;
+    let activeEditSelectionStart = 0;
+    let activeEditSelectionEnd = 0;
     if (focusedItem >= 0) {
       const div = document.querySelector("#super-container-" + items[focusedItem].id) as HTMLElement;
       if (!div) console.warn("focusedItem missing on page");
       else if (!div.contains(document.activeElement)) console.warn("focusedItem does not contain activeElement");
       else {
         const textarea = textArea(focusedItem);
-        let activeEditItem = focusedItem;
-        let activeEditSelectionStart = textarea.selectionStart;
-        let activeEditSelectionEnd = textarea.selectionEnd;
-
-        const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
-        tick()
-          .then(update_dom)
-          .then(() => {
-            if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
-            restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
-          });
+        activeEditElement = textarea;
+        activeEditSelectionStart = textarea.selectionStart;
+        activeEditSelectionEnd = textarea.selectionEnd;
       }
-    } else if (_.min(topMovers) < items.length) {
-      const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
-      tick()
-        .then(update_dom)
-        .then(() => {
-          if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
+    }
+
+    const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
+    tick()
+      .then(update_dom)
+      .then(() => {
+        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
+        if (activeEditElement && !activeEditElement.isSameNode(lastFocusedEditElement)) {
+          restoreItemEditor(activeEditElement, activeEditSelectionStart, activeEditSelectionEnd);
+          lastFocusedEditElement = activeEditElement; // prevent auto-focusing/scrolling again
+        } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
             topMovers.map((index) => {
               if (index == items.length) return Infinity; // nothing in this column
@@ -924,8 +924,8 @@
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
           if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
-        });
-    }
+        }
+      });
   }
 
   let images = new Map<string, string>(); // permanent fname to temporary url
@@ -2853,8 +2853,8 @@
     editingItems.push(index);
   }
 
-  function restoreItemEditor(index, selectionStart = 0, selectionEnd = 0) {
-    const textarea = textArea(index);
+  function restoreItemEditor(textarea, selectionStart = 0, selectionEnd = 0) {
+    if (!textarea) return;
     textarea.focus();
     textarea.selectionStart = selectionStart;
     textarea.selectionEnd = selectionEnd;
@@ -2899,8 +2899,8 @@
     onEditorChange(editorText); // since edit state changed
     tick().then(() => {
       const index = indexFromId.get(lastEditItem);
-      if (index === undefined) return;
-      restoreItemEditor(index, lastEditSelectionStart, lastEditSelectionEnd);
+      if (index === undefined) return; // item deleted
+      restoreItemEditor(textArea(index), lastEditSelectionStart, lastEditSelectionEnd);
     });
   }
 
