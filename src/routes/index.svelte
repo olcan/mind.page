@@ -887,9 +887,9 @@
       columnLastItem[item.column] = index;
     });
 
-    // maintain focus and scroll to caret if edit element (textarea) changes
+    // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
     // OR scroll to top mover (if not narrating, since then we prefer manual scroll)
-    let activeEditElement = null;
+    let activeEditItem = -1;
     let activeEditSelectionStart = 0;
     let activeEditSelectionEnd = 0;
     if (focusedItem >= 0) {
@@ -898,7 +898,7 @@
       else if (!div.contains(document.activeElement)) console.warn("focusedItem does not contain activeElement");
       else {
         const textarea = textArea(focusedItem);
-        activeEditElement = textarea;
+        activeEditItem = focusedItem;
         activeEditSelectionStart = textarea.selectionStart;
         activeEditSelectionEnd = textarea.selectionEnd;
       }
@@ -909,9 +909,9 @@
       .then(update_dom)
       .then(() => {
         if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
-        if (activeEditElement && !activeEditElement.isSameNode(lastFocusedEditElement)) {
-          restoreItemEditor(activeEditElement, activeEditSelectionStart, activeEditSelectionEnd);
-          lastFocusedEditElement = activeEditElement; // prevent auto-focusing/scrolling again
+        if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
+          restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
+          lastFocusedEditElement = textArea(activeEditItem); // prevent auto-focusing/scrolling again
         } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
             topMovers.map((index) => {
@@ -2853,8 +2853,8 @@
     editingItems.push(index);
   }
 
-  function restoreItemEditor(textarea, selectionStart = 0, selectionEnd = 0) {
-    if (!textarea) return;
+  function restoreItemEditor(index, selectionStart = 0, selectionEnd = 0) {
+    const textarea = textArea(index);
     textarea.focus();
     textarea.selectionStart = selectionStart;
     textarea.selectionEnd = selectionEnd;
@@ -2899,8 +2899,8 @@
     onEditorChange(editorText); // since edit state changed
     tick().then(() => {
       const index = indexFromId.get(lastEditItem);
-      if (index === undefined) return; // item deleted
-      restoreItemEditor(textArea(index), lastEditSelectionStart, lastEditSelectionEnd);
+      if (index === undefined) return;
+      restoreItemEditor(index, lastEditSelectionStart, lastEditSelectionEnd);
     });
   }
 
