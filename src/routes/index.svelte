@@ -3788,8 +3788,8 @@
       }
       return;
     }
-    // let unmodified Backspace (or ArrowUp) select label on last context item (i.e. move up to parent)
-    if ((key == "Backspace" || key == "ArrowUp") && !modified) {
+    // let unmodified ArrowUp select label on last context item (i.e. move up to parent)
+    if (key == "ArrowUp" && !modified) {
       // attempt to click on a hide toggle
       const hideToggle = document.querySelector(`.toggle.hide`);
       if (hideToggle) {
