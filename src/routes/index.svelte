@@ -908,7 +908,7 @@
     tick()
       .then(update_dom)
       .then(() => {
-        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled
+        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled by another layout
         if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
           restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
           lastFocusedEditElement = textArea(activeEditItem); // prevent auto-focusing/scrolling again
@@ -2707,6 +2707,7 @@
           return;
         }
         textArea(item.index).focus();
+        updateItemLayout(); // trigger scroll-to-caret w/o waiting for layout due to height change
       });
     } else {
       // stopped editing
