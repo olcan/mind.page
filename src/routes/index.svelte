@@ -2690,6 +2690,8 @@
       editingItems.push(index);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
+      // hide all time-ranked items to help focus on edited item
+      hideIndex = hideIndexFromRanking;
       // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       tick().then(() => {
         if (!textArea(item.index)) {
@@ -2697,8 +2699,6 @@
           return;
         }
         textArea(item.index).focus();
-        // click on hide toggle to help focus on edited item
-        document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event("click"));
       });
     } else {
       // stopped editing
@@ -3876,8 +3876,8 @@
   focused = isClient && (ios || document.hasFocus());
   function onFocus() {
     focused = document.hasFocus();
-    // click on hide toggle on loss of focus on window for a cleaner/faster multi-tab setup
-    if (!focused) document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event("click"));
+    // hide all time-ranked items when window focus is lost
+    if (!focused) hideIndex = hideIndexFromRanking;
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)
