@@ -416,7 +416,9 @@
               classNames = classNames.trim();
               // if (depline) classNames = ""; // disable styling for deps/dependents
               if (classNames) classNames = ` class="${classNames}"`;
+
               // shorten tag if possible
+              // we can shorten both children (<label>/child) and siblings (<parentLabel>/sibling)
               let reltag = tag;
               if (
                 label &&
