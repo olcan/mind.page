@@ -1121,6 +1121,7 @@
   let replaceStateOnEditorChange = false;
   let ignoreStateOnEditorChange = false;
   let hideIndex = 0;
+  let hideIndexMinimal = 0;
   let hideIndexFromRanking = 0;
   let hideIndexForSession = 0;
   let editorChangesWithTimeKept = new Set();
@@ -1157,12 +1158,14 @@
       if (!editorChangePending) {
         editorChangePending = true;
         setTimeout(() => {
+          if (!editorChangePending) return; // change handled via debounce-bypass
           editorChangePending = false;
           onEditorChange(editorText);
         }, editorDebounceTime);
       }
       return;
     }
+    editorChangePending = false;
     lastEditorChangeTime = Infinity; // force minimum wait for next change
     window["_mindboxDebounced"] = false;
     const start = Date.now();
@@ -1469,17 +1472,20 @@
       }
     }
 
+    // calculate "minimal" hide index used when window is defocused or items edited
+    // minimal index is either the first time-ranked item, or the first position-based hidden item
+    hideIndexMinimal =
+      toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end;
+
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
-    // auto-show session items if no position-based toggles
-    // otherwise show first position-based toggle, unless there are targets
-    if (toggles.length == 0) hideIndex = hideIndexForSession;
-    else hideIndex = targetItemCount > 0 ? toggles[0].start : toggles[0].end;
+    // auto-show session items if no position-based toggles, otherwise use minimal
+    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal;
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
-    // if ranking while unfocused, hide any session items
-    if (!focused) hideIndex = hideIndexFromRanking;
+    // if ranking while unfocused, retreat to minimal index
+    if (!focused) hideIndex = hideIndexMinimal;
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -2378,6 +2384,8 @@
     hideIndex++; // show one more item
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
+    // retreat to minimal hide index to focus on new item
+    hideIndex = hideIndexMinimal;
 
     if (run) {
       // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skip due to saveId being null
@@ -2690,8 +2698,8 @@
       editingItems.push(index);
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText); // editing state (and possibly time) has changed
-      // hide all time-ranked items to help focus on edited item
-      hideIndex = hideIndexFromRanking;
+      // retreat to minimal hide index to focus on edited item
+      hideIndex = hideIndexMinimal;
       // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       tick().then(() => {
         if (!textArea(item.index)) {
@@ -3876,8 +3884,8 @@
   focused = isClient && (ios || document.hasFocus());
   function onFocus() {
     focused = document.hasFocus();
-    // hide all time-ranked items when window focus is lost
-    if (!focused) hideIndex = hideIndexFromRanking;
+    // retreat to minimal hide index when window is defocused
+    if (!focused) hideIndex = hideIndexMinimal;
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)
