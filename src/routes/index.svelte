@@ -4509,7 +4509,7 @@
   } */
   /* single-column layout can remove margin since there is no concern of having columns w/ same width */
   .column:not(.multi-column) {
-    margin-right: 0;
+    margin-right: 1px; /* consistent w/ 1px padding-left of .super-container */
   }
   :global(.column:not(.focused) #header),
   :global(.column:not(.focused) .super-container),
@@ -4619,6 +4619,9 @@
   }
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
+    .column:not(.multi-column) {
+      margin-right: 0; /* consistent w/ 0 padding-left of .super-container on small screen */
+    }
     #header-container {
       /*padding-left: 1px;*/ /* matches 1px container border, no super-container padding */
       padding-left: 10px; /* not best use of space, but looks good and avoids edge on curved screens */
