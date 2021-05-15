@@ -3676,8 +3676,8 @@
     // disable space bar page-scroll behavior
     if (key == "Space") e.preventDefault();
 
-    // let unmodified Enter or E key edit target item
-    if ((key == "Enter" || key == "KeyE") && !modified) {
+    // let unmodified Enter to edit target OR resume last edit
+    if (key == "Enter" && !modified) {
       e.preventDefault(); // avoid entering text into editor
       // edit click requires mousedown first (see onClick in Item.svelte)
       const target = document.querySelector(".container.target");
@@ -3690,18 +3690,20 @@
       }
       return;
     }
-    // let unmodified R run target item
-    if (key == "KeyR" && !modified) {
+    // let unmodified Tab run target item
+    if (key == "Tab" && !modified) {
+      e.preventDefault(); // avoid entering text into editor
       document.querySelector(".container.target .run")?.dispatchEvent(new Event("click"));
       return;
     }
-    // let unmodified T toggle logs on target item
-    if (key == "KeyT" && !modified) {
+    // let unmodified Backquote toggle logs on target item
+    if (key == "Backquote" && !modified) {
+      e.preventDefault(); // avoid entering text into editor
       document.querySelector(".container.target .log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
-    // let unmodified J/K (or ArrowLeft/Right) select next/prev visible non-label tag in last context item
-    if ((key == "KeyJ" || key == "KeyK" || key == "ArrowLeft" || key == "ArrowRight") && !modified) {
+    // let unmodified ArrowLeft/Right select next/prev visible non-label tag in last context item
+    if ((key == "ArrowLeft" || key == "ArrowRight") && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       const lastContext = Array.from(document.querySelectorAll(".container.target_context"))
         .filter((e) => e.querySelector("mark.selected"))
@@ -3726,16 +3728,16 @@
           selectedIndex = visibleTags.findIndex((e) => e.matches(".selected"));
         }
         if (selectedIndex >= 0) {
-          if ((key == "KeyJ" || key == "ArrowRight") && selectedIndex < visibleTags.length - 1)
+          if (key == "ArrowRight" && selectedIndex < visibleTags.length - 1)
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
-          else if ((key == "KeyK" || key == "ArrowLeft") && selectedIndex > 0)
+          else if (key == "ArrowLeft" && selectedIndex > 0)
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
         }
         return; // context exists, so J/K/ArrowLeft/Right assumed handled
       }
     }
     // let unmodified ArrowDown (or ArrowRight/J if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
-    if ((key == "ArrowDown" || key == "ArrowRight" || key == "KeyJ") && !modified) {
+    if ((key == "ArrowDown" || key == "ArrowRight") && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector(".container.target mark.label") as any)?.title;
       let nextTargetId;
@@ -3822,12 +3824,8 @@
       }
     }
 
-    // clear non-empty editor on unmodified escape or backspace/arrowup/arrowleft/k (if not handled above)
-    if (
-      editorText &&
-      (key == "Escape" || key == "Backspace" || key == "ArrowUp" || key == "ArrowLeft" || key == "KeyK") &&
-      !modified
-    ) {
+    // clear non-empty editor on unmodified escape or backspace/arrowup/arrowleft (if not handled above)
+    if (editorText && (key == "Escape" || key == "Backspace" || key == "ArrowUp" || key == "ArrowLeft") && !modified) {
       e.preventDefault();
       // this follows onTagClick behavior
       editorText = "";
