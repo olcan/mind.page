@@ -3684,7 +3684,7 @@
       if (target && target.getAttribute("item-id") != lastEditItem) {
         target.dispatchEvent(new Event("mousedown"));
         target.dispatchEvent(new Event("click"));
-      } else if (lastEditItem) {
+      } else if (lastEditItem && indexFromId.get(lastEditItem) < hideIndex) {
         resumeLastEdit();
       } else {
         // try editing first unpinned item OR toggling it visible
