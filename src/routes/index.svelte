@@ -3876,6 +3876,9 @@
         editor.insertImages(true);
       }
     }
+
+    // forward unhandled key to window._on_key
+    if (window["_on_key"]) window["_on_key"](key, e);
   }
   function onKeyUp(e: KeyboardEvent) {
     metaKey = e.metaKey;
