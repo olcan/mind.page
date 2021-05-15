@@ -3681,11 +3681,10 @@
       e.preventDefault(); // avoid entering text into editor
       // edit click requires mousedown first (see onClick in Item.svelte)
       const target = document.querySelector(".container.target");
-      if (target) {
+      if (target && target.getAttribute("item-id") != lastEditItem) {
         target.dispatchEvent(new Event("mousedown"));
         target.dispatchEvent(new Event("click"));
       } else {
-        // just try to resume last edit
         resumeLastEdit();
       }
       return;
