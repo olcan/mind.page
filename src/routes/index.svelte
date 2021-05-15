@@ -753,7 +753,6 @@
   let consolediv;
   let dotCount = 0;
   let columnCount = 0;
-  let topMovers = [];
   let toggles = [];
   let newestTime = 0;
   let oldestTime = Infinity;
@@ -782,8 +781,7 @@
     let columnLastItem = new Array(columnCount).fill(-1);
     let columnItemCount = new Array(columnCount).fill(0);
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight; // first column includes header
-    // reset topMovers if number of columns changes
-    if (topMovers.length != columnCount) topMovers = new Array(columnCount).fill(items.length);
+    let topMovers = new Array(columnCount).fill(items.length);
     let lastTimeString = "";
     newestTime = 0;
     oldestTime = Infinity;
@@ -911,7 +909,7 @@
         if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled by another layout
         if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
           restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
-          lastFocusedEditElement = textArea(activeEditItem); // prevent auto-focusing/scrolling again
+          lastFocusedEditElement = textArea(activeEditItem); // prevent scroll on next layout
         } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
             topMovers.map((index) => {
