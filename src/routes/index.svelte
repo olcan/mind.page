@@ -3902,9 +3902,10 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
-  // on ios, initial focus can be false for no apparent reason, so we just assume it is true; in general ios can be argued to be able to keep multiple windows focused/responsive (e.g. to touch events); also switching apps can be the only way to glance at information from other apps, so arguably we should be less aggressive in hiding items on defocus; we will also treat android the same way for now
+  // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true  
   focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
+    // on ios (also android presumably), multiple windows can focus (e.g. split screen view) and defocus at the same time, reflecting ability of these windows being ready to receive touch events (though not keyboard events); in addition, loss of focus is not as informative since switching apps is necessary even to glance at other windows
     focused = document.hasFocus() || ios || android;
     // retreat to minimal hide index when window is defocused
     if (!focused) hideIndex = hideIndexMinimal;
