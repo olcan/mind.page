@@ -3678,10 +3678,16 @@
 
     // let unmodified Enter or E key edit target item
     if ((key == "Enter" || key == "KeyE") && !modified) {
-      // edit click requires mousedown first (see onClick in Item.svelte)
-      document.querySelector(".container.target")?.dispatchEvent(new Event("mousedown"));
-      document.querySelector(".container.target")?.dispatchEvent(new Event("click"));
       e.preventDefault(); // avoid entering text into editor
+      // edit click requires mousedown first (see onClick in Item.svelte)
+      const target = document.querySelector(".container.target");
+      if (target) {
+        target.dispatchEvent(new Event("mousedown"));
+        target.dispatchEvent(new Event("click"));
+      } else {
+        // just try to resume last edit
+        resumeLastEdit();
+      }
       return;
     }
     // let unmodified R run target item
