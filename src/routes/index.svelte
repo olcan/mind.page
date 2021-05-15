@@ -3902,10 +3902,10 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
-  // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true  
+  // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true
   focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
-    // on ios (also android presumably), multiple windows can focus (e.g. split screen view) and defocus at the same time, reflecting ability of these windows being ready to receive touch events (though not keyboard events); in addition, loss of focus is not as informative since switching apps is necessary even to glance at other windows
+    // on ios (also android presumably), multiple windows can focus (e.g. split screen view) and defocus at the same time, reflecting ability of these windows being ready to receive touch events (though not keyboard events, which do not appear to be distinguished unfortunately, i.e. there is no hasKeyboardFocus); in addition, loss of focus is not as informative since switching apps is necessary even to glance at other windows
     focused = document.hasFocus() || ios || android;
     // retreat to minimal hide index when window is defocused
     if (!focused) hideIndex = hideIndexMinimal;
