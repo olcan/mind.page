@@ -3677,7 +3677,7 @@
     if (key == "Space") e.preventDefault();
 
     // let unmodified Enter or E key edit target item
-    if (key == "Enter" || (key == "KeyE" && !modified)) {
+    if ((key == "Enter" || key == "KeyE") && !modified) {
       // edit click requires mousedown first (see onClick in Item.svelte)
       document.querySelector(".container.target")?.dispatchEvent(new Event("mousedown"));
       document.querySelector(".container.target")?.dispatchEvent(new Event("click"));
