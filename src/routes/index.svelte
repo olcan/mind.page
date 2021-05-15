@@ -1484,7 +1484,7 @@
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
     // if ranking while unfocused, retreat to minimal index
-    // if (!focused) hideIndex = hideIndexMinimal;
+    if (!focused) hideIndex = hideIndexMinimal;
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -3879,12 +3879,12 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
-  // on ios, initial focus can be false for no apparent reason, so we just assume it is true; in general ios can be argued to be able to keep multiple windows focused/responsive (e.g. to touch events); also switching apps can be the only way to glance at information from other apps, so arguably we should be less aggressive in hiding items on defocus
-  focused = isClient && (document.hasFocus() || ios);
+  // on ios, initial focus can be false for no apparent reason, so we just assume it is true; in general ios can be argued to be able to keep multiple windows focused/responsive (e.g. to touch events); also switching apps can be the only way to glance at information from other apps, so arguably we should be less aggressive in hiding items on defocus; we will also treat android the same way for now
+  focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
-    focused = document.hasFocus() || ios;
+    focused = document.hasFocus() || ios || android;
     // retreat to minimal hide index when window is defocused
-    // if (!focused) hideIndex = hideIndexMinimal;
+    if (!focused) hideIndex = hideIndexMinimal;
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)
