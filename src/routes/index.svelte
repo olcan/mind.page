@@ -1108,7 +1108,7 @@
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
   //       Invoke updateItemLayout directly if only item sizes have changed.
-  const sessionTime = Date.now();
+  let sessionTime = Date.now();
   const editorDebounceTime = 500;
   let lastEditorChangeTime = 0;
   let matchingItemCount = 0;
@@ -1479,8 +1479,8 @@
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
     // auto-show session items if no position-based toggles, otherwise use minimal
-    // hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal;
-    hideIndex = hideIndexMinimal;
+    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal;
+    // hideIndex = hideIndexMinimal;
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
     // if ranking while unfocused, retreat to minimal index
@@ -3460,7 +3460,10 @@
                 }
                 if (doc.metadata.hasPendingWrites) return; // ignore local change
                 decryptItem(doc.data()).then((savedItem) => {
-                  // no need to log initial snapshot
+                  // remote changes indicate non-focus: update sessionTime and invoke onFocus
+                  sessionTime = Date.now() + 1000 /* margin for small time differences */;
+                  onFocus(); // focused = window.hasFocus
+
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === "added") {
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
@@ -3476,7 +3479,7 @@
                     items.forEach((item, index) => indexFromId.set(item.id, index));
                     itemTextChanged(0, item.text, true /* update_deps */, false /* run_deps */);
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
-                    hideIndex++; // show one more item
+                    // hideIndex++; // show one more item (skip this for remote add)
                     onEditorChange(editorText); // integrate new item at index 0
                   } else if (change.type == "removed") {
                     // NOTE: remote remove is similar to onItemEditing (deletion case)
