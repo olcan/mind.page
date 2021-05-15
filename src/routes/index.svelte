@@ -1479,11 +1479,12 @@
     // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
     hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, (item) => item.time > sessionTime) + 1);
     // auto-show session items if no position-based toggles, otherwise use minimal
-    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal;
+    // hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal;
+    hideIndex = hideIndexMinimal;
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
     // if ranking while unfocused, retreat to minimal index
-    if (!focused) hideIndex = hideIndexMinimal;
+    // if (!focused) hideIndex = hideIndexMinimal;
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -3878,13 +3879,12 @@
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
-  // on ios, initial focus can be false for no apparent reason, so we assume it is true
-  // (also in general ios seems to be able to keep multiple windows responsive so focus may always be true)
-  focused = isClient && (ios || document.hasFocus());
+  // on ios, initial focus can be false for no apparent reason, so we just assume it is true; in general ios can be argued to be able to keep multiple windows focused/responsive (e.g. to touch events); also switching apps can be the only way to glance at information from other apps, so arguably we should be less aggressive in hiding items on defocus
+  focused = isClient && (document.hasFocus() || ios);
   function onFocus() {
-    focused = document.hasFocus();
+    focused = document.hasFocus() || ios;
     // retreat to minimal hide index when window is defocused
-    if (!focused) hideIndex = hideIndexMinimal;
+    // if (!focused) hideIndex = hideIndexMinimal;
   }
 
   // redirect window.onerror to console.error (or alert if #console not set up yet)
