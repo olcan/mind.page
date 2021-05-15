@@ -3677,10 +3677,10 @@
     if (key == "Space") e.preventDefault();
 
     // let unmodified Enter to edit target OR resume last edit
+    const target = document.querySelector(".container.target");
     if (key == "Enter" && !modified) {
       e.preventDefault(); // avoid entering text into editor
       // edit click requires mousedown first (see onClick in Item.svelte)
-      const target = document.querySelector(".container.target");
       if (target && target.getAttribute("item-id") != lastEditItem) {
         target.dispatchEvent(new Event("mousedown"));
         target.dispatchEvent(new Event("click"));
@@ -3702,15 +3702,15 @@
       return;
     }
     // let unmodified Tab run target item
-    if (key == "Tab" && !modified) {
+    if (key == "Tab" && !modified && target) {
       e.preventDefault(); // avoid entering text into editor
-      document.querySelector(".container.target .run")?.dispatchEvent(new Event("click"));
+      target.querySelector(".run")?.dispatchEvent(new Event("click"));
       return;
     }
     // let unmodified Backquote toggle logs on target item
-    if (key == "Backquote" && !modified) {
+    if (key == "Backquote" && !modified && target) {
       e.preventDefault(); // avoid entering text into editor
-      document.querySelector(".container.target .log-summary")?.dispatchEvent(new Event("click"));
+      target.querySelector(".log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
     // let unmodified ArrowLeft/Right select next/prev visible non-label tag in last context item
@@ -3838,6 +3838,7 @@
     // clear non-empty editor on unmodified escape or backspace/arrowup/arrowleft (if not handled above)
     if (editorText && (key == "Escape" || key == "Backspace" || key == "ArrowUp" || key == "ArrowLeft") && !modified) {
       e.preventDefault();
+      hideIndex = hideIndexMinimal;
       // this follows onTagClick behavior
       editorText = "";
       forceNewStateOnEditorChange = true; // force new state
@@ -3871,6 +3872,7 @@
       key == "Escape"
     ) {
       e.preventDefault();
+      hideIndex = hideIndexMinimal;
       textArea(-1).focus();
       document.body.scrollTo(0, 0);
       // create/run new item on create/save shortcuts
