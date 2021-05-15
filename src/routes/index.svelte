@@ -3684,8 +3684,20 @@
       if (target && target.getAttribute("item-id") != lastEditItem) {
         target.dispatchEvent(new Event("mousedown"));
         target.dispatchEvent(new Event("click"));
-      } else {
+      } else if (lastEditItem) {
         resumeLastEdit();
+      } else {
+        // try editing first unpinned item OR toggling it visible
+        const targetId = items.find((item) => !item.pinned)?.id;
+        if (targetId) {
+          const target = document.querySelector(`#super-container-${targetId} .container`);
+          if (target) {
+            target.dispatchEvent(new Event("mousedown"));
+            target.dispatchEvent(new Event("click"));
+          } else {
+            document.querySelector(`.toggle.show`)?.dispatchEvent(new Event("click"));
+          }
+        }
       }
       return;
     }
@@ -3732,10 +3744,10 @@
           else if (key == "ArrowLeft" && selectedIndex > 0)
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
         }
-        return; // context exists, so J/K/ArrowLeft/Right assumed handled
+        return; // context exists, so ArrowLeft/Right assumed handled
       }
     }
-    // let unmodified ArrowDown (or ArrowRight/J if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    // let unmodified ArrowDown (or ArrowRight if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == "ArrowDown" || key == "ArrowRight") && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector(".container.target mark.label") as any)?.title;
