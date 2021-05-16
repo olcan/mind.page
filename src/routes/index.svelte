@@ -3704,14 +3704,14 @@
       }
       return;
     }
-    // let unmodified Tab run target item
-    if (key == "Tab" && !modified && target) {
+    // let unmodified Backquote run target item
+    if (key == "Backquote" && !modified && target) {
       e.preventDefault(); // avoid entering text into editor
       target.querySelector(".run")?.dispatchEvent(new Event("click"));
       return;
     }
-    // let unmodified Backquote toggle logs on target item
-    if (key == "Backquote" && !modified && target) {
+    // let Shift+Backquote toggle logs on target item
+    if (key == "Backquote" && shiftKey && target) {
       e.preventDefault(); // avoid entering text into editor
       target.querySelector(".log-summary")?.dispatchEvent(new Event("click"));
       return;
