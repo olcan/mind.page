@@ -35,6 +35,7 @@
       `(^|\\s|\\()(${regexTags.join("|")})`,
       "g"
     );
+    // NOTE: this replacement IGNORES the careful exclusions performed by parseTags (see util.js) other than blocks (e.g. will highlight tags inside html tags that also occur outside of html tags). We fix this below by undoing the replacement in highlightOther.
     return text.replace(regex, "$1<mark>$2</mark>");
   }
   function highlightOther(text) {
@@ -43,6 +44,8 @@
     return text.replace(
       /(^|[^\\])(\$?\$`|`?`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*?)(`\$\$?|``?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|(?:\w|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
       (m, pfx, begin, content, end) => {
+        // undo any tag highlighting inside highlighted sections
+        content = content.replace(/<mark>(.*?)<\/mark>/g, "$1");
         if (begin == end && (begin == "`" || begin == "``"))
           return pfx + `<span class="code">${begin + content + end}</span>`;
         else if ((begin == "$`" && end == "`$") || (begin == "$$`" && end == "`$$"))
