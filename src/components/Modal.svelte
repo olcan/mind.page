@@ -131,15 +131,15 @@
     const key = e.code || e.key; // for android compatibility
     // NOTE: modal is on top of the page and handles ALL key events
     if (!visible) return; // ignore if not visible
-    if (key == "Enter") _onConfirm(e);
-    else if (key == "Escape") {
-      // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
-      setTimeout(() => {
+    // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
+    setTimeout(() => {
+      if (key == "Enter") _onConfirm(e);
+      else if (key == "Escape") {
         // treat escape like background click
         if (background.toLowerCase() == "confirm") _onConfirm(e);
         else if (background.toLowerCase() == "cancel") _onCancel(e);
-      });
-    }
+      }
+    });
     // stop all non-modal non-modifier key events as a modal should
     if (!(e.target as HTMLElement).closest(".modal") && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.stopPropagation();
