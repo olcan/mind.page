@@ -1918,8 +1918,7 @@
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
               setTimeout(() => {
-                if (depitem.index == indexFromId.get(depitem.id)) 
-                  onItemRun(depitem.index, false /* touch_first */);
+                if (depitem.index == indexFromId.get(depitem.id)) onItemRun(depitem.index, false /* touch_first */);
               });
           }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
@@ -2804,7 +2803,7 @@
       });
     }
     const runItem = () => {
-      const index = indexFromId.get(item.id)
+      const index = indexFromId.get(item.id);
       if (index === undefined) return; // item deleted
       // clear *_output blocks as they should be re-generated
       item.text = clearBlock(item.text, "\\w*?_output");
@@ -2818,9 +2817,9 @@
       saveItem(item.id);
       lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
       onEditorChange(editorText); // item time/text has changed
-    }
+    };
     // run immediately if touch_first == false OR if item is editing (so touch is redundant)
-    if (!touch_first || item.editing) runItem()
+    if (!touch_first || item.editing) runItem();
     else {
       // touch first to avoid delayed scroll-to-top on cpu-intensive runs
       onItemTouch(index);
@@ -3597,7 +3596,8 @@
               consoleLog.push({
                 type: verb,
                 stack: evalStack.slice(),
-                text: text.trim(),
+                // disallow multi-line log messages to simplify handling, e.g. using TYPE: prefix
+                text: text.replace(/\s*\n+\s*/, " ").trim(),
                 time: Date.now(),
                 level: log_levels.indexOf(verb),
               });
