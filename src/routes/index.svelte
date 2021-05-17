@@ -902,11 +902,9 @@
       }
     }
 
-    const lastLayoutTimeAtDispatch = lastLayoutTime; // so we update only for latest layout
     tick()
       .then(update_dom)
       .then(() => {
-        if (lastLayoutTime != lastLayoutTimeAtDispatch) return; // cancelled by another layout
         if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
           restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
           lastFocusedEditElement = textArea(activeEditItem); // prevent scroll on next layout
