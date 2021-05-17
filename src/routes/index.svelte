@@ -3689,10 +3689,43 @@
     // disable space bar page-scroll behavior
     if (key == "Space") e.preventDefault();
 
+    // left Shift+ArrowDown/ArrowUp toggle items
+    if ((key == "ArrowDown" || key == "ArrowUp") && shiftKey) {
+      const toggle =
+        key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
+      if (toggle) {
+        // if toggle is too far down, bring it to ~middle of page
+        const toggleTop = (toggle as HTMLElement).offsetTop;
+        if (toggleTop + 100 > document.body.scrollTop + innerHeight)
+          document.body.scrollTo(0, Math.max(0, toggleTop - innerHeight / 2));
+        toggle.dispatchEvent(new Event("click"));
+      }
+      return;
+    }
+
+    // let unmodified DigitX select/target corresponding item if named, touch it otherwise
+    if (key.match(/Digit\d+/) && !modified) {
+      const index = parseInt(key.match(/\d+/)?.shift()) - 1;
+      const item = items[index];
+      if (item?.uniqueLabel) {
+        const target = document.querySelector(`#super-container-${item.id} .container`);
+        if (target) {
+          target.querySelector("mark.label")?.dispatchEvent(new MouseEvent("mousedown"));
+          // target.dispatchEvent(new Event("mousedown"));
+          // target.dispatchEvent(new Event("click"));
+        } else {
+          alert(`item numbered ${index + 1} (${item.name}) is not visible`);
+        }
+      } else if (item) {
+        _item(item.id).touch();
+      }
+      return;
+    }
+
     // let unmodified Enter to edit target OR resume last edit
     const target = document.querySelector(".container.target");
     if (key == "Enter" && !modified) {
-      e.preventDefault(); // avoid entering text into editor
+      e.preventDefault(); // prevent entry into item editor
       // edit click requires mousedown first (see onClick in Item.svelte)
       if (target && target.getAttribute("item-id") != lastEditItem) {
         target.dispatchEvent(new Event("mousedown"));
@@ -3716,13 +3749,11 @@
     }
     // let unmodified Backquote run target item
     if (key == "Backquote" && !modified && target) {
-      e.preventDefault(); // avoid entering text into editor
       target.querySelector(".run")?.dispatchEvent(new Event("click"));
       return;
     }
     // let Shift+Backquote toggle logs on target item
     if (key == "Backquote" && shiftKey && target) {
-      e.preventDefault(); // avoid entering text into editor
       target.querySelector(".log-summary")?.dispatchEvent(new Event("click"));
       return;
     }

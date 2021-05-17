@@ -1399,11 +1399,11 @@
 
   .item-menu > .index {
     background: transparent;
-    color: #444;
+    color: #999;
   }
 
   .item-menu > .index.leader {
-    color: #999;
+    color: #fff;
   }
 
   .item-menu > .index.matching {
