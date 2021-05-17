@@ -1918,7 +1918,8 @@
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
               setTimeout(() => {
-                if (depitem.index == indexFromId.get(depitem.id)) onItemRun(depitem.index);
+                if (depitem.index == indexFromId.get(depitem.id)) 
+                  onItemRun(depitem.index, false /* touch_first */);
               });
           }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id);
@@ -2787,7 +2788,7 @@
     lastEditTime = Date.now();
   }
 
-  function onItemRun(index: number = -1) {
+  function onItemRun(index: number = -1, touch_first = true) {
     if (index < 0) index = focusedItem;
     let item = items[index];
     // maintain selection on textarea if editing
@@ -2802,18 +2803,29 @@
         textarea.selectionEnd = selectionEnd;
       });
     }
-    // clear *_output blocks as they should be re-generated
-    item.text = clearBlock(item.text, "\\w*?_output");
-    // remove *_log blocks so errors do not leave empty blocks
-    item.text = removeBlock(item.text, "\\w*?_log");
-    itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
-    appendJSOutput(index);
-    item.time = Date.now();
-    // we now save even if editing, for consistency with write() saving during edit
-    // if (!item.editing) saveItem(item.id);
-    saveItem(item.id);
-    lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
-    onEditorChange(editorText); // item time/text has changed
+    const runItem = () => {
+      const index = indexFromId.get(item.id)
+      if (index === undefined) return; // item deleted
+      // clear *_output blocks as they should be re-generated
+      item.text = clearBlock(item.text, "\\w*?_output");
+      // remove *_log blocks so errors do not leave empty blocks
+      item.text = removeBlock(item.text, "\\w*?_log");
+      itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
+      appendJSOutput(index);
+      item.time = Date.now();
+      // we now save even if editing, for consistency with write() saving during edit
+      // if (!item.editing) saveItem(item.id);
+      saveItem(item.id);
+      lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
+      onEditorChange(editorText); // item time/text has changed
+    }
+    // run immediately if touch_first == false OR if item is editing (so touch is redundant)
+    if (!touch_first || item.editing) runItem()
+    else {
+      // touch first to avoid delayed scroll-to-top on cpu-intensive runs
+      onItemTouch(index);
+      tick().then(update_dom).then(runItem);
+    }
   }
 
   function onItemTouch(index: number) {
