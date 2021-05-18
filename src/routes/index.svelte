@@ -3928,8 +3928,9 @@
     ) {
       e.preventDefault();
       hideIndex = hideIndexMinimal;
-      textArea(-1).focus();
-      document.body.scrollTo(0, headerOffsetTop);
+      //  document.body.scrollTo(0, headerOffsetTop);
+      if (document.body.scrollTop > headerOffsetTop) document.body.scrollTo(0, headerOffsetTop);
+      tick().then(() => textArea(-1).focus());
 
       // create/run new item on create/save shortcuts
       if (
