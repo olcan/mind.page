@@ -4174,7 +4174,7 @@
 {#if focused}
   <style>
     body {
-      background: rgb(10, 10, 10);
+      background: #171717;
     }
   </style>
 {/if}
