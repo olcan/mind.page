@@ -24,6 +24,8 @@
   export let admin = false;
   export let hidden = false;
   export let showLogs = false;
+  export let selectionStart = 0;
+  export let selectionEnd = 0;
   // NOTE: required props should not have default values
   export let index: number;
   export let name: string;
@@ -1218,6 +1220,8 @@
         bind:this={editor}
         bind:text
         bind:focused
+        bind:selectionStart
+        bind:selectionEnd
         {onRun}
         {onPrev}
         {onNext}

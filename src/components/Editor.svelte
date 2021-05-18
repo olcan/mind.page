@@ -7,6 +7,10 @@
   export let createOnAnyModifiers = false;
   export let clearOnShiftBackspace = false;
   export let allowCommandCtrlBracket = false;
+  // we standardize initial position as 0; can be value.length (e.g. on android)
+  // 0 works better for longer items since top of item provides much better context
+  export let selectionStart = 0;
+  export let selectionEnd = 0;
   export let onFocused = (focused: boolean) => {};
   export let onEdited = (text) => {};
   export let onEscape = (e) => true; // false means handled/ignore
@@ -624,15 +628,17 @@
   import { afterUpdate, onMount, onDestroy } from "svelte";
   afterUpdate(updateTextDivs);
 
-  const selectionUpdateDebounceTime = 0;
-  let selectionUpdatePending = false;
+  const highlightDebounceTime = 0;
+  let highlightPending = false;
   function onSelectionChange(e) {
     if (!document.activeElement.isSameNode(textarea)) return;
+    selectionStart = textarea.selectionStart;
+    selectionEnd = textarea.selectionEnd;
     if (textarea.selectionStart != textarea.selectionEnd) return;
-    if (selectionUpdatePending) return;
-    selectionUpdatePending = true;
+    if (highlightPending) return;
+    highlightPending = true;
     setTimeout(() => {
-      selectionUpdatePending = false;
+      highlightPending = false;
       if (!highlights) return;
       if (
         highlights.querySelector("span.highlight") ||
@@ -645,13 +651,11 @@
       ) {
         updateTextDivs();
       }
-    }, selectionUpdateDebounceTime);
+    }, highlightDebounceTime);
   }
   onMount(() => {
     document.addEventListener("selectionchange", onSelectionChange);
-    // standardize initial position at 0; can be value.length (e.g. on android)
-    // 0 works better for longer items since top of item provides much better context
-    setSelection(0, 0);
+    setSelection(selectionStart, selectionEnd);
   });
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>

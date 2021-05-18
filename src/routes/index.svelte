@@ -894,8 +894,6 @@
     // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
     // OR scroll to top mover (if not narrating, since then we prefer manual scroll)
     let activeEditItem = -1;
-    let activeEditSelectionStart = 0;
-    let activeEditSelectionEnd = 0;
     if (focusedItem >= 0) {
       const div = document.querySelector("#super-container-" + items[focusedItem].id) as HTMLElement;
       if (!div) console.warn("focusedItem missing on page");
@@ -903,8 +901,6 @@
       else {
         const textarea = textArea(focusedItem);
         activeEditItem = focusedItem;
-        activeEditSelectionStart = textarea.selectionStart;
-        activeEditSelectionEnd = textarea.selectionEnd;
       }
     }
 
@@ -912,7 +908,7 @@
       .then(update_dom)
       .then(() => {
         if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
-          restoreItemEditor(activeEditItem, activeEditSelectionStart, activeEditSelectionEnd);
+          restoreItemEditor(activeEditItem);
           lastFocusedEditElement = textArea(activeEditItem); // prevent scroll on next layout
         } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
@@ -2757,13 +2753,9 @@
           itemTextChanged(index, item.text); // updates tags, label, deps, etc before JS eval
           appendJSOutput(index);
         }
-        // save edit state for resuming edit
-        if (!cancelled) {
-          let textarea = textArea(item.index);
-          lastEditItem = item.id;
-          lastEditSelectionStart = textarea.selectionStart;
-          lastEditSelectionEnd = textarea.selectionEnd;
-        }
+        // remember item for resumeLastEdit
+        // if (!cancelled) lastEditItem = item.id;
+        lastEditItem = item.id;
         // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
         if (altKey && metaKey) item.time = item.savedTime;
         if (!cancelled && (item.time != item.savedTime || item.text != item.savedText)) saveItem(item.id);
@@ -2878,11 +2870,9 @@
     editingItems.push(index);
   }
 
-  function restoreItemEditor(index, selectionStart = 0, selectionEnd = 0) {
+  function restoreItemEditor(index) {
     const textarea = textArea(index);
     textarea.focus();
-    textarea.selectionStart = selectionStart;
-    textarea.selectionEnd = selectionEnd;
 
     // scroll to caret position if necessary
     // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
@@ -2908,8 +2898,6 @@
   }
 
   let lastEditItem;
-  let lastEditSelectionStart;
-  let lastEditSelectionEnd;
   function resumeLastEdit() {
     if (!lastEditItem) return;
     let index = indexFromId.get(lastEditItem);
@@ -2925,7 +2913,7 @@
     tick().then(() => {
       const index = indexFromId.get(lastEditItem);
       if (index === undefined) return;
-      restoreItemEditor(index, lastEditSelectionStart, lastEditSelectionEnd);
+      restoreItemEditor(index);
     });
   }
 
