@@ -752,7 +752,6 @@
   let headerdiv;
   let consolediv;
   let headerScrolled = false;
-  let headerOffsetTop = 0;
   let dotCount = 0;
   let columnCount = 0;
   let toggles = [];
@@ -795,9 +794,7 @@
     // as soon as header is available, add top margin and scroll to header
     // also store header offset for all other scrollTo calculations
     if (headerdiv && !headerScrolled) {
-      (document.querySelector(".items") as HTMLElement).style.marginTop = "40vh";
-      headerOffsetTop = (document.querySelector(".column") as HTMLElement)?.offsetTop || 0;
-      document.body.scrollTo(0, headerOffsetTop);
+      document.body.scrollTo(0, headerdiv.offsetTop);
       headerScrolled = true;
     }
 
@@ -923,12 +920,12 @@
               if (index == items.length) return Infinity; // nothing in this column
               const div = document.querySelector("#super-container-" + items[index].id);
               if (!div) return Infinity; // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop + headerOffsetTop;
+              return (div as HTMLElement).offsetTop;
             })
           );
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
           if (itemTop - 100 < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
         }
       });
@@ -1650,13 +1647,13 @@
               if (index == items.length) return Infinity; // nothing in this column
               const div = document.querySelector("#super-container-" + items[index].id);
               if (!div) return Infinity; // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop + headerOffsetTop;
+              return (div as HTMLElement).offsetTop;
             })
           );
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up, or too far down, bring it to ~middle of page
           if (itemTop - 100 < document.body.scrollTop || itemTop + 100 > document.body.scrollTop + innerHeight)
-            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
         });
     }
   }
@@ -2394,6 +2391,11 @@
     // retreat to minimal hide index to focus on new item
     hideIndex = hideIndexMinimal;
 
+    // hide dotted items when creating new item
+    // reduces jump to new item editor
+    // helps avoid loss of focus if new item editor goes off screen on ios
+    showDotted = false;
+
     if (run) {
       // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skip due to saveId being null
       appendJSOutput(indexFromId.get(item.id));
@@ -2409,10 +2411,13 @@
       if (text != origText) selectionStart = selectionEnd = 0;
       tick().then(() => {
         let textarea = textArea(indexFromId.get(item.id));
-        if (!textarea) return;
+        if (!textarea) {
+          console.error("missing textarea for new item");
+          return;
+        }
+        textarea.focus();
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
-        textarea.focus();
         // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
         if (selectionStart > 0 || selectionEnd > 0) {
           setTimeout(() => {
@@ -2777,9 +2782,9 @@
         update_dom().then(() => {
           const div = document.querySelector("#super-container-" + item.id);
           if (!div) return; // item deleted or hidden
-          const itemTop = (div as HTMLElement).offsetTop + headerOffsetTop;
+          const itemTop = (div as HTMLElement).offsetTop;
           if (itemTop - 100 < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
         });
       }
     });
@@ -2899,7 +2904,7 @@
     clone.remove();
     // if caret is  is too far up, or too far down, bring it to ~middle of page
     if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
-      document.body.scrollTo(0, Math.max(headerOffsetTop, caretTop - innerHeight / 2));
+      document.body.scrollTo(0, Math.max(headerdiv.offsetTop, caretTop - innerHeight / 2));
   }
 
   let lastEditItem;
@@ -3677,6 +3682,10 @@
       init_log(`initialized client`);
     });
 
+  function onColumnPaddingClick(e) {
+    document.body.scrollTo(0, headerdiv.offsetTop);
+  }
+
   let metaKey = false;
   let ctrlKey = false; // NOTE: can cause left click
   let altKey = false;
@@ -3706,9 +3715,9 @@
         key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
       if (toggle) {
         // if toggle is too far down, bring it to ~middle of page
-        const toggleTop = (toggle as HTMLElement).offsetTop + headerOffsetTop;
+        const toggleTop = (toggle as HTMLElement).offsetTop;
         if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-          document.body.scrollTo(0, Math.max(headerOffsetTop, toggleTop - innerHeight / 2));
+          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
         toggle.dispatchEvent(new Event("click"));
       }
       return;
@@ -3847,9 +3856,9 @@
           const showToggle = document.querySelector(`.toggle.show`);
           if (showToggle) {
             // if toggle is too far down, bring it to ~middle of page
-            const toggleTop = (showToggle as HTMLElement).offsetTop + headerOffsetTop;
+            const toggleTop = (showToggle as HTMLElement).offsetTop;
             if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-              document.body.scrollTo(0, Math.max(headerOffsetTop, toggleTop - innerHeight / 2));
+              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
             showToggle.dispatchEvent(new Event("click"));
           }
           // update_dom().then(() => {
@@ -3928,8 +3937,8 @@
     ) {
       e.preventDefault();
       hideIndex = hideIndexMinimal;
-      //  document.body.scrollTo(0, headerOffsetTop);
-      if (document.body.scrollTop > headerOffsetTop) document.body.scrollTo(0, headerOffsetTop);
+      //  document.body.scrollTo(0, headerdiv.offsetTop);
+      if (document.body.scrollTop > headerdiv.offsetTop) document.body.scrollTo(0, headerdiv.offsetTop);
       tick().then(() => textArea(-1).focus());
 
       // create/run new item on create/save shortcuts
@@ -3991,7 +4000,14 @@
 {#if user && processed}
   <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating} class:focused>
     {#each { length: columnCount + 1 } as _, column}
-      <div class="column" class:multi-column={columnCount > 1} class:hidden={column == columnCount} class:focused>
+      <div
+        class="column"
+        class:multi-column={columnCount > 1}
+        class:hidden={column == columnCount}
+        class:focused
+        class:editorFocused
+      >
+        <div class="column-padding" on:click={onColumnPaddingClick} />
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="focus-indicator" class:focused />
@@ -4170,14 +4186,6 @@
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />
-
-{#if focused}
-  <style>
-    body {
-      background: #171717;
-    }
-  </style>
-{/if}
 
 <!-- increase list item padding on android, otherwise too small -->
 <!-- also hack for custom font wrapping issue (if needed) -->
@@ -4552,13 +4560,13 @@
     /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
-    /* fill full height of page even if no items are shown */
+    /* fill full height (+40vh for .column-padding) of page even if no items are shown */
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
-    min-height: 100%;
+    min-height: 140vh;
 
     /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
-    padding-bottom: 50vh;
+    padding-bottom: 40vh;
     box-sizing: border-box;
   }
   /* .items.multi-column {
@@ -4587,6 +4595,17 @@
     /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
     margin-right: 8px;
   }
+  /* column padding allows scrolling top items to ~middle of screen */
+  .column-padding {
+    height: 40vh;
+  }
+  .column:first-child.focused .column-padding {
+    background: #171717; /* matches #header-container unfocused background */
+  }
+  .column:first-child.editorFocused .column-padding {
+    background: #222; /* matches #header-container focused background */
+  }
+
   /* .column:last-child {
     margin-right: 0;
   } */
