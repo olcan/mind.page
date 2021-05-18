@@ -749,6 +749,7 @@
   }
 
   let indexFromId;
+  let itemsdiv;
   let headerdiv;
   let consolediv;
   let headerScrolled = false;
@@ -762,6 +763,7 @@
   // TODO: try maxColumns=1 during initial render if partial-height layouts prove problematic
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
+  let lastInnerHeight = 0;
   let lastFocusedEditElement = null;
   let lastTimeStringUpdateTime = 0;
   let showDotted = false;
@@ -790,6 +792,17 @@
     lastTimeStringUpdateTime = Date.now();
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn();
+
+    // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
+    // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
+    if (itemsdiv && innerHeight != lastInnerHeight) {
+      lastInnerHeight = innerHeight;
+      itemsdiv.style.minHeight = 1.7 * innerHeight + "px";
+      itemsdiv.style.paddingBottom = 0.7 * innerHeight + "px";
+      itemsdiv
+        .querySelectorAll(".column-padding")
+        .forEach((div: HTMLElement) => (div.style.height = 0.7 * innerHeight + "px"));
+    }
 
     // as soon as header is available, add top margin and scroll to header
     // also store header offset for all other scrollTo calculations
@@ -3972,7 +3985,13 @@
 </script>
 
 {#if user && processed}
-  <div class="items" class:multi-column={columnCount > 1} class:hide-videos={narrating} class:focused>
+  <div
+    class="items"
+    bind:this={itemsdiv}
+    class:multi-column={columnCount > 1}
+    class:hide-videos={narrating}
+    class:focused
+  >
     {#each { length: columnCount + 1 } as _, column}
       <div
         class="column"
@@ -4172,6 +4191,12 @@
       /* padding-right: 11px !important; */
       /* font-family: monospace !important; */
     }
+    /* .items {
+      min-height: 100%;
+    }
+    .column-padding {
+      display: none;
+    } */
   </style>
 {/if}
 
