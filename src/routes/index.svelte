@@ -751,6 +751,8 @@
   let indexFromId;
   let headerdiv;
   let consolediv;
+  let headerScrolled = false;
+  let headerOffsetTop = 0;
   let dotCount = 0;
   let columnCount = 0;
   let toggles = [];
@@ -761,7 +763,6 @@
   // TODO: try maxColumns=1 during initial render if partial-height layouts prove problematic
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
-  let lastLayoutTime = 0;
   let lastFocusedEditElement = null;
   let lastTimeStringUpdateTime = 0;
   let showDotted = false;
@@ -787,10 +788,18 @@
     oldestTime = Infinity;
     oldestTimeString = "";
     totalItemHeight = 0;
-    lastLayoutTime = Date.now();
     lastTimeStringUpdateTime = Date.now();
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn();
+
+    // as soon as header is available, add top margin and scroll to header
+    // also store header offset for all other scrollTo calculations
+    if (headerdiv && !headerScrolled) {
+      (document.querySelector(".items") as HTMLElement).style.marginTop = "40vh";
+      headerOffsetTop = (document.querySelector(".column") as HTMLElement)?.offsetTop || 0;
+      document.body.scrollTo(0, headerOffsetTop);
+      headerScrolled = true;
+    }
 
     items.forEach((item, index) => {
       item.index = index;
@@ -914,11 +923,12 @@
               if (index == items.length) return Infinity; // nothing in this column
               const div = document.querySelector("#super-container-" + items[index].id);
               if (!div) return Infinity; // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop;
+              return (div as HTMLElement).offsetTop + headerOffsetTop;
             })
           );
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
-          if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+          if (itemTop - 100 < document.body.scrollTop)
+            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
         }
       });
@@ -1640,13 +1650,13 @@
               if (index == items.length) return Infinity; // nothing in this column
               const div = document.querySelector("#super-container-" + items[index].id);
               if (!div) return Infinity; // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop;
+              return (div as HTMLElement).offsetTop + headerOffsetTop;
             })
           );
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up, or too far down, bring it to ~middle of page
           if (itemTop - 100 < document.body.scrollTop || itemTop + 100 > document.body.scrollTop + innerHeight)
-            document.body.scrollTo(0, Math.max(0, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
         });
     }
   }
@@ -2767,8 +2777,9 @@
         update_dom().then(() => {
           const div = document.querySelector("#super-container-" + item.id);
           if (!div) return; // item deleted or hidden
-          const itemTop = (div as HTMLElement).offsetTop;
-          if (itemTop - 100 < document.body.scrollTop) document.body.scrollTo(0, Math.max(0, itemTop - 100));
+          const itemTop = (div as HTMLElement).offsetTop + headerOffsetTop;
+          if (itemTop - 100 < document.body.scrollTop)
+            document.body.scrollTo(0, Math.max(headerOffsetTop, itemTop - innerHeight / 2));
         });
       }
     });
@@ -2888,7 +2899,7 @@
     clone.remove();
     // if caret is  is too far up, or too far down, bring it to ~middle of page
     if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
-      document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 2));
+      document.body.scrollTo(0, Math.max(headerOffsetTop, caretTop - innerHeight / 2));
   }
 
   let lastEditItem;
@@ -3695,9 +3706,9 @@
         key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
       if (toggle) {
         // if toggle is too far down, bring it to ~middle of page
-        const toggleTop = (toggle as HTMLElement).offsetTop;
+        const toggleTop = (toggle as HTMLElement).offsetTop + headerOffsetTop;
         if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-          document.body.scrollTo(0, Math.max(0, toggleTop - innerHeight / 2));
+          document.body.scrollTo(0, Math.max(headerOffsetTop, toggleTop - innerHeight / 2));
         toggle.dispatchEvent(new Event("click"));
       }
       return;
@@ -3836,9 +3847,9 @@
           const showToggle = document.querySelector(`.toggle.show`);
           if (showToggle) {
             // if toggle is too far down, bring it to ~middle of page
-            const toggleTop = (showToggle as HTMLElement).offsetTop;
+            const toggleTop = (showToggle as HTMLElement).offsetTop + headerOffsetTop;
             if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-              document.body.scrollTo(0, Math.max(0, toggleTop - innerHeight / 2));
+              document.body.scrollTo(0, Math.max(headerOffsetTop, toggleTop - innerHeight / 2));
             showToggle.dispatchEvent(new Event("click"));
           }
           // update_dom().then(() => {
@@ -3918,7 +3929,8 @@
       e.preventDefault();
       hideIndex = hideIndexMinimal;
       textArea(-1).focus();
-      document.body.scrollTo(0, 0);
+      document.body.scrollTo(0, headerOffsetTop);
+
       // create/run new item on create/save shortcuts
       if (
         (key == "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
@@ -4157,6 +4169,14 @@
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />
+
+{#if focused}
+  <style>
+    body {
+      background: rgb(10, 10, 10);
+    }
+  </style>
+{/if}
 
 <!-- increase list item padding on android, otherwise too small -->
 <!-- also hack for custom font wrapping issue (if needed) -->
