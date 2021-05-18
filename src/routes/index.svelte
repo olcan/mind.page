@@ -3998,7 +3998,6 @@
         <div class="column-padding" on:click={onColumnPaddingClick} />
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-            <div id="focus-indicator" class:focused />
             <div id="header-container" class:focused={editorFocused}>
               <div id="editor">
                 <Editor
@@ -4397,18 +4396,6 @@
   #header {
     max-width: 100%;
   }
-  #focus-indicator {
-    display: none;
-    position: absolute;
-    width: 100%;
-    height: 7px;
-    /* background: #7a7; */
-    background: white;
-    opacity: 0;
-  }
-  #focus-indicator.focused {
-    opacity: 0.05;
-  }
   #header-container {
     display: flex;
     padding: 10px;
@@ -4451,9 +4438,6 @@
     background: #222;
     cursor: pointer;
     overflow: hidden;
-    /* shadow to cut into .focus-indicator */
-    /* box-shadow: 0px 0 0 4px black; */
-    z-index: 1;
   }
   #user.anonymous:not(.readonly).signedin {
     background: green;
@@ -4548,13 +4532,13 @@
     /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
-    /* fill full height (+40vh for .column-padding) of page even if no items are shown */
+    /* fill full height (+50vh for .column-padding) of page even if no items are shown */
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
-    min-height: 140vh;
+    min-height: 150vh;
 
     /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
-    padding-bottom: 40vh;
+    padding-bottom: 50vh;
     box-sizing: border-box;
   }
   /* .items.multi-column {
@@ -4585,7 +4569,7 @@
   }
   /* column padding allows scrolling top items to ~middle of screen */
   .column-padding {
-    height: 40vh;
+    height: 50vh;
   }
   .column:first-child.focused .column-padding {
     background: #171717; /* matches #header-container unfocused background */
