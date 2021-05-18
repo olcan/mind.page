@@ -795,6 +795,7 @@
 
     // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
     // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
+    // as a side effect this ensures header stays in view (precisely) on ios
     if (itemsdiv && innerHeight != lastInnerHeight) {
       lastInnerHeight = innerHeight;
       itemsdiv.style.minHeight = 1.7 * innerHeight + "px";
@@ -4580,6 +4581,7 @@
   }
   /* column padding allows scrolling top items to ~middle of screen (or beyond) */
   /* 70vh seems maximum we can do without allowing a blank screen on iphone */
+  /* (actually this is no longer true w/ vh->px replacement during layout) */
   .column-padding {
     height: 70vh;
   }
