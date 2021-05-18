@@ -2779,6 +2779,20 @@
       // NOTE: we do not focus back up on the editor unless we are already at the top
       //       (especially bad on iphone due to lack of keyboard focus benefit)
       if (editingItems.length > 0 || document.body.scrollTop == 0) focusOnNearestEditingItem(index);
+
+      // scroll top of item to ~middle of page
+      // (most helpful for items that are much taller when editing)
+      if (!narrating) {
+        tick()
+          .then(update_dom)
+          .then(() => {
+            const div = document.querySelector("#super-container-" + item.id);
+            if (!div) return; // item deleted or hidden
+            const itemTop = (div as HTMLElement).offsetTop;
+            if (itemTop - 100 < document.body.scrollTop)
+              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
+          });
+      }
     }
   }
 
