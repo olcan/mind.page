@@ -2532,6 +2532,7 @@
       console.warn(`ignoring zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`);
       return;
     }
+    // console.debug(`item ${item.name} height changed from ${prevHeight}} to ${height}`);
 
     item.height = height;
     if (item.hidden) return; // skip layout update for hidden item
@@ -2715,7 +2716,6 @@
           return;
         }
         textArea(item.index).focus();
-        updateItemLayout(); // trigger scroll-to-caret w/o waiting for layout due to height change
       });
     } else {
       // stopped editing
@@ -2766,20 +2766,6 @@
       //       (especially bad on iphone due to lack of keyboard focus benefit)
       if (editingItems.length > 0 || document.body.scrollTop == 0) focusOnNearestEditingItem(index);
     }
-
-    // scroll up to top of item if needed, allowing dom update before calculating new position
-    // (particularly important for items that are much taller when editing)
-    tick().then(() => {
-      if (!narrating) {
-        update_dom().then(() => {
-          const div = document.querySelector("#super-container-" + item.id);
-          if (!div) return; // item deleted or hidden
-          const itemTop = (div as HTMLElement).offsetTop;
-          if (itemTop - 100 < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
-        });
-      }
-    });
   }
 
   // WARNING: onItemFocused may NOT be invoked when editor is destroyed
@@ -4532,13 +4518,13 @@
     /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
-    /* fill full height (+50vh for .column-padding) of page even if no items are shown */
+    /* fill full height (+70vh for .column-padding) of page even if no items are shown */
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
-    min-height: 150vh;
+    min-height: 170vh;
 
     /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
-    padding-bottom: 50vh;
+    padding-bottom: 70vh;
     box-sizing: border-box;
   }
   /* .items.multi-column {
@@ -4567,9 +4553,10 @@
     /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
     margin-right: 8px;
   }
-  /* column padding allows scrolling top items to ~middle of screen */
+  /* column padding allows scrolling top items to ~middle of screen (or beyond) */
+  /* 70vh seems maximum we can do without allowing a blank screen on iphone */
   .column-padding {
-    height: 50vh;
+    height: 70vh;
   }
   .column:first-child.focused .column-padding {
     background: #171717; /* matches #header-container unfocused background */
