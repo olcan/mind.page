@@ -942,7 +942,7 @@
             })
           );
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
-          // scroll up to item if needed, bringing it to ~middle, snapping to header (if above mid-screen)
+          // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
           if (itemTop - 100 < document.body.scrollTop)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
@@ -1670,7 +1670,7 @@
             })
           );
           if (itemTop == Infinity) return; // nothing to scroll to
-          // if item is too far up or below middle, bring it to ~middle, snapping up to header
+          // if item is too far up or down, bring it to ~upper-middle, snapping up to header
           if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight / 4)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
         });
@@ -2909,6 +2909,10 @@
         if (!textarea) return;
         textarea.focus();
 
+        // update vertical padding in case it is out of date
+        // could help w/ caret position calculation below, but unconfirmed empirically
+        updateVerticalPadding();
+
         // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
         const backdrop = textarea.closest(".editor")?.querySelector(".backdrop");
         if (!backdrop) return; // unable to locate backdrop div for caret position
@@ -2927,9 +2931,9 @@
         }
         clone.remove();
 
-        // if caret is  is too far up, or too far down, bring it to ~upper-middle of page
+        // if caret is too far up or down, bring it to ~upper-middle of page
         // allow going above header for more reliable scrolling on mobile (esp. on ios)
-        if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
+        if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
           document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4));
       });
   }
