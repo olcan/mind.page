@@ -754,7 +754,7 @@
     // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
     // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
     // as a nice side effect this ensures header stays in view (precisely) on ios
-    // we need to use innerHeight since it is also used to calculate scroll positions (e.g. ~middle screen)
+    // we need to use innerHeight since it is also used to calculate scroll positions
     // innerHeight can change frequently, which is ok as long as updateVerticalPadding is invoked carefully
     const viewHeight = innerHeight;
     if (itemsdiv && viewHeight != lastViewHeight) {
@@ -944,7 +944,7 @@
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
           // scroll up to item if needed, bringing it to ~middle, snapping to header (if above mid-screen)
           if (itemTop - 100 < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
         }
       });
@@ -1670,9 +1670,9 @@
             })
           );
           if (itemTop == Infinity) return; // nothing to scroll to
-          // if item is too far up or too far down, bring it to ~middle, snapping up to header
-          if (itemTop - 100 < document.body.scrollTop || itemTop + 100 > document.body.scrollTop + innerHeight)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
+          // if item is too far up or below middle, bring it to ~middle, snapping up to header
+          if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight / 4)
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
         });
     }
   }
@@ -2797,7 +2797,7 @@
       //       (especially bad on iphone due to lack of keyboard focus benefit)
       if (editingItems.length > 0 || document.body.scrollTop == 0) focusOnNearestEditingItem(index);
 
-      // scroll up to item to bring it to ~middle of page, snapping up to header
+      // scroll up to item to bring it to ~upper-middle of page, snapping up to header
       // (most helpful for items that are much taller when editing)
       if (!narrating) {
         tick()
@@ -2807,7 +2807,7 @@
             if (!div) return; // item deleted or hidden
             const itemTop = (div as HTMLElement).offsetTop;
             if (itemTop - 100 < document.body.scrollTop)
-              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
+              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
           });
       }
     }
@@ -2927,10 +2927,10 @@
         }
         clone.remove();
 
-        // if caret is  is too far up, or too far down, bring it to ~middle of page
+        // if caret is  is too far up, or too far down, bring it to ~upper-middle of page
         // allow going above header for more reliable scrolling on mobile (esp. on ios)
         if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
-          document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 2));
+          document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4));
       });
   }
 
@@ -3742,10 +3742,10 @@
       const toggle =
         key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
       if (toggle) {
-        // if toggle is too far down, bring it to ~middle of page, snapping to header
+        // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop;
         if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
+          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4));
         toggle.dispatchEvent(new Event("click"));
       }
       return;
@@ -3883,10 +3883,10 @@
         else {
           const showToggle = document.querySelector(`.toggle.show`);
           if (showToggle) {
-            // if toggle is too far down, bring it to ~middle of page, snapping to header
+            // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
             const toggleTop = (showToggle as HTMLElement).offsetTop;
             if (toggleTop + 100 > document.body.scrollTop + innerHeight)
-              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
+              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4));
             showToggle.dispatchEvent(new Event("click"));
           }
           // update_dom().then(() => {
@@ -4620,7 +4620,7 @@
     /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
     margin-right: 8px;
   }
-  /* column padding allows scrolling top items to ~middle of screen (or beyond) */
+  /* column padding allows scrolling top items to ~anywhere on screen */
   .column-padding {
     height: 70vh;
   }
