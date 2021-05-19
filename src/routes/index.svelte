@@ -763,6 +763,7 @@
       padding = 0.7 * viewHeight;
       // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
       itemsdiv.querySelectorAll(".column-padding").forEach((div: HTMLElement) => (div.style.height = padding + "px"));
+      // adjust scroll position to prevent jump in contents due to change in top padding
       document.body.scrollTo(0, prevScrollTop + padding - prevPadding);
       itemsdiv.style.paddingBottom = padding + "px";
       lastViewHeight = viewHeight;
@@ -814,7 +815,7 @@
     resizeHiddenColumn();
     updateVerticalPadding();
 
-    // as soon as header is available, add top margin and scroll to header
+    // as soon as header is available, add top margin and scroll down to header
     // also store header offset for all other scrollTo calculations
     if (headerdiv && !headerScrolled) {
       document.body.scrollTo(0, headerdiv.offsetTop);
@@ -915,7 +916,7 @@
     });
 
     // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
-    // OR scroll to top mover (if not narrating, since then we prefer manual scroll)
+    // OR scroll up to top mover (if not narrating, since then we prefer manual scroll)
     let activeEditItem;
     if (focusedItem >= 0) {
       const div = document.querySelector("#super-container-" + items[focusedItem].id) as HTMLElement;
@@ -941,6 +942,7 @@
             })
           );
           // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
+          // scroll up to item if needed, bringing it to ~middle, snapping to header (if above mid-screen)
           if (itemTop - 100 < document.body.scrollTop)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
           topMovers = new Array(columnCount).fill(items.length); // reset topMovers after scroll
@@ -1668,7 +1670,7 @@
             })
           );
           if (itemTop == Infinity) return; // nothing to scroll to
-          // if item is too far up, or too far down, bring it to ~middle of page
+          // if item is too far up or too far down, bring it to ~middle, snapping up to header
           if (itemTop - 100 < document.body.scrollTop || itemTop + 100 > document.body.scrollTop + innerHeight)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 2));
         });
@@ -2795,7 +2797,7 @@
       //       (especially bad on iphone due to lack of keyboard focus benefit)
       if (editingItems.length > 0 || document.body.scrollTop == 0) focusOnNearestEditingItem(index);
 
-      // scroll top of item to ~middle of page
+      // scroll up to item to bring it to ~middle of page, snapping up to header
       // (most helpful for items that are much taller when editing)
       if (!narrating) {
         tick()
@@ -2926,6 +2928,7 @@
         clone.remove();
 
         // if caret is  is too far up, or too far down, bring it to ~middle of page
+        // allow going above header for more reliable scrolling on mobile (esp. on ios)
         if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
           document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 2));
       });
@@ -3739,7 +3742,7 @@
       const toggle =
         key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
       if (toggle) {
-        // if toggle is too far down, bring it to ~middle of page
+        // if toggle is too far down, bring it to ~middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop;
         if (toggleTop + 100 > document.body.scrollTop + innerHeight)
           document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
@@ -3880,7 +3883,7 @@
         else {
           const showToggle = document.querySelector(`.toggle.show`);
           if (showToggle) {
-            // if toggle is too far down, bring it to ~middle of page
+            // if toggle is too far down, bring it to ~middle of page, snapping to header
             const toggleTop = (showToggle as HTMLElement).offsetTop;
             if (toggleTop + 100 > document.body.scrollTop + innerHeight)
               document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 2));
@@ -3962,7 +3965,7 @@
     ) {
       e.preventDefault();
       hideIndex = hideIndexMinimal;
-      //  document.body.scrollTo(0, headerdiv.offsetTop);
+      // scroll up to header if necessary
       if (document.body.scrollTop > headerdiv.offsetTop) document.body.scrollTo(0, headerdiv.offsetTop);
       tick().then(() => textArea(-1).focus());
 
