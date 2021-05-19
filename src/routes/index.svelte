@@ -748,6 +748,27 @@
         (document.querySelector(".column:not(.hidden)") as HTMLElement).offsetWidth + "px";
   }
 
+  let padding = 0;
+  let lastViewHeight = 0;
+  function updateVerticalPadding() {
+    // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
+    // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
+    // as a nice side effect this ensures header stays in view (precisely) on ios
+    // we need to use innerHeight since it is also used to calculate scroll positions (e.g. ~middle screen)
+    // innerHeight can change frequently, which is ok as long as updateVerticalPadding is invoked carefully
+    const viewHeight = innerHeight;
+    if (itemsdiv && viewHeight != lastViewHeight) {
+      const prevScrollTop = document.body.scrollTop;
+      const prevPadding = itemsdiv.querySelector(".column-padding").offsetHeight;
+      padding = 0.7 * viewHeight;
+      // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
+      itemsdiv.querySelectorAll(".column-padding").forEach((div: HTMLElement) => (div.style.height = padding + "px"));
+      document.body.scrollTo(0, prevScrollTop + padding - prevPadding);
+      itemsdiv.style.paddingBottom = padding + "px";
+      lastViewHeight = viewHeight;
+    }
+  }
+
   let indexFromId;
   let itemsdiv;
   let headerdiv;
@@ -763,7 +784,6 @@
   // TODO: try maxColumns=1 during initial render if partial-height layouts prove problematic
   let defaultItemHeight = 0; // if zero, initial layout will be single-column
   let totalItemHeight = 0;
-  let lastInnerHeight = 0;
   let lastFocusedEditElement = null;
   let lastTimeStringUpdateTime = 0;
   let showDotted = false;
@@ -792,18 +812,7 @@
     lastTimeStringUpdateTime = Date.now();
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn();
-
-    // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
-    // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
-    // as a side effect this ensures header stays in view (precisely) on ios
-    if (itemsdiv && innerHeight != lastInnerHeight) {
-      lastInnerHeight = innerHeight;
-      itemsdiv.style.minHeight = 1.7 * innerHeight + "px";
-      itemsdiv.style.paddingBottom = 0.7 * innerHeight + "px";
-      itemsdiv
-        .querySelectorAll(".column-padding")
-        .forEach((div: HTMLElement) => (div.style.height = 0.7 * innerHeight + "px"));
-    }
+    updateVerticalPadding();
 
     // as soon as header is available, add top margin and scroll to header
     // also store header offset for all other scrollTo calculations
@@ -907,23 +916,21 @@
 
     // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
     // OR scroll to top mover (if not narrating, since then we prefer manual scroll)
-    let activeEditItem = -1;
+    let activeEditItem;
     if (focusedItem >= 0) {
       const div = document.querySelector("#super-container-" + items[focusedItem].id) as HTMLElement;
       if (!div) console.warn("focusedItem missing on page");
       else if (!div.contains(document.activeElement)) console.warn("focusedItem does not contain activeElement");
-      else {
-        const textarea = textArea(focusedItem);
-        activeEditItem = focusedItem;
-      }
+      else activeEditItem = items[focusedItem].id;
     }
 
     tick()
       .then(update_dom)
       .then(() => {
-        if (activeEditItem >= 0 && !textArea(activeEditItem).isSameNode(lastFocusedEditElement)) {
+        const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null;
+        if (activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
           restoreItemEditor(activeEditItem);
-          lastFocusedEditElement = textArea(activeEditItem); // prevent scroll on next layout
+          lastFocusedEditElement = focusedEditElement; // prevent scroll on next layout
         } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
             topMovers.map((index) => {
@@ -2419,8 +2426,11 @@
       let selectionEnd = textarea.selectionEnd;
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
       if (text != origText) selectionStart = selectionEnd = 0;
+      // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
-        let textarea = textArea(indexFromId.get(item.id));
+        const index = indexFromId.get(item.id);
+        if (index == undefined) return;
+        let textarea = textArea(index);
         if (!textarea) {
           console.error("missing textarea for new item");
           return;
@@ -2428,6 +2438,11 @@
         textarea.focus();
         textarea.selectionStart = selectionStart;
         textarea.selectionEnd = selectionEnd;
+
+        // scroll to caret position ...
+        // (unnecessary and problematic on ios)
+        if (!ios) restoreItemEditor(item.id);
+
         // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
         if (selectionStart > 0 || selectionEnd > 0) {
           setTimeout(() => {
@@ -2884,31 +2899,36 @@
     editingItems.push(index);
   }
 
-  function restoreItemEditor(index) {
-    const textarea = textArea(index);
-    textarea.focus();
+  function restoreItemEditor(id) {
+    tick()
+      .then(update_dom)
+      .then(() => {
+        const textarea = textArea(indexFromId.get(id));
+        if (!textarea) return;
+        textarea.focus();
 
-    // scroll to caret position if necessary
-    // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
-    const backdrop = textarea.closest(".editor")?.querySelector(".backdrop");
-    if (!backdrop) return; // unable to locate backdrop div for caret position
-    const clone = backdrop.cloneNode(true) as HTMLDivElement;
-    clone.style.visibility = "hidden";
-    backdrop.parentElement.insertBefore(clone, backdrop);
-    (clone.firstChild as HTMLElement).innerHTML =
-      _.escape(textarea.value.substring(0, textarea.selectionStart)) +
-      `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
-    const span = clone.querySelector("span");
-    let elem = span as HTMLElement;
-    let caretTop = span.offsetTop;
-    while (!elem.offsetParent.isSameNode(document.body)) {
-      elem = elem.offsetParent as HTMLElement;
-      caretTop += elem.offsetTop;
-    }
-    clone.remove();
-    // if caret is  is too far up, or too far down, bring it to ~middle of page
-    if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
-      document.body.scrollTo(0, Math.max(headerdiv.offsetTop, caretTop - innerHeight / 2));
+        // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
+        const backdrop = textarea.closest(".editor")?.querySelector(".backdrop");
+        if (!backdrop) return; // unable to locate backdrop div for caret position
+        const clone = backdrop.cloneNode(true) as HTMLDivElement;
+        clone.style.visibility = "hidden";
+        backdrop.parentElement.insertBefore(clone, backdrop);
+        (clone.firstChild as HTMLElement).innerHTML =
+          _.escape(textarea.value.substring(0, textarea.selectionStart)) +
+          `<span>${textarea.value.substring(textarea.selectionStart) || " "}</span>`;
+        const span = clone.querySelector("span");
+        let elem = span as HTMLElement;
+        let caretTop = span.offsetTop;
+        while (!elem.offsetParent.isSameNode(document.body)) {
+          elem = elem.offsetParent as HTMLElement;
+          caretTop += elem.offsetTop;
+        }
+        clone.remove();
+
+        // if caret is  is too far up, or too far down, bring it to ~middle of page
+        if (caretTop - 100 < document.body.scrollTop || caretTop + 100 > document.body.scrollTop + innerHeight)
+          document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 2));
+      });
   }
 
   let lastEditItem;
@@ -2924,11 +2944,7 @@
     editItem(index);
     lastEditorChangeTime = 0; // force immediate update
     onEditorChange(editorText); // since edit state changed
-    tick().then(() => {
-      const index = indexFromId.get(lastEditItem);
-      if (index === undefined) return;
-      restoreItemEditor(index);
-    });
+    restoreItemEditor(lastEditItem);
   }
 
   function textArea(index: number): HTMLTextAreaElement {
@@ -3429,6 +3445,13 @@
 
         if (Date.now() - lastScrollTime < 250) return; // avoid layout during scroll
         if (Date.now() - lastResizeTime < 250) return; // avoid layout during resizing
+
+        // update vertical padding, but only if we are consistently unfocused (to avoid shifting during/after focus)
+        if (
+          (!document.activeElement || document.activeElement.isSameNode(document.body)) &&
+          document.activeElement == lastFocusElem
+        )
+          updateVerticalPadding();
 
         const documentWidth = document.documentElement.clientWidth;
         if (
@@ -4558,14 +4581,15 @@
     /* prevent horizontal overflow which causes stuck zoom-out on iOS Safari */
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
-    /* fill full height (+70vh for .column-padding) of page even if no items are shown */
+    /* fill full height of page even if no items are shown */
     /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
-    min-height: 170vh;
+    min-height: 100%;
 
     /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
+    /* matches .column-padding to enable scrolling down to top of header regardless of .items contents */
     padding-bottom: 70vh;
-    box-sizing: border-box;
+    /* box-sizing: border-box; */
   }
   /* .items.multi-column {
     padding-bottom: 0;
@@ -4594,8 +4618,6 @@
     margin-right: 8px;
   }
   /* column padding allows scrolling top items to ~middle of screen (or beyond) */
-  /* 70vh seems maximum we can do without allowing a blank screen on iphone */
-  /* (actually this is no longer true w/ vh->px replacement during layout) */
   .column-padding {
     height: 70vh;
   }
