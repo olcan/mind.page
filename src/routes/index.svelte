@@ -3760,8 +3760,14 @@
     }
 
     // let unmodified DigitX select/target corresponding item if named, touch it otherwise
+    // let Digit0 scroll to target (if any)
     if (key.match(/Digit\d+/) && !modified) {
       const index = parseInt(key.match(/\d+/)?.shift()) - 1;
+      if (index == -1) {
+        const target = document.querySelector(`.super-container.target`) as HTMLElement;
+        if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4);
+        return;
+      }
       const item = items[index];
       if (item?.uniqueLabel) {
         const target = document.querySelector(`#super-container-${item.id} .container`);
