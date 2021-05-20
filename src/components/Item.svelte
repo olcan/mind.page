@@ -1198,7 +1198,7 @@
     class:running
     class:admin
     class:showLogs
-    class:bordered={error || warning || running}
+    class:bordered={error || warning || running || target}
     class:runnable
     class:saveable
     class:scripted
@@ -1297,7 +1297,7 @@
     top: -1px;
     right: -1px;
     /* background: #333; */
-    opacity: 0.5;
+    opacity: 1;
     /* NOTE: border-radius causes pixel alignment issues on right edge, so we add rounding to menu items */
     /* border-radius: 0 5px 0 4px; */
     /* overflow: hidden; */
@@ -1403,11 +1403,11 @@
 
   .item-menu > .index {
     background: transparent;
-    color: #999;
+    color: #777;
   }
 
   .item-menu > .index.leader {
-    color: #fff;
+    color: #eee;
   }
 
   .item-menu > .index.matching {
