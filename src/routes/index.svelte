@@ -1305,20 +1305,22 @@
       // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
       // skip secondary terms (for ranking and highlighting) for listing item
       // because it just feels like a distraction in that particular case
-      item.matchingTermsSecondary = item.index == listingItemIndex ? [] :        
-      _.uniq(
-        _.concat(
-          termsContext.filter(
-            (t) =>
-              item.tagsExpanded.includes(t) ||
-              item.depsString.toLowerCase().includes(t) ||
-              item.dependentsString.toLowerCase().includes(t)
-          ),
-          terms.filter(
-            (t) => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
-          )
-        )
-      );
+      item.matchingTermsSecondary =
+        item.index == listingItemIndex
+          ? []
+          : _.uniq(
+              _.concat(
+                termsContext.filter(
+                  (t) =>
+                    item.tagsExpanded.includes(t) ||
+                    item.depsString.toLowerCase().includes(t) ||
+                    item.dependentsString.toLowerCase().includes(t)
+                ),
+                terms.filter(
+                  (t) => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
+                )
+              )
+            );
 
       // item is considered matching if primary terms match
       // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
@@ -2744,13 +2746,8 @@
       // retreat to minimal hide index to focus on edited item
       hideIndex = hideIndexMinimal;
       // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
-      tick().then(() => {
-        if (!textArea(item.index)) {
-          console.warn("missing editor");
-          return;
-        }
-        textArea(item.index).focus();
-      });
+      // layout above does not trigger focus/scroll since editor is not rendered at that point
+      restoreItemEditor(item.id);
     } else {
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
