@@ -1676,7 +1676,7 @@
           );
           if (itemTop == Infinity) return; // nothing to scroll to
           // if item is too far up or down, bring it to ~upper-middle, snapping up to header
-          if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight / 4)
+          if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4));
         });
     }
@@ -3754,7 +3754,7 @@
       if (toggle) {
         // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop;
-        if (toggleTop + 100 > document.body.scrollTop + innerHeight)
+        if (toggleTop > document.body.scrollTop + innerHeight - 200)
           document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4));
         toggle.dispatchEvent(new Event("click"));
       }
@@ -3895,7 +3895,7 @@
           if (showToggle) {
             // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
             const toggleTop = (showToggle as HTMLElement).offsetTop;
-            if (toggleTop + 100 > document.body.scrollTop + innerHeight)
+            if (toggleTop > document.body.scrollTop + innerHeight - 200)
               document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4));
             showToggle.dispatchEvent(new Event("click"));
           }
