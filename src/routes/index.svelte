@@ -2447,8 +2447,7 @@
         textarea.selectionEnd = selectionEnd;
 
         // scroll to caret position ...
-        // (unnecessary and problematic on ios)
-        if (!ios) restoreItemEditor(item.id);
+        restoreItemEditor(item.id);
 
         // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
         if (selectionStart > 0 || selectionEnd > 0) {
@@ -2745,9 +2744,14 @@
       onEditorChange(editorText); // editing state (and possibly time) has changed
       // retreat to minimal hide index to focus on edited item
       hideIndex = hideIndexMinimal;
-      // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       // layout above does not trigger focus/scroll since editor is not rendered at that point
-      restoreItemEditor(item.id);
+      // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
+      // on ios we still need a well-timed focus() call to bring up the keyboard
+      // as in onEditorDone, update_dom turns out to be too slow to switch focus but tick works
+      tick().then(() => {
+        textArea(item.index)?.focus();
+        restoreItemEditor(item.id); // scroll to caret position
+      });
     } else {
       // stopped editing
       editingItems.splice(editingItems.indexOf(index), 1);
@@ -2908,6 +2912,7 @@
         const textarea = textArea(indexFromId.get(id));
         if (!textarea) return;
         textarea.focus();
+        if (ios || android) return; // ios and android have built-in focus scrolling that works better
 
         // update vertical padding in case it is out of date
         // could help w/ caret position calculation below, but unconfirmed empirically
