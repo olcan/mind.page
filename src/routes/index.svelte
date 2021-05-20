@@ -2723,7 +2723,13 @@
   const android = isAndroid();
   const ios = isIOS();
 
-  function onItemEditing(index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) {
+  function onItemEditing(
+    index: number,
+    editing: boolean,
+    cancelled: boolean = false,
+    run: boolean = false,
+    e: KeyboardEvent = null
+  ) {
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
     let item = items[index];
 
@@ -2792,7 +2798,7 @@
         // if (!cancelled) lastEditItem = item.id;
         lastEditItem = item.id;
         // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
-        if (altKey && metaKey) item.time = item.savedTime;
+        if (e?.altKey && e?.metaKey) item.time = item.savedTime;
         if (!cancelled && (item.time != item.savedTime || item.text != item.savedText)) saveItem(item.id);
         onEditorChange(editorText); // item time and/or text may have changed
       }
@@ -2870,22 +2876,22 @@
     }
   }
 
-  function onItemTouch(index: number) {
+  function onItemTouch(index: number, e: MouseEvent = null) {
     // if (items[index].log) {
     //   alert("#log item can not be moved");
     //   return;
     // } // ignore
     if (items[index].time > newestTime) console.warn("invalid item time");
-    if (altKey && metaKey) {
+    if (e?.altKey && e?.metaKey) {
       // move item time back 1 day
       items[index].time = items[index].time - 24 * 3600 * 1000;
-    } else if (altKey) {
+    } else if (e?.altKey) {
       if (index == items.length - 1 || items[index].time < items[index + 1].time) {
         alert("can not move item down");
         return;
       }
       items[index].time = items[index + 1].time - 1;
-    } else if (metaKey) {
+    } else if (e?.metaKey) {
       if (index == 0 || items[index].time > items[index - 1].time) {
         alert("can not move item up");
         return;
@@ -3724,17 +3730,9 @@
     document.body.scrollTo(0, headerdiv.offsetTop);
   }
 
-  let metaKey = false;
-  let ctrlKey = false; // NOTE: can cause left click
-  let altKey = false;
-  let shiftKey = false; // NOTE: can cause unintentional text selection
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
-    metaKey = e.metaKey;
-    ctrlKey = e.ctrlKey;
-    altKey = e.altKey;
-    shiftKey = e.shiftKey;
-    const modified = metaKey || ctrlKey || altKey || shiftKey;
+    const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
 
     // console.debug(e, initialized, modal.isVisible());
@@ -3748,7 +3746,7 @@
     if (key == "Space") e.preventDefault();
 
     // left Shift+ArrowDown/ArrowUp toggle items
-    if ((key == "ArrowDown" || key == "ArrowUp") && shiftKey) {
+    if ((key == "ArrowDown" || key == "ArrowUp") && e.shiftKey) {
       const toggle =
         key == "ArrowDown" ? document.querySelector(`.toggle.show`) : _.last(document.querySelectorAll(`.toggle.hide`));
       if (toggle) {
@@ -3811,7 +3809,7 @@
       return;
     }
     // let Shift+Backquote toggle logs on target item
-    if (key == "Backquote" && shiftKey && target) {
+    if (key == "Backquote" && e.shiftKey && target) {
       target.querySelector(".log-summary")?.dispatchEvent(new Event("click"));
       return;
     }
@@ -3994,13 +3992,6 @@
 
     // forward unhandled key to window._on_key
     if (window["_on_key"]) window["_on_key"](key, e);
-  }
-  function onKeyUp(e: KeyboardEvent) {
-    metaKey = e.metaKey;
-    ctrlKey = e.ctrlKey;
-    altKey = e.altKey;
-    shiftKey = e.shiftKey;
-    // console.debug(metaKey, ctrlKey, altKey, shiftKey);
   }
 
   // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true
@@ -4222,7 +4213,6 @@
 
 <svelte:window
   on:keydown={onKeyDown}
-  on:keyup={onKeyUp}
   on:focus={onFocus}
   on:blur={onFocus}
   on:error={onError}

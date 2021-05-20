@@ -61,13 +61,19 @@
   export let target_context = false;
   let saveable = false;
   $: saveable = text.trim().length > 0; /* otherwise saving would delete, so just cancel */
-  export let onEditing = (index: number, editing: boolean, cancelled: boolean = false, run: boolean = false) => {};
+  export let onEditing = (
+    index: number,
+    editing: boolean,
+    cancelled: boolean = false,
+    run: boolean = false,
+    e: KeyboardEvent = null
+  ) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
   export let onEscape = (e) => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
-  export let onTouch = (index: number) => {};
+  export let onTouch = (index: number, e:MouseEvent = null) => {};
   export let onResized = (id, container, trigger: string) => {};
   export let onImageRendering = (src: string): string => {
     return "";
@@ -83,7 +89,7 @@
 
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
     if (run && !cancelled) invalidateElemCache(id);
-    onEditing(index, (editing = false), cancelled, run);
+    onEditing(index, (editing = false), cancelled, run, e);
   }
   let mouseDownTime = 0;
   function onMouseDown() {
@@ -102,7 +108,7 @@
     if (clickable && clickable["_clickable"](e)) return true;
     if (window.getSelection().type == "Range") return; // ignore click if text is selected
     if (editing) return; // already editing
-    onEditing(index, (editing = true));
+    onEditing(index, (editing = true), false /* cancelled */, false /* run */, e);
   }
 
   function onRunClick(e) {
@@ -117,20 +123,20 @@
   function onIndexClick(e) {
     e.stopPropagation();
     e.preventDefault();
-    onTouch(index);
+    onTouch(index, e);
   }
 
   function onSaveClick(e) {
     if (!saveable) return;
     e.stopPropagation();
     e.preventDefault();
-    onEditing(index, (editing = false));
+    onEditing(index, (editing = false), false /* cancelled */, false /* run */, e);
   }
 
   function onCancelClick(e) {
     e.stopPropagation();
     e.preventDefault();
-    onEditing(index, (editing = false), true /* cancelled */);
+    onEditing(index, (editing = false), true /* cancelled */, false /* run */, e);
   }
 
   let editor;
@@ -144,7 +150,7 @@
     e.stopPropagation();
     e.preventDefault();
     text = ""; // indicates deletion
-    onEditing(index, (editing = false));
+    onEditing(index, (editing = false), false /* cancelled */, false /* run */, e);
   }
 
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {};
