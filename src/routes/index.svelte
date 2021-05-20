@@ -1303,7 +1303,10 @@
       item.matchingTerms = _.uniq(item.matchingTerms); // can have duplicates (e.g. regex:*, id:*, ...)
 
       // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
-      item.matchingTermsSecondary = _.uniq(
+      // skip secondary terms (for ranking and highlighting) for listing item
+      // because it just feels like a distraction in that particular case
+      item.matchingTermsSecondary = item.index == listingItemIndex ? [] :        
+      _.uniq(
         _.concat(
           termsContext.filter(
             (t) =>
