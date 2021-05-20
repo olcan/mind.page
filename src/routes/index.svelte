@@ -2933,6 +2933,7 @@
 
         // if caret is too far up or down, bring it to ~upper-middle of page
         // allow going above header for more reliable scrolling on mobile (esp. on ios)
+        // NOTE: the downward scrolling hew maybe too aggressive (was caretTop > scrollTop + innerHeight - 100) i.e. the jump on editing items could get annoying but seems worth experimenting with the new UX for a while ...
         if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
           document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4));
       });
