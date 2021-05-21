@@ -354,17 +354,19 @@
       if (text.length >= writeConfirmLength) {
         if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return; // cancel write
       }
-      // maintain selection on textarea if editing
+      // maintain selection on textarea if editing and textarea is available (may not be for newly created item)
       if (item(this.id)?.editing) {
         let textarea = textArea(item(this.id).index);
-        let selectionStart = textarea.selectionStart;
-        let selectionEnd = textarea.selectionEnd;
-        tick().then(() => {
-          let textarea = textArea(indexFromId.get(this.id));
-          if (!textarea) return;
-          textarea.selectionStart = selectionStart;
-          textarea.selectionEnd = selectionEnd;
-        });
+        if (textarea) {
+          let selectionStart = textarea.selectionStart;
+          let selectionEnd = textarea.selectionEnd;
+          tick().then(() => {
+            let textarea = textArea(indexFromId.get(this.id));
+            if (!textarea) return;
+            textarea.selectionStart = selectionStart;
+            textarea.selectionEnd = selectionEnd;
+          });
+        }
       }
       // if writing *_log, clear any existing *_log blocks
       // (and skip write if block is empty)
@@ -442,7 +444,7 @@
       let evaljs = [prefix, js].join("\n").trim();
       if (!options["debug"]) {
         if (options["async"]) {
-          if (options["simple_async"]) {
+          if (options["async_simple"]) {
             // use light-weight wrapper without output/logging into item
             evaljs = [";(async () => {", evaljs, "})()"].join("\n");
           } else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
@@ -2341,12 +2343,14 @@
                     );
                   } else {
                     text = obj.text;
-                    // if obj.{edit,run} is not truthy or falsy we keep the default (based on modifier keys)
+                    // since we are async, we need to call onEditorDone again with run/editing set properly
+                    // obj.{edit,run} can override defaults editing=true and run=false
+                    let editing = true;
+                    let run = false;
                     if (obj.edit == true) editing = true;
                     else if (obj.edit == false) editing = false;
                     if (obj.run == true) run = true;
                     else if (obj.run == false) run = false;
-                    // since we are async, we need to call onEditorDone again with run/editing set properly
                     let item = onEditorDone(text, null, false, run, editing);
                     // run programmatic initializer function if any
                     try {
@@ -2421,7 +2425,7 @@
     showDotted = false;
 
     if (run) {
-      // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skip due to saveId being null
+      // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skipped due to saveId being null
       appendJSOutput(indexFromId.get(item.id));
       text = itemToSave.text = item.text; // no need to update editorText
     }
