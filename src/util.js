@@ -38,22 +38,6 @@ export function extractBlock(text, type) {
     .trim();
 }
 
-export function extractImages(text) {
-  return _.uniq(
-    Array.from(
-      text
-        .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
-        // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
-        .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
-        .replace(/(^|[^\\])`.*?`/g, "$1")
-        .matchAll(/<img [^>]*?src\s*=\s*"(.*?)".*?>/gi),
-      (m) => m[1]
-    ).map((src) =>
-      src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "")
-    )
-  );
-}
-
 import "highlight.js/styles/sunburst.css";
 import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
 // custom registration function that can extend highlighting for all languages
@@ -122,8 +106,8 @@ export function parseTags(text) {
     Array.from(
       text
         .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
-        // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
-        .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
+        // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
+        .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, "") // remove 4-space indented blocks
         .replace(/(^|[^\\])`.*?`/g, "$1") // remove inline code spans
         .replace(/(^|[^\\])\$?\$`.+?`\$\$?/g, "$1") // remove math
         .replace(/(^|[^\\])<script.*?>.*?<\/script>/gs, "$1") // remove scripts (can be multi-line)

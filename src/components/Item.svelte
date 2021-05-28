@@ -73,7 +73,7 @@
   export let onEscape = (e) => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
-  export let onTouch = (index: number, e:MouseEvent = null) => {};
+  export let onTouch = (index: number, e: MouseEvent = null) => {};
   export let onResized = (id, container, trigger: string) => {};
   export let onImageRendering = (src: string): string => {
     return "";
@@ -376,24 +376,24 @@
         }
 
         // preserve line breaks by inserting <br>\n outside of code blocks
-        // (we miss indented blocks that start with bullets -/* for now since it requires prior-line context)
+        // (we miss indented blocks that start with bullets [-*+] for now since it requires prior-line context)
         // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
         // (we also exclude /^\s*>/ to break inside blockquotes for now)
         // (also note since we process lines, \s does not match \n)
         if (
           !insideBlock &&
-          (str.match(/\\$/) || !str.match(/^\s*```|^    \s*[^-*+]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
+          (str.match(/\\$/) || !str.match(/^\s*```|^     *[^-*+ ]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
         )
           str = str + "<br>\n";
 
         // NOTE: some lines (e.g. html tag lines) require an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^    \s*[^-*+]|^\s*</)) str += "\n";
+        if (!insideBlock && str.match(/^\s*```|^     *[^-*+ ]|^\s*</)) str += "\n";
 
         // NOTE: for blockquotes (>...) we break lines using double-space
         if (!insideBlock && str.match(/^\s*>/)) str += "  ";
 
         const depline = str.startsWith('<div class="deps-and-dependents">');
-        if (!insideBlock && (depline || !str.match(/^\s*```|^    \s*[^\-\*]/))) {
+        if (!insideBlock && (depline || !str.match(/^\s*```|^     *[^-*+ ]/))) {
           // wrap math inside span.math (unless text matches search terms)
           if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has("$")))
             str = str.replace(/(^|[^\\])(\$?\$`.+?`\$\$?)/g, (m, pfx, math) =>

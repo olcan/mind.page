@@ -200,7 +200,7 @@
       } else if (insideBlock) {
         code += line + "\n";
       } else {
-        if (line.match(/^    \s*[^-*+]/)) html += _.escape(line) + "\n";
+        if (line.match(/^     *[^-*+ ]/)) html += _.escape(line) + "\n";
         else html += highlightTitles(highlightOther(highlightTags(_.escape(line), tags))) + "\n";
       }
     });

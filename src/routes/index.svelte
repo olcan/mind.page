@@ -634,8 +634,8 @@
         Array.from(
           (this.text
             .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
-            // NOTE: currently we miss indented blocks that start with bullets -/* (since it requires context)
-            .replace(/(?:^|\n)     *[^\-\*].*(?:$|\n)/g, "") // remove 4-space indented blocks
+            // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
+            .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, "") // remove 4-space indented blocks
             .replace(/(^|[^\\])`.*?`/g, "$1") as any).matchAll(/<img .*?src\s*=\s*"(.*?)".*?>/gi),
           (m) => m[1]
         ).map((src) =>
