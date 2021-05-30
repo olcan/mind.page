@@ -3729,7 +3729,8 @@
       init_log(`initialized client`);
     });
 
-  function onColumnPaddingClick(e) {
+  function onColumnPaddingMouseDown(e) {
+    e.preventDefault(); // prevent click & focus shift
     document.body.scrollTo(0, headerdiv.offsetTop);
   }
 
@@ -4051,7 +4052,7 @@
         class:focused
         class:editorFocused
       >
-        <div class="column-padding" on:click={onColumnPaddingClick} />
+        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown} />
         {#if column == 0}
           <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div id="header-container" class:focused={editorFocused}>
