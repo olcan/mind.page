@@ -4213,7 +4213,7 @@
   </div>
 {/if}
 
-{#if !user || !initialized || signingIn || signingOut}
+{#if !user || !initialized || !headerScrolled || signingIn || signingOut}
   <div id="loading">
     <Circle2 size="60" unit="px" />
   </div>
@@ -4452,8 +4452,8 @@
     height: 100%;
     justify-content: center;
     align-items: center;
-    /* NOTE: if you add transparency, initial zero-height layout will be visible */
-    background: rgba(17, 17, 17, 0.75);
+    /* NOTE: if you add transparency, initial zero-height layout and unscrolled header will be visible */
+    background: rgba(17, 17, 17, 1);
   }
   #header {
     max-width: 100%;
