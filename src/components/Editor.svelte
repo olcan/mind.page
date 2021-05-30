@@ -25,6 +25,9 @@
   import { highlight, parseTags, numberWithCommas } from "../util.js";
 
   const placeholder = " ";
+  let spellcheck = true;
+  // $: spellcheck = !!text.match(/(?:^|\s|\()#_spelling\b/);
+
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
   let highlights: HTMLDivElement;
@@ -676,7 +679,7 @@
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
-    spellcheck={false}
+    {spellcheck}
     autocapitalize="off">{text}</textarea>
 {#if showButtons}
   <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->
