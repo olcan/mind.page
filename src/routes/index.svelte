@@ -3314,8 +3314,7 @@
     resetUser();
     window.sessionStorage.setItem("mindpage_signin_pending", "1"); // prevents anonymous user on reload
     document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
-
-    let provider = new window.firebase.auth.GoogleAuthProvider();
+    let provider = new (window.firebase as any).auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
     // firebase().auth().setPersistence("none")
     // firebase().auth().setPersistence("session")
