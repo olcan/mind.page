@@ -1,6 +1,7 @@
 <script context="module" lang="ts">
   // NOTE: Preload function can be called on either client or server
-  // See https://sapper.svelte.dev/docs#Preloading
+  // See https://sapper.svelte.dev/docs#Preloading for documentation
+  // Start 'npm run serve' and open localhost:5000 to test locally
   export async function preload(page, session) {
     return process["server-preload"](page, session);
   }
