@@ -25,8 +25,11 @@
   import { highlight, parseTags, numberWithCommas } from "../util.js";
 
   const placeholder = " ";
-  let spellcheck = true;
-  // $: spellcheck = !!text.match(/(?:^|\s|\()#_spelling\b/);
+  let spellcheck = false;
+  // enable spellcheck iff item contains no blocks (```) and no #_nospell or contains #_spell
+  $: spellcheck =
+    (!text.match(/(?:^|\n)\s*```\w*(?:$|\n)/) /* no blocks */ && !text.match(/(?:^|\s|\()#_nospell\b/)) ||
+    !!text.match(/(?:^|\s|\()#_spell\b/);
 
   let editor: HTMLDivElement;
   let backdrop: HTMLDivElement;
