@@ -928,12 +928,14 @@
       else activeEditItem = items[focusedItem].id;
     }
 
+    const dispatchTime = Date.now();
     tick()
       .then(update_dom)
       .then(() => {
         const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null;
         if (activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
-          restoreItemEditor(activeEditItem);
+          focusedEditElement.focus();
+          if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem); // scroll to caret
           lastFocusedEditElement = focusedEditElement; // prevent scroll on next layout
         } else if (_.min(topMovers) < items.length && !narrating) {
           const itemTop = _.min(
@@ -2763,9 +2765,11 @@
       // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       // on ios we still need a well-timed focus() call to bring up the keyboard
       // as in onEditorDone, update_dom turns out to be too slow to switch focus but tick works
+      const dispatchTime = Date.now();
       tick().then(() => {
         textArea(item.index)?.focus();
-        restoreItemEditor(item.id); // scroll to caret position
+        lastFocusedEditElement = textArea(item.index); // prevent refocus/scroll in layout (e.g. after resize)
+        if (lastScrollTime < dispatchTime) restoreItemEditor(item.id); // scroll to caret
       });
     } else {
       // stopped editing
