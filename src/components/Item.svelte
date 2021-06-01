@@ -981,10 +981,10 @@
       renderMath(math);
     });
 
-    // add click handler to links that do not already trigger _handleLinkClick
-    // (e.g. if they implement custom onclick and do not go through marked.Renderer)
+    // add click handler to links w/ custom onclick that does not trigger _handleLinkClick
     itemdiv.querySelectorAll("a").forEach((a) => {
-      if (a.hasAttribute("onclick") && a.getAttribute("onclick").includes("_handleLinkClick")) return;
+      if (!a.getAttribute("onclick")) return;
+      if (a.getAttribute("onclick").includes("_handleLinkClick")) return;
       const prevOnClick: any = a.onclick;
       a.onclick = function (e) {
         let ret;
