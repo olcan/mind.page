@@ -1105,6 +1105,8 @@
       tag == "#async" ||
       tag == "#debug" ||
       tag == "#autorun" ||
+      tag == "#spell" ||
+      tag == "#nospell" ||
       tag.match(/^#pin(?:\/|$)/) ||
       tag.match(/\/pin(?:\/|$)/)
     );
@@ -1122,6 +1124,8 @@
     else if (tag == "#async") return ["#features/_async"];
     else if (tag == "#debug") return ["#features/_debug"];
     else if (tag == "#autorun") return ["#features/_autorun"];
+    else if (tag == "#spell") return ["#features/_spell"];
+    else if (tag == "#nospell") return ["#features/_nospell"];
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ["#features/_pin"];
     else return [];
   }
