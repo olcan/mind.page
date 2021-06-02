@@ -1024,8 +1024,11 @@
       input.multiple = true;
     });
 
-    // remove "disabled" attribute from markdown-generated checkboxes
-    document.querySelectorAll(".list-item input").forEach((elem) => elem.removeAttribute("disabled"));
+    // fix markdown-generated checkboxes by removing "disabled" attribute and hiding bullet points
+    document.querySelectorAll(".list-item input").forEach((elem) => {
+      elem.removeAttribute("disabled");
+      elem.closest("ul").style.listStyleType = "none";
+    });
 
     // set up file inputs to insert images into item
     // NOTE: only the first file input is accepted and replaces all inputs
@@ -1568,6 +1571,8 @@
   :global(.item span.list-item input[type="checkbox"]) {
     pointer-events: none;
     vertical-align: middle;
+    margin-left: -15px;
+    /* margin-right: 3px; */
   }
 
   /* column spacing for tables */
