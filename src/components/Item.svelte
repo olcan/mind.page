@@ -1623,45 +1623,24 @@
     margin-left: -15px;
   }
   :global(input[type="checkbox"]) {
-    box-sizing: border-box;
     -webkit-appearance: none;
     appearance: none;
-    position: relative;
-    width: 1.5em;
-    height: 1.5em;
-    color: black;
     border: 1px solid #aaa;
     border-radius: 4px;
-    outline: 0;
     cursor: pointer;
-    transition: background 175ms cubic-bezier(0.1, 0.1, 0.25, 1);
-  }
-  :global(input[type="checkbox"]::before) {
-    box-sizing: border-box;
-    position: absolute;
-    content: "";
-    display: block;
-    top: 1px;
-    left: 5px;
-    width: 5px;
-    height: 11px;
-    border-style: solid;
-    border-color: white;
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-    opacity: 0;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   :global(input[type="checkbox"]:checked) {
-    box-sizing: border-box;
     color: white;
     /* border-color: #4af; */
     /* background: #4af; */
   }
-  :global(input[type="checkbox"]:checked:before) {
-    opacity: 1;
-  }
   :global(input[type="checkbox"]:checked:after) {
-    opacity: 1;
+    content: "✔︎"; /* could be: ✔︎✓ */
   }
 
   /* column spacing for tables */
