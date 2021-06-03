@@ -546,6 +546,8 @@
       },
       langPrefix: "",
     });
+    // insert word-joiner &#8288; (https://stackoverflow.com/a/28405917) to allow checkbox items that start with a tag (<mark>) or other html
+    text = text.replace(/(?:^|\n)\s*[-*+] \[.\] /g, (m) => m + "&#8288;");
     text = marked(text);
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
