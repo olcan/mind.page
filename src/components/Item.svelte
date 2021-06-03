@@ -546,8 +546,12 @@
       },
       langPrefix: "",
     });
-    // insert word-joiner &#8288; (https://stackoverflow.com/a/28405917) to allow checkbox items that start with a tag (<mark>) or other html
-    text = text.replace(/(?:^|\n)\s*[-*+] \[.\] /g, (m) => m + "&#8288;");
+
+    // assign indices to checkboxes to be moved into _checkbox_index attribute below
+    // adding text after checkbox also allows checkbox items that start w/ tag (<mark>) or other html
+    let checkboxIndex = 0;
+    text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, (m) => m + "%%" + checkboxIndex++ + "%%");
+
     text = marked(text);
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
@@ -571,6 +575,11 @@
 
     // wrap list items in span to control spacing from bullets
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, "</span></li>");
+
+    // move checkbox indices into attributes
+    text = text.replace(/(<input [^>]*?type="checkbox">\s*)%%(\d+)%%/gi, (m, box, index) => {
+      return box.replace(/>/, ` _checkbox_index=${index}>`);
+    });
 
     // process images to transform src and add _cached attribute (skip if caching managed manually)
     text = text.replace(/<img [^>]*?src\s*=\s*"([^>]*?)".*?>/gi, (m, src) => {
@@ -1026,14 +1035,37 @@
       input.multiple = true;
     });
 
-    // fix markdown-generated checkboxes by removing "disabled" attribute
-    // also add checkbox and checked styles to the containing <li>
-    document.querySelectorAll("li input[type=checkbox]").forEach((elem) => {
-      elem.removeAttribute("disabled");
+    // set up markdown-generated checkboxes
+    itemdiv.querySelectorAll("li span.list-item input[type=checkbox]").forEach((elem: HTMLElement) => {
       const li = elem.closest("li");
       if (!li) return; // should not happen but just in case
+      if (!elem.hasAttribute("_checkbox_index")) return; // element not parsed properly
+      const index = parseInt(elem.getAttribute("_checkbox_index"));
+      // remove "disabled" attribute added by markdown
+      elem.removeAttribute("disabled");
+      // add .checkbox(.checked) class to containing list item
       li.classList.add("checkbox");
       if (elem.hasAttribute("checked")) li.classList.add("checked");
+      // configure click handler
+      elem.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        let item = window["_item"](id);
+        // alert("checkbox index " + index + " on item " + item.name);
+        let text = item.read();
+        let checkboxIndex = 0;
+        text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, (m) => {
+          if (checkboxIndex++ == index) return m.replace(/\[[xX ]\]/, elem.hasAttribute("checked") ? "[ ]" : "[x]");
+          else return m;
+        });
+        item.write(text, "" /* replace whole item*/);
+      };
+    });
+
+    // add .checbox class to unordered lists where all items are checkbox items
+    itemdiv.querySelectorAll("ul").forEach((ul: HTMLElement) => {
+      if (ul.querySelector(":scope > li:not(.checkbox)")) return;
+      ul.classList.add("checkbox");
     });
 
     // set up file inputs to insert images into item
@@ -1574,19 +1606,63 @@
   } */
 
   /* style markdown-generated checkboxes */
+  /* custom styling css adapted from https://www.sliderrevolution.com/resources/css-checkbox/ */
   :global(.item span.list-item input[type="checkbox"]) {
-    pointer-events: none;
     vertical-align: middle;
+    /* pointer-events: none; */
   }
   :global(.item li.checkbox.checked, .item li.checkbox.checked li) {
-    text-decoration: line-through;
+    /* text-decoration: line-through; */
     opacity: 0.25;
     /* display: none; */
   }
-
-  /* :global(.item li.checkbox.checked span.list-item) {
-    font-size: 80%;
-  } */
+  :global(.item ul.checkbox) {
+    list-style: none;
+  }
+  :global(.item ul.checkbox > li > span.list-item > p > input[type="checkbox"]) {
+    margin-left: -15px;
+  }
+  :global(input[type="checkbox"]) {
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    width: 1.5em;
+    height: 1.5em;
+    color: black;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    outline: 0;
+    cursor: pointer;
+    transition: background 175ms cubic-bezier(0.1, 0.1, 0.25, 1);
+  }
+  :global(input[type="checkbox"]::before) {
+    box-sizing: border-box;
+    position: absolute;
+    content: "";
+    display: block;
+    top: 1px;
+    left: 5px;
+    width: 5px;
+    height: 11px;
+    border-style: solid;
+    border-color: white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    opacity: 0;
+  }
+  :global(input[type="checkbox"]:checked) {
+    box-sizing: border-box;
+    color: white;
+    /* border-color: #4af; */
+    /* background: #4af; */
+  }
+  :global(input[type="checkbox"]:checked:before) {
+    opacity: 1;
+  }
+  :global(input[type="checkbox"]:checked:after) {
+    opacity: 1;
+  }
 
   /* column spacing for tables */
   :global(.item table) {
