@@ -1024,10 +1024,14 @@
       input.multiple = true;
     });
 
-    // fix markdown-generated checkboxes by removing "disabled" attribute and hiding bullet points
-    document.querySelectorAll(".list-item input").forEach((elem) => {
+    // fix markdown-generated checkboxes by removing "disabled" attribute
+    // also add checkbox and checked styles to the containing <li>
+    document.querySelectorAll("li input[type=checkbox]").forEach((elem) => {
       elem.removeAttribute("disabled");
-      elem.closest("ul").style.listStyleType = "none";
+      const li = elem.closest("li");
+      if (!li) return; // should not happen but just in case
+      li.classList.add("checkbox");
+      if (elem.hasAttribute("checked")) li.classList.add("checked");
     });
 
     // set up file inputs to insert images into item
@@ -1567,13 +1571,20 @@
     break-inside: avoid;
   } */
 
-  /* make markdown-generated checkboxes middle-aligned, pass-through, and left-shifted (over bullets) */
+  /* style markdown-generated checkboxes */
   :global(.item span.list-item input[type="checkbox"]) {
     pointer-events: none;
     vertical-align: middle;
-    margin-left: -15px;
-    /* margin-right: 3px; */
   }
+  :global(.item li.checkbox.checked, .item li.checkbox.checked li) {
+    text-decoration: line-through;
+    opacity: 0.25;
+    /* display: none; */
+  }
+
+  /* :global(.item li.checkbox.checked span.list-item) {
+    font-size: 80%;
+  } */
 
   /* column spacing for tables */
   :global(.item table) {
