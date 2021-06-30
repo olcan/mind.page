@@ -286,6 +286,8 @@
     else e.stopPropagation();
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
+    // TODO: figure out an alternative to this (also for RightArrow/LeftArrow) for iOS15 if necessary
+    //       (same issue on MacOS w/ Ctrl+RightArrow/LeftArrow being captured by system unless reconfigured)
     if (!allowCommandCtrlBracket && (key == "BracketLeft" || key == "BracketRight") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       return;
