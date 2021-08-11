@@ -1404,6 +1404,7 @@
     //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
     //       (afterUpdate is also triggered by the various assignments above)
     // NOTE: undefined values produce NaN, which is treated as 0
+    // NOTE: bool - bool is fine (even w/o parens), but true - undefined is NaN~0
     items = items.sort(
       (a, b) =>
         // dotted? (contains #_pin/dot or #_pin/dot/*)
@@ -3164,7 +3165,7 @@
   let initTime = 0; // set where initialize is invoked
   let processed = false;
   let initialized = false;
-  let maxRenderedAtInit = 100;
+  let maxRenderedAtInit = 100; //items.length;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -3189,6 +3190,7 @@
       item.savedTime = item.time;
       // NOTE: we also initialized other state here to have a central listing
       // state used in onEditorChange
+      item.editing = false; // otherwise undefined till rendered/bound to svelte object
       item.matching = false;
       item.target = false;
       item.target_context = false;
