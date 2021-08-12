@@ -3671,7 +3671,7 @@
                 type: verb,
                 stack: evalStack.slice(),
                 // disallow multi-line log messages to simplify handling, e.g. using TYPE: prefix
-                text: text.replace(/\s*\n+\s*/, " ").trim(),
+                text: text.replace(/\s*\n+\s*/g, " ").trim(),
                 time: Date.now(),
                 level: log_levels.indexOf(verb),
               });
