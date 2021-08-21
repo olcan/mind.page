@@ -14,7 +14,7 @@
   let canConfirm = (input: string) => input.length > 0;
   let onConfirm = (input = null) => {};
   let onCancel = () => {};
-  let background = ""; // can be "confirm" or "cancel" (empty means block)
+  let background = ""; // can be "confirm" or "cancel", default (empty) is to block, or hide if no confirm/cancel buttons
 
   let selected_images = []; // used internally for file input
   let ready_image_count = 0;
@@ -99,9 +99,9 @@
     return visible;
   }
 
-  function _onConfirm(e) {
-    e.stopPropagation();
-    e.preventDefault();
+  function _onConfirm(e = null) {
+    e?.stopPropagation();
+    e?.preventDefault();
     if (!enabled) return;
     visible = false;
     const out = images ? selected_images : input != null ? input : true;
@@ -109,9 +109,9 @@
     _resolve(out);
   }
 
-  function _onCancel(e) {
-    e.stopPropagation();
-    e.preventDefault();
+  function _onCancel(e = null) {
+    e?.stopPropagation();
+    e?.preventDefault();
     if (!cancel) return;
     visible = false;
     const out = images ? [] : input != null ? null : false;
@@ -119,32 +119,37 @@
     _resolve(out);
   }
 
-  function onBackgroundClick(e) {
-    if ((e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
-    e.stopPropagation();
-    e.preventDefault();
-    if (background.toLowerCase() == "confirm") _onConfirm(e);
-    else if (background.toLowerCase() == "cancel") _onCancel(e);
+  function onBackgroundClick(e = null) {
+    if (e && (e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
+    e?.stopPropagation();
+    e?.preventDefault();
+    if (!confirm && !cancel) hide();
+    else if (confirm && background.toLowerCase() == "confirm") _onConfirm(e);
+    else if (cancel && background.toLowerCase() == "cancel") _onCancel(e);
+    // else block
   }
 
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key; // for android compatibility
     // NOTE: modal is on top of the page and handles ALL key events
     if (!visible) return; // ignore if not visible
-    // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
-    setTimeout(() => {
-      if (key == "Enter") _onConfirm(e);
-      else if (key == "Escape") {
-        // treat escape like background click
-        if (background.toLowerCase() == "confirm") _onConfirm(e);
-        else if (background.toLowerCase() == "cancel") _onCancel(e);
-      }
-    });
-    // stop all non-modal non-modifier key events as a modal should
-    if (!(e.target as HTMLElement).closest(".modal") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+
+    // always stop Enter and Escape
+    // also stop all non-modal non-modifier key events as a modal should
+    if (
+      key == "Enter" ||
+      key == "Escape" ||
+      (!(e.target as HTMLElement).closest(".modal") && !e.metaKey && !e.ctrlKey && !e.altKey)
+    ) {
       e.stopPropagation();
       e.preventDefault();
     }
+
+    // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
+    setTimeout(() => {
+      if (key == "Enter") _onConfirm();
+      else if (key == "Escape") onBackgroundClick();
+    });
   }
 
   function onFilesSelected(e) {
@@ -175,68 +180,69 @@
   }
 </script>
 
-{#if visible}
-  <div class="background" on:click={onBackgroundClick}>
-    <div class="modal">
-      {#if content}{@html marked(content)}{/if}
-      {#if input != null}
-        <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
-        <form>
-          {#if password}
-            <input type="text" name="username" value={username} autocomplete="username" style="display:none" />
-            <input
-              id="modal-input"
-              type="password"
-              name="password"
-              bind:value={input}
-              bind:this={inputelem}
-              {autocomplete}
-              on:keydown={onKeyDown}
-            />
-          {:else}
-            <input id="modal-input" bind:value={input} on:keydown={onKeyDown} bind:this={inputelem} {autocomplete} />
-          {/if}
-        </form>
-        <script>
-          setTimeout(() => document.querySelector("#modal-input").focus());
-        </script>
-      {/if}
-      {#if images}
-        <form>
-          <label class="button">
-            Select Images
-            <input type="file" accept="image/*,application/pdf" multiple on:input={onFilesSelected} />
-          </label>
-        </form>
-        {#if selected_images.length > 0}
-          <div class="uploads">
-            {#each selected_images as image (image.url)}
-              {#if image.fname}
-                Ready to insert "{image.name}" ({numberWithCommas(Math.ceil(image.size / 1024))} KB) as "{image.fname}".
-              {:else if image.size != null}
-                {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ({numberWithCommas(
-                  Math.ceil(image.size / 1024)
-                )} KB) ...
-              {:else}
-                {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ...
-              {/if}
-              <br />
-            {/each}
-          </div>
+<div class="background" class:visible on:click={onBackgroundClick}>
+  <div class="modal">
+    {#if content}{@html marked(content)}{/if}
+    {#if input != null}
+      <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
+      <form>
+        {#if password}
+          <input type="text" name="username" value={username} autocomplete="username" style="display:none" />
+          <input
+            id="modal-input"
+            type="password"
+            name="password"
+            bind:value={input}
+            bind:this={inputelem}
+            {autocomplete}
+            on:keydown={onKeyDown}
+          />
+        {:else}
+          <input id="modal-input" bind:value={input} on:keydown={onKeyDown} bind:this={inputelem} {autocomplete} />
         {/if}
-      {/if}
-      {#if confirm || cancel}
-        <div class="buttons">
-          {#if cancel}<div class="button cancel" on:mousedown={_onCancel} on:touchend={_onCancel}>{cancel}</div>{/if}
-          {#if confirm}
-            <div class="button confirm" class:enabled on:mousedown={_onConfirm} on:touchend={_onConfirm}>
-              {confirm}
-            </div>
-          {/if}
+      </form>
+    {/if}
+    {#if images}
+      <form>
+        <label class="button">
+          Select Images
+          <input type="file" accept="image/*,application/pdf" multiple on:input={onFilesSelected} />
+        </label>
+      </form>
+      {#if selected_images.length > 0}
+        <div class="uploads">
+          {#each selected_images as image (image.url)}
+            {#if image.fname}
+              Ready to insert "{image.name}" ({numberWithCommas(Math.ceil(image.size / 1024))} KB) as "{image.fname}".
+            {:else if image.size != null}
+              {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ({numberWithCommas(
+                Math.ceil(image.size / 1024)
+              )} KB) ...
+            {:else}
+              {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ...
+            {/if}
+            <br />
+          {/each}
         </div>
       {/if}
-    </div>
+    {/if}
+    {#if confirm || cancel}
+      <div class="buttons">
+        {#if cancel}<div class="button cancel" on:mousedown={_onCancel} on:touchend={_onCancel}>{cancel}</div>{/if}
+        {#if confirm}
+          <div class="button confirm" class:enabled on:mousedown={_onConfirm} on:touchend={_onConfirm}>
+            {confirm}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
+</div>
+
+{#if visible}
+  <script>
+    setTimeout(() => document.querySelector("#modal-input").focus());
+  </script>
 {/if}
 
 <svelte:window on:keydown={onKeyDown} />
@@ -254,6 +260,10 @@
     align-items: center;
     min-height: 100%;
     background: rgba(17, 17, 17, 0.8);
+    visibility: hidden;
+  }
+  .background.visible {
+    visibility: visible;
   }
   .modal {
     height: auto;
@@ -263,6 +273,7 @@
     background: #eee;
     border-radius: 5px;
     padding: 20px;
+    /* padding-bottom: 30px; */
     color: black;
     font-size: 17px;
     line-height: 24px;
@@ -277,7 +288,7 @@
     padding: 5px;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 10px;
+    margin: 10px 0;
   }
   input[type="file"] {
     display: none;
