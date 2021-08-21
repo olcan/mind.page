@@ -40,9 +40,6 @@ export function extractBlock(text, type) {
 
 // import "highlight.js/styles/sunburst.css";
 // import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
-function hljs() {
-  return typeof window !== "undefined" ? window.hljs : require("highlight.js");
-}
 
 // // custom registration function that can extend highlighting for all languages
 // function registerLanguage(name, func) {
@@ -55,7 +52,7 @@ function hljs() {
 //     else def.contains.unshift(comment);
 //     return def;
 //   };
-//   hljs().registerLanguage(name, custom_func);
+//   hljs.registerLanguage(name, custom_func);
 // }
 
 // import plaintext from "highlight.js/lib/languages/plaintext.js";
@@ -86,9 +83,9 @@ function hljs() {
 // import mathematica from "highlight.js/lib/languages/mathematica";
 // registerLanguage("mathematica", mathematica);
 
-hljs().registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
-hljs().registerAliases(["math", "mathjax"], { languageName: "latex" });
-hljs().configure({ tabReplace: "  " });
+// hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
+// hljs.registerAliases(["math", "mathjax"], { languageName: "latex" });
+// hljs.configure({ tabReplace: "  " });
 
 export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
@@ -110,8 +107,8 @@ export function highlight(code, language) {
   if (!language.startsWith("_")) language = language.replace(/(^\w+?)_.+$/, "$1");
   // highlight json as javascript so e.g. quotes are not required for keys
   if (language == "json") language = "js";
-  language = hljs().getLanguage(language) ? language : "plaintext";
-  return hljs().highlight(code, { language }).value;
+  language = window.hljs.getLanguage(language) ? language : "plaintext";
+  return window.hljs.highlight(code, { language }).value;
 }
 
 export function parseTags(text) {
