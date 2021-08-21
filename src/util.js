@@ -63,6 +63,11 @@ import coffeescript from "highlight.js/lib/languages/coffeescript.js";
 registerLanguage("coffeescript", coffeescript);
 import python from "highlight.js/lib/languages/python.js";
 registerLanguage("python", python);
+import swift from "highlight.js/lib/languages/swift";
+registerLanguage("swift", swift);
+// NOTE: mathematica is ~135KB, ~10-20x other languages, consider dropping if problematic
+import mathematica from "highlight.js/lib/languages/mathematica";
+registerLanguage("mathematica", mathematica);
 import css from "highlight.js/lib/languages/css.js";
 registerLanguage("css", css);
 import json from "highlight.js/lib/languages/json.js";
