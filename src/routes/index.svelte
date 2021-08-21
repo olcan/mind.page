@@ -4222,6 +4222,8 @@
       </div>
     {/each}
   </div>
+  <!-- <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/mathematica.min.js"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/swift.min.js"></script> -->
 {/if}
 
 {#if !user || !initialized || !headerScrolled || signingIn || signingOut}

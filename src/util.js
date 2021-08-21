@@ -38,49 +38,57 @@ export function extractBlock(text, type) {
     .trim();
 }
 
-import "highlight.js/styles/sunburst.css";
-import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
-// custom registration function that can extend highlighting for all languages
-function registerLanguage(name, func) {
-  const custom_func = function (hljs) {
-    let def = func(hljs);
-    // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
-    // (e.g. the individual characters could be interpreted in latex)
-    const comment = hljs.COMMENT(/\\?;{___/, /___}/, { className: "comment-custom", relevance: 0 });
-    if (!def.contains) def.contains = [comment];
-    else def.contains.unshift(comment);
-    return def;
-  };
-  hljs.registerLanguage(name, custom_func);
+// import "highlight.js/styles/sunburst.css";
+// import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
+function hljs() {
+  return typeof window !== "undefined" ? window.hljs : require("highlight.js");
 }
-import plaintext from "highlight.js/lib/languages/plaintext.js";
-registerLanguage("plaintext", plaintext);
-import javascript from "highlight.js/lib/languages/javascript.js";
-registerLanguage("javascript", javascript);
-import typescript from "highlight.js/lib/languages/typescript.js";
-registerLanguage("typescript", typescript);
-import coffeescript from "highlight.js/lib/languages/coffeescript.js";
-registerLanguage("coffeescript", coffeescript);
-import python from "highlight.js/lib/languages/python.js";
-registerLanguage("python", python);
-import swift from "highlight.js/lib/languages/swift";
-registerLanguage("swift", swift);
-// NOTE: mathematica is ~135KB, ~10-20x other languages, consider dropping if problematic
-import mathematica from "highlight.js/lib/languages/mathematica";
-registerLanguage("mathematica", mathematica);
-import css from "highlight.js/lib/languages/css.js";
-registerLanguage("css", css);
-import json from "highlight.js/lib/languages/json.js";
-registerLanguage("json", json);
-import xml from "highlight.js/lib/languages/xml.js";
-registerLanguage("xml", xml); // includes html
-import glsl from "highlight.js/lib/languages/glsl.js";
-registerLanguage("glsl", glsl);
-import latex from "highlight.js/lib/languages/latex.js";
-registerLanguage("latex", latex); // includes tex
-hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
-hljs.registerAliases(["math", "mathjax"], { languageName: "latex" });
-hljs.configure({ tabReplace: "  " });
+
+// // custom registration function that can extend highlighting for all languages
+// function registerLanguage(name, func) {
+//   const custom_func = function (hljs) {
+//     let def = func(hljs);
+//     // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
+//     // (e.g. the individual characters could be interpreted in latex)
+//     const comment = hljs.COMMENT(/\\?;{___/, /___}/, { className: "comment-custom", relevance: 0 });
+//     if (!def.contains) def.contains = [comment];
+//     else def.contains.unshift(comment);
+//     return def;
+//   };
+//   hljs().registerLanguage(name, custom_func);
+// }
+
+// import plaintext from "highlight.js/lib/languages/plaintext.js";
+// registerLanguage("plaintext", plaintext);
+// import javascript from "highlight.js/lib/languages/javascript.js";
+// registerLanguage("javascript", javascript);
+// import typescript from "highlight.js/lib/languages/typescript.js";
+// registerLanguage("typescript", typescript);
+// import coffeescript from "highlight.js/lib/languages/coffeescript.js";
+// registerLanguage("coffeescript", coffeescript);
+// import python from "highlight.js/lib/languages/python.js";
+// registerLanguage("python", python);
+
+// import css from "highlight.js/lib/languages/css.js";
+// registerLanguage("css", css);
+// import json from "highlight.js/lib/languages/json.js";
+// registerLanguage("json", json);
+// import xml from "highlight.js/lib/languages/xml.js";
+// registerLanguage("xml", xml); // includes html
+// import glsl from "highlight.js/lib/languages/glsl.js";
+// registerLanguage("glsl", glsl);
+// import latex from "highlight.js/lib/languages/latex.js";
+// registerLanguage("latex", latex); // includes tex
+
+// import swift from "highlight.js/lib/languages/swift";
+// registerLanguage("swift", swift);
+// // NOTE: mathematica is ~135KB, ~10-20x other languages, consider dropping if problematic
+// import mathematica from "highlight.js/lib/languages/mathematica";
+// registerLanguage("mathematica", mathematica);
+
+hljs().registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
+hljs().registerAliases(["math", "mathjax"], { languageName: "latex" });
+hljs().configure({ tabReplace: "  " });
 
 export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
@@ -102,8 +110,8 @@ export function highlight(code, language) {
   if (!language.startsWith("_")) language = language.replace(/(^\w+?)_.+$/, "$1");
   // highlight json as javascript so e.g. quotes are not required for keys
   if (language == "json") language = "js";
-  language = hljs.getLanguage(language) ? language : "plaintext";
-  return hljs.highlight(language, code).value;
+  language = hljs().getLanguage(language) ? language : "plaintext";
+  return hljs().highlight(code, { language }).value;
 }
 
 export function parseTags(text) {
