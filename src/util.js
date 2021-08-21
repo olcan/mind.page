@@ -88,6 +88,7 @@ export function extractBlock(text, type) {
 // hljs.configure({ tabReplace: "  " });
 
 export function highlight(code, language) {
+  if (!window.hljs) return code;
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
   language = language.replace(/(?:_removed|_hidden)$/, "");
