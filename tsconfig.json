@@ -1,8 +1,20 @@
 {
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
-    "lib": ["DOM", "ES2017", "WebWorker"]
+    "lib": ["DOM", "ES2017", "WebWorker"],
+    // options from https://github.com/sveltejs/sapper/blob/master/tsconfig.json ...
+    "target": "es2017",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "importHelpers": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "noImplicitThis": true,
+    "allowSyntheticDefaultImports": true
+    // "allowJs": true, // conflicts w/ firebase.js
   },
   "include": ["src/**/*", "src/node_modules/**/*"],
-  "exclude": ["node_modules/*", "__sapper__/*", "static/*", "lib/*", "src/firebase/*"]
+  "exclude": ["node_modules/*", "__sapper__/*", "static/*", "lib/*", "src/firebase/*"],
+  "types": ["@sapper"]
 }
