@@ -26,8 +26,8 @@
   "dependencies": {
     "compression": "^1.7.1",
     "express": "4.17.1",
-    "firebase": "^8.6.3",
-    "firebase-admin": "^9.3.0",
+    "firebase": "^8.10.0",
+    "firebase-admin": "^9.11.1",
     "firebase-auth": "^0.1.2",
     "firebase-functions": "^3.15.4"
   },
@@ -52,7 +52,7 @@
     "cookie-parser": "^1.4.5",
     "eslint": "^7.32.0",
     "eslint-plugin-promise": "^5.1.0",
-    "firebase-functions-test": "^0.2.0",
+    "firebase-functions-test": "^0.3.2",
     "lodash": "^4.17.21",
     "marked": "^3.0.0",
     "rollup": "^2.56.2",
