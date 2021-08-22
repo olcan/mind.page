@@ -241,7 +241,7 @@
 
 {#if visible}
   <script>
-    setTimeout(() => document.querySelector("#modal-input").focus());
+    setTimeout(() => document.querySelector("#modal-input")?.focus());
   </script>
 {/if}
 

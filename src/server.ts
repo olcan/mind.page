@@ -64,7 +64,7 @@ const sapperServer = express().use(
   },
   sapper.middleware({
     session: (req, res) => ({
-      cookie: res.getHeader("Set-Cookie") || "",
+      cookie: res["cookie"],
     }),
   })
 );
