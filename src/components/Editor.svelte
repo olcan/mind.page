@@ -710,10 +710,11 @@
   }
   .backdrop,
   textarea {
-    font-family: "Roboto Mono", monospace;
+    font-family: monospace;
     font-size: 15px;
     line-height: 25px;
     caret-color: red;
+    /* font-weight: 300; */
   }
   .backdrop {
     /* color: transparent; */
@@ -798,7 +799,7 @@
   :global(mark) {
     /* color: transparent; */
     background: #999;
-    font-weight: 500;
+    font-weight: 600; /* 500 looks light for Menlo w/ white background */
     border-radius: 4px;
     padding: 0 2px;
     margin: 0 -2px;
