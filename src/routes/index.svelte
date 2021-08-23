@@ -2421,11 +2421,11 @@
         ? items[0].labelText + " "
         : "";
 
-    hideIndex++; // show one more item
+    // hideIndex++; // show one more item
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText); // integrate new item at index 0
     // retreat to minimal hide index to focus on new item
-    hideIndex = hideIndexMinimal;
+    // hideIndex = hideIndexMinimal;
 
     // hide dotted items when creating new item
     // reduces jump to new item editor
