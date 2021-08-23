@@ -4534,6 +4534,7 @@
     border-radius: 4px;
     border: 1px solid #222;
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     text-align: left;
     -webkit-touch-callout: auto;
     -webkit-user-select: auto;
@@ -4560,6 +4561,7 @@
     height: 20px;
     text-align: center;
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     font-size: 12px;
     color: #999;
     position: relative;
@@ -4701,6 +4703,7 @@
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     font-size: 20px;
   }
   .section-separator hr {

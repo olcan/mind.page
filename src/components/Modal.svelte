@@ -359,6 +359,7 @@
   :global(.modal code) {
     font-size: 15px; /* 2px smaller looks better */
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;

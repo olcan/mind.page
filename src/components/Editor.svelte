@@ -711,10 +711,10 @@
   .backdrop,
   textarea {
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     font-size: 15px;
     line-height: 25px;
     caret-color: red;
-    /* font-weight: 300; */
   }
   .backdrop {
     /* color: transparent; */
@@ -833,7 +833,7 @@
     background: rgba(255, 255, 255, 0.1);
     /* background: rgba(0, 0, 0, 0.9); */
     border-radius: 4px;
-    font-weight: bold;
+    font-weight: 700;
   }
   :global(.section) {
     border: 1px dashed #444;

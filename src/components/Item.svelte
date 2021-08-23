@@ -1675,6 +1675,7 @@
     font-size: 15px;
     line-height: 25px;
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
     padding: 2px 4px;
@@ -1876,6 +1877,7 @@
     display: flex;
     font-size: 12px;
     font-family: "JetBrains Mono NL", monospace;
+    font-weight: 300;
     align-items: bottom;
     justify-content: center;
     /* background: red; */
