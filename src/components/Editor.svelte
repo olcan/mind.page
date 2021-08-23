@@ -710,7 +710,7 @@
   }
   .backdrop,
   textarea {
-    font-family: monospace;
+    font-family: "JetBrains Mono NL", monospace;
     font-size: 15px;
     line-height: 25px;
     caret-color: red;

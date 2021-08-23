@@ -358,7 +358,7 @@
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
     font-size: 15px; /* 2px smaller looks better */
-    font-family: monospace;
+    font-family: "JetBrains Mono NL", monospace;
     background: #ddd;
     white-space: pre-wrap;
     padding: 2px 4px;
