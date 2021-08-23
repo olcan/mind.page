@@ -1664,16 +1664,16 @@
     /* padding-left: 5px; */
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
-    font-size: 15px;
-    line-height: 25px;
+    font-size: 14px;
+    line-height: 24px;
     margin-top: 4px;
   }
   :global(.item pre:first-child) {
     margin-top: 0;
   }
   :global(.item code) {
-    font-size: 15px;
-    line-height: 25px;
+    font-size: 14px;
+    line-height: 24px;
     font-family: "JetBrains Mono NL", monospace;
     font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
@@ -2063,8 +2063,8 @@
     }
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
-      font-size: 12px;
-      line-height: 21px;
+      font-size: 11px;
+      line-height: 20px;
     }
     :global(.item .log-summary),
     :global(.item .deps-summary),

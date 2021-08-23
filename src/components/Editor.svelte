@@ -712,8 +712,8 @@
   textarea {
     font-family: "JetBrains Mono NL", monospace;
     font-weight: 300;
-    font-size: 15px;
-    line-height: 25px;
+    font-size: 14px;
+    line-height: 24px;
     caret-color: red;
   }
   .backdrop {
@@ -862,8 +862,8 @@
   @media only screen and (max-width: 600px) {
     .backdrop,
     textarea {
-      font-size: 12px;
-      line-height: 21px;
+      font-size: 11px;
+      line-height: 20px;
     }
   }
 </style>
