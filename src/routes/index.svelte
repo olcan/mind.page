@@ -2139,7 +2139,7 @@
         sessionHistory.unshift(sessionHistory[0]);
     }
 
-    let origText = text; // if text is modified, caret position will be lost
+    let origText = text; // if text is modified, caret position will be reset
     let time = Date.now(); // default time is current, can be past if undeleting
     let clearLabel = false; // force clear, even if text starts with tag
     if (editing == null) {
@@ -2353,12 +2353,15 @@
                     text = obj.text;
                     // since we are async, we need to call onEditorDone again with run/editing set properly
                     // obj.{edit,run} can override defaults editing=true and run=false
-                    let editing = true;
-                    let run = false;
+                    // let editing = true;
+                    // let run = false;
                     if (obj.edit == true) editing = true;
                     else if (obj.edit == false) editing = false;
                     if (obj.run == true) run = true;
                     else if (obj.run == false) run = false;
+                    // reset focus for generated text
+                    let textarea = textArea(-1);
+                    textarea.selectionStart = textarea.selectionEnd = 0;
                     let item = onEditorDone(text, null, false, run, editing);
                     // run programmatic initializer function if any
                     try {
