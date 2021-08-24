@@ -2803,7 +2803,7 @@
       } else {
         itemTextChanged(index, item.text);
         // clear _output and execute javascript unless cancelled
-        if (run && !cancelled) {
+        if (run && !cancelled && item.runnable /* just updated */) {
           // clear *_output blocks as they should be re-generated
           item.text = clearBlock(item.text, "\\w*?_output");
           // remove *_log blocks so errors do not leave empty blocks
