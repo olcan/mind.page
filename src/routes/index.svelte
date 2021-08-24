@@ -766,9 +766,9 @@
       padding = 0.7 * viewHeight;
       // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
       itemsdiv.querySelectorAll(".column-padding").forEach((div: HTMLElement) => (div.style.height = padding + "px"));
-      // adjust scroll position to prevent jump in contents due to change in top padding
-      document.body.scrollTo(0, prevScrollTop + padding - prevPadding);
+      // adjust bottom padding and then scroll position to prevent jumping
       itemsdiv.style.paddingBottom = padding + "px";
+      document.body.scrollTo(0, prevScrollTop + padding - prevPadding);
       lastViewHeight = viewHeight;
     }
   }
