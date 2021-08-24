@@ -1222,7 +1222,7 @@
         )
     ).filter((t) => t);
     // disable search for text starting with '/', to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
-    // if (text.startsWith("/")) terms = [];
+    if (text.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsContext
     let termsContext = _.flatten(tags.all.map(tagPrefixes));
