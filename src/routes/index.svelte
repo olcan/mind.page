@@ -3778,7 +3778,7 @@
     }
 
     // let unmodified DigitX select/target corresponding item if named, touch it otherwise
-    // let Digit0 scroll to target (if any)
+    // let Digit0 scroll target (if any) to ~center
     if (key.match(/Digit\d+/) && !modified) {
       const index = parseInt(key.match(/\d+/)?.shift()) - 1;
       if (index == -1) {
