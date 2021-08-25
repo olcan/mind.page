@@ -753,7 +753,7 @@
   }
   .buttons {
     position: absolute;
-    top: -15px; /* -15px touches browser bar, -14px leaves 1px of background visible */
+    top: -30px; /* -15px (touches browser bar), -15 for additional padding */
     right: -2px;
     color: black;
     display: flex;
@@ -765,12 +765,13 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    border-radius: 0 0 5px 5px;
+    border-radius: 5px;
     overflow: hidden;
   }
   .button {
     height: 23px;
     padding: 0 8px;
+    padding-top: 15px;
     display: inline-flex;
     background: #999;
     cursor: pointer;
