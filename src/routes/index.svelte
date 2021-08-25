@@ -97,6 +97,14 @@
     return _.sortBy(ids.map(_item), (item) => -item.time);
   }
 
+  // _labels returns labels in use, optionally filtered by selector (label,ids):boolean
+  function _labels(selector = null) {
+    if (!selector) return Array.from(idsFromLabel.keys());
+    let matches = [];
+    for (const [label, ids] of idsFromLabel.entries()) if (selector(label, ids)) matches.push(label);
+    return matches;
+  }
+
   // _modal shows a modal dialog
   function _modal(options) {
     return modal.show(options);
@@ -141,6 +149,7 @@
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
     window["_item"] = _item;
     window["_items"] = _items;
+    window["_labels"] = _labels;
     window["_exists"] = _exists;
     window["_modal"] = _modal;
     window["_modal_close"] = _modal_close;
@@ -1874,6 +1883,9 @@
           let other = items[indexFromId.get(ids[0])];
           other.labelUnique = true;
           other.name = other.labelUnique ? other.labelText : "id:" + other.id;
+        } else if (ids.length == 0) {
+          // delete to ensure all keys are used
+          idsFromLabel.delete(prevLabel);
         }
       }
       if (item.label) {
