@@ -809,7 +809,10 @@
       // show item again, but cancel highlights if itemdiv is missing or mindbox modified
       if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) return;
 
-      let terms = highlightTerms.split(" ").filter((t) => t);
+      let terms = highlightTerms
+        .split(" ")
+        .filter((t) => t)
+        .sort((a, b) => b.length - a.length); // longer terms first
       if (label) {
         terms.slice().forEach((term: string) => {
           if (
@@ -1488,8 +1491,8 @@
     /* display: block; */
   }
   .debug {
-    /* display: inline-block; */
-    display: none;
+    display: inline-block;
+    /* display: none; */
     color: #444;
   }
   .item {
