@@ -1959,7 +1959,8 @@
           }
           // dependency is considered modified when dependency is added/removed
           if ((is_dependent && item.deephash != prevDeepHash) || is_dependent != was_dependent) {
-            // update deephash (triggers re-rendering and cache invalidation)
+            // update deps & deephash (triggers re-rendering and cache invalidation)
+            depitem.deps = itemDeps(depindex);
             depitem.deephash = hashCode(
               depitem.deps
                 .map((id) => items[indexFromId.get(id)].hash)
