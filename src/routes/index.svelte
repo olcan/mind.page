@@ -432,6 +432,7 @@
 
     // "touches" item by updating its time
     // if save=false, change is not saved, a.k.a. "soft touch"
+    // NOTE: this does not respect #log items, so any relevant checks must be done externally
     touch(save = false) {
       item(this.id).time = Date.now();
       lastEditorChangeTime = 0; // force immediate update
