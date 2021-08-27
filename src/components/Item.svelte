@@ -908,8 +908,8 @@
               word.style.borderTopLeftRadius = tagStyle.borderTopLeftRadius;
               word.style.borderBottomLeftRadius = tagStyle.borderBottomLeftRadius;
 
-              // insert spacer divs under .menu class where mark becomes flexible
-              if (node.parentElement.closest(".menu")) {
+              // insert spacer divs under .menu class where non-hidden mark becomes flexible
+              if (node.parentElement.closest(".menu") && !node.parentElement.classList.contains("hidden")) {
                 let spacer = node.parentElement.insertBefore(
                   document.createElement("div"),
                   node.parentElement.firstChild
@@ -1728,12 +1728,12 @@
     width: 95%; /* leave some extra space for editing and item count/index indicators */
   }
   :global(.item .menu a),
-  :global(.item .menu mark) {
+  :global(.item .menu mark:not(.hidden)) {
     padding: 4px;
     font-size: 110%;
     font-weight: 600;
   }
-  :global(.item .menu p a, .item .menu p mark) {
+  :global(.item .menu p a, .item .menu p mark:not(.hidden)) {
     flex: 1 1 auto;
     display: flex;
     justify-content: center;
@@ -1769,6 +1769,10 @@
     border: 1px dashed #ddd;
   }
   :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) {
+    display: none;
+  }
+  /* hide tags more aggressively in menu items */
+  :global(.item .menu mark.hidden:not(.missing/*, .selected*/)) {
     display: none;
   }
   :global(.item br:last-child) {
