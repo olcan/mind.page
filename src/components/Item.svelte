@@ -1012,6 +1012,14 @@
       };
     });
 
+    // invoke global function _highlight (if it exists) w/ elements of class _highlight_*
+    // NOTE: _* suffix is added by highlight.js dependening on scope depth
+    if (window["_highlight"]) {
+      itemdiv.querySelectorAll("._highlight,._highlight_,._highlight__,._highlight___").forEach((elem) => {
+        window["_highlight"](elem, id);
+      });
+    }
+
     // set up img tags to enable caching and invoke onResized onload
     itemdiv.querySelectorAll("img").forEach((img) => {
       if (img.hasAttribute("_loaded")) return; // already loaded (and presumably restored from cache)
