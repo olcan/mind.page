@@ -2307,6 +2307,7 @@
           const args = text
             .replace(/^\/\w+/, "")
             .trim()
+            .replace(/\\/g, "\\\\")
             .replace(/`/g, "\\`");
           if (cmd == "/_narrate") {
             narrating = !narrating;
