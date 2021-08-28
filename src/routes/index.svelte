@@ -105,6 +105,16 @@
     return matches;
   }
 
+  // _sublabels returns all labels (in use) that are nested under given parent label
+  function _sublabels(parent: string) {
+    let prefix = parent;
+    if (!prefix.startsWith("#")) prefix = "#" + prefix;
+    if (!prefix.endsWith("/")) prefix = prefix + "/";
+    return _labels((label) => label.length > prefix.length && label.startsWith(prefix)).map((label) =>
+      label.slice(prefix.length)
+    );
+  }
+
   // _modal shows a modal dialog
   function _modal(options) {
     return modal.show(options);
@@ -149,8 +159,9 @@
     Object.defineProperty(window, "_that", { get: () => _item(evalStack[0]) });
     window["_item"] = _item;
     window["_items"] = _items;
-    window["_labels"] = _labels;
     window["_exists"] = _exists;
+    window["_labels"] = _labels;
+    window["_sublabels"] = _sublabels;
     window["_modal"] = _modal;
     window["_modal_close"] = _modal_close;
     window["_modal_update"] = _modal_update;
