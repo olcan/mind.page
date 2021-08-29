@@ -3709,7 +3709,7 @@
               var elem = document.createElement("div");
               if (verb.endsWith("error")) verb = "error";
               elem.classList.add("console-" + verb);
-              // NOTE: we indicate full eval stack as prefix
+              // NOTE: we indicate full eval stack as prefix (not available for replayed logs)
               let prefix = evalStack.map((id) => items[indexFromId.get(id)].name).join(" ");
               if (prefix) prefix = "[" + prefix + "] ";
               let text = "";
