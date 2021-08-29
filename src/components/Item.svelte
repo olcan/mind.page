@@ -1897,7 +1897,7 @@
     justify-content: center;
     /* background: red; */
     min-width: 100px;
-    max-width: 50%;
+    max-width: 40%; /* 50% is a bit much and can overlap w/ other summaries */
     overflow: hidden;
     height: 25px;
     position: absolute;
