@@ -272,7 +272,7 @@
     // returns store-cached property, (re)computing value as needed
     cached(key, value_function) {
       const cache = this.cache as any;
-      return cache[key] || (cache[key] = value_function(this));
+      return cache[key] ?? (cache[key] = value_function(this));
     }
 
     // key-value store synchronized into localStorage
