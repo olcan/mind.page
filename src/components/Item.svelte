@@ -1201,7 +1201,7 @@
         dot.querySelectorAll(".node > text > .MathJax > svg > *").forEach((elem) => {
           if (!item.elem?.contains(elem)) {
             // console.error("detached _graph elem in item", item.name)
-            item.invalidate_cache();
+            item.invalidate_elem_cache();
             return;
           }
           let math = elem as SVGGraphicsElement;

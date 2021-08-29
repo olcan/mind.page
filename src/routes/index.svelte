@@ -261,6 +261,20 @@
       if (!_item.store) _item.store = {};
       return _item.store;
     }
+
+    // general-purpose cache object stored in this.store, cleared on deephash changes
+    get cache(): object {
+      const store = this.store as any;
+      if (store.cache?._deephash == this.deephash) return store.cache;
+      return (store.cache = Object.defineProperty({}, "_deephash", { value: this.deephash }));
+    }
+
+    // returns store-cached property, (re)computing value as needed
+    cached(key, value_function) {
+      const cache = this.cache as any;
+      return cache[key] || (cache[key] = value_function(this));
+    }
+
     // key-value store synchronized into localStorage
     // (should always be accessed via this accessor to ensure updates)
     get local_store(): object {
@@ -463,7 +477,7 @@
             //       notable exceptions are async 'run' and async 'command' evals
             Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
           );
-      let evaljs = [prefix, js].join("\n").trim();
+      let evaljs = [prefix, js].join(";\n").trim();
       if (!options["debug"]) {
         if (options["async"]) {
           if (options["async_simple"]) {
@@ -750,8 +764,8 @@
       );
     }
 
-    // invalidate element cache for item
-    invalidate_cache() {
+    // invalidates element cache for item
+    invalidate_elem_cache() {
       invalidateElemCache(this.id);
     }
   }
