@@ -1200,7 +1200,7 @@
 
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
     // NOTE: non-empty condition is dropped if last call was debounced, otherwise backspace can stall on first char
-    text = text.toLowerCase().trim();
+    text = text.toLowerCase().trim(); // trim editor for search/navigation purposes
     if (
       (text.length > 0 || lastEditorChangeTime < Infinity) &&
       document.activeElement == textArea(-1) &&
@@ -1222,7 +1222,6 @@
     window["_mindboxDebounced"] = false;
     const start = Date.now();
 
-    text = text.toLowerCase().trim();
     const tags = parseTags(text);
     let terms = _.uniq(
       text
@@ -1242,8 +1241,9 @@
           )
         )
     ).filter((t) => t);
-    // disable search for text starting with '/', to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
-    if (text.startsWith("/")) terms = [];
+
+    // disable search for (untrimmed) editor text starting with '/' (as it also required for command parsing), to provide a way to disable search, and to ensure search results do not interfere with commands that create new items or modify existing items
+    if (editorText.startsWith("/")) terms = [];
 
     // expand tag prefixes into termsContext
     let termsContext = _.flatten(tags.all.map(tagPrefixes));
@@ -2143,6 +2143,11 @@
     if (cancelled) {
       if (key == "Escape") {
         setTimeout(() => textArea(-1).blur()); // requires dispatch on chrome
+        // clear command text since it does not trigger search/navigation and is rather useless without focus
+        if (text.startsWith("/")) {
+          lastEditorChangeTime = 0; // disable debounce even if editor focused
+          onEditorChange("");
+        }
       } else {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
@@ -2314,6 +2319,7 @@
       }
       default: {
         if (text.match(/^\/\w+/)) {
+          // NOTE: text is untrimmed, so no whitespace before /
           const cmd = text.match(/^\/\w+/)[0];
           const args = text
             .replace(/^\/\w+/, "")
@@ -2366,11 +2372,14 @@
                 })
               )
                 .then((obj) => {
-                  if (!obj) {
-                    onEditorChange("");
-                  } else if (typeof obj == "string") {
+                  if (typeof obj == "string") {
+                    lastEditorChangeTime = 0; // disable debounce even if editor focused
                     onEditorChange(obj);
-                    textArea(-1).focus(); // refocus on non-empty editor
+                    setTimeout(() => textArea(-1).focus()); // refocus (may require dispatch)
+                  } else if (!obj) {
+                    lastEditorChangeTime = 0; // disable debounce even if editor focused
+                    onEditorChange("");
+                    setTimeout(() => textArea(-1).blur()); // defocus, requires dispatch on chrome
                   } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
                     alert(
                       `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", edit:true|false, run:true|false}`
