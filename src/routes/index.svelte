@@ -1590,7 +1590,7 @@
           orderHash,
           hideIndex,
           scrollPosition: document.body.scrollTop,
-          final: !editorText || finalizeStateOnEditorChange,
+          final: finalizeStateOnEditorChange,
         };
         // console.debug(history.state.final ? "push" : "replace", state);
         if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange))
@@ -1682,7 +1682,7 @@
       editorText = tag + " "; // space in case more text is added
     }
     forceNewStateOnEditorChange = true; // force new state
-    finalizeStateOnEditorChange = true; // finalize state
+    // finalizeStateOnEditorChange = true; // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText, e.altKey /* keep_times */);
@@ -2586,7 +2586,7 @@
     if (!e.shiftKey) return true; // not handled (want shift key also)
     editorText = "";
     forceNewStateOnEditorChange = true; // force new state
-    finalizeStateOnEditorChange = true; // finalize state
+    // finalizeStateOnEditorChange = true; // finalize state
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText);
     // restore focus (can be necessary e.g. if edited item was also "target" item)
@@ -4001,7 +4001,7 @@
       // this follows onTagClick behavior
       editorText = "";
       forceNewStateOnEditorChange = true; // force new state
-      finalizeStateOnEditorChange = true; // finalize state
+      // finalizeStateOnEditorChange = true; // finalize state
       lastEditorChangeTime = 0; // disable debounce even if editor focused
       onEditorChange(editorText);
       return;
