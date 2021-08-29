@@ -809,10 +809,7 @@
       // show item again, but cancel highlights if itemdiv is missing or mindbox modified
       if (!itemdiv || window["_mindboxLastModified"] != mindboxModifiedAtDispatch) return;
 
-      let terms = highlightTerms
-        .split(" ")
-        .filter((t) => t)
-        .sort((a, b) => b.length - a.length); // longer terms first
+      let terms = highlightTerms.split(" ").filter((t) => t);
       if (label) {
         terms.slice().forEach((term: string) => {
           if (
@@ -857,6 +854,7 @@
         let text = node.nodeValue;
         terms = terms.filter((t) => !(highlight_counts[t] >= maxHighlightsPerTerm));
         if (terms.length == 0) continue; // nothing left to highlight
+        terms.sort((a, b) => b.length - a.length); // longer first as needed for regex
         let regex = new RegExp(`^(.*?)(${terms.map(_.escapeRegExp).join("|")})`, "si");
         // if we are highlighting inside tag, we expand the regex to allow shortening and rendering adjustments ...
         if (node.parentElement.tagName == "MARK") {
@@ -864,6 +862,7 @@
             .concat(highlight_counts["#…"] + highlight_counts["…"] >= maxHighlightsPerTerm ? [] : ["#…"])
             .map(_.escapeRegExp);
           tagTerms = tagTerms.concat(tagTerms.map((t) => t.replace(/^#(.+)$/, "^$1")));
+          tagTerms.sort((a, b) => b.length - a.length); // longer first as needed for regex
           regex = new RegExp(`(^.*?)(${tagTerms.join("|")})`, "si");
         }
         let m;
