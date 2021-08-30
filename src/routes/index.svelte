@@ -3424,7 +3424,7 @@
       log_levels.forEach((verb) => {
         console["_" + verb] = console[verb];
         console[verb] = (...args) => {
-          replay_log.push({ verb, args });
+          replay_log.push({ verb, args, stack: evalStack.slice() });
           return console["_" + verb](...args);
         };
       });
@@ -3754,7 +3754,13 @@
               }, statusLogExpiration);
             };
           });
-          replay_log.forEach((entry) => console[entry.verb](...entry.args));
+          // replay logs during init (including eval stack)
+          const _evalStack = evalStack; // restored post-replay
+          replay_log.forEach((entry) => {
+            evalStack = entry.stack;
+            console[entry.verb](...entry.args);
+          });
+          evalStack = _evalStack;
           replay = false;
         });
 
