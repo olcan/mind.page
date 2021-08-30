@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let id = "editor";
+  export let id_suffix = "editor";
   export let text = "";
   export let focused = false;
   export let showButtons = false;
@@ -680,10 +680,10 @@
 <!-- prettier-ignore -->
 <div bind:this={editor} class="editor">
   <div class="backdrop" class:focused bind:this={backdrop}>
-    <div id="highlights" bind:this={highlights}>{placeholder}</div>
+    <div bind:this={highlights}>{placeholder}</div>
   </div>
   <textarea
-    id={"textarea-" + id}
+    id={"textarea-" + id_suffix}
     bind:this={textarea}
     {placeholder}
     on:input={onInput}

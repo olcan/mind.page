@@ -3120,6 +3120,7 @@
     showDotted = !showDotted;
   }
 
+  let summarydiv;
   function onConsoleClick(e) {
     // ignore click if text is selected
     if (window.getSelection().type == "Range") {
@@ -3128,13 +3129,13 @@
     }
     e.stopPropagation();
     consolediv.style.display = "none";
-    document.getElementById("console-summary").style.visibility = "visible";
+    summarydiv.style.visibility = "visible";
   }
   function onConsoleSummaryClick(e) {
     if (consolediv.childNodes.length > 0) {
       e.stopPropagation();
       consolediv.style.display = "block";
-      document.getElementById("console-summary").style.visibility = "hidden";
+      summarydiv.style.visibility = "hidden";
     }
   }
 
@@ -3418,7 +3419,7 @@
     initialization = new Promise((resolve) => {
       resolve_init = resolve; // invoked from initialize()
 
-      // set up replay log until #console is set up in onMount
+      // set up replay log until .console is set up in onMount
       let replay_log = [];
       log_levels.forEach((verb) => {
         console["_" + verb] = console[verb];
@@ -3729,7 +3730,6 @@
               });
               if (consoleLog.length > consoleLogMaxSize) consoleLog = consoleLog.slice(consoleLogMaxSize / 2);
 
-              const summarydiv = document.getElementById("console-summary");
               const summaryelem = document.createElement("span");
               summaryelem.innerText = "·";
               summaryelem.classList.add("console-" + verb);
@@ -4076,7 +4076,7 @@
     if (!focused) hideIndex = hideIndexMinimal;
   }
 
-  // redirect window.onerror to console.error (or alert if #console not set up yet)
+  // redirect window.onerror to console.error (or alert if .console not set up yet)
   function onError(e) {
     if (!consolediv) return; // can happen during login process
     let msg = errorMessage(e);
@@ -4117,11 +4117,11 @@
       >
         <div class="column-padding" on:mousedown={onColumnPaddingMouseDown} />
         {#if column == 0}
-          <div id="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
-            <div id="header-container" class:focused={editorFocused}>
-              <div id="editor">
+          <div class="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
+            <div class="header-container" class:focused={editorFocused}>
+              <div class="editor">
                 <Editor
-                  id="mindbox"
+                  id_suffix="mindbox"
                   bind:this={editor}
                   bind:text={editorText}
                   bind:focused={editorFocused}
@@ -4141,7 +4141,7 @@
               <div class="spacer" />
               {#if user}
                 <img
-                  id="user"
+                  class="user"
                   class:anonymous
                   class:readonly
                   class:signedin
@@ -4152,8 +4152,8 @@
                 />
               {/if}
             </div>
-            <div id="status" class:hasDots={dotCount > 0} on:click={onStatusClick}>
-              <span id="console-summary" on:click={onConsoleSummaryClick} />
+            <div class="status" class:hasDots={dotCount > 0} on:click={onStatusClick}>
+              <span class="console-summary" bind:this={summarydiv} on:click={onConsoleSummaryClick} />
               {#if dotCount > 0}
                 {#if showDotted}
                   <div class="triangle">▲</div>
@@ -4172,7 +4172,7 @@
                   {/if}
                 </div>
               {/if}
-              <div id="console" bind:this={consolediv} on:click={onConsoleClick} />
+              <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
             </div>
           </div>
         {/if}
@@ -4279,7 +4279,7 @@
 {/if}
 
 {#if !user || !initialized || !headerScrolled || signingIn || signingOut}
-  <div id="loading">
+  <div class="loading">
     <Circle2 size="60" unit="px" />
   </div>
 {/if}
@@ -4508,7 +4508,7 @@
     display: none;
   }
 
-  #loading {
+  .loading {
     position: absolute;
     top: 0;
     left: 0;
@@ -4520,10 +4520,10 @@
     /* NOTE: if you add transparency, initial zero-height layout and unscrolled header will be visible */
     background: rgba(17, 17, 17, 1);
   }
-  #header {
+  .header {
     max-width: 100%;
   }
-  #header-container {
+  .header-container {
     display: flex;
     padding: 10px;
     background: #171717;
@@ -4531,11 +4531,11 @@
     border-bottom: 1px solid #222;
     /*padding-left: 2px;*/ /* matches 1px super-container padding + 1px container border */
   }
-  #header-container.focused {
-    background: #222; /* #222 matches #user background */
+  .header-container.focused {
+    background: #222; /* #222 matches .user background */
     border-bottom: 1px solid #333;
   }
-  #editor {
+  .editor {
     width: 100%;
     /* push editor down/left for more clearance for buttons and from profile picture */
     margin-top: 4px;
@@ -4544,18 +4544,18 @@
     margin-right: 5px;
   }
   /* remove dashed border when top editor is unfocused */
-  :global(#header #editor .backdrop:not(.focused)) {
+  :global(.header .editor .backdrop:not(.focused)) {
     border: 1px solid transparent;
   }
   /* lighten solid border when top editor is focused */
-  :global(#header #editor .backdrop.focused) {
+  :global(.header .editor .backdrop.focused) {
     border: 1px solid #333;
     /* border: 1px solid transparent; */
   }
   .spacer {
     flex-grow: 1;
   }
-  #user {
+  .user {
     height: 56px; /* 45px = focused height of single-line editor (also see @media query below) */
     width: 56px;
     min-width: 56px; /* seems necessary to ensure full width inside flex */
@@ -4566,14 +4566,14 @@
     cursor: pointer;
     overflow: hidden;
   }
-  #user.anonymous:not(.readonly).signedin {
+  .user.anonymous:not(.readonly).signedin {
     background: green;
   }
-  #console {
+  .console {
     display: none;
     position: absolute;
-    min-height: 20px; /* covers #console-summary (w/ +8px padding) */
-    min-width: 60px; /* covers #console-summary */
+    min-height: 20px; /* covers .console-summary (w/ +8px padding) */
+    min-width: 60px; /* covers .console-summary */
     top: 0;
     left: 0;
     z-index: 10;
@@ -4605,7 +4605,7 @@
   :global(.console-error) {
     color: red;
   }
-  #status {
+  .status {
     padding: 4px;
     height: 20px;
     text-align: center;
@@ -4618,12 +4618,12 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  #status #console-summary {
+  .status .console-summary {
     position: absolute;
     left: 0;
     top: 0;
     padding-top: 4px;
-    height: 24px; /* matches #status height(+padding) above */
+    height: 24px; /* matches .status height(+padding) above */
     min-width: 60px; /* ensure clickability */
     max-width: 30%; /* try not to cover center (item dots) */
     text-align: left;
@@ -4631,13 +4631,13 @@
     padding-left: 4px;
     cursor: pointer;
   }
-  #status.hasDots {
+  .status.hasDots {
     cursor: pointer;
   }
-  #status .dots {
+  .status .dots {
     color: #666;
   }
-  #status .counts {
+  .status .counts {
     font-family: sans-serif;
     font-size: 14px;
     position: absolute;
@@ -4646,12 +4646,12 @@
     padding-right: 4px; /* matches .corner inset on first item */
     padding-top: 4px;
   }
-  :global(#status .counts .unit, #status .counts .comma) {
+  :global(.status .counts .unit, .status .counts .comma) {
     color: #666;
     font-size: 80%;
   }
-  #status .counts .matching,
-  #status .dots .matching {
+  .status .counts .matching,
+  .status .dots .matching {
     color: #9f9;
   }
 
@@ -4662,7 +4662,7 @@
     /* (note that overflow-x did not work but this is fine too) */
     overflow: hidden;
     /* fill full height of page even if no items are shown */
-    /* otherwise (tapped) #console can be cut off at the bottom when there are no items */
+    /* otherwise (tapped) .console can be cut off at the bottom when there are no items */
     /* also prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
     min-height: 100%;
 
@@ -4702,10 +4702,10 @@
     height: 70vh;
   }
   .column:first-child.focused .column-padding {
-    background: #171717; /* matches #header-container unfocused background */
+    background: #171717; /* matches .header-container unfocused background */
   }
   .column:first-child.editorFocused .column-padding {
-    background: #222; /* matches #header-container focused background */
+    background: #222; /* matches .header-container focused background */
   }
 
   /* .column:last-child {
@@ -4718,7 +4718,7 @@
   .column:not(.multi-column) {
     margin-right: 1px; /* consistent w/ 1px padding-left of .super-container */
   }
-  :global(.column:not(.focused) #header),
+  :global(.column:not(.focused) .header),
   :global(.column:not(.focused) .super-container),
   :global(.column:not(.focused) .toggle) {
     opacity: 0.25;
@@ -4830,12 +4830,12 @@
     .column:not(.multi-column) {
       margin-right: 0; /* consistent w/ 0 padding-left of .super-container on small screen */
     }
-    #header-container {
+    .header-container {
       /*padding-left: 1px;*/ /* matches 1px container border, no super-container padding */
       padding-left: 10px; /* not best use of space, but looks good and avoids edge on curved screens */
       padding-right: 6px; /* reduced padding to save space */
     }
-    #user {
+    .user {
       height: 52px; /* 41px = height of single-line editor (on narrow window) */
       width: 52px;
       min-width: 52px;

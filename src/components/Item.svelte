@@ -678,7 +678,7 @@
         // console.debug("reusing cached element", key, elem.tagName, elem.id);
         // if (window["_elem_cache"][id][key].querySelector("script")) console.warn("cached element contains script(s)");
         let cached = window["_elem_cache"][id][key];
-        if (document.getElementById("cache").contains(cached)) {
+        if (document.getElementById("cache-div").contains(cached)) {
           cached.remove();
           cached.style.width = cached["_width"];
           cached.style.height = cached["_height"];
@@ -1276,7 +1276,7 @@
       </div>
 
       <Editor
-        {id}
+        id_suffix={id}
         bind:this={editor}
         bind:text
         bind:focused

@@ -168,7 +168,7 @@ export function invalidateElemCache(id) {
 }
 
 export function adoptCachedElem(elem) {
-  let cachediv = document.getElementById("cache");
+  let cachediv = document.getElementById("cache-div");
   if (cachediv.contains(elem)) return;
   elem["_width"] = elem.style.width;
   elem["_height"] = elem.style.height;
