@@ -8,6 +8,7 @@
   //   return process["server-preload"](page, session);
   // }
 </script>
+
 <script lang="ts">
   import _ from "lodash";
   import { isClient, firebase, firestore } from "../../firebase.js";
@@ -117,6 +118,15 @@
     );
   }
 
+  // _hash returns a fast hash of given string, array, object, etc
+  function _hash(x, stringifier = JSON.stringify) {
+    if (x?._hash) return x._hash;
+    if (typeof x == "undefined") return undefined;
+    if (typeof x == "function") return "" + x;
+    if (typeof x == "string") return x;
+    return stringifier(x);
+  }
+
   // _modal shows a modal dialog
   function _modal(options) {
     return modal.show(options);
@@ -164,6 +174,7 @@
     window["_exists"] = _exists;
     window["_labels"] = _labels;
     window["_sublabels"] = _sublabels;
+    window["_hash"] = _hash;
     window["_modal"] = _modal;
     window["_modal_close"] = _modal_close;
     window["_modal_update"] = _modal_update;
@@ -4517,6 +4528,7 @@
 </svelte:head>
 
 <!-- NOTE: remove this when the svelte formatter plugin bug that empties out style tag is fixed -->
+
 <!-- prettier-ignore -->
 <style>
   :global(html) {
