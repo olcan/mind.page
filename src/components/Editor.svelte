@@ -676,8 +676,6 @@
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
 </script>
 
-<!-- (TODO: remove when svelte plugin is fixed and doesn't break closing textarea tag) -->
-<!-- prettier-ignore -->
 <div bind:this={editor} class="editor">
   <div class="backdrop" class:focused bind:this={backdrop}>
     <div bind:this={highlights}>{placeholder}</div>
@@ -692,17 +690,19 @@
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
+    autocapitalize="off"
     {spellcheck}
-    autocapitalize="off">{text}</textarea>
-{#if showButtons}
-  <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->
-  <div class="buttons" class:focused on:click={cancel}>
-    <!-- on:mousedown keeps focus on textarea and generally works better (e.g. allows us to refocus on iOS without going outside of scope of click handler) but we have to cancel subsequent click to avoid side effects (e.g. focus going back to editor after creating a new item) -->
-    <div class="button create" on:mousedown={onCreate}>create</div>
-    <div class="button image" on:mousedown={onImage}>+img</div>
-    <div class="button clear" class:clearable={text.length} on:mousedown={onClear}>clear</div>
-  </div>
-{/if}
+    value={text}
+  />
+  {#if showButtons}
+    <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->
+    <div class="buttons" class:focused on:click={cancel}>
+      <!-- on:mousedown keeps focus on textarea and generally works better (e.g. allows us to refocus on iOS without going outside of scope of click handler) but we have to cancel subsequent click to avoid side effects (e.g. focus going back to editor after creating a new item) -->
+      <div class="button create" on:mousedown={onCreate}>create</div>
+      <div class="button image" on:mousedown={onImage}>+img</div>
+      <div class="button clear" class:clearable={text.length} on:mousedown={onClear}>clear</div>
+    </div>
+  {/if}
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->

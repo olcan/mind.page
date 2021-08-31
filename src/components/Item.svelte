@@ -297,7 +297,7 @@
     }
 
     // remove removed sections
-    text = text.replace(/<!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, "");
+    text = text.replace(/<\!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, "");
 
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(text, "_log");
@@ -495,7 +495,7 @@
 
     // hide hidden sections
     text = text.replace(
-      /<!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
+      /<\!--\s*hidden\s*-->(.*?)<\!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
       '<div style="display:none">$1</div>\n'
     );
 

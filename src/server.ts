@@ -15,8 +15,10 @@ function get_hostdir(req) {
 }
 
 const sapperServer = express().use(
+  "/",
   compression({ threshold: 0 }),
-  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }),
+  // TODO: remove 'as any' when typescript error is fixed
+  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }) as any,
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
@@ -62,11 +64,12 @@ const sapperServer = express().use(
     res.cookie = req.cookies["__session"] || "";
     next();
   },
+  // TODO: remove 'as any' when typescript error is fixed
   sapper.middleware({
     session: (req, res) => ({
       cookie: res["cookie"],
     }),
-  })
+  }) as any
 );
 
 if (!("FIREBASE_CONFIG" in process.env)) {

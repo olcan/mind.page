@@ -2,11 +2,12 @@
   // NOTE: Preload function can be called on either client or server
   // See https://sapper.svelte.dev/docs#Preloading for documentation
   // Start 'npm run serve' and open localhost:5000 to test locally
-  export async function preload(page, session) {
-    return process["server-preload"](page, session);
-  }
+  //
+  // NOTE: this definition was causing an odd error above svelte-preprocess 4.6.6 and since we disabled preloading we just comment it out for now
+  // export async function preload(page, session) {
+  //   return process["server-preload"](page, session);
+  // }
 </script>
-
 <script lang="ts">
   import _ from "lodash";
   import { isClient, firebase, firestore } from "../../firebase.js";
@@ -3381,7 +3382,7 @@
     resetUser();
     window.sessionStorage.setItem("mindpage_signin_pending", "1"); // prevents anonymous user on reload
     document.cookie = "__session=signin_pending;max-age=600"; // temporary setting for server post-redirect
-    let provider = new (window.firebase as any).auth.GoogleAuthProvider();
+    let provider = new window["firebase"].auth.GoogleAuthProvider();
     firebase().auth().useDeviceLanguage();
     // firebase().auth().setPersistence("none")
     // firebase().auth().setPersistence("session")
@@ -4515,6 +4516,8 @@
   <link rel="manifest" href="/manifest.json?v={favicon_version}" />
 </svelte:head>
 
+<!-- NOTE: remove this when the svelte formatter plugin bug that empties out style tag is fixed -->
+<!-- prettier-ignore -->
 <style>
   :global(html) {
     font-family: "Open Sans", sans-serif;
@@ -4802,7 +4805,6 @@
   :global(.toggle + .super-container.timed) {
     margin-top: -24px;
   }
-
   .toggle {
     display: flex;
     justify-content: center;
@@ -4842,7 +4844,6 @@
   .toggle.hide .count {
     margin-left: 20px;
   }
-
   .toggle + .toggle {
     display: none;
   }
