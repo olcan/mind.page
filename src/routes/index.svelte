@@ -122,9 +122,9 @@
   function _hash(x, stringifier = JSON.stringify) {
     if (x?._hash) return x._hash;
     if (typeof x == "undefined") return undefined;
-    if (typeof x == "function") return "" + x;
-    if (typeof x == "string") return x;
-    return stringifier(x);
+    if (typeof x == "function") return hashCode("" + x);
+    if (typeof x == "string") return hashCode(x);
+    return hashCode(stringifier(x));
   }
 
   // _modal shows a modal dialog
