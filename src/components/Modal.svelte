@@ -69,15 +69,21 @@
 
         // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
         // chrome fails to trigger onchange and enable confirm button despite autofill
-        if (input != null && autocomplete) {
+        const isSafari = navigator.userAgent.toLowerCase().indexOf("safari/") > -1;
+        if (!isSafari && input != null && autocomplete) {
           const origDispatchTime = dispatchTime;
           const checkForChromeAutofill = () => {
             if (!visible || dispatchTime != origDispatchTime) return; // cancel
-            if (inputelem?.matches(":-internal-autofill-selected")) {
-              input = inputelem.value; // did not work in experiments but just in case
-              enabled = true;
+            try {
+              if (inputelem?.matches(":-internal-autofill-selected")) {
+                input = inputelem.value; // did not work in experiments but just in case
+                enabled = true;
+              }
+              setTimeout(checkForChromeAutofill, 100);
+            } catch (e) {
+              // report errors as warnings
+              console.warn(e);
             }
-            setTimeout(checkForChromeAutofill, 100);
           };
           checkForChromeAutofill(); // start checking
         }
