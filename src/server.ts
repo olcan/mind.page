@@ -79,19 +79,21 @@ if (!("FIREBASE_CONFIG" in process.env)) {
 import { firebaseAdmin } from "../firebase.js";
 
 // server-side preload hidden from client-side code
+// NOTE: for development server, admin credentials require `gcloud auth application-default login`
 process["server-preload"] = async (page, session) => {
-  // console.debug("preloading, client?", isClient);
-  // NOTE: for development server, admin credentials require `gcloud auth application-default login`
+  // console.debug("preloading, client?", typeof window !== undefined, page, session);
+  return {}; // disable server preload for now, even for anonymous account
+
   let user = null;
   if (session.cookie == "signin_pending") {
-    return {}; // do not waste time retrieving data
+    return {}; // signin pending, do not waste time retrieving data
   } else if (!session.cookie || page.query.user == "anonymous") {
     user = { uid: "anonymous" };
   } else {
-    // uncomment this to disable server-side init for non-anonymous accounts
+    // NOTE: we no longer preload for non-anonymous accounts because it slows down initial page load for larger accounts, and firebase realtime can be much more efficient due to client-side caching
     return {};
-    user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
-    if (!user) return { error: "invalid/expired session cookie" };
+    // user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
+    // if (!user) return { error: "invalid/expired session cookie" };
   }
   let items = await firebaseAdmin()
     .firestore()
@@ -99,8 +101,10 @@ process["server-preload"] = async (page, session) => {
     .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
     .orderBy("time", "desc")
     .get();
+  // console.debug(`retrieved ${items.docs.length} items for user '${user.uid}'`);
   return {
-    items: items.docs.map((doc) =>
+    // NOTE: we use _preload suffix to avoid replacing items on back/forward
+    items_preload: items.docs.map((doc) =>
       Object.assign(doc.data(), {
         id: doc.id,
         updateTime: doc.updateTime.seconds,

@@ -15,6 +15,7 @@
   import Editor from "../components/Editor.svelte";
   import Item from "../components/Item.svelte";
   export let items = [];
+  export let items_preload = []; // items returned by server preload (see above and server.ts)
   export let error = null;
   let user = null;
   let deletedItems = [];
@@ -1753,7 +1754,8 @@
       // console.warn("onPopState before init");
       return;
     }
-    // console.debug("onPopState", e.state);
+    // console.debug("onPopState", e.state, items.length + " items");
+
     // restore editor text and unsaved times
     editorText = e.state.editorText || "";
     if (e.state.unsavedTimes) {
@@ -3218,7 +3220,7 @@
   let initTime = 0; // set where initialize is invoked
   let processed = false;
   let initialized = false;
-  let maxRenderedAtInit = 100; //items.length;
+  let maxRenderedAtInit = 100; // can be upto items.length;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let resolve_init; // set below
   function init_log(...args) {
@@ -3230,7 +3232,7 @@
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
     if (signingOut) return; // encryption error
 
-    // filter hidden items on readonly account
+    // filter "hidden" admin items (e.g. welcome item) on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
 
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
@@ -3281,6 +3283,7 @@
       item.lastEvalTime = 0; // used for _item.get_log
       item.lastRunTime = 0; // used for _item.get_log
     });
+    finalizeStateOnEditorChange = true; // make initial empty state final
     onEditorChange(""); // initial sorting
     items.forEach((item, index) => {
       // initialize deps, deephash, missing tags/labels
@@ -3429,8 +3432,6 @@
         };
       });
 
-      console.debug(`[${window["_client_start_time"]}ms] loaded client`);
-
       // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
       if (error) console.warn(error); // log server-side error
 
@@ -3452,16 +3453,27 @@
       anonymous = user?.uid == "anonymous";
       readonly = anonymous && !admin;
 
+      // print client load time w/ preloaded item count, excluding admin items (e.g. welcome item) if readonly
+      const preload_count = !readonly
+        ? items_preload.length
+        : _.sumBy(items_preload, ({ id }) => (!adminItems.has(id) ? 1 : 0));
+      console.debug(
+        `[${window["_client_start_time"]}ms] loaded client` + (preload_count > 0 ? ` + ${preload_count} items` : "")
+      );
+
       // if items were returned from server, confirm user, then initialize if valid
-      if (items.length > 0) {
+      if (items_preload.length > 0) {
+        items = items_preload;
         if (window.sessionStorage.getItem("mindpage_signin_pending")) {
           console.warn(`ignoring ${items.length} items during signin`);
           items = [];
         } else if (user && user.uid != items[0].user) {
           // items are for wrong user, usually anonymous, due to missing/expired cookie
-          // (you can test this with document.cookie='__session=;max-age=0' in console)
+          // you can test this with document.cookie='__session=;max-age=0' in console
           // can also happen when admin is logged in but acting as anonymous
-          if (items[0].user != "anonymous") console.warn(`ignoring ${items.length} items (${items[0].user})`);
+          // NOTE: we now refresh session cookie regularly and do not expect this warning
+          // if (items[0].user != "anonymous")
+          console.warn(`ignoring ${items.length} items (${items[0].user})`);
           items = [];
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
@@ -3502,20 +3514,29 @@
                 useAnonymousAccount();
               } else {
                 // set up server-side session cookie
-                // store user's ID token as a 1-hour __session cookie to send to server for preload
-                // NOTE: __session is the only cookie allowed by firebase for efficient caching
-                //       (see https://stackoverflow.com/a/44935288)
-                user
-                  .getIdToken(false /*force refresh*/)
-                  .then((token) => {
-                    document.cookie = "__session=" + token + ";max-age=3600";
-                  })
-                  .catch(console.error);
+                // maximum max-age seems to be 7 days for Safari & we refresh daily
+                // store user's ID token as a __session cookie to send to server for preload
+                // __session is the only cookie allowed by firebase for efficient caching
+                // (see https://stackoverflow.com/a/44935288)
+                const sessionCookieMaxAge = 7 * 24 * 60 * 60; // 7 days
+                function updateSessionCookie() {
+                  user
+                    .getIdToken(false /*force refresh*/)
+                    .then((token) => {
+                      // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
+                      document.cookie = "__session=" + token + ";max-age=" + sessionCookieMaxAge;
+                    })
+                    .catch(console.error);
+                }
+                updateSessionCookie();
+                setInterval(updateSessionCookie, 1000 * 24 * 60 * 60);
               }
 
               initFirebaseRealtime();
             });
         });
+      } else if (anonymous && items_preload.length == 0) {
+        initFirebaseRealtime(); // synchronize anonymous items using firebase realtime
       }
 
       // Visual viewport resize/scroll handlers ...
@@ -3572,7 +3593,7 @@
 
       let firstSnapshot = true;
       function initFirebaseRealtime() {
-        if (!user || !firebase().auth().currentUser) return; // need user object and auth
+        if (!user) return; // need user.uid
 
         // start listening for remote changes
         // (also initialize if items were not returned by server)
@@ -3795,7 +3816,7 @@
         init_log("initialized document");
       });
 
-      init_log(`initialized client`);
+      init_log("initialized client");
     });
 
   function onColumnPaddingMouseDown(e) {
