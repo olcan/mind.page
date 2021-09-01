@@ -279,13 +279,26 @@
     get cache(): object {
       const store = this.store as any;
       if (store.cache?._deephash == this.deephash) return store.cache;
-      return (store.cache = Object.defineProperty({}, "_deephash", { value: this.deephash }));
+      // return (store.cache = Object.defineProperty({}, "_deephash", { value: this.deephash }));
+      return (store.cache = {_deephash: this.deephash});
     }
 
     // returns store-cached property, (re)computing value as needed
     cached(key, value_function) {
       const cache = this.cache as any;
       return cache[key] ?? (cache[key] = value_function(this));
+    }
+
+    // invalidates store cache
+    invalidate_cache() {
+      const store = this.store as any;
+      if (store.cache) delete store.cache._deephash
+    }
+
+    // validates store cache, ignoring any changes between this.deephash and cache._deephash
+    validate_cache() {
+      const store = this.store as any;
+      if (store.cache) store.cache._deephash = this.deephash;
     }
 
     // key-value store synchronized into localStorage
@@ -4527,9 +4540,6 @@
   <link rel="manifest" href="/manifest.json?v={favicon_version}" />
 </svelte:head>
 
-<!-- NOTE: remove this when the svelte formatter plugin bug that empties out style tag is fixed -->
-
-<!-- prettier-ignore -->
 <style>
   :global(html) {
     font-family: "Open Sans", sans-serif;
