@@ -6,7 +6,7 @@ import url from "@rollup/plugin-url";
 import svelte from "rollup-plugin-svelte";
 import babel from "@rollup/plugin-babel";
 import { terser } from "rollup-plugin-terser";
-import sveltePreprocess from "svelte-preprocess";
+import autoPreprocess from "svelte-preprocess";
 import typescript from "@rollup/plugin-typescript";
 import config from "sapper/config/rollup.js";
 import pkg from "./package.json";
@@ -33,7 +33,7 @@ export default {
         preventAssignment: true,
       }),
       svelte({
-        preprocess: sveltePreprocess(),
+        preprocess: autoPreprocess(),
         emitCss: true,
         compilerOptions: {
           dev,
@@ -96,7 +96,7 @@ export default {
         preventAssignment: true,
       }),
       svelte({
-        preprocess: sveltePreprocess(),
+        preprocess: autoPreprocess(),
         compilerOptions: {
           generate: "ssr",
           hydratable: true,
