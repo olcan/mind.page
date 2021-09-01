@@ -662,7 +662,8 @@
 
     // do not cache with macro errors
     if (hasMacroErrors) return text;
-    return (window["_html_cache"][id][cache_key] = text);
+    if (!window["_html_cache"][id]) return text;
+    else return (window["_html_cache"][id][cache_key] = text);
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
