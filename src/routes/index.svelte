@@ -335,7 +335,7 @@
       let content = [];
       // include dependencies in order, _before_ item itself
       if (options["include_deps"]) {
-        options["include_deps"] = false; // deps are recursive already
+        options = _.merge({}, options, { include_deps: false }); // deps are recursive already
         item.deps.forEach((id) => {
           const dep = items[indexFromId.get(id)];
           // NOTE: we allow async dependents to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
