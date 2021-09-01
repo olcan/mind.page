@@ -275,30 +275,32 @@
       return _item.store;
     }
 
-    // general-purpose cache object stored in this.store, cleared on deephash changes
+    // general-purpose cache object, cleared automatically if deephash has changed
+    // NOTE: automated clearing is only during access via item.cache
     get cache(): object {
-      const store = this.store as any;
-      if (store.cache?._deephash == this.deephash) return store.cache;
-      // return (store.cache = Object.defineProperty({}, "_deephash", { value: this.deephash }));
-      return (store.cache = {_deephash: this.deephash});
+      const _item = item(this.id);
+      if (_item.cache_deephash == this.deephash) return _item.cache;
+      _item.cache_deephash = this.deephash;
+      return (_item.cache = {});
     }
 
-    // returns store-cached property, (re)computing value as needed
+    // returns cached property, (re)computing value as needed
     cached(key, value_function) {
       const cache = this.cache as any;
       return cache[key] ?? (cache[key] = value_function(this));
     }
 
-    // invalidates store cache
+    // invalidates cache object, to be cleared on next access via item.cache
     invalidate_cache() {
-      const store = this.store as any;
-      if (store.cache) delete store.cache._deephash
+      const _item = item(this.id);
+      if (_item.cache) delete _item.cache_deephash;
     }
 
-    // validates store cache, ignoring any changes between this.deephash and cache._deephash
+    // validates cache object for current deephash
+    // effectively ignores changes between cache_deephash -> this.deephash
     validate_cache() {
-      const store = this.store as any;
-      if (store.cache) store.cache._deephash = this.deephash;
+      const _item = item(this.id);
+      if (_item.cache) _item.cache_deephash = this.deephash;
     }
 
     // key-value store synchronized into localStorage
