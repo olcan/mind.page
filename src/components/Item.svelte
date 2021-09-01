@@ -501,7 +501,9 @@
 
     // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
-    text = text.replace(/(^|[^\\])(<[s]tyle>.*)#item(\W.*<\/style>)/gs, `$1$2#item-${id}$3`);
+    text = text.replace(/(?:^|[^\\])<[s]tyle>.*?#item\W.*?<\/style>/gs, (m) =>
+      m.replace(/#item(?=\W)/g, `#item-${id}`)
+    );
 
     // convert markdown to html
     let renderer = new marked.Renderer();
