@@ -537,12 +537,15 @@
       renderer: renderer,
       highlight: (code, language) => {
         // leave _html(_*) block as is to be "unwrapped" (and unescaped) below
+        // except add a closing comment to allow html itself to contain </code></pre>
         if (language.match(/^_html(_|$)/)) {
-          return code
-            .replace(/(^|[^\\])\$id/g, "$1" + id)
-            .replace(/(^|[^\\])\$hash/g, "$1" + hash)
-            .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
-            .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${++cacheIndex}`);
+          return (
+            code
+              .replace(/(^|[^\\])\$id/g, "$1" + id)
+              .replace(/(^|[^\\])\$hash/g, "$1" + hash)
+              .replace(/(^|[^\\])\$deephash/g, "$1" + deephash)
+              .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${++cacheIndex}`) + "<!--/_html-->"
+          );
         }
         return highlight(code, language);
       },
@@ -557,10 +560,13 @@
     text = marked(text);
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
+    // NOTE: you can test by creating an empty block and seeing its size and non-matching of :empty
     text = text.replace(/\s+<\/code><\/pre>/gs, "</code></pre>");
 
     // unwrap _html(_*) blocks
-    text = text.replace(/<pre><code class="_html_?.*?">(.*?)<\/code><\/pre>/gs, (m, _html) => _.unescape(_html));
+    text = text.replace(/<pre><code class="_html_?.*?">(.*?<!--\/_html-->)<\/code><\/pre>/gs, (m, _html) =>
+      _.unescape(_html.replace(/<\!--\/_html-->$/, ""))
+    );
 
     // replace _math blocks, preserving whitespace
     text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
