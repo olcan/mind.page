@@ -507,31 +507,47 @@
           );
       let evaljs = [prefix, js].join(";\n").trim();
 
-      // wrap evaljs in anonymous function for scoping AND performance
-      // e.g. benchmark(()=>Math.random()) is 10-20x faster with this wrapper
-      // but also attempt to insert return for last expression to maintain ~eval semantics
-      evaljs = evaljs.replace(/([^;\n]+)$/, (m, line) => {
-        // check for reserved keywords, see https://www.w3schools.com/js/js_reserved.asp
-        // NOTE: we include ALL reserved words except 'await' which obviously makes sense after return
-        // NOTE: some of these keywords passed the variable name test ("let X = 0"), but we include them anyway; these were: (abstract|await|boolean|byte|char|double|final|float|goto|int|long|native|short|synchronized|throws|transient|volatile)
-        // NOTE: any variable can still be returned by wrapping in parentheses, e.g. (goto)
-        if (
-          line.match(
-            /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|false|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|new|null|package|private|protected|public|return|short|static|super|switch|synchronized|this|throw|throws|transient|true|try|typeof|var|void|volatile|while|with|yield)(?:\W|$))/
-          )
-        )
-          return line;
-        return "return " + line;
-      });
-      evaljs = ["(() => {", evaljs, "})()"].join("\n");
-
       if (!options["debug"]) {
+        // no (re-)wrapping debug items
         if (options["async"]) {
+          // async wrapper
           if (options["async_simple"]) {
             // use light-weight wrapper without output/logging into item
             evaljs = [";(async () => {", evaljs, "})()"].join("\n");
           } else evaljs = ["_this.start(async () => {", evaljs, "}) // _this.start"].join("\n");
+        } else {
+          // sync wrapper
+          // wrap evaljs in anonymous function for scoping AND performance
+          // e.g. benchmark(()=>Math.random()) is 10-20x faster with this wrapper
+          // but also attempt to insert return for last expression to maintain ~eval semantics
+          // NOTE: we can be conservative about returns since can always be added manually
+          function prependReturnIfSensible(expr) {
+            // check for reserved keywords, see https://www.w3schools.com/js/js_reserved.asp
+            // NOTE: we include ALL reserved words except 'await' which obviously makes sense after return
+            // NOTE: some of these keywords passed the variable name test ("let X = 0"), but we include them anyway; these were: (abstract|await|boolean|byte|char|double|final|float|goto|int|long|native|short|synchronized|throws|transient|volatile)
+            // NOTE: any variable can still be returned by wrapping in parentheses, e.g. (goto)
+            if (
+              expr.match(
+                /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|false|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|new|null|package|private|protected|public|return|short|static|super|switch|synchronized|this|throw|throws|transient|true|try|typeof|var|void|volatile|while|with|yield)(?:\W|$))/
+              )
+            )
+              return expr;
+            return "return " + expr;
+          }
+          const count_regex = (str, regex) => str.match(regex)?.length || 0;
+          let try_lines = false;
+          evaljs = evaljs.replace(/([^;\n]+)$/, (m, expr) => {
+            // check if we are inside an open quote or comment
+            if (count_regex(expr, /[^\\]['"`]/g) % 2 == 1 || count_regex(expr, /\*\//g) > count_regex(expr, /\/\*/g)) {
+              try_lines = true;
+              return expr;
+            }
+            return prependReturnIfSensible(expr);
+          });
+          if (try_lines) evaljs = evaljs.replace(/([^\n]+)$/, (m, expr) => prependReturnIfSensible(expr));
+          evaljs = ["(() => {", evaljs, "})()"].join("\n");
         }
+
         if (options["trigger"]) evaljs = [`const __trigger = '${options["trigger"]}';`, evaljs].join("\n");
         evaljs = ["'use strict';undefined;", `const _id = '${this.id}';`, "const _this = _item(_id);", evaljs].join(
           "\n"
