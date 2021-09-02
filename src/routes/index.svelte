@@ -1273,6 +1273,19 @@
       window["_mindboxLastModified"] = Date.now();
       window["_mindboxDebounced"] = true;
       window["_highlight_counts"] = {};
+
+      // invoke _on_change on all _listen items
+      setTimeout(() => {
+        items.forEach((item) => {
+          if (!item.listen) return;
+          try {
+            _item(item.id).eval(
+              `if (typeof _on_change != 'undefined') _on_change(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+              { trigger: "listen" }
+            );
+          } catch (e) {} // already logged, just continue
+        });
+      });
     }
 
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
@@ -1685,7 +1698,10 @@
       items.forEach((item) => {
         if (!item.listen) return;
         try {
-          _item(item.id).eval(`_on_search(\`${editorText.replace(/`/g, "\\`")}\`)`, { trigger: "listen" });
+          _item(item.id).eval(
+            `if (typeof _on_search != 'undefined') _on_search(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+            { trigger: "listen" }
+          );
         } catch (e) {} // already logged, just continue
       });
     });
@@ -2400,10 +2416,9 @@
           // NOTE: text is untrimmed, so no whitespace before /
           const cmd = text.match(/^\/\w+/)[0];
           const args = text
-            .replace(/^\/\w+/, "")
             .trim()
-            .replace(/\\/g, "\\\\")
-            .replace(/`/g, "\\`");
+            .replace(/^\/\w+/, "")
+            .replace(/([`\\$])/g, "\\$1");
           if (cmd == "/_narrate") {
             narrating = !narrating;
             if (narrating) {
@@ -2594,7 +2609,12 @@
       items.forEach((item) => {
         if (!item.listen) return;
         try {
-          _item(item.id).eval(`_on_create(\`${text.replace(/`/g, "\\`")}\`)`, { trigger: "listen" });
+          _item(item.id).eval(
+            `if (typeof _on_create != 'undefined') _on_create(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+            {
+              trigger: "listen",
+            }
+          );
         } catch (e) {} // already logged, just continue
       });
     });
