@@ -506,6 +506,25 @@
             Object.assign({ replace_ids: true, exclude_async_deps: !options["async"] }, options)
           );
       let evaljs = [prefix, js].join(";\n").trim();
+
+      // wrap evaljs in anonymous function for scoping AND performance
+      // e.g. benchmark(()=>Math.random()) is 10-20x faster with this wrapper
+      // but also attempt to insert return for last expression to maintain ~eval semantics
+      evaljs = evaljs.replace(/([^;\n]+)$/, (m, line) => {
+        // check for reserved keywords, see https://www.w3schools.com/js/js_reserved.asp
+        // NOTE: we include ALL reserved words except 'await' which obviously makes sense after return
+        // NOTE: some of these keywords passed the variable name test ("let X = 0"), but we include them anyway; these were: (abstract|await|boolean|byte|char|double|final|float|goto|int|long|native|short|synchronized|throws|transient|volatile)
+        // NOTE: any variable can still be returned by wrapping in parentheses, e.g. (goto)
+        if (
+          line.match(
+            /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|false|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|new|null|package|private|protected|public|return|short|static|super|switch|synchronized|this|throw|throws|transient|true|try|typeof|var|void|volatile|while|with|yield)(?:\W|$))/
+          )
+        )
+          return line;
+        return "return " + line;
+      });
+      evaljs = ["(() => {", evaljs, "})()"].join("\n");
+
       if (!options["debug"]) {
         if (options["async"]) {
           if (options["async_simple"]) {
