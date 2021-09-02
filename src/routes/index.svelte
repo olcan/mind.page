@@ -1724,7 +1724,7 @@
       editorText = tag + " "; // space in case more text is added
     }
     forceNewStateOnEditorChange = true; // force new state
-    // finalizeStateOnEditorChange = true; // finalize state
+    finalizeStateOnEditorChange = true; // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length));
     lastEditorChangeTime = 0; // disable debounce even if editor focused
     onEditorChange(editorText, e.altKey /* keep_times */);
