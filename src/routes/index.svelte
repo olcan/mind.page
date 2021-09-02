@@ -2416,9 +2416,9 @@
           // NOTE: text is untrimmed, so no whitespace before /
           const cmd = text.match(/^\/\w+/)[0];
           const args = text
-            .trim()
             .replace(/^\/\w+/, "")
-            .replace(/([`\\$])/g, "\\$1");
+            .replace(/([`\\$])/g, "\\$1")
+            .trim();
           if (cmd == "/_narrate") {
             narrating = !narrating;
             if (narrating) {
