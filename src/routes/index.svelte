@@ -410,7 +410,7 @@
       return log.reverse();
     }
 
-    write(text: string, type: string = "_output") {
+    write(text: string, type: string = "_output", options = {}) {
       text = typeof text == "string" ? text : "" + JSON.stringify(text);
       // confirm if write is too big
       const writeConfirmLength = 16 * 1024;
@@ -441,8 +441,8 @@
         if (type.trim() == "") __item.text = text;
         else __item.text = appendBlock(this.text, type, text);
       }
-      if (!__item.log) __item.time = Date.now();
-      itemTextChanged(this.index, this.text);
+      if (!__item.log && !options["keep_time"]) __item.time = Date.now();
+      itemTextChanged(this.index, this.text, true, true, options["keep_time"]);
       // dispatch onEditorChange to prevent index changes during eval
       setTimeout(() => {
         lastEditorChangeTime = 0; // disable debounce even if editor focused
@@ -1929,7 +1929,7 @@
   }
 
   let tagCounts = new Map<string, number>();
-  function itemTextChanged(index: number, text: string, update_deps = true, run_deps = true) {
+  function itemTextChanged(index: number, text: string, update_deps = true, run_deps = true, keep_time = false) {
     // console.debug("itemTextChanged", index);
     let item = items[index];
     item.hash = hashCode(text);
@@ -2049,7 +2049,7 @@
           .concat(item.hash)
           .join(",")
       );
-      if (item.deephash != prevDeepHash && !item.log) item.time = Date.now();
+      if (item.deephash != prevDeepHash && !item.log && !keep_time) item.time = Date.now();
       item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
 
       // update deps and deephash as needed for all dependent items
@@ -2107,15 +2107,20 @@
       // invoke _on_item_change on all _listen items
       if (item.deephash != prevDeepHash) {
         const changed_item_id = item.id;
+        const changed_item_label = item.label;
         setTimeout(() => {
           const start = Date.now();
+          const deleted = !indexFromId.has(changed_item_id);
           items.forEach((item) => {
             if (!item.listen) return;
             if (!item.text.includes("_on_item_change")) return;
             try {
-              _item(item.id).eval(`if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}')`, {
-                trigger: "listen",
-              });
+              _item(item.id).eval(
+                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}',${deleted})`,
+                {
+                  trigger: "listen",
+                }
+              );
             } catch (e) {} // already logged, just continue
           });
         });
@@ -2845,7 +2850,8 @@
     }
     item.saving = true;
     let itemToSave = {
-      user: user.uid, // allows us to use set() instead of update()
+      // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
+      // user: user.uid, // allows us to use set() instead of update()
       time: item.time,
       text: item.text,
     };
@@ -2859,7 +2865,7 @@
       firestore()
         .collection("items")
         .doc(item.savedId)
-        .set(itemToSave)
+        .update(itemToSave)
         .then(() => {
           onItemSaved(item.id, itemToSave);
         })
@@ -2868,7 +2874,7 @@
       // also save to history ...
       firestore()
         .collection("history")
-        .add({ item: item.savedId, ...itemToSave })
+        .add({ item: item.savedId, user: user.uid, ...itemToSave })
         .catch(console.error);
     }); // encryptItem(itemToSave)
   }
@@ -3706,6 +3712,10 @@
           .orderBy("time", "desc")
           .onSnapshot(
             function (snapshot) {
+              if (window["_disable_sync"]) {
+                console.warn("ignoring firestore snapshot due to _disable_sync");
+                return;
+              }
               snapshot.docChanges().forEach(function (change) {
                 const doc = change.doc;
                 // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
@@ -3766,7 +3776,13 @@
                     let item = items[index];
                     item.text = item.savedText = savedItem.text;
                     item.time = item.savedTime = savedItem.time;
-                    itemTextChanged(index, item.text, true /* update_deps */, false /* run_deps */);
+                    itemTextChanged(
+                      index,
+                      item.text,
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      true /* keep_time */
+                    );
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     onEditorChange(editorText); // item time/text has changed
                   }
