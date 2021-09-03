@@ -1278,6 +1278,7 @@
       setTimeout(() => {
         items.forEach((item) => {
           if (!item.listen) return;
+          if (!item.text.includes("_on_change")) return;
           try {
             _item(item.id).eval(
               `if (typeof _on_change != 'undefined') _on_change(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
@@ -1697,6 +1698,7 @@
     setTimeout(() => {
       items.forEach((item) => {
         if (!item.listen) return;
+        if (!item.text.includes("_on_search")) return;
         try {
           _item(item.id).eval(
             `if (typeof _on_search != 'undefined') _on_search(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
@@ -2101,6 +2103,23 @@
         const dep = items[indexFromId.get(id)];
         dep.depsString = itemDepsString(dep);
       });
+
+      // invoke _on_item_change on all _listen items
+      if (item.deephash != prevDeepHash) {
+        const changed_item_id = item.id;
+        setTimeout(() => {
+          const start = Date.now();
+          items.forEach((item) => {
+            if (!item.listen) return;
+            if (!item.text.includes("_on_item_change")) return;
+            try {
+              _item(item.id).eval(`if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}')`, {
+                trigger: "listen",
+              });
+            } catch (e) {} // already logged, just continue
+          });
+        });
+      }
     }
   }
 
@@ -2608,6 +2627,7 @@
     setTimeout(() => {
       items.forEach((item) => {
         if (!item.listen) return;
+        if (!item.text.includes("_on_create")) return;
         try {
           _item(item.id).eval(
             `if (typeof _on_create != 'undefined') _on_create(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
