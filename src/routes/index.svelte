@@ -2826,10 +2826,11 @@
     } catch (e) {} // already logged, just continue
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined;
+    // stringify output
+    if (jsout !== undefined && typeof jsout != "string") jsout = "" + JSON.stringify(jsout);
     const outputConfirmLength = 16 * 1024;
-    if (jsout !== undefined && ("" + JSON.stringify(jsout)).length >= outputConfirmLength) {
+    if (jsout !== undefined && jsout.length >= outputConfirmLength)
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined;
-    }
     // append _output and _log and update for changes
     if (jsout !== undefined) item.text = appendBlock(item.text, "_output", jsout);
     _item(item.id).write_log(); // auto-write log
