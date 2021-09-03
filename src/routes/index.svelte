@@ -3059,10 +3059,10 @@
   }
 
   function onItemTouch(index: number, e: MouseEvent = null) {
-    // if (items[index].log) {
-    //   alert("#log item can not be moved");
-    //   return;
-    // } // ignore
+    if (items[index].log) {
+      alert("#log item can not be moved");
+      return;
+    } // ignore, can try again after removing #log tag
     if (items[index].time > newestTime) console.warn("invalid item time");
     if (e?.altKey && e?.metaKey) {
       // move item time back 1 day
