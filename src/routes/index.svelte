@@ -3097,6 +3097,9 @@
         const textarea = textArea(indexFromId.get(id));
         if (!textarea) return;
         textarea.focus();
+
+        // NOTE: commented this out after scroll-to-caret failed on ipad and iphone for deep log line edits
+        //       scrolling is still not ideal on iphone, likely due to virtual keyboard not being accounted properly
         // if (ios || android) return; // ios and android have built-in focus scrolling that works better
 
         // update vertical padding in case it is out of date
