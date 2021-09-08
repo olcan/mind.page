@@ -3097,12 +3097,13 @@
         const textarea = textArea(indexFromId.get(id));
         if (!textarea) return;
         textarea.focus();
-        if (ios || android) return; // ios and android have built-in focus scrolling that works better
+        // if (ios || android) return; // ios and android have built-in focus scrolling that works better
 
         // update vertical padding in case it is out of date
         // could help w/ caret position calculation below, but unconfirmed empirically
         updateVerticalPadding();
 
+        // calculate caret position
         // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
         const backdrop = textarea.closest(".editor")?.querySelector(".backdrop");
         if (!backdrop) return; // unable to locate backdrop div for caret position

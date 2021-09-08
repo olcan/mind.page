@@ -284,6 +284,7 @@
   let lastKeyDownPosition;
 
   function onKeyDown(e: any) {
+    unlockCaret();
     let key = e.code || e.key; // for android compatibility
     // console.debug("Editor.onKeyDown:", e, key);
     lastKeyDown = key;
@@ -544,6 +545,11 @@
     }
   }
 
+  let caretUnlockTime = 0;
+  function unlockCaret() {
+    caretUnlockTime = Date.now();
+  }
+
   function onPaste(e: ClipboardEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -648,8 +654,20 @@
   let highlightPending = false;
   function onSelectionChange(e) {
     if (!document.activeElement.isSameNode(textarea)) return;
+    if (selectionStart == textarea.selectionStart && selectionEnd == textarea.selectionEnd) return;
+    // reject caret movement without relevant events "unlocking" caret within 250ms
+    // main goal is to prevent caret movement onhappens on trackpad clicks on ipad
+    // we make exception for selection changes which can be triggered programmatically
+    // programmatic caret movement requires a related event to be dispatched first, and care must be taken on ipad such that this does not coincide with a trackpad click
+    if (textarea.selectionStart == textarea.selectionEnd && Date.now() - caretUnlockTime > 250) {
+      // console.debug("REJECTED onSelectionChange due to caret lock", textarea.selectionStart, textarea.selectionEnd);
+      textarea.selectionStart = selectionStart;
+      textarea.selectionEnd = selectionEnd;
+      return;
+    }
     selectionStart = textarea.selectionStart;
     selectionEnd = textarea.selectionEnd;
+    // console.debug("onSelectionChange", selectionStart, selectionEnd);
     if (textarea.selectionStart != textarea.selectionEnd) return;
     if (highlightPending) return;
     highlightPending = true;
@@ -671,6 +689,7 @@
   }
   onMount(() => {
     document.addEventListener("selectionchange", onSelectionChange);
+    // console.debug("onMount selection", selectionStart, selectionEnd);
     setSelection(selectionStart, selectionEnd);
   });
   onDestroy(() => document.removeEventListener("selectionchange", onSelectionChange));
@@ -687,6 +706,8 @@
     on:input={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
+    on:mousedown={unlockCaret}
+    on:touchstart={unlockCaret}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
