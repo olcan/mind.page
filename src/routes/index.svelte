@@ -2121,7 +2121,7 @@
             if (!item.text.includes("_on_item_change")) return;
             try {
               _item(item.id).eval(
-                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}',${deleted})`,
+                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}','${prevLabel}',${deleted})`,
                 {
                   trigger: "listen",
                 }
