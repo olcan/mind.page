@@ -410,8 +410,8 @@
               const hidden = tag.startsWith("#_");
               tag = tag.replace(/^#_/, "#");
               // make relative tags absolute
-              if (label && tag.startsWith("#//")) tag = parentLabelText + tag.substring(2);
-              else if (label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
+              if (label && tag != label && tag.startsWith("#//")) tag = parentLabelText + tag.substring(2);
+              else if (label && tag != label && tag.startsWith("#/")) tag = labelText + tag.substring(1);
 
               const lctag = tag.toLowerCase();
               let classNames = "";

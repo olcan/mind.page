@@ -1975,6 +1975,7 @@
     if (item.label) {
       // convert relative tags to absolute
       const resolveTag = (tag) =>
+        tag == item.label ? tag : 
         tag.startsWith("#//")
           ? item.label.replace(/\/[^\/]*$/, "") + tag.substring(2)
           : tag.startsWith("#/")
