@@ -3,6 +3,8 @@ import express from "express";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import * as sapper from "@sapper/server";
+import https from "https";
+import fs from "fs";
 
 const { PORT, NODE_ENV } = process.env;
 const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
@@ -72,11 +74,26 @@ const sapperServer = express().use(
   }) as any
 );
 
+// listen if firebase is not handling the server ...
 if (!("FIREBASE_CONFIG" in process.env)) {
-  // firebase handles the listening
   sapperServer.listen(PORT).on("error", (err) => {
     if (err) console.log("error", err);
   });
+  // also listen on HTTPS port ...
+  const server = https
+    .createServer(
+      {
+        key: fs.readFileSync("server.key"),
+        cert: fs.readFileSync("server.crt"),
+      },
+      sapperServer
+    )
+    .listen(443, () => {
+      console.log("HTTPS server listening on https://localhost:443");
+    })
+    .on("error", (err) => {
+      if (err) console.log("error", err);
+    });
 }
 
 import { firebaseAdmin } from "../firebase.js";
