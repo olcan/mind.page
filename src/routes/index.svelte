@@ -3697,6 +3697,19 @@
           });
           items = items; // trigger svelte render
         }
+
+        // on ios, fix textarea/editor height if inconsistent with backdrop height
+        // was first observed on iOS 15 when switching back to split windows
+        // logic is same as in updateTextDivs() in Editor.svelte
+        if (ios) {
+          document.querySelectorAll(".editor").forEach((editor: HTMLElement) => {
+            const textarea = editor.querySelector("textarea");
+            const backdrop = editor.querySelector(".backdrop");
+            if (editor.style.height != backdrop.scrollHeight + "px")
+              // inconsistent
+              textarea.style.height = editor.style.height = backdrop.scrollHeight + "px";
+          });
+        }
       }
 
       document.body.addEventListener("scroll", onScroll);
@@ -3906,6 +3919,7 @@
           replay = false;
         });
 
+        if (ios || android) setInterval(checkFocus, 250); // check focus on ios/android
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
 
@@ -3946,6 +3960,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    onTouchStart(); // treat keys as touch on ios/android
     const key = e.code || e.key; // for android compatibility
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
@@ -4218,10 +4233,30 @@
   // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true
   focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
-    // on ios (also android presumably), multiple windows can focus (e.g. split screen view) and defocus at the same time, reflecting ability of these windows being ready to receive touch events (though not keyboard events, which do not appear to be distinguished unfortunately, i.e. there is no hasKeyboardFocus); in addition, loss of focus is not as informative since switching apps is necessary even to glance at other windows
-    focused = document.hasFocus() || ios || android;
+    // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
+    if (ios || android) return; // focus handled in checkFocus below
+    focused = document.hasFocus();
     // retreat to minimal hide index when window is defocused
     if (!focused) hideIndex = hideIndexMinimal;
+  }
+
+  let lastTouchTime;
+  function onTouchStart() {
+    if (!ios && !android) return; // only on ios or android
+    lastTouchTime = Date.now().toString();
+    localStorage.setItem("mindpage_last_touch_time", lastTouchTime);
+    checkFocus(); // update focus immediately
+  }
+
+  function checkFocus() {
+    if (focused && lastTouchTime != localStorage.getItem("mindpage_last_touch_time")) {
+      focused = false;
+      hideIndex = hideIndexMinimal;
+      (document.activeElement as HTMLElement)?.blur();
+    } else if (!focused && lastTouchTime == localStorage.getItem("mindpage_last_touch_time")) {
+      focused = true;
+      (document.activeElement as HTMLElement)?.focus();
+    }
   }
 
   // redirect window.onerror to console.error (or alert if .console not set up yet)
@@ -4439,6 +4474,8 @@
   on:focus={onFocus}
   on:blur={onFocus}
   on:error={onError}
+  on:touchstart={onTouchStart}
+  on:mousedown={onTouchStart}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />
