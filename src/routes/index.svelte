@@ -3925,7 +3925,8 @@
           replay = false;
         });
 
-        if (ios || android) setInterval(checkFocus, 250); // check focus on ios/android
+        // if (ios || android) setInterval(checkFocus, 250); // check focus on ios/android
+        if (ios || android) window.onstorage = checkFocus; // check focus on ios/android
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
 
