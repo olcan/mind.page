@@ -2,6 +2,7 @@
   export let id_suffix = "editor";
   export let text = "";
   export let focused = false;
+  export let lockCaret = false;
   export let showButtons = false;
   export let cancelOnDelete = false;
   export let createOnAnyModifiers = false;
@@ -659,7 +660,7 @@
     // main goal is to prevent caret movement onhappens on trackpad clicks on ipad
     // we make exception for selection changes which can be triggered programmatically
     // programmatic caret movement requires a related event to be dispatched first, and care must be taken on ipad such that this does not coincide with a trackpad click
-    if (textarea.selectionStart == textarea.selectionEnd && Date.now() - caretUnlockTime > 250) {
+    if (lockCaret && textarea.selectionStart == textarea.selectionEnd && Date.now() - caretUnlockTime > 250) {
       // console.debug("REJECTED onSelectionChange due to caret lock", textarea.selectionStart, textarea.selectionEnd);
       textarea.selectionStart = selectionStart;
       textarea.selectionEnd = selectionEnd;

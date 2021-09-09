@@ -1975,8 +1975,9 @@
     if (item.label) {
       // convert relative tags to absolute
       const resolveTag = (tag) =>
-        tag == item.label ? tag : 
-        tag.startsWith("#//")
+        tag == item.label
+          ? tag
+          : tag.startsWith("#//")
           ? item.label.replace(/\/[^\/]*$/, "") + tag.substring(2)
           : tag.startsWith("#/")
           ? item.label + tag.substring(1)
@@ -4313,6 +4314,7 @@
                   bind:this={editor}
                   bind:text={editorText}
                   bind:focused={editorFocused}
+                  lockCaret={false}
                   showButtons={true}
                   cancelOnDelete={true}
                   createOnAnyModifiers={true}
