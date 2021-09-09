@@ -6,7 +6,7 @@
   "functions": {
     "predeploy": ["git push"],
     "source": ".",
-    "ignore": ["**/node_modules/**", "**/dev/**"]
+    "ignore": ["**/node_modules/**", "**/dev/**", "ssl-dev/**"]
   },
   "hosting": {
     "public": "static",

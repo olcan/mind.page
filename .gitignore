@@ -4,5 +4,4 @@ __sapper__/
 .firebase/
 lib/
 *.log
-server.crt
-server.key
+ssl-dev/

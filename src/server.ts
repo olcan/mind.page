@@ -83,8 +83,8 @@ if (!("FIREBASE_CONFIG" in process.env)) {
   const server = https
     .createServer(
       {
-        key: fs.readFileSync("server.key"),
-        cert: fs.readFileSync("server.crt"),
+        key: fs.readFileSync("ssl-dev/server.key"),
+        cert: fs.readFileSync("ssl-dev/server.crt"),
       },
       sapperServer
     )
