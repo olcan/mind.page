@@ -1722,6 +1722,7 @@
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
+    onTouchStart(); // treat mousedown as touch on ios/android
     const index = indexFromId.get(id);
     if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
