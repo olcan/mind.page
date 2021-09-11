@@ -1722,7 +1722,7 @@
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
-    onTouchStart(); // treat mousedown as touch on ios/android
+    onTouchStart(); // treat mousedown as touch for focusing
     const index = indexFromId.get(id);
     if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
@@ -3210,7 +3210,8 @@
   let lastScrollTime = 0;
   let historyUpdatePending = false;
   function onScroll() {
-    if (Date.now() - lastScrollTime > 250) onTouchStart(); // count fresh scroll as touch
+    // count any fresh scrolling (even w/ trackpad) as touch for focusing
+    if (Date.now() - lastScrollTime > 250) onTouchStart();
     lastScrollTime = Date.now();
     if (!historyUpdatePending) {
       historyUpdatePending = true;
@@ -3969,7 +3970,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    onTouchStart(); // treat keys as touch on ios/android
+    onTouchStart(); // treat keys as touch for focusing
     const key = e.code || e.key; // for android compatibility
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
@@ -4251,7 +4252,7 @@
 
   let lastTouchTime; // last touch time
   function onTouchStart() {
-    if (!ios && !android) return; // only on ios or android
+    if (!ios && !android) return; // focus handled in onFocus above
     lastTouchTime = Date.now().toString();
     localStorage.setItem("mindpage_last_touch_time", lastTouchTime);
     checkFocus(); // update focus immediately
