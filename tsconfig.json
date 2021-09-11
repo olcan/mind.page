@@ -1,9 +1,9 @@
 {
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
-    "lib": ["DOM", "ES2019", "WebWorker"],
+    "lib": ["DOM", "ES2021", "WebWorker"],
     // options from https://github.com/sveltejs/sapper/blob/master/tsconfig.json ...
-    "target": "es2019",
+    "target": "es2021",
     "moduleResolution": "Node",
     "resolveJsonModule": true,
     "baseUrl": ".",
