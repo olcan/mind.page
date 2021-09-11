@@ -1,14 +1,3 @@
-<script context="module" lang="ts">
-  // NOTE: Preload function can be called on either client or server
-  // See https://sapper.svelte.dev/docs#Preloading for documentation
-  // Start 'npm run serve' and open localhost:5000 to test locally
-  //
-  // NOTE: this definition was causing an odd error above svelte-preprocess 4.6.6 and since we disabled preloading we just comment it out for now
-  // export async function preload(page, session) {
-  //   return process["server-preload"](page, session);
-  // }
-</script>
-
 <script lang="ts">
   import _ from "lodash";
   import { isClient, firebase, firestore } from "../../firebase.js";
