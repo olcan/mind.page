@@ -3210,6 +3210,7 @@
   let lastScrollTime = 0;
   let historyUpdatePending = false;
   function onScroll() {
+    if (Date.now() - lastScrollTime > 250) onTouchStart(); // count fresh scroll as touch
     lastScrollTime = Date.now();
     if (!historyUpdatePending) {
       historyUpdatePending = true;
@@ -4248,7 +4249,7 @@
     if (!focused) hideIndex = hideIndexMinimal;
   }
 
-  let lastTouchTime;
+  let lastTouchTime; // last touch time
   function onTouchStart() {
     if (!ios && !android) return; // only on ios or android
     lastTouchTime = Date.now().toString();
