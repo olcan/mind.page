@@ -56,7 +56,7 @@
     return (
       text
         .replace(
-          /(^|[^\\])(\$?\$`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*)(`\$\$?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|(?:\w|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
+          /(^|[^\\])([$]?[$]`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*)(`[$][$]?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|(?:\w|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
           (m, pfx, begin, content, end) => {
             // undo any tag highlighting inside highlighted sections
             content = content.replace(/<mark>(.*?)<\/mark>/g, "$1");

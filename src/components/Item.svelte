@@ -345,7 +345,7 @@
     const regexTerms = Array.from(matchingTerms)
       .map(_.escapeRegExp)
       .sort((a, b) => b.length - a.length);
-    let mathTermRegex = new RegExp(`\\$\`.*(?:${regexTerms.join("|")}).*\`\\$`, "i");
+    let mathTermRegex = new RegExp(`[$]\`.*(?:${regexTerms.join("|")}).*\`[$]`, "i");
 
     const parentLabel = label.replace(/\/[^\/]*$/, "");
     const parentLabelText = labelText.replace(/\/[^\/]*$/, "");
@@ -396,7 +396,7 @@
         if (!insideBlock && (depline || !str.match(/^\s*```|^     *[^-*+ ]/))) {
           // wrap math inside span.math (unless text matches search terms)
           if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has("$")))
-            str = str.replace(/(^|[^\\])(\$?\$`.+?`\$\$?)/g, (m, pfx, math) =>
+            str = str.replace(/(^|[^\\])([$]?[$]`.+?`[$][$]?)/g, (m, pfx, math) =>
               (math.startsWith("$`") && math.endsWith("`$")) || (math.startsWith("$$`") && math.endsWith("`$$"))
                 ? pfx + wrapMath(math)
                 : m
@@ -572,8 +572,8 @@
     text = text.replace(/<pre><code class="_math">(.*?)<\/code><\/pre>/gs, (m, _math) => wrapMath(_math));
 
     // allow escaping of math and macro delimiters in inline code blocks, used in documenting syntax
-    text = text.replace(/(<code>.*?)\\\$`(.*?<\/code>)/g, "$1$$`$2"); // \$`
-    text = text.replace(/(<code>.*?)\\\$\$`(.*?<\/code>)/g, "$1$$$$`$2"); // \$$`
+    text = text.replace(/(<code>.*?)\\[$]`(.*?<\/code>)/g, "$1$$`$2"); // \$`
+    text = text.replace(/(<code>.*?)\\[$][$]`(.*?<\/code>)/g, "$1$$$$`$2"); // \$$`
     text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, "$1&lt;&lt;$2"); // \<<
     text = text.replace(/(<code>.*?)\\@\{(.*?<\/code>)/g, "$1@{$2"); // \@{
 
@@ -996,7 +996,7 @@
         if ((code = elem.querySelector("code"))) code.outerHTML = code.innerHTML;
         // insert delimiters if missing (in particular for multi-line _math blocks)
         if (!elem.textContent.match(/^\$.+\$$/)) {
-          elem.innerHTML = "$$\n" + elem.innerHTML + "\n$$";
+          elem.innerHTML = "$$" + "\n" + elem.innerHTML + "\n" + "$$";
         }
         math.push(elem);
       });
