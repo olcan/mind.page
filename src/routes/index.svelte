@@ -4262,16 +4262,28 @@
     checkFocus(); // update focus immediately
   }
 
+  let lastBlurredElem;
   function checkFocus() {
     if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
       focused = false;
       hideIndex = hideIndexMinimal;
-      // not blurring allows return of focus using cmd-tilde, which we are unable to detect on ipad
-      // (document.activeElement as HTMLElement)?.blur();
+      // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also prevents cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is problematic anyway as we are unable to detect it (see comments in onEditorFocus)
+      lastBlurredElem = document.activeElement as HTMLElement;
+      lastBlurredElem?.blur();
     } else if (!focused && lastFocusTime == localStorage.getItem("mindpage_last_focus_time")) {
       focused = true;
-      (document.activeElement as HTMLElement)?.focus();
+      // attempt restore focus on last blurred element
+      // NOTE: does NOT seem to work on iPad, indeed even triggering focus on click handler did not work, so iPad does something weird to manage keyboard focus and we have to live with that for now -- at least we can blur and allow touch-to-focus-on-other-window
+      lastBlurredElem?.focus();
+      lastBlurredElem = null;
     }
+  }
+
+  function onWindowClick(e) {
+    // console.log("window click", e.target);
+    // e.target.focus();
+    // setTimeout(()=>e.target.focus());
+    // setTimeout(()=>e.target.focus(),1000);
   }
 
   // redirect window.onerror to console.error (or alert if .console not set up yet)
@@ -4495,6 +4507,7 @@
   on:error={onError}
   on:touchstart={focus}
   on:mousedown={focus}
+  on:click={onWindowClick}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />
