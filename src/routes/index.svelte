@@ -1184,7 +1184,7 @@
   if (isClient) window["_onImageRendered"] = onImageRendered;
 
   function onEditorFocused(focused: boolean) {
-    // NOTE: this does not capture cmd-tilde switching, and in fact none of the window/document focus events seem to fire in that case (e.g. see http://output.jsbin.com/rinece), and indeed document.activeElement and document.hasFocus() remain unchanged; a workaround is to hit a modifier key such as "Shift" post-switch to be detected by editor keydown handlers below
+    // NOTE: this does not capture cmd-tilde switching, and in fact none of the window/document focus events seem to fire in that case (e.g. see http://output.jsbin.com/rinece), and indeed document.activeElement and document.hasFocus() remain unchanged; a workaround is to hit a modifier key such as Shift or Alt post-switch to be detected by editor keydown handlers below
     if (focused) focus(); // ensure window focus
   }
 
@@ -4267,23 +4267,29 @@
     if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
       focused = false;
       hideIndex = hideIndexMinimal;
-      // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also prevents cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is problematic anyway as we are unable to detect it (see comments in onEditorFocus)
+      // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
       lastBlurredElem = document.activeElement as HTMLElement;
       lastBlurredElem?.blur();
     } else if (!focused && lastFocusTime == localStorage.getItem("mindpage_last_focus_time")) {
       focused = true;
-      // attempt restore focus on last blurred element
-      // NOTE: does NOT seem to work on iPad, indeed even triggering focus on click handler did not work, so iPad does something weird to manage keyboard focus and we have to live with that for now -- at least we can blur and allow touch-to-focus-on-other-window
+      // see comment above; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
       lastBlurredElem?.focus();
       lastBlurredElem = null;
     }
   }
 
-  function onWindowClick(e) {
-    // console.log("window click", e.target);
+  function onTouchStart(e) {
+    // if no focus, ignore event and let checkFocus recover focus
+    // if (!focused) {
+    //   e.preventDefault();
+    //   e.stopPropagation();
+    // }
+    focus(); // ensure focus
     // e.target.focus();
-    // setTimeout(()=>e.target.focus());
-    // setTimeout(()=>e.target.focus(),1000);
+  }
+
+  function onMouseDown(e) {
+    onTouchStart(e); // handle like touchstart
   }
 
   // redirect window.onerror to console.error (or alert if .console not set up yet)
@@ -4505,9 +4511,8 @@
   on:focusin={onFocus}
   on:blur={onFocus}
   on:error={onError}
-  on:touchstart={focus}
-  on:mousedown={focus}
-  on:click={onWindowClick}
+  on:touchstart={onTouchStart}
+  on:mousedown={onMouseDown}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />
