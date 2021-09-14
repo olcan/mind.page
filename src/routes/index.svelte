@@ -720,11 +720,13 @@
     images(options = {}) {
       let srcs = _.uniq(
         Array.from(
-          (this.text
-            .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
-            // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
-            .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, "") // remove 4-space indented blocks
-            .replace(/(^|[^\\])`.*?`/g, "$1") as any).matchAll(/<img .*?src\s*=\s*"(.*?)".*?>/gi),
+          (
+            this.text
+              .replace(/(?:^|\n) *```.*?\n *```/gs, "") // remove multi-line blocks
+              // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
+              .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, "") // remove 4-space indented blocks
+              .replace(/(^|[^\\])`.*?`/g, "$1") as any
+          ).matchAll(/<img .*?src\s*=\s*"(.*?)".*?>/gi),
           (m) => m[1]
         ).map((src) =>
           src.replace(/^https?:\/\/www\.dropbox\.com/, "https://dl.dropboxusercontent.com").replace(/\?dl=0$/, "")
@@ -1181,7 +1183,18 @@
   }
   if (isClient) window["_onImageRendered"] = onImageRendered;
 
-  function onEditorFocused(focused: boolean) {}
+  function onEditorFocused(focused: boolean) {
+    // NOTE: this does not capture cmd-tilde switching, and in fact none of the window/document focus events seem to fire in that case (e.g. see http://output.jsbin.com/rinece), and indeed document.activeElement and document.hasFocus() remain unchanged; a workaround is to hit a modifier key such as "Shift" post-switch to be detected by editor keydown handlers below
+    if (focused) focus(); // ensure window focus
+  }
+
+  // editor keydown handlers have same logic as in window onKeyDown (see below)
+  function onEditorKeyDown(e: KeyboardEvent) {
+    if (!e.metaKey) focus();
+  }
+  function onItemEditorKeyDown(e: KeyboardEvent) {
+    if (!e.metaKey) focus();
+  }
 
   function isSpecialTag(tag) {
     return (
@@ -1711,7 +1724,7 @@
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
-    onTouchStart(); // treat mousedown as touch for focusing
+    focus(); // ensure window focus on tag click (mousedown)
     const index = indexFromId.get(id);
     if (index === undefined) return; // deleted
     // "soft touch" item if not already newest and not pinned and not log
@@ -2999,8 +3012,10 @@
 
   // WARNING: onItemFocused may NOT be invoked when editor is destroyed
   function onItemFocused(index: number, focused: boolean) {
-    if (focused) focusedItem = index;
-    else focusedItem = -1;
+    if (focused) {
+      focusedItem = index;
+      focus(); // ensure window focus
+    } else focusedItem = -1;
     // console.debug(
     //   `item ${index} focused: ${focused}, focusedItem:${focusedItem}`
     // );
@@ -3199,8 +3214,8 @@
   let lastScrollTime = 0;
   let historyUpdatePending = false;
   function onScroll() {
-    // count any fresh scrolling (even w/ trackpad) as touch for focusing
-    if (Date.now() - lastScrollTime > 250) onTouchStart();
+    // trigger focus on any fresh scrolling (via touch, trackpad, mouse, etc)
+    if (Date.now() - lastScrollTime > 250) focus();
     lastScrollTime = Date.now();
     if (!historyUpdatePending) {
       historyUpdatePending = true;
@@ -3959,7 +3974,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    onTouchStart(); // treat keys as touch for focusing
+    if (!e.metaKey) focus(); // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
     const key = e.code || e.key; // for android compatibility
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
@@ -4233,26 +4248,27 @@
   focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
-    if (ios || android) return; // focus handled in checkFocus below
+    if (ios || android) return; // focus handled in focus/checkFocus below
     focused = document.hasFocus();
     // retreat to minimal hide index when window is defocused
     if (!focused) hideIndex = hideIndexMinimal;
   }
 
-  let lastTouchTime; // last touch time
-  function onTouchStart() {
+  let lastFocusTime;
+  function focus() {
     if (!ios && !android) return; // focus handled in onFocus above
-    lastTouchTime = Date.now().toString();
-    localStorage.setItem("mindpage_last_touch_time", lastTouchTime);
+    lastFocusTime = Date.now().toString();
+    localStorage.setItem("mindpage_last_focus_time", lastFocusTime);
     checkFocus(); // update focus immediately
   }
 
   function checkFocus() {
-    if (focused && lastTouchTime != localStorage.getItem("mindpage_last_touch_time")) {
+    if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
       focused = false;
       hideIndex = hideIndexMinimal;
-      (document.activeElement as HTMLElement)?.blur();
-    } else if (!focused && lastTouchTime == localStorage.getItem("mindpage_last_touch_time")) {
+      // not blurring allows return of focus using cmd-tilde, which we are unable to detect on ipad
+      // (document.activeElement as HTMLElement)?.blur();
+    } else if (!focused && lastFocusTime == localStorage.getItem("mindpage_last_focus_time")) {
       focused = true;
       (document.activeElement as HTMLElement)?.focus();
     }
@@ -4313,6 +4329,7 @@
                   createOnAnyModifiers={true}
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}
+                  {onEditorKeyDown}
                   onEdited={onEditorChange}
                   onFocused={onEditorFocused}
                   {onPastedImage}
@@ -4392,6 +4409,7 @@
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}
                 onEdited={onItemEdited}
+                onEditorKeyDown={onItemEditorKeyDown}
                 onRun={onItemRun}
                 onTouch={onItemTouch}
                 onResized={onItemResized}
@@ -4472,10 +4490,11 @@
 <svelte:window
   on:keydown={onKeyDown}
   on:focus={onFocus}
+  on:focusin={onFocus}
   on:blur={onFocus}
   on:error={onError}
-  on:touchstart={onTouchStart}
-  on:mousedown={onTouchStart}
+  on:touchstart={focus}
+  on:mousedown={focus}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
 />

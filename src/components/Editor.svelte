@@ -13,6 +13,7 @@
   export let selectionStart = 0;
   export let selectionEnd = 0;
   export let onFocused = (focused: boolean) => {};
+  export let onEditorKeyDown = (e: KeyboardEvent) => {};
   export let onEdited = (text) => {};
   export let onEscape = (e) => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
@@ -285,6 +286,7 @@
   let lastKeyDownPosition;
 
   function onKeyDown(e: any) {
+    onEditorKeyDown(e);
     unlockCaret();
     let key = e.code || e.key; // for android compatibility
     // console.debug("Editor.onKeyDown:", e, key);

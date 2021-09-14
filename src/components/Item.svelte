@@ -70,6 +70,7 @@
   ) => {};
   export let onFocused = (index: number, focused: boolean) => {};
   export let onEdited = (index: number, text: string) => {};
+  export let onEditorKeyDown = (e: KeyboardEvent) => {};
   export let onEscape = (e) => true; // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
@@ -1296,6 +1297,7 @@
         {onNext}
         onFocused={(focused) => onFocused(index, focused)}
         onEdited={(text) => onEdited(index, text)}
+        {onEditorKeyDown}
         {onEscape}
         {onPastedImage}
         {onDone}
