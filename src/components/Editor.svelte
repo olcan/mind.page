@@ -742,7 +742,7 @@
   }
   .backdrop,
   textarea {
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     font-size: 14px;
     line-height: 24px;

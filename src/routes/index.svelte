@@ -4716,6 +4716,8 @@
     font-weight: 400;
     /* Safari renders heavier fonts under default subpixel-antialiasing */
     -webkit-font-smoothing: antialiased;
+    /* disable ligatures which can be confusing and _may_ cause line wrapping issues */
+    /* font-variant-ligatures: none; */
   }
   :global(b, strong) {
     font-weight: 700;
@@ -4804,7 +4806,7 @@
     background: rgba(0, 0, 0, 0.85);
     border-radius: 4px;
     border: 1px solid #222;
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     text-align: left;
     -webkit-touch-callout: auto;
@@ -4831,7 +4833,7 @@
     padding: 4px;
     height: 20px;
     text-align: center;
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     font-size: 12px;
     color: #999;
@@ -4973,7 +4975,7 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     font-size: 20px;
   }

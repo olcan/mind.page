@@ -1695,7 +1695,7 @@
   :global(.item code) {
     font-size: 14px;
     line-height: 24px;
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
     background: #222;
@@ -1901,7 +1901,7 @@
   :global(.item .dependents-summary) {
     display: flex;
     font-size: 12px;
-    font-family: "JetBrains Mono NL", monospace;
+    font-family: "JetBrains Mono", monospace;
     font-weight: 300;
     align-items: bottom;
     justify-content: center;
