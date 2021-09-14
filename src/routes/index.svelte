@@ -1937,7 +1937,14 @@
   }
 
   let tagCounts = new Map<string, number>();
-  function itemTextChanged(index: number, text: string, update_deps = true, run_deps = true, keep_time = false) {
+  function itemTextChanged(
+    index: number,
+    text: string,
+    update_deps = true,
+    run_deps = true,
+    keep_time = false,
+    invoke_listeners = true
+  ) {
     // console.debug("itemTextChanged", index);
     let item = items[index];
     item.hash = hashCode(text);
@@ -2114,8 +2121,8 @@
         dep.depsString = itemDepsString(dep);
       });
 
-      // invoke _on_item_change on all _listen items
-      if (item.deephash != prevDeepHash) {
+      // if deephash has changed, invoke _on_item_change on all _listen items
+      if (invoke_listeners && item.deephash != prevDeepHash) {
         const changed_item_id = item.id;
         const changed_item_label = item.label;
         setTimeout(() => {
@@ -3775,7 +3782,14 @@
                     items = [item, ...items];
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index));
-                    itemTextChanged(0, item.text, true /* update_deps */, false /* run_deps */);
+                    itemTextChanged(
+                      0,
+                      item.text,
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      false /* keep_time */,
+                      false /* invoke_listeners */
+                    );
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     // hideIndex++; // show one more item (skip this for remote add)
                     onEditorChange(editorText); // integrate new item at index 0
@@ -3785,7 +3799,14 @@
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
                     if (index === undefined) return; // nothing to remove
                     let item = items[index];
-                    itemTextChanged(index, "", true /* update_deps */, false /* run_deps */);
+                    itemTextChanged(
+                      index,
+                      "",
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      false /* keep_time */,
+                      false /* invoke_listeners */
+                    );
                     items.splice(index, 1);
                     if (index < hideIndex) hideIndex--; // back up hide index
                     // update indices as needed by onEditorChange
@@ -3810,7 +3831,8 @@
                       item.text,
                       true /* update_deps */,
                       false /* run_deps */,
-                      true /* keep_time */
+                      true /* keep_time */,
+                      false /* invoke_listeners */
                     );
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     onEditorChange(editorText); // item time/text has changed
