@@ -1943,7 +1943,7 @@
     update_deps = true,
     run_deps = true,
     keep_time = false,
-    invoke_listeners = true
+    remote = false
   ) {
     // console.debug("itemTextChanged", index);
     let item = items[index];
@@ -2122,7 +2122,7 @@
       });
 
       // if deephash has changed, invoke _on_item_change on all _listen items
-      if (invoke_listeners && item.deephash != prevDeepHash) {
+      if (item.deephash != prevDeepHash) {
         const changed_item_id = item.id;
         const changed_item_label = item.label;
         setTimeout(() => {
@@ -2133,7 +2133,7 @@
             if (!item.text.includes("_on_item_change")) return;
             try {
               _item(item.id).eval(
-                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}','${prevLabel}',${deleted})`,
+                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}','${prevLabel}',${deleted},${remote})`,
                 {
                   trigger: "listen",
                 }
@@ -3788,7 +3788,7 @@
                       true /* update_deps */,
                       false /* run_deps */,
                       false /* keep_time */,
-                      false /* invoke_listeners */
+                      true /* remote */
                     );
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     // hideIndex++; // show one more item (skip this for remote add)
@@ -3805,7 +3805,7 @@
                       true /* update_deps */,
                       false /* run_deps */,
                       false /* keep_time */,
-                      false /* invoke_listeners */
+                      true /* remote */
                     );
                     items.splice(index, 1);
                     if (index < hideIndex) hideIndex--; // back up hide index
@@ -3832,7 +3832,7 @@
                       true /* update_deps */,
                       false /* run_deps */,
                       true /* keep_time */,
-                      false /* invoke_listeners */
+                      true /* remote */
                     );
                     lastEditorChangeTime = 0; // disable debounce even if editor focused
                     onEditorChange(editorText); // item time/text has changed
