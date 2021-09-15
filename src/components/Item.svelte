@@ -1531,7 +1531,7 @@
   }
 
   .target {
-    border-color: #484;
+    border-color: #242;
   }
   .target_context {
     border-left-color: #242;
