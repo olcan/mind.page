@@ -31,7 +31,7 @@ const sapperServer = express().use(
         theme_color: "#111",
         name: globalThis.hostname,
         short_name: globalThis.hostname,
-        display: "minimal-ui",
+        display: "fullscreen", // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
         start_url: "/",
         icons: [
           {
