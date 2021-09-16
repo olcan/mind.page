@@ -18,6 +18,7 @@
   let admin = false;
   let anonymous = false;
   let readonly = false;
+  let zoom = isClient && localStorage.getItem("mindpage_zoom");
   let inverted = isClient && localStorage.getItem("mindpage_inverted") == "true";
   let narrating = isClient && localStorage.getItem("mindpage_narrating") != null;
   let green_screen = isClient && localStorage.getItem("mindpage_green_screen") == "true";
@@ -862,6 +863,13 @@
     }
   }
 
+  function getDocumentWidth() {
+    // we use document width because it is invariant to zoom scale but sensitive to font size
+    // also window.outerWidth can be stale after device rotation in iOS Safari
+    // we divide by optional zoom factor to get effective width post-zoom
+    return document.documentElement.clientWidth / (parseFloat(zoom) || 1);
+  }
+
   let indexFromId;
   let itemsdiv;
   let headerdiv;
@@ -888,8 +896,9 @@
     indexFromId = new Map<string, number>();
     dotCount = 0;
 
-    // NOTE: we use document width as it scales with font size consistently on iOS and Mac
-    const documentWidth = document.documentElement.clientWidth;
+    // set zoom (if any) on items div
+    if (itemsdiv && itemsdiv.style.zoom != zoom) itemsdiv.style.zoom = zoom;
+    const documentWidth = getDocumentWidth();
     const minColumnWidth = 500; // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth));
     let columnHeights = new Array(columnCount).fill(0);
@@ -2460,7 +2469,14 @@
             .replace(/^\/\w+/, "")
             .replace(/([`\\$])/g, "\\$1")
             .trim();
-          if (cmd == "/_narrate") {
+          if (cmd == "/_zoom") {
+            if (args) localStorage.setItem("mindpage_zoom", args);
+            else localStorage.removeItem("mindpage_zoom");
+            zoom = args; // will affect next checkLayout call
+            lastEditorChangeTime = 0; // disable debounce even if editor focused
+            onEditorChange("");
+            return;
+          } else if (cmd == "/_narrate") {
             narrating = !narrating;
             if (narrating) {
               localStorage.setItem("mindpage_narrating", args);
@@ -3671,8 +3687,6 @@
       }
 
       // Visual viewport resize/scroll handlers ...
-      // NOTE: we use document width because it is invariant to zoom scale but sensitive to font size
-      //       (also window.outerWidth can be stale after device rotation in iOS Safari)
       let lastDocumentWidth = 0;
       let lastWindowHeight = 0;
       let lastFocusElem = null; // element that had focus on last recorded width/height
@@ -3691,7 +3705,7 @@
         )
           updateVerticalPadding();
 
-        const documentWidth = document.documentElement.clientWidth;
+        const documentWidth = getDocumentWidth();
         if (
           documentWidth != lastDocumentWidth ||
           // ignore height change if active element also changed
@@ -3954,8 +3968,14 @@
           replay = false;
         });
 
-        // if (ios || android) setInterval(checkFocus, 250); // check focus on ios/android
-        if (ios || android) window.onstorage = checkFocus; // check focus on ios/android
+        window.onstorage = () => {
+          // NOTE: we only check localStorage for properties we want to sync dynamically (across tabs on same device)
+          if (zoom != localStorage.getItem("mindpage_zoom")) {
+            zoom = localStorage.getItem("mindpage_zoom");
+            checkLayout(); // check layout for remote zoom change
+          }
+          if (ios || android) checkFocus(); // check focus on ios/Android
+        };
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
 
