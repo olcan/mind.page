@@ -4751,7 +4751,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="{hostdir}/favicon-16x16.png?v={favicon_version}" />
   <!-- see https://stackoverflow.com/a/25041921 about custom apple-touch-icon location -->
   <link rel="apple-touch-icon" type="image/png" href="{hostdir}/apple-touch-icon.png?v={favicon_version}" />
-  <link rel="manifest" href="/manifest.json?v={favicon_version}" />
+  <link rel="manifest" href="manifest.json?v={favicon_version}" />
 </svelte:head>
 
 <style>

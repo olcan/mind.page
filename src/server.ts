@@ -16,8 +16,14 @@ function get_hostdir(req) {
   return ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
 }
 
+// we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
+// see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain
+const paths = [];
+for (let i = 0; i < 10; i++) paths.push(`/${i}/`);
+paths.push("/"); // allow root if none of the prefixes match
+
 const sapperServer = express().use(
-  "/",
+  paths,
   compression({ threshold: 0 }),
   // TODO: remove 'as any' when typescript error is fixed
   sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }) as any,
@@ -25,14 +31,22 @@ const sapperServer = express().use(
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     const hostdir = get_hostdir(req);
-    if (req.path == "/manifest.json") {
+    // serve /manifest.json from any path (to allow scoping in manifest)
+    if (req.path.endsWith("/manifest.json")) {
+      const scope = req.originalUrl.replace(/manifest\.json[?]?.*$/, "");
       res.json({
+        scope: scope,
+        // NOTE: start_url is not allowed to be outside scope, and if there is redirect it can force address bar for app
+        start_url: scope,
+        name: globalThis.hostname + scope.slice(0, -1),
+        short_name: globalThis.hostname + scope.slice(0, -1),
+        // fullscreen hides status bar (though also inhibits app switching gestures)
+        // minimal-ui always shows a thick chrome toolbar that is unnecessary w/ pull-to-reload gesture
+        // standalone should hide chrome toolbar but may show it if app navigates outside scope
+        // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
+        display: "fullscreen",
         background_color: "#111",
         theme_color: "#111",
-        name: globalThis.hostname,
-        short_name: globalThis.hostname,
-        display: "fullscreen", // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
-        start_url: "/",
         icons: [
           {
             src: hostdir + "/apple-touch-icon.png",
