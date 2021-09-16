@@ -3237,8 +3237,10 @@
   let lastScrollTime = 0;
   let historyUpdatePending = false;
   function onScroll() {
-    // trigger focus on any fresh scrolling (via touch, trackpad, mouse, etc)
-    if (Date.now() - lastScrollTime > 250) focus();
+    // trigger focus on any fresh scrolling
+    // in particular for mouse/trackpad input not detected via touchstart/mousedown/keydown
+    // NOTE: we ignore scroll events within 1s of window resize (found problematic on android but generally sensible)
+    if (Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus();
     lastScrollTime = Date.now();
     if (!historyUpdatePending) {
       historyUpdatePending = true;
