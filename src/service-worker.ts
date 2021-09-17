@@ -1,5 +1,3 @@
-// WARNING: server workers are currently DISABLED in client.ts as they are so far useless and in fact appear to interfere with basic server functions such as serving of /favicon.ico (see TODO messages below) and appear to trigger errors in the service worker console (under Develop menu) that are only triggered in the cloud and have been very difficult to debug
-
 import { timestamp, files, shell } from "@sapper/service-worker";
 
 const ASSETS = `cache${timestamp}`;
@@ -15,7 +13,7 @@ self.addEventListener("install", (event: ExtendableEvent) => {
       .open(ASSETS)
       .then((cache) => cache.addAll(to_cache))
       .then(() => {
-        ((self as any) as ServiceWorkerGlobalScope).skipWaiting();
+        (self as any as ServiceWorkerGlobalScope).skipWaiting();
       })
   );
 });
@@ -28,7 +26,7 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
         if (key !== ASSETS) await caches.delete(key);
       }
 
-      ((self as any) as ServiceWorkerGlobalScope).clients.claim();
+      (self as any as ServiceWorkerGlobalScope).clients.claim();
     })
   );
 });
@@ -59,6 +57,7 @@ self.addEventListener("fetch", (event: FetchEvent) => {
   // TODO: why does this need to be done here?
   // TODO: how does service-worker work exactly?
   // TODO: why does localhost console only log errors?
+  // console.debug("serviceWorker fetch", event.request?.url);
   const url = new URL(event.request.url);
   if (url.pathname == "/favicon.ico") {
     const hostdir = ["mind.page", "mindbox.io", "olcan.com"].includes(url.hostname) ? url.hostname : "other";

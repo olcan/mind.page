@@ -3970,13 +3970,14 @@
           replay = false;
         });
 
+        focus(); // focus on init
         window.onstorage = () => {
           // NOTE: we only check localStorage for properties we want to sync dynamically (across tabs on same device)
           if (zoom != localStorage.getItem("mindpage_zoom")) {
             zoom = localStorage.getItem("mindpage_zoom");
             checkLayout(); // check layout for remote zoom change
           }
-          if (ios || android) checkFocus(); // check focus on ios/Android
+          checkFocus();
         };
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
@@ -4308,6 +4309,7 @@
 
   let lastBlurredElem;
   function checkFocus() {
+    if (!ios && !android) return; // focus handled in onFocus above
     if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
       focused = false;
       hideIndex = hideIndexMinimal;
