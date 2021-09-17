@@ -3389,7 +3389,10 @@
     // filter "hidden" items on all accounts, used only for encrypted synced storage
     // also move into hiddenItems map for easy access later
     items.forEach((item) => {
-      if (item.hidden) hiddenItems.set(item.id, item);
+      if (item.hidden) {
+        // console.debug("found hidden item", JSON.stringify(item));
+        hiddenItems.set(item.id, JSON.parse(item.text));
+      }
     });
     items = items.filter((item) => !item.hidden);
 
@@ -3797,7 +3800,8 @@
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === "added") {
                     if (savedItem.hidden) {
-                      hiddenItems.set(doc.id, savedItem);
+                      hiddenItems.set(doc.id, JSON.parse(savedItem.text));
+                      hiddenItemsChangedRemotely();
                       return;
                     }
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
@@ -3825,6 +3829,7 @@
                   } else if (change.type == "removed") {
                     if (savedItem.hidden) {
                       hiddenItems.delete(doc.id);
+                      hiddenItemsChangedRemotely();
                       return;
                     }
                     // NOTE: remote remove is similar to onItemEditing (deletion case)
@@ -3853,7 +3858,8 @@
                     }); // for /undelete
                   } else if (change.type == "modified") {
                     if (savedItem.hidden) {
-                      hiddenItems.set(doc.id, savedItem);
+                      hiddenItems.set(doc.id, JSON.parse(savedItem.text));
+                      hiddenItemsChangedRemotely();
                       return;
                     }
                     // NOTE: remote modify is similar to _write without saving
@@ -3926,6 +3932,8 @@
 
       onMount(() => {
         Promise.resolve(initialization).then(() => {
+          focus(); // focus on init (focus and checkFocus are disabled until init)
+
           let replay = true; // true until replay below
           log_levels.forEach(function (verb) {
             console[verb] = function (...args) {
@@ -3991,8 +3999,6 @@
           replay = false;
         });
 
-        focus(); // focus on init
-        // checkFocusViaForage();
         window.onstorage = () => {
           // NOTE: we only check localStorage for properties we want to sync dynamically (across tabs on same device)
           if (zoom != localStorage.getItem("mindpage_zoom")) {
@@ -4321,8 +4327,6 @@
     if (window["_on_key"]) window["_on_key"](key, e);
   }
 
-  // on ios (also android presumably), initial focus can be false for no apparent reason, so we just assume it is true
-  focused = isClient && (document.hasFocus() || ios || android);
   function onFocus() {
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
     if (ios || android) return; // focus handled in focus/checkFocus below
@@ -4333,16 +4337,20 @@
 
   let lastFocusTime;
   function focus() {
-    if (!ios && !android) return; // focus handled in onFocus above
+    if (!ios && !android) {
+      onFocus(); // focus based on document.hasFocus()
+      return;
+    }
+    if (!initialized) return; // decline focus until initialized
     lastFocusTime = Date.now().toString();
     localStorage.setItem("mindpage_last_focus_time", lastFocusTime);
-    // setLastFocusTimeInForage();
     checkFocus(); // update focus immediately
   }
 
   let lastBlurredElem;
   function checkFocus() {
     if (!ios && !android) return; // focus handled in onFocus above
+    if (!initialized) return; // decline focus changes until initialized
     if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
       focused = false;
       hideIndex = hideIndexMinimal;
@@ -4354,6 +4362,91 @@
       // see comment above; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
       lastBlurredElem?.focus();
       lastBlurredElem = null;
+      // use firestore-based hidden items to defocus all remote tabs/windows
+      setHiddenItem("focus", { lastFocusTime });
+    }
+  }
+
+  // returns hidden item with specified name, or null if not found
+  // item id is also returned as item.id
+  function getHiddenItem(name) {
+    for (const [id, item] of hiddenItems.entries()) if (item.name == name) return Object.assign(item, { id });
+    return null;
+  }
+
+  function setHiddenItem(name, item) {
+    if (!initialized) throw new Error("setHiddenItem called before initialized");
+
+    item.name = name; // store name in item itself
+    const existing_item = getHiddenItem(name);
+
+    let itemToSave = {
+      hidden: true,
+      time: Date.now(),
+      text: JSON.stringify(item),
+    };
+
+    if (existing_item) {
+      hiddenItems.set(existing_item.id, item); // just replace with new item
+      if (readonly) return; // no saving
+
+      // console.debug("updating hidden item", name);
+
+      // NOTE: if existing item is saving, we need to wait for its persistent id before we can update
+      Promise.resolve(existing_item.saving || existing_item.id).then((saved_id) => {
+        encryptItem(itemToSave)
+          .then((itemToSave) => {
+            firestore()
+              .collection("items")
+              .doc(saved_id)
+              .update(itemToSave)
+              // .then(() => {
+              //   console.debug("updated hidden item", JSON.stringify(item));
+              // })
+              .catch(console.error);
+          })
+          .catch(console.error);
+      });
+    } else {
+      // create new hidden item
+      const temp_id = (Date.now() + sessionCounter++).toString();
+      hiddenItems.set(temp_id, item);
+      if (readonly) return; // no saving
+
+      itemToSave["user"] = user.uid; // required for creation
+      item.saving = new Promise((resolve, reject) => {
+        encryptItem(itemToSave)
+          .then((itemToSave) => {
+            firestore()
+              .collection("items")
+              .add(itemToSave)
+              .then((doc) => {
+                // console.debug("created hidden item", JSON.stringify(itemToSave));
+                hiddenItems.delete(temp_id);
+                hiddenItems.set(doc.id, item);
+                item.id = doc.id; // update id stored in item
+                delete item.saving; // no longer saving
+                resolve(doc.id);
+              })
+              .catch((e) => {
+                console.error(e);
+                reject(e);
+              });
+          })
+          .catch((e) => {
+            console.error(e);
+            reject(e);
+          });
+      });
+    }
+  }
+
+  function hiddenItemsChangedRemotely() {
+    const focus_item = getHiddenItem("focus");
+    if (focus_item) {
+      // copy (remote) focus time into localStorage and trigger defocus
+      localStorage.setItem("mindpage_last_focus_time", focus_item.lastFocusTime);
+      checkFocus();
     }
   }
 
@@ -4370,31 +4463,6 @@
   function onMouseDown(e) {
     onTouchStart(e); // handle like touchstart
   }
-
-  // async function setLastFocusTimeInForage() {
-  //   if (!ios) return;
-  //   localForage
-  //     .setItem("mindpage_last_focus_time", lastFocusTime)
-  //     .then((value) => console.log("set focus time in forage", value))
-  //     .catch(console.error);
-  // }
-
-  // async function checkFocusViaForage() {
-  //   if (!ios) return;
-  //   localForage
-  //     .getItem("mindpage_last_focus_time")
-  //     .then((cachedLastFocusTime: string) => {
-  //       if (cachedLastFocusTime && cachedLastFocusTime != lastFocusTime) {
-  //         console.log("got new focus time from forage", cachedLastFocusTime);
-  //         localStorage.setItem("mindpage_last_focus_time", cachedLastFocusTime);
-  //         checkFocus();
-  //       } else if (cachedLastFocusTime == lastFocusTime) {
-  //         console.log("focus time is same as cached", cachedLastFocusTime);
-  //       }
-  //       setTimeout(checkFocusViaForage, 1000);
-  //     })
-  //     .catch(console.error);
-  // }
 
   // redirect window.onerror to console.error (or alert if .console not set up yet)
   function onError(e) {
