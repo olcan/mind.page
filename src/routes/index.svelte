@@ -4776,6 +4776,17 @@
     display: none;
   }
 
+  /* customize selection colors */
+  /* see https://css-tricks.com/almanac/selectors/s/selection/ */
+  :global(::-moz-selection) {
+    color: white;
+    background: rgba(255, 0, 0, 0.5);
+  }
+  :global(::selection) {
+    color: white;
+    background: rgba(255, 0, 0, 0.5);
+  }
+
   .loading {
     position: absolute;
     top: 0;
