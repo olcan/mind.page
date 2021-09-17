@@ -18,9 +18,27 @@ function get_hostdir(req) {
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
 // see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain
+// optionally, digit can be followed by a letter (f, s, m, b) to indicate display mode
+// fullscreen (f) hides status bar (though also inhibits app switching gestures)
+// minimal-ui (m) always shows a thick chrome toolbar that is unnecessary w/ pull-to-reload gesture
+// standalone (s) should hide chrome toolbar but may show if app navigates outside scope
+// browser (b) runs in a regular browser tab or window
+// see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
 const paths = [];
-for (let i = 0; i < 10; i++) paths.push(`/${i}/`);
-paths.push("/"); // allow root if none of the prefixes match
+for (let i = 0; i < 10; i++) {
+  paths.push(`/${i}f/`); // fullscreen
+  paths.push(`/${i}s/`); // standalone (default)
+  paths.push(`/${i}m/`); // minimal-ui
+  paths.push(`/${i}b/`); // browser
+  paths.push(`/${i}/`); // default (standalone)
+}
+// display-only prefixes
+paths.push("/f/");
+paths.push("/s/");
+paths.push("/m/");
+paths.push("/b/");
+// default global-scope standalone-display prefix
+paths.push("/");
 
 const sapperServer = express().use(
   paths,
@@ -40,11 +58,15 @@ const sapperServer = express().use(
         start_url: scope,
         name: globalThis.hostname + scope.slice(0, -1),
         short_name: globalThis.hostname + scope.slice(0, -1),
-        // fullscreen hides status bar (though also inhibits app switching gestures)
-        // minimal-ui always shows a thick chrome toolbar that is unnecessary w/ pull-to-reload gesture
-        // standalone should hide chrome toolbar but may show it if app navigates outside scope
-        // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
-        display: "fullscreen",
+        display: scope.includes("f")
+          ? "fullscreen"
+          : scope.includes("s")
+          ? "standalone"
+          : scope.includes("m")
+          ? "minimal-ui"
+          : scope.includes("b")
+          ? "browser"
+          : "standalone",
         background_color: "#111",
         theme_color: "#111",
         icons: [
