@@ -47,7 +47,7 @@
     "@rollup/plugin-url": "^6.1.0",
     "@tsconfig/svelte": "^2.0.1",
     "@types/compression": "^1.7.2",
-    "@types/node": "^16.9.1",
+    "@types/node": "^16.9.2",
     "cookie-parser": "^1.4.5",
     "eslint": "^7.32.0",
     "eslint-plugin-promise": "^5.1.0",
