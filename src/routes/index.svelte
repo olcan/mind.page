@@ -1,5 +1,6 @@
 <script lang="ts">
   import _ from "lodash";
+  // import localForage from "localforage";
   import { isClient, firebase, firestore } from "../../firebase.js";
   import { Circle2 } from "svelte-loading-spinners";
   import Modal from "../components/Modal.svelte";
@@ -3971,6 +3972,7 @@
         });
 
         focus(); // focus on init
+        // checkFocusViaForage();
         window.onstorage = () => {
           // NOTE: we only check localStorage for properties we want to sync dynamically (across tabs on same device)
           if (zoom != localStorage.getItem("mindpage_zoom")) {
@@ -3981,6 +3983,16 @@
         };
         setInterval(checkLayout, 250); // check layout every 250ms
         setInterval(checkElemCache, 1000); // check elem cache every second
+
+        // // check service workers
+        // if (navigator.serviceWorker) {
+        //   navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        //     for (let registration of registrations)
+        //       console.debug("service worker found for scope: " + registration.scope);
+        //   });
+        // } else {
+        //   console.debug("service workers not available");
+        // }
 
         let welcome = null;
         if (readonly) {
@@ -4304,6 +4316,7 @@
     if (!ios && !android) return; // focus handled in onFocus above
     lastFocusTime = Date.now().toString();
     localStorage.setItem("mindpage_last_focus_time", lastFocusTime);
+    // setLastFocusTimeInForage();
     checkFocus(); // update focus immediately
   }
 
@@ -4337,6 +4350,31 @@
   function onMouseDown(e) {
     onTouchStart(e); // handle like touchstart
   }
+
+  // async function setLastFocusTimeInForage() {
+  //   if (!ios) return;
+  //   localForage
+  //     .setItem("mindpage_last_focus_time", lastFocusTime)
+  //     .then((value) => console.log("set focus time in forage", value))
+  //     .catch(console.error);
+  // }
+
+  // async function checkFocusViaForage() {
+  //   if (!ios) return;
+  //   localForage
+  //     .getItem("mindpage_last_focus_time")
+  //     .then((cachedLastFocusTime: string) => {
+  //       if (cachedLastFocusTime && cachedLastFocusTime != lastFocusTime) {
+  //         console.log("got new focus time from forage", cachedLastFocusTime);
+  //         localStorage.setItem("mindpage_last_focus_time", cachedLastFocusTime);
+  //         checkFocus();
+  //       } else if (cachedLastFocusTime == lastFocusTime) {
+  //         console.log("focus time is same as cached", cachedLastFocusTime);
+  //       }
+  //       setTimeout(checkFocusViaForage, 1000);
+  //     })
+  //     .catch(console.error);
+  // }
 
   // redirect window.onerror to console.error (or alert if .console not set up yet)
   function onError(e) {
