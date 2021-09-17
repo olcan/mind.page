@@ -3372,6 +3372,7 @@
   let initialized = false;
   let maxRenderedAtInit = 100; // can be upto items.length;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
+  let hiddenItems = new Map();
   let resolve_init; // set below
   function init_log(...args) {
     console.debug(`[${Math.round(performance.now())}ms] ${args.join(" ")}`);
@@ -3382,8 +3383,15 @@
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
     if (signingOut) return; // encryption error
 
-    // filter "hidden" admin items (e.g. welcome item) on readonly account
+    // filter "admin" items (e.g. welcome item) that should be hidden on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
+
+    // filter "hidden" items on all accounts, used only for encrypted synced storage
+    // also move into hiddenItems map for easy access later
+    items.forEach((item) => {
+      if (item.hidden) hiddenItems.set(item.id, item);
+    });
+    items = items.filter((item) => !item.hidden);
 
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
@@ -3603,10 +3611,10 @@
       anonymous = user?.uid == "anonymous";
       readonly = anonymous && !admin;
 
-      // print client load time w/ preloaded item count, excluding admin items (e.g. welcome item) if readonly
-      const preload_count = !readonly
-        ? items_preload.length
-        : _.sumBy(items_preload, ({ id }) => (!adminItems.has(id) ? 1 : 0));
+      // print client load time w/ preloaded item count, excluding admin and hidden items
+      const preload_count = _.sumBy(items_preload, ({ hidden, id }) =>
+        !hidden && (!readonly || !adminItems.has(id)) ? 1 : 0
+      );
       console.debug(
         `[${window["_client_start_time"]}ms] loaded client` + (preload_count > 0 ? ` + ${preload_count} items` : "")
       );
@@ -3788,6 +3796,10 @@
 
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === "added") {
+                    if (savedItem.hidden) {
+                      hiddenItems.set(doc.id, savedItem);
+                      return;
+                    }
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
                     let item = {
                       ...savedItem,
@@ -3811,6 +3823,10 @@
                     // hideIndex++; // show one more item (skip this for remote add)
                     onEditorChange(editorText); // integrate new item at index 0
                   } else if (change.type == "removed") {
+                    if (savedItem.hidden) {
+                      hiddenItems.delete(doc.id);
+                      return;
+                    }
                     // NOTE: remote remove is similar to onItemEditing (deletion case)
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
@@ -3836,6 +3852,10 @@
                       text: item.savedText,
                     }); // for /undelete
                   } else if (change.type == "modified") {
+                    if (savedItem.hidden) {
+                      hiddenItems.set(doc.id, savedItem);
+                      return;
+                    }
                     // NOTE: remote modify is similar to _write without saving
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
