@@ -291,7 +291,7 @@
     let key = e.code || e.key; // for android compatibility
     // workaround for "Windows" key on Hacker's Keyboard on android
     if (lastKeyDown == "Meta") Object.defineProperty(e, "metaKey", { value: true });
-    console.debug("Editor.onKeyDown:", e, key);
+    // console.debug("Editor.onKeyDown:", e, key);
     lastKeyDown = key;
     lastKeyDownPosition = textarea.selectionStart;
 
