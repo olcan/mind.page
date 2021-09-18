@@ -4360,7 +4360,9 @@
     }
     if (focused) return; // already focused
     if (!initialized) return; // decline focus until initialized
-    setGlobalFocusIndex((focusIndex = getGlobalFocusIndex() + 1));
+    // NOTE: we ensure focus index increments are global by taking a max with Date.now()
+    focusIndex = Math.max(getGlobalFocusIndex() + 1, Date.now());
+    setGlobalFocusIndex(focusIndex);
     focused = true;
     // see comment below; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
     lastBlurredElem?.focus();
