@@ -4000,6 +4000,7 @@
         });
 
         window.onstorage = () => {
+          onStorageFired = true; // receiving onstorage events from other instances of app
           // NOTE: we only check localStorage for properties we want to sync dynamically (across tabs on same device)
           if (zoom != localStorage.getItem("mindpage_zoom")) {
             zoom = localStorage.getItem("mindpage_zoom");
@@ -4335,36 +4336,54 @@
     if (!focused) hideIndex = hideIndexMinimal;
   }
 
-  let lastFocusTime;
+  // global focus index is the one stored in local storage, or in focus hidden item as fallback
+  let focusIndex; // local focus index updated in focus()
+  let onStorageFired = false;
+  function getGlobalFocusIndex() {
+    let index = parseInt(localStorage.getItem("mindpage_focus_index")) || 0;
+    if (!onStorageFired) {
+      const focusItem = getHiddenItem("focus");
+      if (focusItem?.index > index) return focusItem.index;
+    }
+    return index;
+  }
+  function setGlobalFocusIndex(index) {
+    localStorage.setItem("mindpage_focus_index", index.toString());
+    if (!onStorageFired) setHiddenItem("focus", { index });
+  }
+
+  let lastBlurredElem;
   function focus() {
     if (!ios && !android) {
       onFocus(); // focus based on document.hasFocus()
       return;
     }
+    if (focused) return; // already focused
     if (!initialized) return; // decline focus until initialized
-    lastFocusTime = Date.now().toString();
-    localStorage.setItem("mindpage_last_focus_time", lastFocusTime);
-    checkFocus(); // update focus immediately
+    setGlobalFocusIndex((focusIndex = getGlobalFocusIndex() + 1));
+    focused = true;
+    // see comment below; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
+    lastBlurredElem?.focus();
+    lastBlurredElem = null;
   }
 
-  let lastBlurredElem;
   function checkFocus() {
     if (!ios && !android) return; // focus handled in onFocus above
+    if (!focused) return; // not focused
     if (!initialized) return; // decline focus changes until initialized
-    if (focused && lastFocusTime != localStorage.getItem("mindpage_last_focus_time")) {
-      focused = false;
-      hideIndex = hideIndexMinimal;
-      // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
-      lastBlurredElem = document.activeElement as HTMLElement;
-      lastBlurredElem?.blur();
-    } else if (!focused && lastFocusTime == localStorage.getItem("mindpage_last_focus_time")) {
-      focused = true;
-      // see comment above; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
-      lastBlurredElem?.focus();
-      lastBlurredElem = null;
-      // use firestore-based hidden items to defocus all remote tabs/windows
-      setHiddenItem("focus", { lastFocusTime });
+    const globalFocusIndex = getGlobalFocusIndex();
+    if (focusIndex == globalFocusIndex) return; // focus is fine
+    if (focusIndex > globalFocusIndex) {
+      // should not happen since localStorage is always incremented together with focusIndex
+      // could indicate some sort of external manipulation of localStorage
+      console.error("focus index is ahead of stored global index");
+      return;
     }
+    focused = false;
+    hideIndex = hideIndexMinimal;
+    // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
+    lastBlurredElem = document.activeElement as HTMLElement;
+    lastBlurredElem?.blur();
   }
 
   // returns hidden item with specified name, or null if not found
@@ -4442,12 +4461,7 @@
   }
 
   function hiddenItemsChangedRemotely() {
-    const focus_item = getHiddenItem("focus");
-    if (focus_item) {
-      // copy (remote) focus time into localStorage and trigger defocus
-      localStorage.setItem("mindpage_last_focus_time", focus_item.lastFocusTime);
-      checkFocus();
-    }
+    checkFocus(); // check window focus since it may depend on "focus" hidden item
   }
 
   function onTouchStart(e) {
