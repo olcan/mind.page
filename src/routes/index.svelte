@@ -3240,7 +3240,8 @@
   function onScroll() {
     // trigger focus on any fresh scrolling
     // in particular for mouse/trackpad input not detected via touchstart/mousedown/keydown
-    // NOTE: we ignore scroll events within 1s of window resize (found problematic on android but generally sensible)
+    // we ignore scroll events within 1s of window resize (found problematic on android but generally sensible)
+    // does not appear to be possible to shift-focus-on-scroll on macos
     if (Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus();
     lastScrollTime = Date.now();
     if (!historyUpdatePending) {
