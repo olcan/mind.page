@@ -289,6 +289,8 @@
     onEditorKeyDown(e);
     unlockCaret();
     let key = e.code || e.key; // for android compatibility
+    if (!key) return; // can be empty for pencil input on ios
+
     // console.debug("Editor.onKeyDown:", e, key);
     // workaround for "Shift" modifier on Samsung keyboard
     // NOTE: turns out this "workaround" only works when swipe gesture is used for "Cursor Control" (vs "swipe to type"), which also does not seem to work except that it causes a Shift-keyup event on ALL keys, including the Shift key, allowing us to detect taps on Shift key (but not its toggle state) from lack of follow-up events ...
@@ -519,6 +521,8 @@
   let lastKeyUpPrev;
   function onKeyUp(e: any) {
     const key = e.code || e.key; // for android compatibility
+    if (!key) return; // can be empty for pencil input on ios
+
     // console.debug("Editor.onKeyUp", e, key);
     lastKeyUpPrev = lastKeyUp;
     lastKeyUp = key;

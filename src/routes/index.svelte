@@ -4060,6 +4060,7 @@
   function onKeyDown(e: KeyboardEvent) {
     if (!e.metaKey) focus(); // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
     const key = e.code || e.key; // for android compatibility
+    if (!key) return; // can be empty for pencil input on ios
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
     // console.debug(metaKey, ctrlKey, altKey, shiftKey);
 
