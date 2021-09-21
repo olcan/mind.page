@@ -548,10 +548,15 @@
               .replace(/(^|[^\\])\$cid/g, "$1" + `${id}-${deephash}-${++cacheIndex}`) + "<!--/_html-->"
           );
         }
+        // leave _markdown(_*) or _md(_*) block as is to be unwrapped below also
+        if (language.match(/^(?:_markdown|_md)(_|$)/)) return code;
         return highlight(code, language);
       },
       langPrefix: "",
     });
+
+    // unwrap _markdown(_*) and _md(_*) blocks
+    text = text.replace(/(^|\n)```(?:_markdown|_md)_?.*?\n(.*?)\n\s*```/gs, "$1$2");
 
     // assign indices to checkboxes to be moved into _checkbox_index attribute below
     // adding text after checkbox also allows checkbox items that start w/ tag (<mark>) or other html
