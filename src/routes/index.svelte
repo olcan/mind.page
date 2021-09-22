@@ -4936,6 +4936,8 @@
     -webkit-font-smoothing: antialiased;
     /* disable ligatures which can be confusing and _may_ cause line wrapping issues */
     /* font-variant-ligatures: none; */
+    /* disable tap highlights on ios and android */
+    -webkit-tap-highlight-color: transparent;
   }
   :global(b, strong) {
     font-weight: 700;

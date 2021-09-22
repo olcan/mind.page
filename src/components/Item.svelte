@@ -1527,7 +1527,6 @@
     font-size: 17px;
     line-height: 30px;
     /* cursor: pointer; */
-    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
     /* clear floats (e.g. deps, dependents) */
     /* this causes scrolling for popups */
     /* overflow: auto; */
