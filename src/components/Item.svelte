@@ -1737,8 +1737,8 @@
   /* .menu styling: paragraphs become flex boxes */
   :global(.item .menu p) {
     display: flex;
-    line-height: 26px; /* match image height */
-    width: 95%; /* leave some extra space for editing and item count/index indicators */
+    line-height: 24px; /* same as .menu img below */
+    width: 96%; /* align right side while leaving space for item number and tapping for editing */
   }
   :global(.item .menu a),
   :global(.item .menu mark:not(.hidden)) {
