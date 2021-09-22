@@ -680,8 +680,36 @@
     }
 
     // dispatch = setTimeout on attached function
-    dispatch(func, ms, ...args) {
-      setTimeout(this.attach(func), ms, ...args);
+    dispatch(func, delay_ms = 0) {
+      setTimeout(this.attach(func), delay_ms);
+    }
+
+    // dispatches function as a named task that can be cancelled or repeated
+    // if repeat_ms>0, repeats function as long as item is not deleted
+    // cancels any previously dispatched task under given name
+    // cancels task if function returns null
+    dispatch_task(name, func, delay_ms = 0, repeat_ms = 0) {
+      const task = () => {
+        if (!_exists(this.id)) return; // item deleted
+        const _item = item(this.id);
+        if (_item.tasks[name] != task) return; // task cancelled or replaced
+        if (func() === null) {
+          delete _item.tasks[name];
+          return;
+        }
+        if (repeat_ms > 0) this.dispatch(task, repeat_ms); // set up repeat
+      };
+      const _item = item(this.id);
+      if (!_item.tasks) _item.tasks = {};
+      _item.tasks[name] = task; // replaces any previous task under same name
+      this.dispatch(task, delay_ms); // initial dispatch
+    }
+
+    // cancels any previously dispatched task under given name
+    cancel_task(name) {
+      const _item = item(this.id);
+      if (!_item.tasks) return;
+      delete _item.tasks[name];
     }
 
     // promise = new Promise attached (see above) to item
