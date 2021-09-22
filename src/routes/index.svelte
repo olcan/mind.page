@@ -3090,7 +3090,7 @@
   }
 
   function onItemTouch(index: number, e: MouseEvent = null) {
-    if (items[index].log && !confirm(`move up #log item?\ncreation time/ordering will be lost`)) return;
+    if (items[index].log && !confirm(`modify time for #log item?\ncreation time/ordering will be lost`)) return;
     if (items[index].time > newestTime) console.warn("invalid item time");
     if (e?.altKey && e?.metaKey) {
       // move item time back 1 day
