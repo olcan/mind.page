@@ -527,15 +527,16 @@
           }
           const count_regex = (str, regex) => str.match(regex)?.length || 0;
           let try_lines = false;
-          evaljs = evaljs.replace(/([^;\n]+)$/, (m, expr) => {
+          evaljs = evaljs.replace(/(.*(?:;|\n(?! )))(.*?)$/s, (m, pfx, expr) => {
             // check if we are inside an open quote or comment
             if (count_regex(expr, /[^\\]['"`]/g) % 2 == 1 || count_regex(expr, /\*\//g) > count_regex(expr, /\/\*/g)) {
               try_lines = true;
-              return expr;
+              return pfx + expr;
             }
-            return prependReturnIfSensible(expr);
+            return pfx + prependReturnIfSensible(expr);
           });
-          if (try_lines) evaljs = evaljs.replace(/([^\n]+)$/, (m, expr) => prependReturnIfSensible(expr));
+          if (try_lines)
+            evaljs = evaljs.replace(/(.*\n(?! ))(.*?)$/s, (m, pfx, expr) => pfx + prependReturnIfSensible(expr));
           evaljs = ["(() => {", evaljs, "})()"].join("\n");
         }
 
