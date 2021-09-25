@@ -1919,7 +1919,7 @@
 
   let signingOut = false;
   function signOut() {
-    if (window.sessionStorage.getItem("mindpage_signin_pending")) return; // can not signout during signin
+    if (window.sessionStorage.getItem("mindpage_signin_pending")) console.warn("signing out while signin pending ...");
     signingOut = true;
 
     // blur active element as caret can show through loading div
@@ -3566,7 +3566,13 @@
 
   let signingIn = false;
   function signIn() {
-    if (firebase().auth().currentUser) return; // already signed in, must sign out first
+    // if user appears to be signed in, sign out instead
+    if (firebase().auth().currentUser) {
+      if (!signedin) alert("inconsistent signin state, signing out ...");
+      console.warn("attempted to sign in while already signed in, signing out ...");
+      signOut();
+      return;
+    }
     signingIn = true;
 
     // blur active element as caret can show through loading div
@@ -4589,7 +4595,7 @@
                   src={user.photoURL}
                   alt={user.displayName || user.email}
                   title={user.displayName || user.email}
-                  on:click={() => (!signedin ? signIn() : signOut())}
+                  on:click|stopPropagation={() => (!signedin ? signIn() : signOut())}
                 />
               {/if}
             </div>
