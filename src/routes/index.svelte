@@ -2143,6 +2143,27 @@
       if (item.deephash != prevDeepHash && !item.log && !keep_time) item.time = Date.now();
       item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
 
+      // if deephash has changed, invoke _on_item_change on all _listen items
+      function invoke_listeners_for_changed_item(id, label, dependency = false) {
+        setTimeout(() => {
+          const start = Date.now();
+          const deleted = !indexFromId.has(id);
+          items.forEach((item) => {
+            if (!item.listen) return;
+            if (!item.text.includes("_on_item_change")) return;
+            try {
+              _item(item.id).eval(
+                `if (typeof _on_item_change != 'undefined') _on_item_change('${id}','${label}','${prevLabel}',${deleted},${remote},${dependency})`,
+                {
+                  trigger: "listen",
+                }
+              );
+            } catch (e) {} // already logged, just continue
+          });
+        });
+      }
+      if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label);
+
       // update deps and deephash as needed for all dependent items
       // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
       if (!item.dependents || item.label != prevLabel || item.deephash != prevDeepHash) {
@@ -2160,12 +2181,15 @@
           if ((is_dependent && item.deephash != prevDeepHash) || is_dependent != was_dependent) {
             // update deps & deephash (triggers re-rendering and cache invalidation)
             depitem.deps = itemDeps(depindex);
+            const depitem_prevDeepHash = depitem.deephash;
             depitem.deephash = hashCode(
               depitem.deps
                 .map((id) => items[indexFromId.get(id)].hash)
                 .concat(depitem.hash)
                 .join(",")
             );
+            if (depitem.deephash != depitem_prevDeepHash)
+              invoke_listeners_for_changed_item(depitem.id, depitem.label, true /*dependency*/);
             depitem.deepasync = depitem.async || depitem.deps.some((id) => items[indexFromId.get(id)].async);
             // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
@@ -2194,28 +2218,6 @@
         const dep = items[indexFromId.get(id)];
         dep.depsString = itemDepsString(dep);
       });
-
-      // if deephash has changed, invoke _on_item_change on all _listen items
-      if (item.deephash != prevDeepHash) {
-        const changed_item_id = item.id;
-        const changed_item_label = item.label;
-        setTimeout(() => {
-          const start = Date.now();
-          const deleted = !indexFromId.has(changed_item_id);
-          items.forEach((item) => {
-            if (!item.listen) return;
-            if (!item.text.includes("_on_item_change")) return;
-            try {
-              _item(item.id).eval(
-                `if (typeof _on_item_change != 'undefined') _on_item_change('${changed_item_id}','${changed_item_label}','${prevLabel}',${deleted},${remote})`,
-                {
-                  trigger: "listen",
-                }
-              );
-            } catch (e) {} // already logged, just continue
-          });
-        });
-      }
     }
   }
 
