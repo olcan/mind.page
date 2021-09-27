@@ -1155,9 +1155,9 @@
           console.error("script src not supported yet");
         } else {
           try {
-            // NOTE: we wrap scripts inside function to provide internal scope and allow (empty) returns
-            //       (prefix ; prevents parser confusion when previous line is not colon-terminated)
-            window["_item"](id).eval([";(function(){", script.innerHTML, "})()"].join("\n"), {
+            // NOTE: we wrap scripts inside function to provide additional scoping
+            window["_item"](id).eval(script.innerHTML.trim(), {
+              // ["(() => {", script.innerHTML, "})()"].join("\n"), {
               trigger: "script_" + scriptIndex,
               // if _exclude_async, then code from local item is excluded if deepasync
               // (note code from deepasync deps are already excluded for sync eval)
