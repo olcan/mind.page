@@ -2144,16 +2144,15 @@
       item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
 
       // if deephash has changed, invoke _on_item_change on all _listen items
-      function invoke_listeners_for_changed_item(id, label, dependency = false) {
+      function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
         setTimeout(() => {
-          const start = Date.now();
           const deleted = !indexFromId.has(id);
           items.forEach((item) => {
             if (!item.listen) return;
             if (!item.text.includes("_on_item_change")) return;
             try {
               _item(item.id).eval(
-                `if (typeof _on_item_change != 'undefined') _on_item_change('${id}','${label}','${prevLabel}',${deleted},${remote},${dependency})`,
+                `if (typeof _on_item_change != 'undefined') _on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
                 {
                   trigger: "listen",
                 }
@@ -2162,7 +2161,7 @@
           });
         });
       }
-      if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label);
+      if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label, prevLabel);
 
       // update deps and deephash as needed for all dependent items
       // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
@@ -2189,7 +2188,7 @@
                 .join(",")
             );
             if (depitem.deephash != depitem_prevDeepHash)
-              invoke_listeners_for_changed_item(depitem.id, depitem.label, true /*dependency*/);
+              invoke_listeners_for_changed_item(depitem.id, depitem.label, depitem.label, true /*dependency*/);
             depitem.deepasync = depitem.async || depitem.deps.some((id) => items[indexFromId.get(id)].async);
             // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
