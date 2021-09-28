@@ -53,6 +53,7 @@
   export let text: string;
   export let hash: string;
   export let deephash: string;
+  export let elemCacheVersion: number;
   export let height = 0;
   const placeholder = " ";
   let error = false;
@@ -89,7 +90,10 @@
   $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`;
 
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
-    if (run && !cancelled) invalidateElemCache(id);
+    if (run && !cancelled) {
+      invalidateElemCache(id);
+      elemCacheVersion++;
+    }
     onEditing(index, (editing = false), cancelled, run, e);
   }
   let mouseDownTime = 0;
@@ -118,6 +122,7 @@
     e.stopPropagation();
     e.preventDefault();
     invalidateElemCache(id);
+    elemCacheVersion++;
     onRun(index);
   }
 
@@ -204,7 +209,8 @@
     matchingTerms: any, // space-separated string converted to Set
     matchingTermsSecondary: any, // space-separated string converted to Set
     depsString: string,
-    dependentsString: string
+    dependentsString: string,
+    elemCacheVersion: number
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
@@ -669,6 +675,10 @@
           .join("");
       text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
+
+    // append elemCacheVersion to ensure svelte content cache is invalidated along w/ elem cache
+    // otherwise there is a problem e.g. if we run item, invalidate cache, but html is identical and svelte skips update
+    text += `<!-- elemCacheVersion=${elemCacheVersion} -->`;
 
     // do not cache with macro errors
     if (hasMacroErrors) return text;
@@ -1138,6 +1148,7 @@
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
       // since dependencies are not always fully captured in the cache key (even with deephash)
       invalidateElemCache(id);
+      elemCacheVersion++;
 
       let pendingScripts = scripts.length;
       let scriptErrors = [];
@@ -1322,7 +1333,8 @@
           matchingTerms,
           matchingTermsSecondary,
           depsString,
-          dependentsString
+          dependentsString,
+          elemCacheVersion
         )}
       </div>
     {/if}

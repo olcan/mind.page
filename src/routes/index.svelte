@@ -631,7 +631,7 @@
         return out;
       } catch (e) {
         console.error(e);
-        invalidateElemCache(this.id);
+        this.invalidate_elem_cache();
         if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
@@ -655,7 +655,7 @@
             })
             .catch((e) => {
               console.error(e);
-              invalidateElemCache(this.id);
+              this.invalidate_elem_cache();
               this.write_log_any(); // customized via _this.log_options
               item(this.id).running = false;
               reject(e);
@@ -674,14 +674,14 @@
         if (out instanceof Promise) {
           out = this.attach(out).catch((e) => {
             console.error(e);
-            invalidateElemCache(this.id);
+            this.invalidate_elem_cache();
           });
         }
         if (evalStack.pop() != this.id) console.error("invalid stack");
         return out;
       } catch (e) {
         console.error(e);
-        invalidateElemCache(this.id);
+        this.invalidate_elem_cache();
         if (evalStack.pop() != this.id) console.error("invalid stack");
         throw e;
       }
@@ -887,6 +887,7 @@
     // invalidates element cache for item
     invalidate_elem_cache() {
       invalidateElemCache(this.id);
+      item(this.id).elemCacheVersion++;
     }
   }
 
@@ -3509,6 +3510,7 @@
       // other state
       item.lastEvalTime = 0; // used for _item.get_log
       item.lastRunTime = 0; // used for _item.get_log
+      item.elemCacheVersion = 0;
     });
     finalizeStateOnEditorChange = true; // make initial empty state final
     onEditorChange(""); // initial sorting
@@ -4719,6 +4721,7 @@
                 labelText={item.labelText}
                 hash={item.hash}
                 deephash={item.deephash}
+                bind:elemCacheVersion={item.elemCacheVersion}
                 missingTags={item.missingTags.join(" ")}
                 matchingTerms={item.matchingTerms.join(" ")}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
