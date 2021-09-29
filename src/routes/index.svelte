@@ -2331,14 +2331,16 @@
     if (item.cipher) return item; // already encrypted
     if (!item.text) return item; // nothing to encrypt
     item.cipher = await encrypt(JSON.stringify(item));
-    delete item.text; // remove text until decryption
+    // setting item.text = null ensures !item.text and that field is cleared in update on firestore
+    // full removal in update (vs set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
+    item.text = null; // null until decryption
     return item;
   }
   async function decryptItem(item) {
     if (item.text) return item; // already decrypted
     if (!item.cipher) return item; // nothing to decrypt
     item.text = JSON.parse(await decrypt(item.cipher)).text;
-    delete item.cipher; // remove cipher until encryption
+    item.cipher = null; // null until encryption
     return item;
   }
 
@@ -2963,6 +2965,8 @@
     }
 
     encryptItem(itemToSave).then((itemToSave) => {
+      // ensure removal of text field from older (pre-encryption) items that are now encrypted
+      if (itemToSave.cipher) itemToSave.text = window["firebase"].firestore.FieldValue.delete();
       firestore()
         .collection("items")
         .doc(item.savedId)
@@ -2973,6 +2977,8 @@
         .catch(console.error);
 
       // also save to history ...
+      // need to clear FieldValue.delete() not allowed for add/set used for history collection
+      if (itemToSave.cipher) delete itemToSave.text;
       firestore()
         .collection("history")
         .add({ item: item.savedId, user: user.uid, ...itemToSave })
