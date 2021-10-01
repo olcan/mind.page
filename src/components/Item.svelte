@@ -1923,13 +1923,14 @@
     min-width: 100px;
     max-width: 40%; /* 50% is a bit much and can overlap w/ other summaries */
     overflow: hidden;
-    height: 25px;
+    height: 22px; /* touches tags (mark) on last line w/ bottom:-8px */
     position: absolute;
     left: 0;
     right: 0;
     /* 3px left padding aligns best with code block left border on iOS Safari */
     padding: 0 3px;
-    bottom: -5px;
+    bottom: -8px; /* same as .super-container gap (2x vertical padding) w/o time strings */
+    line-height: 160%; /* for vertical positioning of dots */
     margin-left: auto;
     margin-right: auto;
     width: fit-content;
@@ -1937,16 +1938,6 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-  }
-
-  /* increase left/right padding on non-iOS mac due to ~1px less padding of monospace characters */
-  @supports not (-webkit-touch-callout: none) {
-    :global(.item .log-summary),
-    :global(.item .deps-summary),
-    :global(.item .dependents-summary) {
-      padding: 0 4px;
-      bottom: -3px; /* works better with fonts on non-iOS */
-    }
   }
 
   :global(.item .log-summary) {
