@@ -53,7 +53,7 @@
   export let text: string;
   export let hash: string;
   export let deephash: string;
-  export let elemCacheVersion: number;
+  export let version: number;
   export let height = 0;
   const placeholder = " ";
   let error = false;
@@ -92,7 +92,7 @@
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
     if (run && !cancelled) {
       invalidateElemCache(id);
-      elemCacheVersion++;
+      version++; // ensure re-render even if deephash, time, and html are unchanged
     }
     onEditing(index, (editing = false), cancelled, run, e);
   }
@@ -122,7 +122,7 @@
     e.stopPropagation();
     e.preventDefault();
     invalidateElemCache(id);
-    elemCacheVersion++;
+    version++; // ensure re-render even if deephash, time, and html are unchanged
     onRun(index);
   }
 
@@ -210,7 +210,8 @@
     matchingTermsSecondary: any, // space-separated string converted to Set
     depsString: string,
     dependentsString: string,
-    elemCacheVersion: number
+    time: number,
+    version: number
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = "html-" + hashCode(Array.from(arguments).slice(1).toString());
@@ -219,7 +220,7 @@
       // console.debug("toHTML skipped");
       return window["_html_cache"][id][cache_key];
     }
-    // console.debug("toHTML", name);
+    // console.debug("toHTML", name, deephash, time, version);
 
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0; // counter to distinguish positions of identical cached elements
@@ -676,9 +677,8 @@
       text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`;
     }
 
-    // append elemCacheVersion to ensure svelte content cache is invalidated along w/ elem cache
-    // otherwise there is a problem e.g. if we run item, invalidate cache, but html is identical and svelte skips update
-    text += `<!-- elemCacheVersion=${elemCacheVersion} -->`;
+    // include time and version in html content so they are included in svelte content cache key
+    text += `<!-- time=${time} version=${version} -->`;
 
     // do not cache with macro errors
     if (hasMacroErrors) return text;
@@ -1147,14 +1147,14 @@
 
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
       // since dependencies are not always fully captured in the cache key (even with deephash)
+      // a version increment does not make sense since these scripts are considered part of the current version
+      // also version increment can cause a render-error loop since elements are not cached no errors
       invalidateElemCache(id);
-      elemCacheVersion++;
+      // version++; // ensure re-render even if deephash, time, and html are unchanged
 
       let pendingScripts = scripts.length;
       let scriptErrors = [];
-      // console.debug(
-      //   `executing ${pendingScripts} scripts in item ${name} ...`
-      // );
+      // console.debug(`executing ${pendingScripts} scripts in item ${name} ...`);
       scripts.forEach((script, scriptIndex) => {
         // console.debug(script.parentElement);
         if (!script.hasAttribute("_uncached") && !script.parentElement.hasAttribute("_cache_key")) {
@@ -1334,7 +1334,8 @@
           matchingTermsSecondary,
           depsString,
           dependentsString,
-          elemCacheVersion
+          time,
+          version
         )}
       </div>
     {/if}

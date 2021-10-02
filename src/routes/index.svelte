@@ -890,9 +890,14 @@
     }
 
     // invalidates element cache for item
-    invalidate_elem_cache() {
+    // often invoked from error handling code
+    // otherwise can force_render to ensure re-render even if deephash/time/html are unchanged
+    invalidate_elem_cache(force_render = false) {
       invalidateElemCache(this.id);
-      item(this.id).elemCacheVersion++;
+      if (force_render) {
+        item(this.id).version++;
+        items = items; // trigger svelte render
+      }
     }
   }
 
@@ -3521,7 +3526,7 @@
       // other state
       item.lastEvalTime = 0; // used for _item.get_log
       item.lastRunTime = 0; // used for _item.get_log
-      item.elemCacheVersion = 0;
+      item.version = 0;
     });
     finalizeStateOnEditorChange = true; // make initial empty state final
     onEditorChange(""); // initial sorting
@@ -4732,7 +4737,7 @@
                 labelText={item.labelText}
                 hash={item.hash}
                 deephash={item.deephash}
-                bind:elemCacheVersion={item.elemCacheVersion}
+                bind:version={item.version}
                 missingTags={item.missingTags.join(" ")}
                 matchingTerms={item.matchingTerms.join(" ")}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(" ")}
