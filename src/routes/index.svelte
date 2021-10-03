@@ -547,7 +547,8 @@
             });
           try_last_line(evaljs); // modifies evaljs directly
         }
-        evaljs = ["return (() => {", evaljs, "})()"].join("\n");
+        const async = options["async"];
+        evaljs = [`return (${async ? "async " : ""}() => {`, evaljs, "})()"].join("\n");
 
         // prepend context prefix (if not excluded)
         if (!options["exclude_prefix"]) {
@@ -562,7 +563,7 @@
         }
 
         // no (re-)wrapping debug items
-        if (options["async"]) {
+        if (async) {
           // async wrapper
           if (options["async_simple"]) {
             // use light-weight wrapper without output/logging into item
