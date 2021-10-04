@@ -296,7 +296,7 @@
     if (
       key == "Enter" &&
       ((lastKeyDown == "Space" && Date.now() - lastKeyDownTime < 250) ||
-        (lastInputInsertText == " " && Date.now() - lastInputInsertTextTime < 250)) &&
+        (lastInputInsertText?.endsWith(" ") && Date.now() - lastInputInsertTextTime < 250)) &&
       !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart >= 1 &&
@@ -622,7 +622,7 @@
   let lastInputInsertText;
   let lastInputInsertTextTime = 0;
   function onInput(e = null) {
-    if (e?.inputType == "insertText") {
+    if (e?.inputType == "insertText" || e?.inputType == "insertCompositionText") {
       // to help disambiguate some "Unidentified" keys (e.g. "Space") for some android keyboards, in particular gboard
       // NOTE: this is a limited experiment and not extended to many other problematic keys, e.g. Enter, which seem to be content-sensitive (e.g. key is Enter after a space, but Unidentified otherwise)
       lastInputInsertText = e.data;
