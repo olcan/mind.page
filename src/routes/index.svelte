@@ -2173,7 +2173,7 @@
           });
         });
       }
-      if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label, prevLabel);
+      if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label, prevLabel ?? "");
 
       // update deps and deephash as needed for all dependent items
       // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
@@ -2667,9 +2667,9 @@
       savedId: null, // filled in below after save
       savedTime: time,
       savedText: "", // so cancel = delete
-      editing: editing, 
-      saving: !editing
-    })
+      editing: editing,
+      saving: !editing,
+    });
     items = [item, ...items];
 
     // update indices as needed by itemTextChanged
@@ -3463,7 +3463,7 @@
   }
 
   // function to initialize new item state to serve as central listing
-  function initItemState(item, index, state={}) {
+  function initItemState(item, index, state = {}) {
     // state used in onEditorChange
     item.editing = false; // otherwise undefined till rendered/bound to svelte object
     item.matching = false;
@@ -3503,7 +3503,7 @@
     item.lastEvalTime = 0; // used for _item.get_log
     item.lastRunTime = 0; // used for _item.get_log
     item.version = 0;
-    return _.merge(item, state)
+    return _.merge(item, state);
   }
 
   async function initialize() {
