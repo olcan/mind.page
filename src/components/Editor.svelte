@@ -305,6 +305,7 @@
       // Object.defineProperty(e, "shiftKey", { value: true });
       textarea.value = textarea.value.slice(0, -1); // remove last space w/o undo
       e.preventDefault();
+      e.stopPropagation();
       onDone((text = textarea.value), e);
       return;
     }
