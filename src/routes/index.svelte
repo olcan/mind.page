@@ -2423,6 +2423,10 @@
         signIn();
         return;
       }
+      case "/_reload": {
+        location.reload();
+        return;
+      }
       case "/_count": {
         text = `${editingItems.length} items are selected`;
         break;
