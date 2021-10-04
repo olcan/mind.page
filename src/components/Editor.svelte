@@ -299,11 +299,13 @@
         (lastInputInsertText?.endsWith(" ") && Date.now() - lastInputInsertTextTime < 250)) &&
       !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
       textarea.selectionStart == textarea.selectionEnd &&
-      textarea.selectionStart >= 1 &&
-      textarea.value.endsWith(" ")
+      textarea.value[textarea.selectionStart - 1] == " "
     ) {
       // Object.defineProperty(e, "shiftKey", { value: true });
-      textarea.value = textarea.value.slice(0, -1); // remove last space w/o undo
+      const selectionStart = textarea.selectionStart; // to restore after deletion
+      textarea.value =
+        textarea.value.slice(0, textarea.selectionStart - 1) + textarea.value.slice(textarea.selectionStart);
+      textarea.selectionStart = textarea.selectionEnd = selectionStart - 1;
       e.preventDefault();
       e.stopPropagation();
       onDone((text = textarea.value), e);
