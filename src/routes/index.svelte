@@ -731,13 +731,18 @@
         const _item = item(this.id);
         if (_item.tasks[name] != task) return; // task cancelled or replaced
         try {
-          this.resolve(func()).then((out) => {
-            if (out === null) {
-              delete _item.tasks[name];
+          this.resolve(func())
+            .then((out) => {
+              if (out === null) {
+                delete _item.tasks[name];
+                return;
+              }
+              if (repeat_ms > 0) this.dispatch(task, repeat_ms); // dispatch repeat
+            })
+            .catch((e) => {
+              console.error(`stopping task '${name}' due to error: ${e}`);
               return;
-            }
-            if (repeat_ms > 0) this.dispatch(task, repeat_ms); // dispatch repeat
-          });
+            });
         } catch (e) {
           console.error(`stopping task '${name}' due to error: ${e}`);
           return;
