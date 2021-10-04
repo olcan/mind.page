@@ -858,6 +858,7 @@
                 : NodeFilter.FILTER_ACCEPT;
             case "svg":
             case "script":
+            case "style":
               return NodeFilter.FILTER_REJECT;
             default:
               return classList?.contains("c3") ||
