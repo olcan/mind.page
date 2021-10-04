@@ -2661,15 +2661,15 @@
       time: time,
       text: text,
     };
-    let item = {
+    let item = initItemState({}, 0, {
       ...itemToSave,
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
       savedId: null, // filled in below after save
-      editing: editing,
-      saving: !editing,
       savedTime: time,
       savedText: "", // so cancel = delete
-    };
+      editing: editing, 
+      saving: !editing
+    })
     items = [item, ...items];
 
     // update indices as needed by itemTextChanged
@@ -3462,6 +3462,50 @@
     console.debug(`[${Math.round(performance.now())}ms] ${args.join(" ")}`);
   }
 
+  // function to initialize new item state to serve as central listing
+  function initItemState(item, index, state={}) {
+    // state used in onEditorChange
+    item.editing = false; // otherwise undefined till rendered/bound to svelte object
+    item.matching = false;
+    item.target = false;
+    item.target_context = false;
+    item.tagMatches = 0;
+    item.labelMatch = false;
+    item.prefixMatch = false;
+    item.pinnedMatch = false;
+    item.pinnedMatchTerm = "";
+    item.uniqueLabel = "";
+    // item.uniqueLabelPrefixes = [];
+    item.matchingTerms = [];
+    item.matchingTermsSecondary = [];
+    item.missingTags = [];
+    item.hasError = false;
+    // state from updateItemLayout
+    item.index = index;
+    item.lastIndex = index;
+    item.aboveTheFold = false;
+    // item.prominence = 0;
+    item.leader = false;
+    item.mover = false;
+    item.timeString = "";
+    item.timeOutOfOrder = false;
+    item.height = 0;
+    item.resolve_render = null; // invoked from onItemResized on first call
+    item.column = 0;
+    item.lastColumn = 0;
+    item.nextColumn = -1;
+    item.nextItemInColumn = -1;
+    item.outerHeight = 0;
+    // dependents (filled below)
+    item.dependents = [];
+    item.dependentsString = "";
+    // other state
+    item.lastEvalTime = 0; // used for _item.get_log
+    item.lastRunTime = 0; // used for _item.get_log
+    item.version = 0;
+    return _.merge(item, state)
+  }
+
   async function initialize() {
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
@@ -3484,50 +3528,11 @@
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false); // deps handled below after index assignment
+      initItemState(item, index);
       item.admin = adminItems.has(item.id);
       item.savedId = item.id;
       item.savedText = item.text;
       item.savedTime = item.time;
-      // NOTE: we also initialized other state here to have a central listing
-      // state used in onEditorChange
-      item.editing = false; // otherwise undefined till rendered/bound to svelte object
-      item.matching = false;
-      item.target = false;
-      item.target_context = false;
-      item.tagMatches = 0;
-      item.labelMatch = false;
-      item.prefixMatch = false;
-      item.pinnedMatch = false;
-      item.pinnedMatchTerm = "";
-      item.uniqueLabel = "";
-      // item.uniqueLabelPrefixes = [];
-      item.matchingTerms = [];
-      item.matchingTermsSecondary = [];
-      item.missingTags = [];
-      item.hasError = false;
-      // state from updateItemLayout
-      item.index = index;
-      item.lastIndex = index;
-      item.aboveTheFold = false;
-      // item.prominence = 0;
-      item.leader = false;
-      item.mover = false;
-      item.timeString = "";
-      item.timeOutOfOrder = false;
-      item.height = 0;
-      item.resolve_render = null; // invoked from onItemResized on first call
-      item.column = 0;
-      item.lastColumn = 0;
-      item.nextColumn = -1;
-      item.nextItemInColumn = -1;
-      item.outerHeight = 0;
-      // dependents (filled below)
-      item.dependents = [];
-      item.dependentsString = "";
-      // other state
-      item.lastEvalTime = 0; // used for _item.get_log
-      item.lastRunTime = 0; // used for _item.get_log
-      item.version = 0;
     });
     finalizeStateOnEditorChange = true; // make initial empty state final
     onEditorChange(""); // initial sorting
@@ -3896,13 +3901,13 @@
                       return;
                     }
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                    let item = {
+                    let item = initItemState({}, 0, {
                       ...savedItem,
                       id: doc.id,
                       savedId: doc.id,
                       savedTime: savedItem.time,
                       savedText: savedItem.text,
-                    };
+                    });
                     items = [item, ...items];
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index));
