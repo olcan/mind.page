@@ -725,6 +725,7 @@
     // if repeat_ms>0, repeats function as long as item is not deleted
     // cancels any previously dispatched task under given name
     // cancels task if function returns null or throws error
+    // function can be async or return promise
     dispatch_task(name, func, delay_ms = 0, repeat_ms = 0) {
       const task = () => {
         if (!_exists(this.id)) return; // item deleted
