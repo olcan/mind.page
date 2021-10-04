@@ -4441,6 +4441,7 @@
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
     if (ios || android) return; // focus handled in focus/checkFocus below
     focused = document.hasFocus();
+    if (focused) window["_focus_time"] = Date.now();
     // retreat to minimal hide index when window is defocused
     if (!focused) hideIndex = hideIndexMinimal;
   }
@@ -4463,6 +4464,7 @@
 
   let lastBlurredElem;
   function focus() {
+    window["_focus_time"] = Date.now();
     if (!ios && !android) {
       onFocus(); // focus based on document.hasFocus()
       return;
