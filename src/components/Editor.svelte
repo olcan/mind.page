@@ -283,7 +283,7 @@
   let enterStart = -1;
   let enterIndentation = "";
   let lastKeyDown;
-  let lastKeyDownPosition;
+  let lastKeyDownTime = 0;
 
   function onKeyDown(e: any) {
     onEditorKeyDown(e);
@@ -292,15 +292,26 @@
     if (!key) return; // can be empty for pencil input on ios
 
     // console.debug("Editor.onKeyDown:", e, key);
-    // workaround for "Shift" modifier on Samsung keyboard
-    // NOTE: turns out this "workaround" only works when swipe gesture is used for "Cursor Control" (vs "swipe to type"), which also does not seem to work except that it causes a Shift-keyup event on ALL keys, including the Shift key, allowing us to detect taps on Shift key (but not its toggle state) from lack of follow-up events ...
-    if (Date.now() - lastKeyUpTime < 100) lastKeyUp = lastKeyUpPrev;
-    if (lastKeyUp == "Shift") Object.defineProperty(e, "shiftKey", { value: true });
-    lastKeyUp = lastKeyUpPrev = undefined; // reset keyup history on keydown
+    // generic workaround for Shift-Enter not working on android keyboards: Space-then-Return-within-250ms w/o modifiers deletes the space and behaves like Shift+Enter
+    if (
+      key == "Enter" &&
+      ((lastKeyDown == "Space" && Date.now() - lastKeyDownTime < 250) ||
+        (lastInputInsertText == " " && Date.now() - lastInputInsertTextTime < 250)) &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
+      textarea.selectionStart == textarea.selectionEnd &&
+      textarea.selectionStart >= 1 &&
+      textarea.value.endsWith(" ")
+    ) {
+      // Object.defineProperty(e, "shiftKey", { value: true });
+      textarea.value = textarea.value.slice(0, -1); // remove last space w/o undo
+      e.preventDefault();
+      onDone((text = textarea.value), e);
+      return;
+    }
     // workaround for "Windows" key on Hacker's Keyboard on android
     if (lastKeyDown == "Meta") Object.defineProperty(e, "metaKey", { value: true });
     lastKeyDown = key;
-    lastKeyDownPosition = textarea.selectionStart;
+    lastKeyDownTime = Date.now();
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return;
@@ -450,7 +461,7 @@
     const prefix = textarea.value.substring(0, textarea.selectionStart);
     if (
       key == "Backspace" &&
-      !(e.shiftKey || e.metaKey || e.ctrlKey) &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
       textarea.selectionStart == textarea.selectionEnd &&
       textarea.selectionStart >= 2 &&
       prefix.match(/(?:^|\s)[-*+ ] $/) &&
@@ -516,17 +527,11 @@
     }
   }
 
-  let lastKeyUp;
-  let lastKeyUpTime;
-  let lastKeyUpPrev;
   function onKeyUp(e: any) {
     const key = e.code || e.key; // for android compatibility
     if (!key) return; // can be empty for pencil input on ios
 
     // console.debug("Editor.onKeyUp", e, key);
-    lastKeyUpPrev = lastKeyUp;
-    lastKeyUp = key;
-    lastKeyUpTime = Date.now();
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return;
@@ -614,21 +619,15 @@
     });
   }
 
-  function onInput() {
-    // fix for some android keyboard (e.g. GBoard) sending Unidentified for many keys, including Enter
-    if (
-      lastKeyDown == "Unidentified" &&
-      lastKeyDownPosition == textarea.selectionStart - 1 && // exclude backspace
-      textarea.selectionStart == textarea.selectionEnd &&
-      textarea.value.substring(textarea.selectionStart - 1).startsWith("\n")
-    ) {
-      const pos = textarea.selectionStart;
-      textarea.selectionEnd = textarea.selectionStart = pos - 1;
-      onKeyDown({ code: "Enter" });
-      textarea.selectionEnd = textarea.selectionStart = pos;
-      onKeyUp({ code: "Enter" });
+  let lastInputInsertText;
+  let lastInputInsertTextTime = 0;
+  function onInput(e = null) {
+    if (e?.inputType == "insertText") {
+      // to help disambiguate some "Unidentified" keys (e.g. "Space") for some android keyboards, in particular gboard
+      // NOTE: this is a limited experiment and not extended to many other problematic keys, e.g. Enter, which seem to be content-sensitive (e.g. key is Enter after a space, but Unidentified otherwise)
+      lastInputInsertText = e.data;
+      lastInputInsertTextTime = Date.now();
     }
-
     text = textarea.value; // no trimming until onDone
     updateTextDivs();
     onEdited(textarea.value);
