@@ -2727,7 +2727,8 @@
         textarea.selectionEnd = selectionEnd;
 
         // scroll to caret position ...
-        restoreItemEditor(item.id);
+        // NOTE: it turns out this may have been unnecessary and causing over-scrolling on iphone, see comment in restoreItemEditor
+        // restoreItemEditor(item.id);
 
         // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
         if (selectionStart > 0 || selectionEnd > 0) {
@@ -3212,8 +3213,7 @@
         if (!textarea) return;
         textarea.focus();
 
-        // NOTE: commented this out after scroll-to-caret failed on ipad and iphone for deep log line edits
-        //       scrolling is still not ideal on iphone, likely due to virtual keyboard not being accounted properly
+        // NOTE: this prevents some consistent overscrolling on iphone (e.g. for new items created below other items, e.g. #todo items), but downside is that there may be no scrolling ipad/iphone for deep log line edits; a more recent fix was to disable restoreItemEditor call for new item creation because it may not be necessary (see onEditorDone)
         // if (ios || android) return; // ios and android have built-in focus scrolling that works better
 
         // update vertical padding in case it is out of date
