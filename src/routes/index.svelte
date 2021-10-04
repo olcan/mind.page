@@ -731,15 +731,17 @@
         const _item = item(this.id);
         if (_item.tasks[name] != task) return; // task cancelled or replaced
         try {
-          if (func() === null) {
-            delete _item.tasks[name];
-            return;
-          }
+          this.resolve(func()).then((out) => {
+            if (out === null) {
+              delete _item.tasks[name];
+              return;
+            }
+            if (repeat_ms > 0) this.dispatch(task, repeat_ms); // dispatch repeat
+          });
         } catch (e) {
           console.error(`stopping task '${name}' due to error: ${e}`);
           return;
         }
-        if (repeat_ms > 0) this.dispatch(task, repeat_ms); // set up repeat
       };
       const _item = item(this.id);
       if (!_item.tasks) _item.tasks = {};
@@ -760,7 +762,7 @@
       return this.attach(new Promise(this.attach(func)));
     }
 
-    // resolve = same as Promise.resolve but with the returns promise attached
+    // resolve = same as Promise.resolve but with the returned promise attached
     resolve(thing) {
       return this.attach(Promise.resolve(thing));
     }
