@@ -302,10 +302,9 @@
       textarea.value[textarea.selectionStart - 1] == " "
     ) {
       // Object.defineProperty(e, "shiftKey", { value: true });
-      const selectionStart = textarea.selectionStart; // to restore after deletion
-      textarea.value =
-        textarea.value.slice(0, textarea.selectionStart - 1) + textarea.value.slice(textarea.selectionStart);
-      textarea.selectionStart = textarea.selectionEnd = selectionStart - 1;
+      const caretPos = textarea.selectionStart; // to restore after deletion
+      textarea.value = textarea.value.slice(0, caretPos - 1) + textarea.value.slice(caretPos);
+      textarea.selectionStart = textarea.selectionEnd = caretPos - 1;
       e.preventDefault();
       e.stopPropagation();
       onDone((text = textarea.value), e);
@@ -670,7 +669,10 @@
   }
 
   import { afterUpdate, onMount, onDestroy } from "svelte";
-  afterUpdate(updateTextDivs);
+  afterUpdate(() => {
+    if (!textarea) return; // can happen occasionally during destruction at end of editing
+    updateTextDivs();
+  });
 
   const highlightDebounceTime = 0;
   let highlightPending = false;
