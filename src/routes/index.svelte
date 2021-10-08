@@ -1736,7 +1736,7 @@
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
     // if ranking while unfocused, retreat to minimal index
-    if (!focused) hideIndex = hideIndexMinimal;
+    // if (!focused) hideIndex = hideIndexMinimal;
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
@@ -4443,7 +4443,7 @@
     focused = document.hasFocus();
     if (focused) window["_focus_time"] = Date.now();
     // retreat to minimal hide index when window is defocused
-    if (!focused) hideIndex = hideIndexMinimal;
+    // if (!focused) hideIndex = hideIndexMinimal;
   }
 
   // global focus index is the one stored in local storage, or in focus hidden item as fallback
@@ -4493,7 +4493,7 @@
       return;
     }
     focused = false;
-    hideIndex = hideIndexMinimal;
+    // hideIndex = hideIndexMinimal;
     // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
     lastBlurredElem = document.activeElement as HTMLElement;
     lastBlurredElem?.blur();
