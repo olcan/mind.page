@@ -595,12 +595,15 @@
           }
           // replace tabs with double-space
           text = text.replace(/\t/g, "  ");
+          // NOTE: on android getAsString causes a mysterious reset selectionStart->selectionEnd
+          textarea.selectionStart = selectionStart; // fix for android
           document.execCommand("insertText", false, text);
         });
       } else if (item.type.startsWith("image/") || item.type == "application/pdf") {
         const file = item.getAsFile();
         const url = URL.createObjectURL(file);
         const zoom = Math.round(1000 / window.devicePixelRatio) / 1000;
+        // textarea.selectionStart = selectionStart; // fix for android (see note above)
         // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
         // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
         // onPastedImage(url, file);
@@ -616,6 +619,7 @@
             setTimeout(window["_modal_close"], 0); // increase delay for testing
             const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`;
             textarea.focus();
+            textarea.selectionStart = selectionStart; // fix for android (see note above)
             document.execCommand("insertText", false, img);
           })
           .catch(console.error);
