@@ -3877,6 +3877,7 @@
 
         // start listening for remote changes
         // (also initialize if items were not returned by server)
+        let firebase_snapshot_errors = 0;
         firebase()
           .firestore()
           .collection("items")
@@ -3888,12 +3889,16 @@
                 console.warn("ignoring firestore snapshot due to _disable_sync");
                 return;
               }
+              let first_snapshot_items = 0;
+              let first_snapshot_changes = 0;
               snapshot.docChanges().forEach(function (change) {
                 const doc = change.doc;
                 // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
                 if (firstSnapshot) {
+                  first_snapshot_changes++;
                   if (change.type != "added") console.warn("unexpected change type: ", change.type);
-                  if (initTime == 0) {
+                  if (!initTime) {
+                    first_snapshot_items++;
                     // NOTE: snapshot items do not have updateTime/createTime available
                     items.push(Object.assign(doc.data(), { id: doc.id }));
                   }
@@ -3995,8 +4000,20 @@
               // either way set up callback to complete "synchronization" and set up welcome item if needed
               if (firstSnapshot) {
                 if (!initTime) {
-                  initTime = Date.now();
-                  initialize();
+                  // alert on empty init for user known to have items, or on any errors before/during first snapshot
+                  // TODO: remove this once you've debugged the issue where first snapshot is blank and items are added in subsequent snapshot(s), triggering the "welcome" dialog and many errors as items are added incrementally (and slowly) post-initialization ... if there are no relevant error/warnings and no other ways to detect a problem, then we may have to either track total number of items, or new users w/ empty accounts, or both.
+                  if (first_snapshot_items == 0 && user.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2") {
+                    alert(
+                      `failed init w/ zero items for non-empty account; changes: ${first_snapshot_changes} (see warnings for types), errors: ${firebase_snapshot_errors}; see console for details, reload to retry`
+                    );
+                  } else if (firebase_snapshot_errors > 0) {
+                    alert(
+                      `failed init w/ ${firebase_snapshot_errors} errors; see console for details, reload to retry`
+                    );
+                  } else {
+                    initTime = Date.now();
+                    initialize();
+                  }
                 }
                 Promise.resolve(initialization).then(() => {
                   if (!initialized) return; // initialization failed, we should be signing out ...
@@ -4021,6 +4038,7 @@
               }
             },
             (error) => {
+              firebase_snapshot_errors++;
               console.error(error);
               if (error.code == "permission-denied") {
                 // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
