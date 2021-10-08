@@ -1138,6 +1138,22 @@
       };
     });
 
+    // hide any top-level <br> preceding 0-height tail, including hidden tags, hidden blocks, etc
+    // we process matching tags in reverse order to handle arbitrarily long series of br tags
+    // this is in addition to hiding rules in css, e.g. see rules for br:last-child below
+    Array.from(itemdiv.querySelectorAll(".item > br"))
+      .reverse()
+      .forEach((br: HTMLElement) => {
+        let height_below = 0;
+        let elem = br;
+        while ((elem = elem.nextElementSibling as HTMLElement)) {
+          if (elem.classList.contains("deps-and-dependents")) continue;
+          if (elem.classList.contains("deps-summary")) continue;
+          height_below += elem.offsetHeight;
+        }
+        if (height_below == 0) br.style.display = "none";
+      });
+
     // trigger execution of script tags by adding/removing them to <head>
     // NOTE: this is slow, so we do it asyc, and we warn if the parent element is not cached
     setTimeout(() => {
@@ -1801,11 +1817,14 @@
   :global(.item .menu mark.hidden:not(.missing/*, .selected*/)) {
     display: none;
   }
+
+  /* disable <br> added by marked as last child under other html tags (e.g. p) */
   :global(.item br:last-child) {
     display: none;
   }
+  /* preserve <br> inside blockquotes */
   :global(.item blockquote br:last-child) {
-    display: block;
+    display: inline;
   }
 
   :global(.item mark.hidden.missing) {
