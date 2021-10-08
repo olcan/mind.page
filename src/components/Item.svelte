@@ -1139,16 +1139,25 @@
     });
 
     // hide any top-level <br> preceding 0-height tail, including hidden tags, hidden blocks, etc
-    // we process matching tags in reverse order to handle arbitrarily long series of br tags
+    // process matching tags in reverse order to handle arbitrarily long series of br tags
     // this is in addition to hiding rules in css, e.g. see rules for br:last-child below
+    // allows useful visual spacing in editor of item tail w/ hidden code, tags, etc
     Array.from(itemdiv.querySelectorAll(".item > br"))
       .reverse()
       .forEach((br: HTMLElement) => {
         let height_below = 0;
         let elem = br;
         while ((elem = elem.nextElementSibling as HTMLElement)) {
-          if (elem.classList.contains("deps-and-dependents")) continue;
-          if (elem.classList.contains("deps-summary")) continue;
+          // ignore auto-generated tail divs
+          if (
+            elem.className == "deps-and-dependents" ||
+            elem.className == "deps-summary" ||
+            elem.className == "dependents-summary" ||
+            elem.className == "log-summary"
+          )
+            continue;
+          // ignore _log blocks that are toggled via .showLogs class
+          if (elem.tagName == "PRE" && elem.children[0]?.className == "_log") continue;
           height_below += elem.offsetHeight;
         }
         if (height_below == 0) br.style.display = "none";
