@@ -294,26 +294,59 @@
       if (_item.cache) _item.cache_deephash = this.deephash;
     }
 
-    // key-value store synchronized into localStorage
-    // (should always be accessed via this accessor to ensure updates)
+    // "local" key-value store backed by localStorage
+    // dispatches call to save_local_store to auto-save any synchronous changes
+    // e.g. item.local_store.hello = "hello world" // saved automatically
     get local_store(): object {
       let _item = item(this.id);
       if (!_item.savedId) throw new Error("local_store is not available until item has been saved");
       const key = "mindpage_item_store_" + _item.savedId;
       if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {};
-      // dispatch save to localStorage
-      setTimeout(() => {
-        let _item = item(this.id);
-        if (!_item || !_item.local_store) {
-          localStorage.removeItem(key);
-          return;
-        }
-        const obj = JSON.stringify(_item.local_store);
-        if (obj == "{}") localStorage.removeItem(key);
-        else localStorage.setItem(key, obj);
-      });
+      // dispatch save for synchronous changes
+      setTimeout(() => this.save_local_store());
       return _item.local_store;
     }
+
+    // saves item.local_store to localStorage
+    // removes from localStorage if item or item.local_store is missing, or if object is empty
+    save_local_store() {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("save_local_store is not available until item has been saved");
+      const key = "mindpage_item_store_" + _item.savedId;
+      if (!_item || !_item.local_store || _.isEmpty(_item.local_store)) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify(_item.local_store));
+    }
+
+    // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
+    // dispatches call to save_global_store to auto-save any synchronous changes
+    // e.g. item.global_store.hello = "hello world" // saved automatically
+    get global_store(): object {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("global_store is not available until item has been saved");
+      const name = "global_store_" + _item.savedId;
+      if (!_item.global_store) _item.global_store = _.cloneDeep(getHiddenItem(name)) || {};
+      // dispatch save for any synchronous changes
+      setTimeout(() => this.save_global_store());
+      return _item.global_store;
+    }
+
+    // saves item.global_store to firebase
+    // skips saving if global_store is unchanged according to _.isEqual
+    // deletes from firebase if item or item.global_store is missing, or if object is empty
+    save_global_store() {
+      let _item = item(this.id);
+      if (!_item.savedId) throw new Error("save_global_store is not available until item has been saved");
+      const name = "global_store_" + _item.savedId;
+      if (!_item || !_item.global_store || _.isEmpty(_item.global_store)) {
+        deleteHiddenItem(getHiddenItemWrapper(name)?.id);
+        return;
+      }
+      if (!_.isEqual(_item.global_store, getHiddenItem(name))) setHiddenItem(name, _.cloneDeep(_item.global_store));
+    }
+
     // separate store used for debugging
     get debug_store(): object {
       let _item = item(this.id);
@@ -2351,7 +2384,7 @@
     if (!item.text) return item; // nothing to encrypt
     item.cipher = await encrypt(JSON.stringify(item));
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
-    // full removal in update (vs set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
+    // full removal in update (but not add/set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
     item.text = null; // null until decryption
     return item;
   }
@@ -2989,8 +3022,6 @@
     }
 
     encryptItem(itemToSave).then((itemToSave) => {
-      // ensure removal of text field from older (pre-encryption) items that are now encrypted
-      if (itemToSave.cipher) itemToSave.text = window["firebase"].firestore.FieldValue.delete();
       firestore()
         .collection("items")
         .doc(item.savedId)
@@ -3001,8 +3032,6 @@
         .catch(console.error);
 
       // also save to history ...
-      // need to clear FieldValue.delete() not allowed for add/set used for history collection
-      if (itemToSave.cipher) delete itemToSave.text;
       firestore()
         .collection("history")
         .add({ item: item.savedId, user: user.uid, ...itemToSave })
@@ -3530,8 +3559,9 @@
     // also move into hiddenItems map for easy access later
     items.forEach((item) => {
       if (item.hidden) {
-        // console.debug("found hidden item", JSON.stringify(item));
-        hiddenItems.set(item.id, JSON.parse(item.text));
+        const wrapper = JSON.parse(item.text);
+        // console.debug("found hidden item", wrapper.name, wrapper.item, item);
+        hiddenItems.set(item.id, wrapper);
       }
     });
     items = items.filter((item) => !item.hidden);
@@ -4034,6 +4064,23 @@
                       })
                       .catch(encryptionError);
                   }
+
+                  // delete duplicate hidden items, prioritizing by enumeration order (= most recent at init)
+                  // TODO: ensure this no longer happens once empty initialization issue is fixed
+                  let hidden_names = new Set();
+                  for (const [id, wrapper] of hiddenItems.entries()) {
+                    if (hidden_names.has(wrapper.name)) {
+                      console.warn("deleting duplicate hidden item", wrapper.name);
+                      deleteHiddenItem(id);
+                      continue;
+                    }
+                    if (!wrapper.item) {
+                      console.warn("deleting invalid (unwrapped) hidden item", wrapper.name);
+                      deleteHiddenItem(id);
+                      continue;
+                    }
+                    hidden_names.add(item.name);
+                  }
                 });
               }
             },
@@ -4517,25 +4564,27 @@
     lastBlurredElem?.blur();
   }
 
-  // returns hidden item with specified name, or null if not found
-  // item id is also returned as item.id
+  // returns hidden item w/ given name, or null if not found
   function getHiddenItem(name) {
-    for (const [id, item] of hiddenItems.entries()) if (item.name == name) return Object.assign(item, { id });
+    for (const [id, wrapper] of hiddenItems.entries()) if (wrapper.name == name) return wrapper.item;
+    return null;
+  }
+
+  // returns wrapper for hidden item w/ given name, or null if not found
+  function getHiddenItemWrapper(name) {
+    for (const [id, wrapper] of hiddenItems.entries()) if (wrapper.name == name) return Object.assign(wrapper, { id });
     return null;
   }
 
   function setHiddenItem(name, item) {
     if (!initialized) throw new Error("setHiddenItem called before initialized");
-
-    item.name = name; // store name in item itself
-    const existing_item = getHiddenItem(name);
-
+    item = { name, item }; // replace item w/ wrapper object (will also contain id and saving flag)
     let itemToSave = {
       hidden: true,
       time: Date.now(),
       text: JSON.stringify(item),
     };
-
+    const existing_item = getHiddenItemWrapper(name); // wrapper (w/ id) for existing item
     if (existing_item) {
       hiddenItems.set(existing_item.id, item); // just replace with new item
       if (readonly) return; // no saving
@@ -4551,7 +4600,7 @@
               .doc(saved_id)
               .update(itemToSave)
               // .then(() => {
-              //   console.debug("updated hidden item", JSON.stringify(item));
+              //   console.debug("updated hidden item", name, JSON.stringify(item));
               // })
               .catch(console.error);
           })
@@ -4574,8 +4623,8 @@
                 // console.debug("created hidden item", JSON.stringify(itemToSave));
                 hiddenItems.delete(temp_id);
                 hiddenItems.set(doc.id, item);
-                item.id = doc.id; // update id stored in item
-                delete item.saving; // no longer saving
+                item.id = doc.id; // update id in wrapper
+                delete item.saving; // clear saving flag from wrapper
                 resolve(doc.id);
               })
               .catch((e) => {
@@ -4589,6 +4638,27 @@
           });
       });
     }
+  }
+
+  function deleteHiddenItem(id) {
+    if (!id) return; // nothing to delete
+    if (!initialized) throw new Error("deleteHiddenItem called before initialized");
+    const wrapper = hiddenItems.get(id);
+    if (!wrapper) return; // nothing to delete
+    hiddenItems.delete(id);
+    if (readonly) return; // no saving
+    // console.debug("deleting hidden item", name);
+    // NOTE: if item is saving, we need to wait for its persistent id before we can delete
+    Promise.resolve(wrapper.saving || id).then((saved_id) => {
+      firestore()
+        .collection("items")
+        .doc(saved_id)
+        .delete()
+        // .then(() => {
+        //   console.debug("deleted hidden item", name);
+        // })
+        .catch(console.error);
+    });
   }
 
   function hiddenItemsChangedRemotely() {
