@@ -4257,8 +4257,9 @@
     if (!e.metaKey) focus(); // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
     const key = e.code || e.key; // for android compatibility
     if (!key) return; // can be empty for pencil input on ios
+    // console.debug("window.onKeyDown:", e, key);
+
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
-    // console.debug(metaKey, ctrlKey, altKey, shiftKey);
 
     // console.debug(e, initialized, modal.isVisible());
     if (!initialized) return;
@@ -4496,8 +4497,8 @@
       (key == "KeyS" && (e.metaKey || e.ctrlKey)) ||
       (key == "Slash" && (e.metaKey || e.ctrlKey)) ||
       (key == "KeyI" && e.metaKey && e.shiftKey) ||
-      (key == "ArrowUp" && e.metaKey && e.altKey) ||
-      (key == "ArrowDown" && e.metaKey && e.altKey) ||
+      (key == "ArrowUp" && e.metaKey) ||
+      (key == "ArrowDown" && e.metaKey) ||
       key == "Backspace" ||
       key == "Tab" ||
       key == "Escape"

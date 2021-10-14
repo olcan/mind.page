@@ -290,8 +290,8 @@
     unlockCaret();
     let key = e.code || e.key; // for android compatibility
     if (!key) return; // can be empty for pencil input on ios
-
     // console.debug("Editor.onKeyDown:", e, key);
+
     // generic workaround for Shift-Enter not working on android keyboards: Space-then-Return-within-250ms w/o modifiers deletes the space and behaves like Shift+Enter
     if (
       key == "Enter" &&
@@ -449,12 +449,12 @@
       return;
     }
 
-    if (key == "ArrowUp" && e.metaKey && e.altKey) {
+    if (key == "ArrowUp" && e.metaKey) {
       e.preventDefault();
       onPrev();
       return;
     }
-    if (key == "ArrowDown" && e.metaKey && e.altKey) {
+    if (key == "ArrowDown" && e.metaKey) {
       e.preventDefault();
       onNext();
       return;
