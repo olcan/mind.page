@@ -556,30 +556,33 @@
             /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|false|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|new|null|package|private|protected|public|return|short|static|super|switch|synchronized|this|throw|throws|transient|true|try|var|void|volatile|while|with|yield)(?:\W|$))/
           );
 
-        // first try to insert return at partial-line (semicolon) level ...
-        // regex looks for last semicolon OR _unindented_ new line OR whole js code block
-        // regex takes any whitespace into prefix so it does not split return statement
-        // then we check expression for being balanced+returnable
-        let try_lines; // try full lines below?
-        evaljs = evaljs.replace(/(.*(?:\n(?! )|;|^)\s*)(.+?)$/s, (m, pfx, expr) => {
-          if (!expr_balanced(expr)) {
-            // if not balanced, try finding an expression at line level (see below)
-            try_lines = true;
-            return pfx + expr;
+        // do not insert return if js ends with a semicolon
+        if (!evaljs.match(/;\s*$/)) {
+          // first try to insert return at partial-line (semicolon) level ...
+          // regex looks for last semicolon OR _unindented_ new line OR whole js code block
+          // regex takes any whitespace into prefix so it does not split return statement
+          // then we check expression for being balanced+returnable
+          let try_lines; // try full lines below?
+          evaljs = evaljs.replace(/(.*(?:\n(?! )|;|^)\s*)(.+?)$/s, (m, pfx, expr) => {
+            if (!expr_balanced(expr)) {
+              // if not balanced, try finding an expression at line level (see below)
+              try_lines = true;
+              return pfx + expr;
+            }
+            return pfx + (expr_returnable(expr) ? "return " : "") + expr;
+          });
+          if (try_lines) {
+            // same as above, except exclude semicolons in regex (i.e. lines only)
+            // also try expanding expression to include lines above to balance expression
+            const try_last_line = (js, lines_below = "") =>
+              js.replace(/(.*(?:\n(?! )|^)\s*)(.+?)$/s, (m, pfx, expr) => {
+                expr += lines_below;
+                if (!expr_balanced(expr)) try_last_line("" + pfx, "" + expr);
+                else evaljs = pfx + (expr_returnable(expr) ? "return " : "") + expr;
+                return m;
+              });
+            try_last_line(evaljs); // modifies evaljs directly
           }
-          return pfx + (expr_returnable(expr) ? "return " : "") + expr;
-        });
-        if (try_lines) {
-          // same as above, except exclude semicolons in regex (i.e. lines only)
-          // also try expanding expression to include lines above to balance expression
-          const try_last_line = (js, lines_below = "") =>
-            js.replace(/(.*(?:\n(?! )|^)\s*)(.+?)$/s, (m, pfx, expr) => {
-              expr += lines_below;
-              if (!expr_balanced(expr)) try_last_line("" + pfx, "" + expr);
-              else evaljs = pfx + (expr_returnable(expr) ? "return " : "") + expr;
-              return m;
-            });
-          try_last_line(evaljs); // modifies evaljs directly
         }
         const async = options["async"];
         evaljs = [`return (${async ? "async " : ""}() => {`, evaljs, "})()"].join("\n");
