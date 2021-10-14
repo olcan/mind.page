@@ -327,7 +327,7 @@
       let _item = item(this.id);
       if (!_item.savedId) throw new Error("global_store is not available until item has been saved");
       const name = "global_store_" + _item.savedId;
-      if (!_item.global_store) _item.global_store = _.cloneDeep(getHiddenItem(name)) || {};
+      if (!_item.global_store) _item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {};
       // dispatch save for any synchronous changes
       setTimeout(() => this.save_global_store());
       return _item.global_store;
@@ -341,10 +341,11 @@
       if (!_item.savedId) throw new Error("save_global_store is not available until item has been saved");
       const name = "global_store_" + _item.savedId;
       if (!_item || !_item.global_store || _.isEmpty(_item.global_store)) {
-        deleteHiddenItem(getHiddenItemWrapper(name)?.id);
+        deleteHiddenItem(hiddenItemsByName.get(name)?.id);
         return;
       }
-      if (!_.isEqual(_item.global_store, getHiddenItem(name))) setHiddenItem(name, _.cloneDeep(_item.global_store));
+      if (!_.isEqual(_item.global_store, hiddenItemsByName.get(name)?.item))
+        saveHiddenItem(name, _.cloneDeep(_item.global_store));
     }
 
     // separate store used for debugging
@@ -3498,6 +3499,8 @@
   let maxRenderedAtInit = 100; // can be upto items.length;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let hiddenItems = new Map();
+  let hiddenItemsByName = new Map();
+  let hiddenItemsInvalid = [];
   let resolve_init; // set below
   function init_log(...args) {
     console.debug(`[${Math.round(performance.now())}ms] ${args.join(" ")}`);
@@ -3559,9 +3562,16 @@
     // also move into hiddenItems map for easy access later
     items.forEach((item) => {
       if (item.hidden) {
-        const wrapper = JSON.parse(item.text);
-        // console.debug("found hidden item", wrapper.name, wrapper.item, item);
-        hiddenItems.set(item.id, wrapper);
+        const wrapper = Object.assign(JSON.parse(item.text), { id: item.id });
+        // console.debug("found hidden item", wrapper.name, wrapper.name, wrapper.id, wrapper);
+        // mark duplicate as invalid
+        if (hiddenItemsByName.has(wrapper.name)) {
+          console.warn("found invalid hidden item under duplicate name", wrapper.name, wrapper.id, wrapper);
+          hiddenItemsInvalid.push(wrapper);
+          return;
+        }
+        hiddenItems.set(wrapper.id, wrapper);
+        hiddenItemsByName.set(wrapper.name, wrapper);
       }
     });
     items = items.filter((item) => !item.hidden);
@@ -3943,7 +3953,11 @@
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === "added") {
                     if (savedItem.hidden) {
-                      hiddenItems.set(doc.id, JSON.parse(savedItem.text));
+                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id });
+                      hiddenItems.set(wrapper.id, wrapper);
+                      if (hiddenItemsByName.has(wrapper.name))
+                        console.warn("remote-added hidden item name exists locally", wrapper.name);
+                      hiddenItemsByName.set(wrapper.name, wrapper);
                       hiddenItemsChangedRemotely();
                       return;
                     }
@@ -3971,7 +3985,13 @@
                     onEditorChange(editorText); // integrate new item at index 0
                   } else if (change.type == "removed") {
                     if (savedItem.hidden) {
-                      hiddenItems.delete(doc.id);
+                      const wrapper = hiddenItems.get(doc.id);
+                      if (!wrapper) {
+                        console.warn("remote-deleted hidden item missing locally", doc.id);
+                        return;
+                      }
+                      hiddenItems.delete(wrapper.id);
+                      hiddenItemsByName.delete(wrapper.name);
                       hiddenItemsChangedRemotely();
                       return;
                     }
@@ -4001,7 +4021,17 @@
                     }); // for /undelete
                   } else if (change.type == "modified") {
                     if (savedItem.hidden) {
-                      hiddenItems.set(doc.id, JSON.parse(savedItem.text));
+                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id });
+                      if (!hiddenItems.has(wrapper.id))
+                        console.warn("remote-modified hidden item missing locally", wrapper.id);
+                      else if (hiddenItems.get(wrapper.id).name != wrapper.name)
+                        console.warn(
+                          "remote-modified hidden item has different name",
+                          wrapper.name,
+                          hiddenItems.get(wrapper.id).name
+                        );
+                      hiddenItems.set(wrapper.id, wrapper);
+                      hiddenItemsByName.set(wrapper.name, wrapper);
                       hiddenItemsChangedRemotely();
                       return;
                     }
@@ -4065,22 +4095,12 @@
                       .catch(encryptionError);
                   }
 
-                  // delete duplicate hidden items, prioritizing by enumeration order (= most recent at init)
-                  // TODO: ensure this no longer happens once empty initialization issue is fixed
-                  let hidden_names = new Set();
-                  for (const [id, wrapper] of hiddenItems.entries()) {
-                    if (hidden_names.has(wrapper.name)) {
-                      console.warn("deleting duplicate hidden item", wrapper.name);
-                      deleteHiddenItem(id);
-                      continue;
-                    }
-                    if (!wrapper.item) {
-                      console.warn("deleting invalid (unwrapped) hidden item", wrapper.name);
-                      deleteHiddenItem(id);
-                      continue;
-                    }
-                    hidden_names.add(item.name);
-                  }
+                  // delete invalid hidden items after initialization
+                  // TODO: ensure no duplication issue after empty initialization issue is fixed
+                  hiddenItemsInvalid.forEach((wrapper) => {
+                    console.warn("deleting invalid hidden item", wrapper.name, wrapper.id, wrapper);
+                    deleteHiddenItem(wrapper.id);
+                  });
                 });
               }
             },
@@ -4517,14 +4537,14 @@
   function getGlobalFocusIndex() {
     let index = parseInt(localStorage.getItem("mindpage_focus_index")) || 0;
     if (!onStorageFired) {
-      const focusItem = getHiddenItem("focus");
+      const focusItem = hiddenItemsByName.get("focus")?.item;
       if (focusItem?.index > index) return focusItem.index;
     }
     return index;
   }
   function setGlobalFocusIndex(index) {
     localStorage.setItem("mindpage_focus_index", index.toString());
-    if (!onStorageFired) setHiddenItem("focus", { index });
+    if (!onStorageFired) saveHiddenItem("focus", { index });
   }
 
   let lastBlurredElem;
@@ -4564,35 +4584,22 @@
     lastBlurredElem?.blur();
   }
 
-  // returns hidden item w/ given name, or null if not found
-  function getHiddenItem(name) {
-    for (const [id, wrapper] of hiddenItems.entries()) if (wrapper.name == name) return wrapper.item;
-    return null;
-  }
-
-  // returns wrapper for hidden item w/ given name, or null if not found
-  function getHiddenItemWrapper(name) {
-    for (const [id, wrapper] of hiddenItems.entries()) if (wrapper.name == name) return Object.assign(wrapper, { id });
-    return null;
-  }
-
-  function setHiddenItem(name, item) {
-    if (!initialized) throw new Error("setHiddenItem called before initialized");
-    item = { name, item }; // replace item w/ wrapper object (will also contain id and saving flag)
-    let itemToSave = {
-      hidden: true,
-      time: Date.now(),
-      text: JSON.stringify(item),
-    };
-    const existing_item = getHiddenItemWrapper(name); // wrapper (w/ id) for existing item
-    if (existing_item) {
-      hiddenItems.set(existing_item.id, item); // just replace with new item
+  function saveHiddenItem(name, item) {
+    if (!initialized) throw new Error("saveHiddenItem called before initialized");
+    const wrapper = hiddenItemsByName.get(name);
+    if (wrapper) {
+      // replace existing hidden item
+      wrapper.item = item;
       if (readonly) return; // no saving
 
       // console.debug("updating hidden item", name);
-
+      let itemToSave = {
+        hidden: true,
+        time: Date.now(),
+        text: JSON.stringify(_.pick(wrapper, ["name", "item"])), // save only name/item
+      };
       // NOTE: if existing item is saving, we need to wait for its persistent id before we can update
-      Promise.resolve(existing_item.saving || existing_item.id).then((saved_id) => {
+      Promise.resolve(wrapper.saving || wrapper.id).then((saved_id) => {
         encryptItem(itemToSave)
           .then((itemToSave) => {
             firestore()
@@ -4608,12 +4615,17 @@
       });
     } else {
       // create new hidden item
-      const temp_id = (Date.now() + sessionCounter++).toString();
-      hiddenItems.set(temp_id, item);
+      const wrapper = { name, item, id: (Date.now() + sessionCounter++).toString(), saving: null };
+      hiddenItems.set(wrapper.id, wrapper);
+      hiddenItemsByName.set(wrapper.name, wrapper);
       if (readonly) return; // no saving
-
-      itemToSave["user"] = user.uid; // required for creation
-      item.saving = new Promise((resolve, reject) => {
+      let itemToSave = {
+        hidden: true,
+        user: user.uid, // required for add
+        time: Date.now(),
+        text: JSON.stringify(_.pick(wrapper, ["name", "item"])), // save only name/item
+      };
+      wrapper.saving = new Promise((resolve, reject) => {
         encryptItem(itemToSave)
           .then((itemToSave) => {
             firestore()
@@ -4621,11 +4633,11 @@
               .add(itemToSave)
               .then((doc) => {
                 // console.debug("created hidden item", JSON.stringify(itemToSave));
-                hiddenItems.delete(temp_id);
-                hiddenItems.set(doc.id, item);
-                item.id = doc.id; // update id in wrapper
-                delete item.saving; // clear saving flag from wrapper
-                resolve(doc.id);
+                hiddenItems.delete(wrapper.id); // remove under temp id
+                hiddenItems.set(doc.id, wrapper); // add back under persistent id
+                wrapper.id = doc.id; // update id in wrapper
+                wrapper.saving = null; // no longer saving
+                resolve(wrapper.id); // return persistent id
               })
               .catch((e) => {
                 console.error(e);
@@ -4645,11 +4657,12 @@
     if (!initialized) throw new Error("deleteHiddenItem called before initialized");
     const wrapper = hiddenItems.get(id);
     if (!wrapper) return; // nothing to delete
-    hiddenItems.delete(id);
+    hiddenItems.delete(wrapper.id);
+    hiddenItemsByName.delete(wrapper.name);
     if (readonly) return; // no saving
     // console.debug("deleting hidden item", name);
     // NOTE: if item is saving, we need to wait for its persistent id before we can delete
-    Promise.resolve(wrapper.saving || id).then((saved_id) => {
+    Promise.resolve(wrapper.saving || wrapper.id).then((saved_id) => {
       firestore()
         .collection("items")
         .doc(saved_id)
