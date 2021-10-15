@@ -14,8 +14,7 @@
   let canConfirm = (input: string) => input.length > 0;
   let onConfirm = (input = null) => {};
   let onCancel = () => {};
-  let background = ""; // can be "confirm" or "cancel", default (empty) is to block, or hide if no confirm/cancel buttons
-
+  let background = ""; // can be "confirm", "cancel", or "block"; default ("") is block OR hide if no confirm/cancel buttons
   let selected_images = []; // used internally for file input
   let ready_image_count = 0;
   let visible = false;
@@ -92,7 +91,37 @@
   }
 
   export function update(options) {
-    content = options.content;
+    ({
+      content,
+      confirm,
+      cancel,
+      input,
+      password,
+      username,
+      autocomplete,
+      images,
+      canConfirm,
+      onConfirm,
+      onCancel,
+      background,
+    } = Object.assign(
+      {
+        content,
+        confirm,
+        cancel,
+        input,
+        password,
+        username,
+        autocomplete,
+        images,
+        canConfirm,
+        onConfirm,
+        onCancel,
+        background,
+      },
+      options
+    ));
+    return Promise.resolve(_promise);
   }
 
   export function hide() {
@@ -129,7 +158,7 @@
     if (e && (e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
     e?.stopPropagation();
     e?.preventDefault();
-    if (!confirm && !cancel) hide();
+    if (!confirm && !cancel && background.toLowerCase() != "block") hide();
     else if (confirm && background.toLowerCase() == "confirm") _onConfirm(e);
     else if (cancel && background.toLowerCase() == "cancel") _onCancel(e);
     // else block
@@ -247,7 +276,10 @@
 
 {#if visible}
   <script>
-    setTimeout(() => document.querySelector("#modal-input")?.focus());
+    setTimeout(() => {
+      document.activeElement?.blur();
+      document.querySelector("#modal-input")?.focus();
+    });
   </script>
 {/if}
 
