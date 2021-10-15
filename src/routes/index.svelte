@@ -824,7 +824,7 @@
       this.invoke(() => console.warn(...args));
     }
     error(...args) {
-      this.invoke(() => console.warn(...args));
+      this.invoke(() => console.error(...args));
     }
 
     // delay = promise resolved after specified time
