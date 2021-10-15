@@ -248,6 +248,9 @@
     get dependents(): Array<string> {
       return item(this.id).dependents;
     }
+    get saved_id(): number {
+      return item(this.id).savedId;
+    }
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
       // return document.getElementById("item-" + this.id);
