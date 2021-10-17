@@ -3502,7 +3502,7 @@
   let initTime = 0; // set where initialize is invoked
   let processed = false;
   let initialized = false;
-  let maxRenderedAtInit = 100; // can be upto items.length;
+  let maxRenderedAtInit = 100;
   let adminItems = new Set(["QbtH06q6y6GY4ONPzq8N" /* welcome item */]);
   let hiddenItems = new Map();
   let hiddenItemsByName = new Map();
@@ -3639,7 +3639,7 @@
       0,
       unpinnedIndex /*initial chunk*/,
       10 /*chunk*/,
-      maxRenderedAtInit /*cutoff*/,
+      Math.min(maxRenderedAtInit, items.length) /*cutoff*/,
       100 /*delay*/
     ).then(() => {
       init_log(`initialized ${items.length} items`);
