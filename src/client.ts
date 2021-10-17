@@ -1,5 +1,9 @@
 import * as sapper from "@sapper/app";
 
+// set up window.Octokit for Github API
+import { Octokit } from "@octokit/rest";
+window["Octokit"] = Octokit;
+
 // // import firebase
 // // see https://www.npmjs.com/package/firebase
 // import firebase from "firebase/app";

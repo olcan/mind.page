@@ -1,3 +1,9 @@
+<!-- <script lang="ts" context="module">
+  // const { Octokit } = require("@octokit/rest");
+  import { Octokit } from "@octokit/rest";
+  if (typeof window !== "undefined") window["Octokit"] = Octokit;
+</script> -->
+
 <script lang="ts">
   import _ from "lodash";
   // import localForage from "localforage";
