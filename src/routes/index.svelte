@@ -302,7 +302,7 @@
     // e.g. item.local_store.hello = "hello world" // saved automatically
     get local_store(): object {
       let _item = item(this.id);
-      if (!_item.savedId) throw new Error("local_store is not available until item has been saved");
+      if (!_item?.savedId) throw new Error("local_store is not available until item has been saved");
       const key = "mindpage_item_store_" + _item.savedId;
       if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {};
       // dispatch save for synchronous changes
@@ -314,9 +314,9 @@
     // removes from localStorage if item or item.local_store is missing, or if object is empty
     save_local_store() {
       let _item = item(this.id);
-      if (!_item.savedId) throw new Error("save_local_store is not available until item has been saved");
+      if (!_item?.savedId) throw new Error("save_local_store is not available until item has been saved");
       const key = "mindpage_item_store_" + _item.savedId;
-      if (!_item || !_item.local_store || _.isEmpty(_item.local_store)) {
+      if (_.isEmpty(_item.local_store)) {
         localStorage.removeItem(key);
         return;
       }
@@ -328,10 +328,9 @@
     // e.g. item.global_store.hello = "hello world" // saved automatically
     // redirects to local_store._anonymous_global_store for anonymous user
     get global_store(): object {
-      if (anonymous)
-        return this.local_store["_anonymous_global_store"] || (this.local_store["_anonymous_global_store"] = {});
       let _item = item(this.id);
-      if (!_item.savedId) throw new Error("global_store is not available until item has been saved");
+      if (!_item?.savedId) throw new Error("global_store is not available until item has been saved");
+      if (anonymous) return this.local_store["_anonymous_global_store"] || {};
       const name = "global_store_" + _item.savedId;
       if (!_item.global_store) _item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {};
       // dispatch save for any synchronous changes
@@ -344,11 +343,15 @@
     // deletes from firebase if item or item.global_store is missing, or if object is empty
     // redirects to save_local_store() for anonymous user
     save_global_store() {
-      if (anonymous) return this.save_local_store();
       let _item = item(this.id);
-      if (!_item.savedId) throw new Error("save_global_store is not available until item has been saved");
+      if (!_item?.savedId) throw new Error("save_global_store is not available until item has been saved");
+      if (anonymous) {
+        if (_.isEmpty(_item.global_store)) delete this.local_store["_anonymous_global_store"]
+        else this.local_store["_anonymous_global_store"] = _item.global_store;
+        return;
+      }
       const name = "global_store_" + _item.savedId;
-      if (!_item || !_item.global_store || _.isEmpty(_item.global_store)) {
+      if (_.isEmpty(_item.global_store)) {
         deleteHiddenItem(hiddenItemsByName.get(name)?.id);
         return;
       }
