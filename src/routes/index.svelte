@@ -1,9 +1,3 @@
-<!-- <script lang="ts" context="module">
-  // const { Octokit } = require("@octokit/rest");
-  import { Octokit } from "@octokit/rest";
-  if (typeof window !== "undefined") window["Octokit"] = Octokit;
-</script> -->
-
 <script lang="ts">
   import _ from "lodash";
   // import localForage from "localforage";
@@ -332,7 +326,10 @@
     // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
     // dispatches call to save_global_store to auto-save any synchronous changes
     // e.g. item.global_store.hello = "hello world" // saved automatically
+    // redirects to local_store._anonymous_global_store for anonymous user
     get global_store(): object {
+      if (anonymous)
+        return this.local_store["_anonymous_global_store"] || (this.local_store["_anonymous_global_store"] = {});
       let _item = item(this.id);
       if (!_item.savedId) throw new Error("global_store is not available until item has been saved");
       const name = "global_store_" + _item.savedId;
@@ -345,7 +342,9 @@
     // saves item.global_store to firebase
     // skips saving if global_store is unchanged according to _.isEqual
     // deletes from firebase if item or item.global_store is missing, or if object is empty
+    // redirects to save_local_store() for anonymous user
     save_global_store() {
+      if (anonymous) return this.save_local_store();
       let _item = item(this.id);
       if (!_item.savedId) throw new Error("save_global_store is not available until item has been saved");
       const name = "global_store_" + _item.savedId;
@@ -3567,11 +3566,12 @@
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || [];
     if (signingOut) return; // encryption error
 
-    // filter "admin" items (e.g. welcome item) that should be hidden on readonly account
+    // filter "admin" items (e.g. welcome item) on readonly account
     if (readonly) items = items.filter((item) => !adminItems.has(item.id));
 
-    // filter "hidden" items on all accounts, used only for encrypted synced storage
+    // filter "hidden" items used for encrypted synced storage
     // also move into hiddenItems map for easy access later
+    // warn about hidden items on anonymous account
     items.forEach((item) => {
       if (item.hidden) {
         const wrapper = Object.assign(JSON.parse(item.text), { id: item.id });
@@ -3579,6 +3579,12 @@
         // mark duplicate as invalid
         if (hiddenItemsByName.has(wrapper.name)) {
           console.warn("found invalid hidden item under duplicate name", wrapper.name, wrapper.id, wrapper);
+          hiddenItemsInvalid.push(wrapper);
+          return;
+        }
+        // mark any hidden item as invalid on anonymous account
+        if (anonymous) {
+          console.warn("found invalid hidden item on anonymous account", wrapper.name, wrapper.id, wrapper);
           hiddenItemsInvalid.push(wrapper);
           return;
         }
@@ -4549,7 +4555,7 @@
   let onStorageFired = false;
   function getGlobalFocusIndex() {
     let index = parseInt(localStorage.getItem("mindpage_focus_index")) || 0;
-    if (!onStorageFired) {
+    if (!onStorageFired && !anonymous) {
       const focusItem = hiddenItemsByName.get("focus")?.item;
       if (focusItem?.index > index) return focusItem.index;
     }
@@ -4557,7 +4563,7 @@
   }
   function setGlobalFocusIndex(index) {
     localStorage.setItem("mindpage_focus_index", index.toString());
-    if (!onStorageFired) saveHiddenItem("focus", { index });
+    if (!onStorageFired && !anonymous) saveHiddenItem("focus", { index });
   }
 
   let lastBlurredElem;
@@ -4599,6 +4605,7 @@
 
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error("saveHiddenItem called before initialized");
+    if (anonymous) throw new Error("saveHiddenItem called on anonymous account");
     const wrapper = hiddenItemsByName.get(name);
     if (wrapper) {
       // replace existing hidden item
