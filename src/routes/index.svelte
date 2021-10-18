@@ -3579,6 +3579,10 @@
     // filter "hidden" items used for encrypted synced storage
     // also move into hiddenItems map for easy access later
     // warn about hidden items on anonymous account
+    const existing_ids = new Set<string>(); // ids for global_store cleanup
+    items.forEach((item) => {
+      if (!item.hidden) existing_ids.add(item.id);
+    });
     items.forEach((item) => {
       if (item.hidden) {
         const wrapper = Object.assign(JSON.parse(item.text), { id: item.id });
@@ -3589,11 +3593,25 @@
           hiddenItemsInvalid.push(wrapper);
           return;
         }
-        // mark any hidden item as invalid on anonymous account
+        // mark any hidden item on anonymous account as invalid
         if (anonymous) {
           console.warn("found invalid hidden item on anonymous account", wrapper.name, wrapper.id, wrapper);
           hiddenItemsInvalid.push(wrapper);
           return;
+        }
+        // mark any global_store_<id> hidden item associated with a missing/deleted <id> as invalid
+        if (wrapper.name.match(/^global_store_/)) {
+          const id = wrapper.name.replace(/^global_store_/, "");
+          if (!existing_ids.has(id)) {
+            console.warn(
+              "found invalid hidden global_store_* item associated with missing/deleted item",
+              wrapper.name,
+              wrapper.id,
+              wrapper
+            );
+            hiddenItemsInvalid.push(wrapper);
+            return;
+          }
         }
         hiddenItems.set(wrapper.id, wrapper);
         hiddenItemsByName.set(wrapper.name, wrapper);
@@ -4684,13 +4702,14 @@
     if (!id) return; // nothing to delete
     if (!initialized) throw new Error("deleteHiddenItem called before initialized");
     const wrapper = hiddenItems.get(id);
-    if (!wrapper) return; // nothing to delete
-    hiddenItems.delete(wrapper.id);
-    hiddenItemsByName.delete(wrapper.name);
+    if (wrapper) {
+      hiddenItems.delete(wrapper.id);
+      hiddenItemsByName.delete(wrapper.name);
+    }
     if (readonly) return; // no saving
     // console.debug("deleting hidden item", name);
     // NOTE: if item is saving, we need to wait for its persistent id before we can delete
-    Promise.resolve(wrapper.saving || wrapper.id).then((saved_id) => {
+    Promise.resolve(wrapper?.saving || id).then((saved_id) => {
       firestore()
         .collection("items")
         .doc(saved_id)
