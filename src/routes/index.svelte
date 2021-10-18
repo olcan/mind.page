@@ -4012,7 +4012,8 @@
                     if (savedItem.hidden) {
                       const wrapper = hiddenItems.get(doc.id);
                       if (!wrapper) {
-                        console.warn("remote-deleted hidden item missing locally", doc.id);
+                        // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
+                        // console.warn("remote-deleted hidden item missing locally", doc.id);
                         return;
                       }
                       hiddenItems.delete(wrapper.id);
