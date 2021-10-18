@@ -330,7 +330,11 @@
     get global_store(): object {
       let _item = item(this.id);
       if (!_item?.savedId) throw new Error("global_store is not available until item has been saved");
-      if (anonymous) return this.local_store["_anonymous_global_store"] || {};
+      if (anonymous) {
+        if (!_item.global_store) _item.global_store = this.local_store["_anonymous_global_store"] || {};
+        setTimeout(() => this.save_global_store());
+        return _item.global_store;
+      }
       const name = "global_store_" + _item.savedId;
       if (!_item.global_store) _item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {};
       // dispatch save for any synchronous changes
@@ -346,7 +350,7 @@
       let _item = item(this.id);
       if (!_item?.savedId) throw new Error("save_global_store is not available until item has been saved");
       if (anonymous) {
-        if (_.isEmpty(_item.global_store)) delete this.local_store["_anonymous_global_store"]
+        if (_.isEmpty(_item.global_store)) delete this.local_store["_anonymous_global_store"];
         else this.local_store["_anonymous_global_store"] = _item.global_store;
         return;
       }
