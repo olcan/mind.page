@@ -2735,8 +2735,18 @@
                   false /*editing*/,
                   attr
                 );
+                // wait for full dom update
                 await tick();
                 await update_dom();
+                // invoke _install(item.id) if defined
+                _modal_close(); // allow _install to display own modals
+                if (item.text.includes("_install")) {
+                  try {
+                    _item(item.id).eval(`if (typeof _install != 'undefined') _install('${item.id}')`, {
+                      trigger: "command",
+                    });
+                  } catch (e) {} // already logged, just continue
+                }
                 console.log(`installed ${path} (${item.name}) in ${Date.now() - start}ms`);
                 // alert("installed " + item.name);
                 // modal does not block background activity (e.g. save spinner, console, etc)
