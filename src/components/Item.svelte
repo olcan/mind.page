@@ -23,6 +23,7 @@
   export let saving = false;
   export let running = false;
   export let admin = false;
+  export let source = null;
   export let hidden = false;
   export let showLogs = false;
   export let selectionStart = 0;
@@ -151,6 +152,12 @@
     e.stopPropagation();
     e.preventDefault();
     editor.insertImages();
+  }
+
+  function onSourceClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    window.open(source);
   }
 
   function onDeleteClick(e) {
@@ -1323,6 +1330,7 @@
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
         {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
         {#if editable} <div class="button image" on:click={onImageClick}>+img</div> {/if}
+        {#if source} <div class="button source" on:click={onSourceClick}>↗︎source</div> {/if}
         <div class="button cancel" on:click={onCancelClick}>{editable ? "cancel" : "close"}</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
       </div>

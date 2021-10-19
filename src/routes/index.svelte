@@ -258,6 +258,13 @@
       item(this.id).editable = editable;
       items = items; // trigger svelte render
     }
+    get source(): string {
+      return item(this.id).source;
+    }
+    set source(source: string) {
+      item(this.id).source = source;
+      items = items; // trigger svelte render
+    }
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
       // return document.getElementById("item-" + this.id);
@@ -3537,6 +3544,7 @@
     item.editable = true;
     item.editing = false; // otherwise undefined till rendered/bound to svelte object
     item.matching = false;
+    item.source = null;
     item.target = false;
     item.target_context = false;
     item.tagMatches = 0;
@@ -4902,6 +4910,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
+                source={item.source}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
                 showLogs={item.showLogs}
                 height={item.height}
