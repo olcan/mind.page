@@ -124,7 +124,7 @@
   }
 
   // _modal_close closes modal manually
-  function _modal_close(options) {
+  function _modal_close() {
     return modal.hide();
   }
 
@@ -2684,6 +2684,7 @@
             if (!repo) repo = "mind.items";
             if (!branch) branch = "master";
             if (!owner) owner = "olcan";
+            if (!token) token = null; // no token, use unauthenticated client
             if (!path) {
               alert("usage: /_install path [repo branch owner token]");
               return;
@@ -2700,29 +2701,53 @@
             const github = token ? new Octokit({ auth: token }) : new Octokit();
             // console.log("/_install", path, repo, branch, owner, token);
             const start = Date.now();
-            github.repos
-              .getContent({ owner, repo, ref: branch, path })
-              .then(({ data }) => {
-                const text = atou(data.content);
+            (async () => {
+              try {
+                _modal({ content: `Installing ${path} ...`, background: "block" });
+                // retrieve text
+                const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
+                const text = decodeBase64(data.content);
+                // retrieve commit sha (allows comparison to later versions)
+                const {
+                  data: [{ sha }],
+                } = await github.repos.listCommits({
+                  owner,
+                  repo,
+                  sha: branch,
+                  path,
+                  per_page: 1,
+                });
                 const attr = {
-                  source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
-                  sha: github_sha(text),
+                  sha,
                   editable: false,
+                  source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
+                  path,
+                  repo,
+                  branch,
+                  owner,
+                  token /* to authenticate for updates */,
                 };
-                const item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
-                tick()
-                  .then(update_dom)
-                  .then(() => {
-                    console.log(`installed ${item.name} in ${Date.now() - start}ms`);
-                    // alert("installed " + item.name);
-                    // modal is preferred as it does not block background activity (e.g. save spinner, console, etc)
-                    _modal({ content: `Installed ${item.name}`, confirm: "OK", background: "confirm" });
-                  });
-              })
-              .catch((e) => {
+                const item = onEditorDone(
+                  text.trim(),
+                  null,
+                  false /*cancelled*/,
+                  false /*run*/,
+                  false /*editing*/,
+                  attr
+                );
+                await tick();
+                await update_dom();
+                console.log(`installed ${path} (${item.name}) in ${Date.now() - start}ms`);
+                // alert("installed " + item.name);
+                // modal does not block background activity (e.g. save spinner, console, etc)
+                // _modal_update({ content: `Installed ${path} (${item.name})`, confirm: "OK", background: "confirm" });
+              } catch (e) {
                 console.error("/_install failed: " + e);
                 alert("/_install failed: " + e);
-              });
+              } finally {
+                _modal_close();
+              }
+            })();
 
             lastEditorChangeTime = 0; // disable debounce even if editor focused
             onEditorChange("");
@@ -3572,8 +3597,7 @@
     renderTag,
     invalidateElemCache,
     checkElemCache,
-    atou,
-    github_sha,
+    decodeBase64,
   } from "../util.js";
 
   let consoleLog = [];

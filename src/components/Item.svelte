@@ -1330,7 +1330,7 @@
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
         {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
         {#if editable} <div class="button image" on:click={onImageClick}>+img</div> {/if}
-        {#if source} <div class="button source" on:click={onSourceClick}>↗︎source</div> {/if}
+        {#if source} <div class="button source" on:click={onSourceClick}>source</div> {/if}
         <div class="button cancel" on:click={onCancelClick}>{editable ? "cancel" : "close"}</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
       </div>
@@ -1452,6 +1452,16 @@
   .button:last-child {
     border-top-right-radius: 5px;
     border-bottom-right-radius: 5px;
+  }
+  /* external link icon for source button, from https://stackoverflow.com/a/52058198 */
+  .button.source::before {
+    content: "";
+    width: 20px;
+    height: 20px;
+    margin-right: 1px;
+    background: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2Ij48cGF0aCBkPSJNOSAyTDkgMyAxMi4zIDMgNiA5LjMgNi43IDEwIDEzIDMuNyAxMyA3IDE0IDcgMTQgMlpNNCA0QzIuOSA0IDIgNC45IDIgNkwyIDEyQzIgMTMuMSAyLjkgMTQgNCAxNEwxMCAxNEMxMS4xIDE0IDEyIDEzLjEgMTIgMTJMMTIgNyAxMSA4IDExIDEyQzExIDEyLjYgMTAuNiAxMyAxMCAxM0w0IDEzQzMuNCAxMyAzIDEyLjYgMyAxMkwzIDZDMyA1LjQgMy40IDUgNCA1TDggNSA5IDRaIi8+PC9zdmc+)
+      no-repeat;
+    background-size: contain;
   }
   .bordered .item-menu {
     top: 0;
