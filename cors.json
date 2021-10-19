@@ -2,7 +2,6 @@
   {
     "origin": ["*"],
     "method": ["GET"],
-    "responseHeader": ["If-Modified-Since"],
     "maxAgeSeconds": 3600
   }
 ]
