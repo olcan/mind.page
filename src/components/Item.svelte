@@ -17,6 +17,7 @@
 
   import { Circle, Circle2 } from "svelte-loading-spinners";
   import Editor from "./Editor.svelte";
+  export let editable = true;
   export let editing = false;
   export let focused = false;
   export let saving = false;
@@ -1309,6 +1310,7 @@
     class:admin
     class:showLogs
     class:bordered={error || warning || running || target}
+    class:editable
     class:runnable
     class:saveable
     class:scripted
@@ -1319,9 +1321,9 @@
     {#if editing}
       <div class="edit-menu">
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-        <div class="button save" on:click={onSaveClick}>save</div>
-        <div class="button image" on:click={onImageClick}>+img</div>
-        <div class="button cancel" on:click={onCancelClick}>cancel</div>
+        {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
+        {#if editable} <div class="button image" on:click={onImageClick}>+img</div> {/if}
+        <div class="button cancel" on:click={onCancelClick}>{editable ? "cancel" : "close"}</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
       </div>
 
@@ -1341,6 +1343,7 @@
         {onEscape}
         {onPastedImage}
         {onDone}
+        {editable}
       />
     {:else}
       <div class="item-menu">

@@ -2,6 +2,7 @@
   export let id_suffix = "editor";
   export let text = "";
   export let focused = false;
+  export let editable = true;
   export let lockCaret = false;
   export let showButtons = false;
   export let cancelOnDelete = false;
@@ -743,6 +744,7 @@
     on:blur={() => onFocused((focused = false))}
     autocapitalize="off"
     {spellcheck}
+    disabled={!editable}
     value={text}
   />
   {#if showButtons}

@@ -251,6 +251,13 @@
     get saved_id(): number {
       return item(this.id).savedId;
     }
+    get editable(): boolean {
+      return item(this.id).editable;
+    }
+    set editable(editable: boolean) {
+      item(this.id).editable = editable;
+      items = items; // trigger svelte render
+    }
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
       // return document.getElementById("item-" + this.id);
@@ -3527,6 +3534,7 @@
   // function to initialize new item state to serve as central listing
   function initItemState(item, index, state = {}) {
     // state used in onEditorChange
+    item.editable = true;
     item.editing = false; // otherwise undefined till rendered/bound to svelte object
     item.matching = false;
     item.target = false;
@@ -4890,6 +4898,7 @@
                 bind:text={item.text}
                 bind:editing={item.editing}
                 bind:focused={item.focused}
+                editable={item.editable}
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
