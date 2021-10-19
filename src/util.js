@@ -16,6 +16,41 @@ export function numberWithCommas(x) {
   return parts.join(".");
 }
 
+// unicode-base64 encoder/decoder
+// from https://stackoverflow.com/a/30106551
+export function utoa(str) {
+  // first we use encodeURIComponent to get percent-encoded UTF-8,
+  // then we convert the percent encodings into raw bytes which
+  // can be fed into btoa.
+  return btoa(
+    encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function toSolidBytes(match, p1) {
+      return String.fromCharCode("0x" + p1);
+    })
+  );
+}
+export function atou(str) {
+  // Going backwards: from bytestream, to percent-encoding, to original string
+  return decodeURIComponent(
+    atob(str)
+      .split("")
+      .map(function (c) {
+        return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+      })
+      .join("")
+  );
+}
+// computes github sha, see https://stackoverflow.com/a/39874235
+export function github_sha(text) {
+  const utf8_text = new TextEncoder().encode(text);
+  const utf8_prefix = new TextEncoder().encode(`blob ${utf8_text.length}\0`);
+  const utf8 = new Uint8Array(utf8_prefix.length + utf8_text.length);
+  utf8.set(utf8_prefix);
+  utf8.set(utf8_text, utf8_prefix.length);
+  // const sha_buffer = await crypto.subtle.digest('SHA-1', utf8)
+  const sha_buffer = sha1.arrayBuffer(utf8);
+  return Array.from(new Uint8Array(sha_buffer), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function blockRegExp(type_regex) {
   if ("".match(type_regex)) throw new Error("invalid block type regex");
   return new RegExp("(^|\\n) *```(" + type_regex + ")\\n(?: *```|.*?\\n *```)", "gs");

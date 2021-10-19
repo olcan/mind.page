@@ -206,6 +206,9 @@
     get time(): number {
       return item(this.id).time;
     }
+    get attr(): object {
+      return item(this.id).attr;
+    }
     get text(): string {
       return item(this.id).text;
     }
@@ -2419,12 +2422,15 @@
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
     // full removal in update (but not add/set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
     item.text = null; // null until decryption
+    item.attr = null; // null until decryption
     return item;
   }
   async function decryptItem(item) {
     if (item.text) return item; // already decrypted
     if (!item.cipher) return item; // nothing to decrypt
-    item.text = JSON.parse(await decrypt(item.cipher)).text;
+    const decrypted = JSON.parse(await decrypt(item.cipher));
+    item.text = decrypted.text;
+    item.attr = decrypted.attr;
     item.cipher = null; // null until encryption
     return item;
   }
@@ -2435,7 +2441,14 @@
   let tempIdFromSavedId = new Map<string, string>();
   let editorText = "";
   let editor;
-  function onEditorDone(text: string, e: any = null, cancelled: boolean = false, run: boolean = false, editing = null) {
+  function onEditorDone(
+    text: string,
+    e: any = null,
+    cancelled: boolean = false,
+    run: boolean = false,
+    editing = null,
+    attr = null
+  ) {
     editorText = text; // in case invoked without setting editorText
     const key = e?.code || e?.key;
     if (cancelled) {
@@ -2507,7 +2520,7 @@
       }
       case "/_times": {
         if (editingItems.length == 0) {
-          alert("/times: no item selected");
+          alert("/_times: no item selected");
           return;
         }
         let item = items[editingItems[0]];
@@ -2601,7 +2614,9 @@
           alert("/_undelete: nothing to undelete (in this session)");
           return;
         }
+        // NOTE: undelete command does NOT restore item id and associated history in firebase or github
         time = deletedItems[0].time;
+        attr = deletedItems[0].attr;
         text = deletedItems[0].text;
         deletedItems.shift();
         editing = false;
@@ -2627,6 +2642,7 @@
             .replace(/^\/\w+/, "")
             .replace(/([`\\$])/g, "\\$1")
             .trim();
+
           if (cmd == "/_zoom") {
             if (args) localStorage.setItem("mindpage_zoom", args);
             else localStorage.removeItem("mindpage_zoom");
@@ -2661,6 +2677,55 @@
                 alert(`retrieved ${examples.docs.length} example items`);
               })
               .catch(console.error);
+            return;
+          } else if (cmd == "/_install") {
+            // install item from specified github source
+            let [path, repo, branch, owner, token] = args.split(/\s+/);
+            if (!repo) repo = "mind.items";
+            if (!branch) branch = "master";
+            if (!owner) owner = "olcan";
+            if (!path) {
+              alert("usage: /_install path [repo branch owner token]");
+              return;
+            }
+            // check file extension in path
+            // default (and preferred) extension is .md for installable items
+            // .markdown is also supported but preferred more for sync/backup/export purposes
+            if (!path.includes(".")) path += ".md";
+            else if (!path.endsWith(".md") && !path.endsWith(".markdown")) {
+              alert(`/_install: invalid file extension in path '${path}'`);
+              return;
+            }
+            const Octokit = window["Octokit"];
+            const github = token ? new Octokit({ auth: token }) : new Octokit();
+            // console.log("/_install", path, repo, branch, owner, token);
+            const start = Date.now();
+            github.repos
+              .getContent({ owner, repo, ref: branch, path })
+              .then(({ data }) => {
+                const text = atou(data.content);
+                const attr = {
+                  source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
+                  sha: github_sha(text),
+                  editable: false,
+                };
+                const item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
+                tick()
+                  .then(update_dom)
+                  .then(() => {
+                    console.log(`installed ${item.name} in ${Date.now() - start}ms`);
+                    // alert("installed " + item.name);
+                    // modal is preferred as it does not block background activity (e.g. save spinner, console, etc)
+                    _modal({ content: `Installed ${item.name}`, confirm: "OK", background: "confirm" });
+                  });
+              })
+              .catch((e) => {
+                console.error("/_install failed: " + e);
+                alert("/_install failed: " + e);
+              });
+
+            lastEditorChangeTime = 0; // disable debounce even if editor focused
+            onEditorChange("");
             return;
           } else if (_item("#commands" + cmd)) {
             function handleError(e) {
@@ -2734,19 +2799,15 @@
       }
     }
 
-    let itemToSave = {
-      user: user.uid,
-      time: time,
-      text: text,
-    };
-    let item = initItemState({}, 0, {
-      ...itemToSave,
+    let itemToSave = { user: user.uid, time, attr, text };
+    let item = initItemState(_.clone(itemToSave), 0, {
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
-      savedId: null, // filled in below after save
-      savedTime: time,
-      savedText: "", // so cancel = delete
       editing: editing,
       saving: !editing,
+      savedId: null, // filled in below after save
+      savedTime: 0, // filled in onItemSaved
+      savedAttr: null, // filled in onItemSaved
+      savedText: "", // filled in onItemSaved (also implies cancel = delete)
     });
     items = [item, ...items];
 
@@ -2885,8 +2946,9 @@
       const index = indexFromId.get(id);
       if (index == undefined) return; // item was deleted
       let item = items[index];
-      item.savedText = savedItem.text;
       item.savedTime = savedItem.time;
+      item.savedAttr = savedItem.attr;
+      item.savedText = savedItem.text;
       item.saving = false;
       items[index] = item; // trigger dom update
       if (item.saveClosure) {
@@ -3046,6 +3108,7 @@
       // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
       // user: user.uid, // allows us to use set() instead of update()
       time: item.time,
+      attr: item.attr,
       text: item.text,
     };
 
@@ -3104,9 +3167,11 @@
     if (!item.log) item.time = Date.now();
 
     // if cancelled, restore savedText
-    // NOTE: we do not restore time so item remains "soft touched"
+    // we do not restore time so item remains "soft touched"
+    // we also do not restore attr
     if (cancelled) {
       // item.time = item.savedTime;
+      // item.attr = item.savedAttr;
       item.text = item.savedText;
     }
 
@@ -3147,6 +3212,7 @@
         onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
         deletedItems.unshift({
           time: item.savedTime,
+          attr: item.savedAttr,
           text: item.savedText,
         }); // for /undelete
         if (!readonly && item.savedId) {
@@ -3168,7 +3234,11 @@
         lastEditItem = item.id;
         // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
         if (e?.altKey && e?.metaKey) item.time = item.savedTime;
-        if (!cancelled && (item.time != item.savedTime || item.text != item.savedText)) saveItem(item.id);
+        if (
+          !cancelled &&
+          (item.time != item.savedTime || item.text != item.savedText || !_.isEqual(item.attr, item.savedAttr))
+        )
+          saveItem(item.id);
         onEditorChange(editorText); // item time and/or text may have changed
       }
 
@@ -3502,6 +3572,8 @@
     renderTag,
     invalidateElemCache,
     checkElemCache,
+    atou,
+    github_sha,
   } from "../util.js";
 
   let consoleLog = [];
@@ -3541,10 +3613,11 @@
   // function to initialize new item state to serve as central listing
   function initItemState(item, index, state = {}) {
     // state used in onEditorChange
-    item.editable = true;
+    if (!item.attr) item.attr = null; // default to null for older items missing attr
+    item.editable = item.attr?.editable ?? true;
+    item.source = item.attr?.source ?? null;
     item.editing = false; // otherwise undefined till rendered/bound to svelte object
     item.matching = false;
-    item.source = null;
     item.target = false;
     item.target_context = false;
     item.tagMatches = 0;
@@ -3642,8 +3715,9 @@
       initItemState(item, index);
       item.admin = adminItems.has(item.id);
       item.savedId = item.id;
-      item.savedText = item.text;
       item.savedTime = item.time;
+      item.savedAttr = item.attr;
+      item.savedText = item.text;
     });
     finalizeStateOnEditorChange = true; // make initial empty state final
     onEditorChange(""); // initial sorting
@@ -4026,6 +4100,7 @@
                       id: doc.id,
                       savedId: doc.id,
                       savedTime: savedItem.time,
+                      savedAttr: savedItem.attr,
                       savedText: savedItem.text,
                     });
                     items = [item, ...items];
@@ -4077,6 +4152,7 @@
                     onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
                     deletedItems.unshift({
                       time: item.savedTime,
+                      attr: item.savedAttr,
                       text: item.savedText,
                     }); // for /undelete
                   } else if (change.type == "modified") {
@@ -4100,8 +4176,9 @@
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
                     if (index === undefined) return; // nothing to modify
                     let item = items[index];
-                    item.text = item.savedText = savedItem.text;
                     item.time = item.savedTime = savedItem.time;
+                    item.attr = item.savedAttr = savedItem.attr;
+                    item.text = item.savedText = savedItem.text;
                     itemTextChanged(
                       index,
                       item.text,
@@ -4658,6 +4735,7 @@
       let itemToSave = {
         hidden: true,
         time: Date.now(),
+        attr: null, // we leave attr unused for now
         text: JSON.stringify(_.pick(wrapper, ["name", "item"])), // save only name/item
       };
       // NOTE: if existing item is saving, we need to wait for its persistent id before we can update
@@ -4685,6 +4763,7 @@
         hidden: true,
         user: user.uid, // required for add
         time: Date.now(),
+        attr: null, // we leave attr unused for now
         text: JSON.stringify(_.pick(wrapper, ["name", "item"])), // save only name/item
       };
       wrapper.saving = new Promise((resolve, reject) => {
