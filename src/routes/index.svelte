@@ -3358,7 +3358,7 @@
   function deleteItem(index): boolean {
     const item = items[index];
     // if item has saved text (not new item) and unique label, confirm deletion
-    if (item.savedText && item.labelUnique && !confirm(`Delete item ${item.name}?`)) {
+    if (item.savedText && item.labelUnique && !confirm(`Delete ${item.name}?`)) {
       item.text = item.savedText; // in case text was cleared to trigger deletion on onItemEditing
       return false;
     }
