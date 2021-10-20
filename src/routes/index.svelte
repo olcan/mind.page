@@ -2551,10 +2551,28 @@
         const max_updates_shown = 5;
         const Octokit = window["Octokit"];
         const github = attr.token ? new Octokit({ auth: attr.token }) : new Octokit();
-        github.repos
-          .listCommits({ ...attr, sha: attr.branch, per_page: 100 })
-          .then(({ data }) => {
+
+        (async () => {
+          try {
+            let { data } = await github.repos.listCommits({ ...attr, sha: attr.branch, per_page: 100 });
             const time_ago = itemTimeString(new Date(data[0].commit.author.date).getTime(), true) + " ago";
+            // _prepend_ any updates for any embeds so that they are treated as updates to container item
+            if (attr.embeds) {
+              for (let embed of attr.embeds) {
+                const resp = await github.repos.listCommits({
+                  ...attr,
+                  path: embed.path,
+                  sha: attr.branch,
+                  per_page: 100,
+                });
+                const index = resp.data.findIndex((commit) => commit.sha == embed.sha);
+                if (index >= 0) resp.data.length = index;
+                const embed_source = `https://github.com/${attr.owner}/${attr.repo}/blob/${attr.branch}/${embed.path}`;
+                for (let update of resp.data)
+                  update.commit.message = `[${embed.path}](${embed_source}) ` + update.commit.message.trim();
+                data = resp.data.concat(data);
+              }
+            }
             if (data[0].sha == attr.sha) {
               // no updates!
               _modal({
@@ -2573,8 +2591,12 @@
                 content:
                   `${update_count} available for [${attr.path}](${attr.source}):  \n` +
                   data
+                    .sort((a, b) => new Date(b.commit.author.date).getTime() - new Date(a.commit.author.date).getTime())
                     .slice(0, max_updates_shown)
-                    .map((update) => `- [${update.sha.slice(0, 7)}](${update.html_url}) ${update.commit.message}  \n`)
+                    .map(
+                      (update) =>
+                        `- [${update.sha.slice(0, 7)}](${update.html_url}) ${update.commit.message.trim()}  \n`
+                    )
                     .join("") +
                   (data.length > max_updates_shown ? `- ... +${data.length - max_updates_shown} more  \n` : "") +
                   "\n" +
@@ -2582,8 +2604,11 @@
                   `See [history](${history}) for all updates.`,
               });
             }
-          })
-          .catch(console.error);
+          } catch (e) {
+            console.error(e);
+          }
+        })();
+
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
         return;
@@ -2745,6 +2770,7 @@
             if (!repo) repo = "mind.items";
             if (!branch) branch = "master";
             if (!owner) owner = "olcan";
+            if (!token) token = localStorage.getItem("mindpage_github_token"); // try localStorage
             if (!token) token = null; // no token, use unauthenticated client
             if (!path) {
               alert("usage: /_install path [repo branch owner token]");
@@ -2764,10 +2790,22 @@
             const start = Date.now();
             (async () => {
               try {
+                // if no token, prompt for it, also mentioning rate limits
+                if (!token) {
+                  token = await _modal({
+                    content: `Please enter your GitHub [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Although you can leave this blank when installing items from public repos, using a token is strongly recommended due to strict rate limits enforced by GitHub for unauthenticated users.`,
+                    confirm: "Use Token",
+                    cancel: "Skip",
+                    input: "",
+                    password: false,
+                  });
+                  if (token) localStorage.setItem("mindpage_github_token", token);
+                  else token = null; // no token, use unauthenticated client
+                }
                 _modal({ content: `Installing ${path} ...`, background: "block" });
                 // retrieve text
                 const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
-                const text = decodeBase64(data.content);
+                let text = decodeBase64(data.content);
                 // retrieve commit sha (allows comparison to later versions)
                 const {
                   data: [{ sha }],
@@ -2787,15 +2825,64 @@
                   branch,
                   owner,
                   token /* to authenticate for updates */,
+                  embeds: null, // may be filled in below
                 };
-                const item = onEditorDone(
-                  text.trim(),
-                  null,
-                  false /*cancelled*/,
-                  false /*run*/,
-                  false /*editing*/,
-                  attr
-                );
+
+                // pre-process text before creating item
+                // this is fine since we use commit sha to detect changes
+                text = text.trim(); // trim any spaces (github likes to add an extra line to files)
+                // process colons in block types, used either for language prefix OR embed path suffix
+                let embeds = [];
+                text = text.replace(/```(\S+?):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
+                  // if there are 3+ parts (two colons), drop first part as optional language prefix
+                  // also drop any additional parts if there are 4+ parts (3+ colons)
+                  if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
+                  if (sfx.includes(".")) {
+                    // process & drop suffix as embed path
+                    embeds.push(sfx);
+                    return m; // leave in for body to be replaced in second pass below
+                  } else {
+                    // drop prefix as a language prefix
+                    return "```" + sfx + "\n" + body + "```";
+                  }
+                });
+                // fetch embed text and latest commit sha
+                let embed_text = {};
+                for (let path of _.uniq(embeds)) {
+                  try {
+                    const { data } = await github.repos.getContent({
+                      owner,
+                      repo,
+                      ref: branch,
+                      path,
+                    });
+                    embed_text[path] = decodeBase64(data.content);
+
+                    const {
+                      data: [{ sha }],
+                    } = await github.repos.listCommits({
+                      owner,
+                      repo,
+                      sha: branch,
+                      path,
+                      per_page: 1,
+                    });
+                    attr.embeds = (attr.embeds ?? []).concat({ path, sha });
+                  } catch (e) {
+                    throw new Error(`failed to embed '${path}'; error: ${e}`);
+                  }
+                }
+                // replace embed text in text
+                text = text.replace(/```(\S+?):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
+                  if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
+                  if (sfx.includes(".")) {
+                    body = embed_text[sfx].trim();
+                    return "```" + pfx + "\n" + body + "\n```";
+                  }
+                  return m;
+                });
+
+                const item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
                 // wait for full dom update
                 await tick();
                 await update_dom();
