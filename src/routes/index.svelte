@@ -329,15 +329,15 @@
 
     // saves item.local_store to localStorage
     // removes from localStorage if item or item.local_store is missing, or if object is empty
+    // saving changes to local_store triggers re-render in case rendering is affected
     save_local_store() {
       let _item = item(this.id);
       if (!_item?.savedId) throw new Error("save_local_store is not available until item has been saved");
       const key = "mindpage_item_store_" + _item.savedId;
-      if (_.isEmpty(_item.local_store)) {
-        localStorage.removeItem(key);
-        return;
-      }
-      localStorage.setItem(key, JSON.stringify(_item.local_store));
+      const modified = !_.isEqual(_item.local_store, JSON.parse(localStorage.getItem(key)) || {});
+      if (modified) this.invalidate_elem_cache(true /*force_render*/);
+      if (_.isEmpty(_item.local_store)) localStorage.removeItem(key);
+      else if (modified) localStorage.setItem(key, JSON.stringify(_item.local_store));
     }
 
     // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
@@ -360,8 +360,8 @@
     }
 
     // saves item.global_store to firebase
-    // skips saving if global_store is unchanged according to _.isEqual
     // deletes from firebase if item or item.global_store is missing, or if object is empty
+    // saving changes to global_store triggers re-render in case rendering is affected
     // redirects to save_local_store() for anonymous user
     save_global_store() {
       let _item = item(this.id);
@@ -372,12 +372,10 @@
         return;
       }
       const name = "global_store_" + _item.savedId;
-      if (_.isEmpty(_item.global_store)) {
-        deleteHiddenItem(hiddenItemsByName.get(name)?.id);
-        return;
-      }
-      if (!_.isEqual(_item.global_store, hiddenItemsByName.get(name)?.item))
-        saveHiddenItem(name, _.cloneDeep(_item.global_store));
+      const modified = !_.isEqual(_item.global_store, hiddenItemsByName.get(name)?.item || {});
+      if (modified) this.invalidate_elem_cache(true /*force_render*/);
+      if (_.isEmpty(_item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id);
+      else if (modified) saveHiddenItem(name, _.cloneDeep(_item.global_store));
     }
 
     // separate store used for debugging
