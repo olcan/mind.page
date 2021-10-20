@@ -519,8 +519,11 @@
       item(this.id).text = removeBlock(this.text, _.escapeRegExp(type));
     }
 
+    // deletes item
+    // may be subject to confirmation by user
+    // returns true if deleted, false if declined/cancelled
     delete() {
-      deleteItem(this.index);
+      return deleteItem(this.index);
     }
 
     write_log(options = {}) {
@@ -3342,12 +3345,12 @@
   const android = isAndroid();
   const ios = isIOS();
 
-  function deleteItem(index) {
+  function deleteItem(index): boolean {
     const item = items[index];
-    // if item has saved text, confirm deletion, restore if cancelled
-    if (item.savedText && !confirm(`Delete item ${item.name}?`)) {
-      item.text = item.savedText; // in case text was cleared
-      return;
+    // if item has saved text (not new item) and unique label, confirm deletion
+    if (item.savedText && item.labelUnique && !confirm(`Delete item ${item.name}?`)) {
+      item.text = item.savedText; // in case text was cleared to trigger deletion on onItemEditing
+      return false;
     }
     itemTextChanged(index, ""); // clears label, deps, etc
     items.splice(index, 1);
@@ -3365,6 +3368,7 @@
     if (!readonly && item.savedId) {
       firestore().collection("items").doc(item.savedId).delete().catch(console.error);
     }
+    return true;
   }
 
   function onItemEditing(
