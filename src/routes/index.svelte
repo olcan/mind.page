@@ -1804,6 +1804,8 @@
     // hideIndex = hideIndexMinimal;
     // if editor text is not modified, we can only show more items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex);
+    // if editor text is modified to be empty, we can only show less items
+    if (editorTextModified && !editorText) Math.min(hideIndex, prevHideIndex);
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal;
 
@@ -2523,9 +2525,62 @@
           alert("/_times: no item selected");
           return;
         }
-        let item = items[editingItems[0]];
+        const item = items[editingItems[0]];
         text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
+      }
+      case "/_updates": {
+        if (editingItems.length == 0) {
+          alert("/_updates: no item selected");
+          return;
+        }
+        const item = items[editingItems[0]];
+        if (!item.attr) {
+          alert(`/_updates: selected item ${item.name} was not installed via /_install command`);
+          return;
+        }
+        const attr = item.attr;
+        const history = attr.source.replace("/blob/", "/commits/");
+        const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`;
+        const max_updates_shown = 5;
+        const Octokit = window["Octokit"];
+        const github = attr.token ? new Octokit({ auth: attr.token }) : new Octokit();
+        github.repos
+          .listCommits({ ...attr, sha: attr.branch, per_page: 100 })
+          .then(({ data }) => {
+            const time_ago = itemTimeString(new Date(data[0].commit.author.date).getTime(), true) + " ago";
+            if (data[0].sha == attr.sha) {
+              // no updates!
+              _modal({
+                content:
+                  `No updates available for [${attr.path}](${attr.source}).  \n` +
+                  `[Last update](${installed_update}) (_installed_) was ${time_ago}.  \n` +
+                  `See [history](${history}) for past updates.`,
+              });
+            } else {
+              // there are updates!
+              const index = data.findIndex((commit) => commit.sha == attr.sha);
+              let update_count = index < 0 ? data.length + "+" : index;
+              update_count += update_count === 1 ? " update" : " updates";
+              if (index >= 0) data.length = index;
+              _modal({
+                content:
+                  `${update_count} available for [${attr.path}](${attr.source}):  \n` +
+                  data
+                    .slice(0, max_updates_shown)
+                    .map((update) => `- [${update.sha.slice(0, 7)}](${update.html_url}) ${update.commit.message}  \n`)
+                    .join("") +
+                  (data.length > max_updates_shown ? `- ... +${data.length - max_updates_shown} more  \n` : "") +
+                  "\n" +
+                  `Last [installed update](${installed_update}) was ${time_ago}.  \n` +
+                  `See [history](${history}) for all updates.`,
+              });
+            }
+          })
+          .catch(console.error);
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange("");
+        return;
       }
       case "/_dependencies": {
         if (editingItems.length == 0) {
@@ -2738,11 +2793,11 @@
                 // wait for full dom update
                 await tick();
                 await update_dom();
-                // invoke _install(item.id) if defined
+                // invoke _install(item) if defined
                 _modal_close(); // allow _install to display own modals
                 if (item.text.includes("_install")) {
                   try {
-                    _item(item.id).eval(`if (typeof _install != 'undefined') _install('${item.id}')`, {
+                    _item(item.id).eval(`if (typeof _install != 'undefined') _install(_item('${item.id}'))`, {
                       trigger: "command",
                     });
                   } catch (e) {} // already logged, just continue

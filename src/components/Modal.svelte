@@ -403,4 +403,11 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
+  :global(.modal > ul, .modal > ol) {
+    padding-left: 35px;
+    padding-bottom: 5px;
+  }
+  :global(.modal ul ul, .modal ol ol) {
+    padding-left: 20px;
+  }
 </style>
