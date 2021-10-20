@@ -2136,7 +2136,9 @@
     item.tagsHiddenAlt = _.uniq(_.flattenDeep(item.tagsHidden.concat(item.tagsHidden.map(altTags))));
     item.log = item.tagsRaw.includes("#_log"); // can also be visible label #log, see below
     item.context = item.tagsRaw.includes("#_context");
+    const prev_init = item.init; // for possible warning below
     item.init = item.tagsRaw.includes("#_init");
+    const prev_welcome = item.welcome; // for possible warning below
     item.welcome = item.tagsRaw.includes("#_welcome");
     item.listen = item.tagsRaw.includes("#_listen");
     item.async = item.tagsRaw.includes("#_async");
@@ -2202,13 +2204,21 @@
       let pos;
       while ((pos = label.lastIndexOf("/")) >= 0) item.labelPrefixes.push((label = label.slice(0, pos)));
     }
-    // name is always unique and either unique label or id:<id>
-    item.name = item.labelUnique ? item.labelText : "id:" + item.id;
 
     // #log label designates log items and is never considered unique
     if (item.label == "#log") {
       item.log = true;
       item.labelUnique = false;
+    }
+
+    // name is always unique and either unique label or id:<id>
+    item.name = item.labelUnique ? item.labelText : "id:" + item.id;
+
+    // warn about new _init or _welcome items
+    // skip if not updating deps (implies invoked from initialize(), i.e. not new/modified item)
+    if (update_deps) {
+      if (!prev_init && item.init) console.warn(`new _init item ${item.name} may require reload`);
+      if (!prev_welcome && item.welcome) console.warn(`new _welcome item ${item.name} may require reload`);
     }
 
     // compute expanded tags including prefixes
@@ -3913,7 +3923,7 @@
     indexFromId = new Map<string, number>(); // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index));
     items.forEach((item, index) => {
-      itemTextChanged(index, item.text, false); // deps handled below after index assignment
+      itemTextChanged(index, item.text, false /*update_deps*/); // deps handled below after index assignment
       initItemState(item, index);
       item.admin = adminItems.has(item.id);
       item.savedId = item.id;
