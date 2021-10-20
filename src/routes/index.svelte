@@ -2839,8 +2839,11 @@
                   if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
                   if (sfx.includes(".")) {
                     // process & drop suffix as embed path
-                    embeds.push(sfx);
-                    return m; // leave in for body to be replaced in second pass below
+                    let path = sfx; // may be relative to container item path (attr.path)
+                    if (!path.startsWith("/") && attr.path.includes("/", 1))
+                      path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
+                    embeds.push(path);
+                    return m; // leave in to replace body w/ embed text in second pass below
                   } else {
                     // drop prefix as a language prefix
                     return "```" + sfx + "\n" + body + "```";
@@ -2872,11 +2875,14 @@
                     throw new Error(`failed to embed '${path}'; error: ${e}`);
                   }
                 }
-                // replace embed text in text
+                // replace embed text
                 text = text.replace(/```(\S+?):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
                   if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
                   if (sfx.includes(".")) {
-                    body = embed_text[sfx].trim();
+                    let path = sfx; // may be relative to container item path (attr.path)
+                    if (!path.startsWith("/") && attr.path.includes("/", 1))
+                      path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
+                    body = embed_text[path].trim();
                     return "```" + pfx + "\n" + body + "\n```";
                   }
                   return m;
