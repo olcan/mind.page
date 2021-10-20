@@ -4301,7 +4301,7 @@
                       if (hiddenItemsByName.has(wrapper.name))
                         console.warn("remote-added hidden item name exists locally", wrapper.name);
                       hiddenItemsByName.set(wrapper.name, wrapper);
-                      hiddenItemsChangedRemotely();
+                      hiddenItemChangedRemotely(wrapper.name, change.type);
                       return;
                     }
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
@@ -4337,7 +4337,7 @@
                       }
                       hiddenItems.delete(wrapper.id);
                       hiddenItemsByName.delete(wrapper.name);
-                      hiddenItemsChangedRemotely();
+                      hiddenItemChangedRemotely(wrapper.name, change.type);
                       return;
                     }
                     // NOTE: remote remove is similar to deleteItem
@@ -4378,7 +4378,7 @@
                         );
                       hiddenItems.set(wrapper.id, wrapper);
                       hiddenItemsByName.set(wrapper.name, wrapper);
-                      hiddenItemsChangedRemotely();
+                      hiddenItemChangedRemotely(wrapper.name, change.type);
                       return;
                     }
                     // NOTE: remote modify is similar to _write without saving
@@ -5026,8 +5026,26 @@
     });
   }
 
-  function hiddenItemsChangedRemotely() {
-    checkFocus(); // check window focus since it may depend on "focus" hidden item
+  function hiddenItemChangedRemotely(name, change_type) {
+    // check window focus if "focus" hidden item is changed (added, modified, or removed)
+    if (name == "focus") {
+      checkFocus();
+      return;
+    }
+
+    // re-render local item for which global_store_<id> is changed remotely
+    if (name.match(/^global_store_/)) {
+      const id = name.replace(/^global_store_/, "");
+      // warn if <id> (always saved_id for global_store) is missing locally
+      // note since item is remote it can not be under temp id locally
+      // also note an item must exist before its global_store does
+      if (!_exists(id)) {
+        console.warn(`missing local item for remote-${change_type} hidden item ${name}`);
+        return;
+      }
+      _item(id).invalidate_elem_cache(true /*force_render*/);
+      return;
+    }
   }
 
   function onTouchStart(e) {
