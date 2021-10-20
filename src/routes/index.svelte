@@ -588,11 +588,11 @@
 
         const expr_returnable = (expr) =>
           // check for reserved keywords, see https://www.w3schools.com/js/js_reserved.asp
-          // NOTE: we include ALL reserved words except await|typeof which are obviously sensible
+          // NOTE: we include ALL reserved words except true|false|null|undefined|new|this|await|typeof which are obviously sensible
           // NOTE: some of these keywords passed the variable name test ("let X = 0"), but we include them anyway; these were: (abstract|await|boolean|byte|char|double|final|float|goto|int|long|native|short|synchronized|throws|transient|volatile)
           // NOTE: any variable can still be returned by wrapping in parentheses, e.g. (goto)
           !expr.match(
-            /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|false|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|new|null|package|private|protected|public|return|short|static|super|switch|synchronized|this|throw|throws|transient|true|try|var|void|volatile|while|with|yield)(?:\W|$))/
+            /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|package|private|protected|public|return|short|static|super|switch|synchronized|throw|throws|transient|try|var|void|volatile|while|with|yield)(?:\W|$))/
           );
 
         // do not insert return if js ends with a semicolon
