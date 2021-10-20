@@ -510,11 +510,17 @@
     }
 
     clear(type: string) {
+      if (!type) throw new Error("clear(type) requires block type");
       item(this.id).text = clearBlock(this.text, _.escapeRegExp(type));
     }
 
     remove(type: string) {
+      if (!type) throw new Error("remove(type) requires block type");
       item(this.id).text = removeBlock(this.text, _.escapeRegExp(type));
+    }
+
+    delete() {
+      deleteItem(this.index);
     }
 
     write_log(options = {}) {
@@ -2897,7 +2903,7 @@
       savedId: null, // filled in below after save
       savedTime: 0, // filled in onItemSaved
       savedAttr: null, // filled in onItemSaved
-      savedText: "", // filled in onItemSaved (also implies cancel = delete)
+      savedText: "", // filled in onItemSaved (also means delete on cancell, no confirm on delete)
     });
     items = [item, ...items];
 
@@ -3243,6 +3249,31 @@
   const android = isAndroid();
   const ios = isIOS();
 
+  function deleteItem(index) {
+    const item = items[index];
+    // if item has saved text, confirm deletion, restore if cancelled
+    if (item.savedText && !confirm(`Delete item ${item.name}?`)) {
+      item.text = item.savedText; // in case text was cleared
+      return;
+    }
+    itemTextChanged(index, ""); // clears label, deps, etc
+    items.splice(index, 1);
+    if (index < hideIndex) hideIndex--; // back up hide index
+    // update indices as needed by onEditorChange
+    indexFromId = new Map<string, number>();
+    items.forEach((item, index) => indexFromId.set(item.id, index));
+    lastEditorChangeTime = 0; // disable debounce even if editor focused
+    onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
+    deletedItems.unshift({
+      time: item.savedTime,
+      attr: item.savedAttr,
+      text: item.savedText,
+    }); // for /undelete
+    if (!readonly && item.savedId) {
+      firestore().collection("items").doc(item.savedId).delete().catch(console.error);
+    }
+  }
+
   function onItemEditing(
     index: number,
     editing: boolean,
@@ -3292,22 +3323,7 @@
       }
       if (item.text.trim().length == 0) {
         // delete
-        itemTextChanged(index, ""); // clears label, deps, etc
-        items.splice(index, 1);
-        if (index < hideIndex) hideIndex--; // back up hide index
-        // update indices as needed by onEditorChange
-        indexFromId = new Map<string, number>();
-        items.forEach((item, index) => indexFromId.set(item.id, index));
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange(editorText); // deletion can affect ordering (e.g. due to missingTags)
-        deletedItems.unshift({
-          time: item.savedTime,
-          attr: item.savedAttr,
-          text: item.savedText,
-        }); // for /undelete
-        if (!readonly && item.savedId) {
-          firestore().collection("items").doc(item.savedId).delete().catch(console.error);
-        }
+        deleteItem(index);
       } else {
         itemTextChanged(index, item.text);
         // clear _output and execute javascript unless cancelled
@@ -4219,7 +4235,7 @@
                       hiddenItemsChangedRemotely();
                       return;
                     }
-                    // NOTE: remote remove is similar to onItemEditing (deletion case)
+                    // NOTE: remote remove is similar to deleteItem
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id);
                     if (index === undefined) return; // nothing to remove
