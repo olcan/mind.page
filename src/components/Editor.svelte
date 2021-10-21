@@ -31,7 +31,7 @@
   let spellcheck = false;
   // enable spellcheck iff item contains no blocks (```) and no #_nospell or contains #_spell
   $: spellcheck =
-    (!text.match(/(?:^|\n)\s*```\w*(?:$|\n)/) /* no blocks */ && !text.match(/(?:^|\s|\()#_nospell\b/)) ||
+    (!text.match(/(?:^|\n)\s*```\S*(?:$|\n)/) /* no blocks */ && !text.match(/(?:^|\s|\()#_nospell\b/)) ||
     !!text.match(/(?:^|\s|\()#_spell\b/);
 
   let editor: HTMLDivElement;
@@ -197,9 +197,11 @@
     let html = "";
     const tags = parseTags(_.unescape(text)).raw;
     text.split("\n").map((line) => {
-      if (!insideBlock && line.match(/^\s*```(\w*)$/)) {
+      if (!insideBlock && line.match(/^\s*```(\S*)$/)) {
         insideBlock = true;
-        language = line.match(/^\s*```(\w*)(?:_removed|_hidden|_tmp)?$/)[1];
+        language = line.match(/^\s*```(\S*)(?:_removed|_hidden|_tmp)?$/)[1];
+        // if language spec contains colon separators, take last part without a period in it
+        if (language.includes(":")) language = _.findLast(language.split(":"), (s) => !s.includes(".")) ?? "";
         code = "";
         html += '<span class="block-delimiter">';
         html += _.escape(line);
