@@ -2556,6 +2556,23 @@
         text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
       }
+      case "/_develop": {
+        if (editingItems.length == 0) {
+          alert("/_develop: no item selected");
+          return;
+        }
+        const item = items[editingItems[0]];
+        if (!item.attr) {
+          alert(`/_develop: selected item ${item.name} was not installed via /_install command`);
+          return;
+        }
+        // make installed item (persistently) editable
+        item.editable = item.attr.editable = true;
+        saveItem(item.id);
+        lastEditorChangeTime = 0; // disable debounce even if editor focused
+        onEditorChange("");
+        return;
+      }
       case "/_updates": {
         if (editingItems.length == 0) {
           alert("/_updates: no item selected");
