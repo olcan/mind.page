@@ -5015,7 +5015,7 @@
               .doc(saved_id)
               .update(itemToSave)
               // .then(() => {
-              //   console.debug("updated hidden item", name, JSON.stringify(item));
+              //   console.debug("updated hidden item", name, item);
               // })
               .catch(console.error);
           })
@@ -5101,7 +5101,8 @@
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`);
         return;
       }
-      item(id)._global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item); // sync _global_store on item
+      // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);
+      item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item); // sync global_store on item
       _item(id).invalidate_elem_cache(true /*force_render*/);
       return;
     }
