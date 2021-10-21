@@ -2915,6 +2915,7 @@
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
                       path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
                     // store original body in attr.embeds to allow item to be edited and pushed back
+                    // note if same path is embedded multiple times, only the last body is retained
                     attr.embeds.find((e) => e.path == path).body = body;
                     return "```" + pfx + ":" + sfx + "\n" + embed_text[path].trim() + "\n```";
                   }
