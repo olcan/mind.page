@@ -648,7 +648,6 @@
           evaljs = [prefix, evaljs].join(";\n").trim();
         }
 
-        // no (re-)wrapping debug items
         if (async) {
           // async wrapper
           if (options["async_simple"]) {
@@ -1463,7 +1462,7 @@
           if (!item.text.includes("_on_change")) return;
           try {
             _item(item.id).eval(
-              `if (typeof _on_change != 'undefined') _on_change(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+              `if (typeof _on_change == 'function') _on_change(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
               { trigger: "listen" }
             );
           } catch (e) {} // already logged, just continue
@@ -1890,7 +1889,7 @@
         if (!item.text.includes("_on_search")) return;
         try {
           _item(item.id).eval(
-            `if (typeof _on_search != 'undefined') _on_search(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+            `if (typeof _on_search == 'function') _on_search(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
             { trigger: "listen" }
           );
         } catch (e) {} // already logged, just continue
@@ -2270,7 +2269,7 @@
             if (!item.text.includes("_on_item_change")) return;
             try {
               _item(item.id).eval(
-                `if (typeof _on_item_change != 'undefined') _on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
+                `if (typeof _on_item_change == 'function') _on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
                 {
                   trigger: "listen",
                 }
@@ -2462,6 +2461,42 @@
     item.attr = decrypted.attr;
     item.cipher = null; // null until encryption
     return item;
+  }
+
+  function handleCommandReturn(cmd, item, obj, handleError) {
+    if (typeof obj == "string") {
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange(obj);
+      setTimeout(() => textArea(-1).focus()); // refocus (may require dispatch)
+    } else if (!obj) {
+      // NOTE: we take any falsy return as default behavior, but docs only specify returning nothing/unknown, allowing us to reserve other falsy values for future internal use (e.g. null to indicate non-handling)
+      lastEditorChangeTime = 0; // disable debounce even if editor focused
+      onEditorChange("");
+      setTimeout(() => textArea(-1).blur()); // defocus, requires dispatch on chrome
+    } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
+      alert(`invalid return for command ${cmd} handled in item ${item.name}`);
+    } else {
+      const text = obj.text;
+      // since we are async, we need to call onEditorDone again with run/editing set properly
+      // obj.{edit,run} can override defaults editing=true and run=false
+      let editing = true;
+      let run = false;
+      if (obj.edit == true) editing = true;
+      else if (obj.edit == false) editing = false;
+      if (obj.run == true) run = true;
+      else if (obj.run == false) run = false;
+      // reset focus for generated text
+      let textarea = textArea(-1);
+      textarea.selectionStart = textarea.selectionEnd = 0;
+      let item = onEditorDone(text, null, false, run, editing);
+      // run programmatic initializer function if any
+      try {
+        if (obj.init) Promise.resolve(obj.init(item)).catch(handleError);
+      } catch (e) {
+        handleError(e);
+        throw e;
+      }
+    }
   }
 
   let sessionCounter = 0; // to ensure unique increasing temporary ids for this session
@@ -2910,7 +2945,7 @@
                 }
                 // replace embed block body with embed contents
                 text = text.replace(/```(\S+):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
-                  if (sfx.includes(".")) {                    
+                  if (sfx.includes(".")) {
                     let path = sfx; // may be relative to container item path (attr.path)
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
                       path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
@@ -2930,7 +2965,7 @@
                 _modal_close(); // allow _install to display own modals
                 if (item.text.includes("_install")) {
                   try {
-                    _item(item.id).eval(`if (typeof _install != 'undefined') _install(_item('${item.id}'))`, {
+                    _item(item.id).eval(`if (typeof _install == 'function') _install(_item('${item.id}'))`, {
                       trigger: "command",
                     });
                   } catch (e) {} // already logged, just continue
@@ -2950,58 +2985,23 @@
             lastEditorChangeTime = 0; // disable debounce even if editor focused
             onEditorChange("");
             return;
-          } else if (_item("#commands" + cmd)) {
+          } else if (_exists("#commands" + cmd)) {
             function handleError(e) {
               const log = _item("#commands" + cmd).get_log({ since: "eval", level: "error" });
               let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
               alert(msg);
             }
             try {
-              // NOTE: if command item is async (or has async dependents), we specify async:true for eval so that it provides (given "command" trigger) a light-weight async wrapper that does not output/log into the item
               let cmd_item = items[_item("#commands" + cmd).index];
-              const async = cmd_item.deepasync;
               Promise.resolve(
-                _item("#commands" + cmd).eval((async ? "return " : "") + `run(\`${args}\`)`, {
+                _item("#commands" + cmd).eval(`run(\`${args}\`)`, {
                   trigger: "command",
-                  async_simple: true, // use simple wrapper if async
-                  async, // enables async command wrapper
+                  async: cmd_item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                 })
               )
                 .then((obj) => {
-                  if (typeof obj == "string") {
-                    lastEditorChangeTime = 0; // disable debounce even if editor focused
-                    onEditorChange(obj);
-                    setTimeout(() => textArea(-1).focus()); // refocus (may require dispatch)
-                  } else if (!obj) {
-                    lastEditorChangeTime = 0; // disable debounce even if editor focused
-                    onEditorChange("");
-                    setTimeout(() => textArea(-1).blur()); // defocus, requires dispatch on chrome
-                  } else if (typeof obj != "object" || !obj.text || typeof obj.text != "string") {
-                    alert(
-                      `#commands${cmd}: run(\`${args}\`) returned invalid value; must be of the form {text:"...", edit:true|false, run:true|false}`
-                    );
-                  } else {
-                    text = obj.text;
-                    // since we are async, we need to call onEditorDone again with run/editing set properly
-                    // obj.{edit,run} can override defaults editing=true and run=false
-                    // let editing = true;
-                    // let run = false;
-                    if (obj.edit == true) editing = true;
-                    else if (obj.edit == false) editing = false;
-                    if (obj.run == true) run = true;
-                    else if (obj.run == false) run = false;
-                    // reset focus for generated text
-                    let textarea = textArea(-1);
-                    textarea.selectionStart = textarea.selectionEnd = 0;
-                    let item = onEditorDone(text, null, false, run, editing);
-                    // run programmatic initializer function if any
-                    try {
-                      if (obj.init) Promise.resolve(obj.init(item)).catch(handleError);
-                    } catch (e) {
-                      handleError(e);
-                      throw e;
-                    }
-                  }
+                  handleCommandReturn(cmd, cmd_item, obj, handleError);
                 })
                 .catch(handleError);
             } catch (e) {
@@ -3010,7 +3010,36 @@
             }
             return;
           } else {
-            alert(`unknown command ${cmd}`);
+            // as last effort, invoke on first listener that handles _on_command_<name>
+            let found_listener = false;
+            for (let item of items) {
+              if (!item.listen) continue;
+              const name = cmd.substring(1);
+              if (!item.text.includes("_on_command_" + name)) continue;
+              found_listener = true;
+              function handleError(e) {
+                const log = _item(item.id).get_log({ since: "eval", level: "error" });
+                let msg = [`${item.name} _on_command_${name}(\`${args}\`) failed: `, ...log, e].join("\n");
+                alert(msg);
+              }
+              const ret = _item(item.id).eval(
+                `(typeof _on_command_${name} == 'function' ? _on_command_${name}(\`${args}\`) : null)`,
+                {
+                  trigger: "listen",
+                  async: item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                }
+              );
+              if (ret === null) continue; // did not handle command
+              Promise.resolve(ret)
+                .then((obj) => {
+                  handleCommandReturn(cmd, item, obj, handleError);
+                })
+                .catch(handleError);
+              found_listener = true;
+              break; // stop on first listener handling command
+            }
+            if (!found_listener) alert(`unknown command ${cmd}`);
             return;
           }
         } else if (text.match(/^\/\s+/s)) {
@@ -3111,7 +3140,7 @@
         if (!item.text.includes("_on_create")) return;
         try {
           _item(item.id).eval(
-            `if (typeof _on_create != 'undefined') _on_create(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
+            `if (typeof _on_create == 'function') _on_create(\`${editorText.replace(/([`\\$])/g, "\\$1")}\`)`,
             {
               trigger: "listen",
             }
@@ -3820,7 +3849,7 @@
     items.forEach((item) => {
       if (!item.init) return;
       try {
-        _item(item.id).eval("_init()", {
+        _item(item.id).eval("if (typeof _init == 'function') _init()", {
           // if item has js_init block, use that, otherwise use js block without dependencies
           type: extractBlock(item.text, "js_init") ? "js_init" : "js",
           include_deps: false,
@@ -4604,7 +4633,7 @@
             items.forEach((item) => {
               if (!item.welcome) return;
               try {
-                _item(item.id).eval("_on_welcome()", { trigger: "welcome" });
+                _item(item.id).eval("if (typeof _on_welcome == 'function') _on_welcome()", { trigger: "welcome" });
               } catch (e) {} // already logged, just continue welcome eval
             });
           });
