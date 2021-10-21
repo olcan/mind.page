@@ -319,7 +319,8 @@
     // e.g. item.local_store.hello = "hello world" // saved automatically
     get local_store(): object {
       let _item = item(this.id);
-      if (!_item?.savedId) throw new Error("local_store is not available until item has been saved");
+      // until item is saved, we can only initialize and return in-memory store
+      if (!_item.savedId) return _item.local_store || (_item.local_store = {});
       const key = "mindpage_item_store_" + _item.savedId;
       if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {};
       // dispatch save for synchronous changes
@@ -332,7 +333,11 @@
     // saving changes to local_store triggers re-render in case rendering is affected
     save_local_store() {
       let _item = item(this.id);
-      if (!_item?.savedId) throw new Error("save_local_store is not available until item has been saved");
+      // retry every second until item is saved
+      if (!_item.savedId) {
+        setTimeout(() => this.save_local_store(), 1000);
+        return;
+      }
       const key = "mindpage_item_store_" + _item.savedId;
       const modified = !_.isEqual(_item.local_store, JSON.parse(localStorage.getItem(key)) || {});
       if (modified) this.invalidate_elem_cache(true /*force_render*/);
@@ -346,7 +351,8 @@
     // redirects to local_store._anonymous_global_store for anonymous user
     get global_store(): object {
       let _item = item(this.id);
-      if (!_item?.savedId) throw new Error("global_store is not available until item has been saved");
+      // until item is saved, we can only initialize and return in-memory store
+      if (!_item.savedId) return _item.global_store || (_item.global_store = {});
       if (anonymous) {
         if (!_item.global_store) _item.global_store = this.local_store["_anonymous_global_store"] || {};
         setTimeout(() => this.save_global_store());
@@ -365,7 +371,11 @@
     // redirects to save_local_store() for anonymous user
     save_global_store() {
       let _item = item(this.id);
-      if (!_item?.savedId) throw new Error("save_global_store is not available until item has been saved");
+      // retry every second until item is saved
+      if (!_item.savedId) {
+        setTimeout(() => this.save_global_store(), 1000);
+        return;
+      }
       if (anonymous) {
         if (_.isEmpty(_item.global_store)) delete this.local_store["_anonymous_global_store"];
         else this.local_store["_anonymous_global_store"] = _item.global_store;
