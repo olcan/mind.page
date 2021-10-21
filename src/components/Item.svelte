@@ -252,6 +252,12 @@
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
     //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
+    // pre-process block types to allow colon-separated parts, taking only last part without a period
+    text = text.replace(/```(\S+)\n(.*?)```/gs, (m, type, body) => {
+      if (type.includes(":")) type = _.findLast(type.split(":"), (s) => !s.includes(".")) ?? "";
+      return "```" + type + "\n" + body + "```";
+    });
+
     // unwrap _markdown(_*) and _md(_*) blocks
     text = text.replace(/(^|\n)```(?:_markdown|_md)_?.*?\n(.*?)\n\s*```/gs, "$1$2");
 

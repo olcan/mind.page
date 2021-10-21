@@ -200,7 +200,7 @@
       if (!insideBlock && line.match(/^\s*```(\S*)$/)) {
         insideBlock = true;
         language = line.match(/^\s*```(\S*)(?:_removed|_hidden|_tmp)?$/)[1];
-        // if language spec contains colon separators, take last part without a period in it
+        // if language spec contains colon separators, take last part without a period
         if (language.includes(":")) language = _.findLast(language.split(":"), (s) => !s.includes(".")) ?? "";
         code = "";
         html += '<span class="block-delimiter">';

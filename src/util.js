@@ -35,9 +35,9 @@ export function blockRegExp(type_regex) {
 }
 
 export function extractBlock(text, type) {
-  // NOTE: this logic is consistent with onInput() in Editor.svelte
+  // NOTE: this regex is mostly consistent w/ that in updateTextDivs in Editor.svelte or toHTML in Item.svelte, and in particular allows a colon-separated prefix and suffix, w/ the suffix required to contain a period; only notable difference is that the type is allowed to match the colon-separated suffix if it matches exactly
   let insideBlock = false;
-  let regex = RegExp("^\\s*```" + type + "(?:_hidden|_removed)?(?:\\s|$)");
+  let regex = RegExp("^\\s*```(?:\\S+:)?" + type + "(?:_hidden|_removed)?(?::\\S*\\.\\S*)?(?:\\s|$)");
   return text
     .split("\n")
     .map((line) => {
