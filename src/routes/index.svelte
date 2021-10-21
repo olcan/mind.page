@@ -2908,14 +2908,15 @@
                     throw new Error(`failed to embed '${path}'; error: ${e}`);
                   }
                 }
-                // insert embed text
+                // replace embed block body with embed contents
                 text = text.replace(/```(\S+):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
-                  if (sfx.includes(".")) {
+                  if (sfx.includes(".")) {                    
                     let path = sfx; // may be relative to container item path (attr.path)
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
                       path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
-                    body = embed_text[path].trim();
-                    return "```" + pfx + ":" + sfx + "\n" + body + "\n```";
+                    // store original body in attr.embeds to allow item to be edited and pushed back
+                    attr.embeds.find((e) => e.path == path).body = body;
+                    return "```" + pfx + ":" + sfx + "\n" + embed_text[path].trim() + "\n```";
                   }
                   return m;
                 });
