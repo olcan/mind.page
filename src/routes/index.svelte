@@ -320,7 +320,10 @@
     get local_store(): object {
       let _item = item(this.id);
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.local_store || (_item.local_store = {});
+      if (!_item.savedId) {
+        setTimeout(() => this.save_local_store());
+        return _item.local_store || (_item.local_store = {});
+      }
       const key = "mindpage_item_store_" + _item.savedId;
       if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {};
       // dispatch save for synchronous changes
@@ -352,7 +355,10 @@
     get global_store(): object {
       let _item = item(this.id);
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.global_store || (_item.global_store = {});
+      if (!_item.savedId) {
+        setTimeout(() => this.save_global_store());
+        return _item.global_store || (_item.global_store = {});
+      }
       if (anonymous) {
         if (!_item.global_store) _item.global_store = this.local_store["_anonymous_global_store"] || {};
         setTimeout(() => this.save_global_store());
@@ -5095,6 +5101,7 @@
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`);
         return;
       }
+      item(id)._global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item); // sync _global_store on item
       _item(id).invalidate_elem_cache(true /*force_render*/);
       return;
     }
