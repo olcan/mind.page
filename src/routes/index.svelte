@@ -2850,25 +2850,20 @@
                 };
 
                 // pre-process text before creating item
-                // this is fine since we use commit sha to detect changes
+                // this is mostly fine since we use commit sha to detect changes
+                // any changes may need to be undone if installed item is later edited and pushed back
                 text = text.trim(); // trim any spaces (github likes to add an extra line to files)
-                // process colons in block types, used either for language prefix OR embed path suffix
+                // extract colon-suffixed embed path in block types
                 let embeds = [];
-                text = text.replace(/```(\S+?):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
-                  // if there are 3+ parts (two colons), drop first part as optional language prefix
-                  // also drop any additional parts if there are 4+ parts (3+ colons)
-                  if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
+                text = text.replace(/```\S+:(\S+?)\n(.*?)```/gs, (m, sfx, body) => {
                   if (sfx.includes(".")) {
                     // process & drop suffix as embed path
                     let path = sfx; // may be relative to container item path (attr.path)
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
                       path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
                     embeds.push(path);
-                    return m; // leave in to replace body w/ embed text in second pass below
-                  } else {
-                    // drop prefix as a language prefix
-                    return "```" + sfx + "\n" + body + "```";
                   }
+                  return m;
                 });
                 // fetch embed text and latest commit sha
                 let embed_text = {};
@@ -2896,15 +2891,14 @@
                     throw new Error(`failed to embed '${path}'; error: ${e}`);
                   }
                 }
-                // replace embed text
-                text = text.replace(/```(\S+?):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
-                  if (pfx.includes(":") || sfx.includes(":")) [pfx, sfx] = (pfx + ":" + sfx).split(":").slice(1);
+                // insert embed text
+                text = text.replace(/```(\S+):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
                   if (sfx.includes(".")) {
                     let path = sfx; // may be relative to container item path (attr.path)
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
                       path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
                     body = embed_text[path].trim();
-                    return "```" + pfx + "\n" + body + "\n```";
+                    return "```" + pfx + ":" + sfx + "\n" + body + "\n```";
                   }
                   return m;
                 });
