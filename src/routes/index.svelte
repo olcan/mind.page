@@ -2857,6 +2857,19 @@
               alert(`usage: ${cmd} path [repo branch owner token]`);
               return;
             }
+            // if path is specified as label, extract path from matching item
+            let label;
+            if (path.startsWith("#")) {
+              label = path;
+              if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
+                alert(`can not update multiple items labeled ${label}`);
+                return;
+              } else if (!_exists(label)) {
+                alert(`missing item ${label}`);
+                return;
+              }
+              path = _item(label).attr.path;
+            }
             // check file extension in path
             // default (and preferred) extension is .md for installable items
             // .markdown is also supported but preferred more for sync/backup/export purposes
@@ -2873,7 +2886,7 @@
                 // if no token, prompt for it, also mentioning rate limits
                 if (!token) {
                   token = await _modal({
-                    content: `Please enter your GitHub [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Although you can leave this blank when installing items from public repos, using a token is strongly recommended due to strict rate limits enforced by GitHub for unauthenticated users.`,
+                    content: `Please enter your GitHub [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Although you can skip the token when accessing public repos, using a token is strongly recommended due to strict rate limits enforced by GitHub for unauthenticated users.`,
                     confirm: "Use Token",
                     cancel: "Skip",
                     input: "",
@@ -2882,7 +2895,10 @@
                   if (token) localStorage.setItem("mindpage_github_token", token);
                   else token = null; // no token, use unauthenticated client
                 }
-                _modal({ content: (updating ? "Updating" : "Installing") + ` ${path} ...`, background: "block" });
+                _modal({
+                  content: (updating ? "Updating" : "Installing") + ` ${updating && label ? label : path} ...`,
+                  background: "block",
+                });
                 // retrieve text
                 const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
                 let text = decodeBase64(data.content);
@@ -2965,7 +2981,8 @@
                 });
 
                 // if item with same name alredy exists, replace (after confirmation depending on command)
-                const label = parseLabel(text, true /*keep_case*/);
+                // we extract label from retrieved item, even if label was specified in command
+                label = parseLabel(text, true /*keep_case*/);
                 let item;
                 if (updating) {
                   if (!label) {
@@ -3013,10 +3030,9 @@
                     });
                   } catch (e) {} // already logged, just continue
                 }
-                console.log(`installed ${path} (${item.name}) in ${Date.now() - start}ms`);
-                // alert("installed " + item.name);
-                // modal does not block background activity (e.g. save spinner, console, etc)
-                // _modal_update({ content: `Installed ${path} (${item.name})`, confirm: "OK", background: "confirm" });
+                console.log(
+                  (updating ? "updated" : "installed") + ` ${path} (${item.name}) in ${Date.now() - start}ms`
+                );
               } catch (e) {
                 console.error(cmd + " failed: " + e);
                 alert(cmd + " failed: " + e);
@@ -3648,6 +3664,10 @@
     lastEditorChangeTime = 0; // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText); // item time has changed
     // onEditorChange(""); // item time has changed, and editor cleared
+  }
+
+  function onItemUpdate(index: number) {
+    onEditorDone("/_update " + items[index].label);
   }
 
   function editItem(index: number) {
@@ -5298,6 +5318,7 @@
                 onEditorKeyDown={onItemEditorKeyDown}
                 onRun={onItemRun}
                 onTouch={onItemTouch}
+                onUpdate={onItemUpdate}
                 onResized={onItemResized}
                 onEscape={onItemEscape}
                 {onImageRendering}
@@ -5316,6 +5337,7 @@
                 running={item.running}
                 admin={item.admin}
                 source={item.source}
+                path={item.attr?.path}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
                 showLogs={item.showLogs}
                 height={item.height}

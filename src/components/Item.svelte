@@ -24,6 +24,7 @@
   export let running = false;
   export let admin = false;
   export let source = null;
+  export let path = null;
   export let hidden = false;
   export let showLogs = false;
   export let selectionStart = 0;
@@ -78,6 +79,7 @@
   export let onPastedImage = (url: string, file: File, size_handler = null) => {};
   export let onRun = (index: number = -1) => {};
   export let onTouch = (index: number, e: MouseEvent = null) => {};
+  export let onUpdate = (index: number) => {};
   export let onResized = (id, container, trigger: string) => {};
   export let onImageRendering = (src: string): string => {
     return "";
@@ -158,6 +160,12 @@
     e.stopPropagation();
     e.preventDefault();
     window.open(source);
+  }
+
+  function onUpdateClick(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    onUpdate(index);
   }
 
   function onDeleteClick(e) {
@@ -1338,8 +1346,9 @@
         {#if editable} <div class="button image" on:click={onImageClick}>+img</div> {/if}
         {#if source}
           <div class="button source" on:click={onSourceClick}>
-            <span class="link-icon" />{source.replace(/^.*\//, "")}
+            <span class="link-icon" />{path}
           </div>
+          {#if labelUnique}<div class="button update" on:click={onUpdateClick}>↓update</div>{/if}
         {/if}
         <div class="button cancel" on:click={onCancelClick}>{editable ? "cancel" : "close"}</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
