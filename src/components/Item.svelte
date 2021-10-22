@@ -1343,12 +1343,16 @@
       <div class="edit-menu">
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
         {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
-        {#if editable} <div class="button image" on:click={onImageClick}>+img</div> {/if}
+        {#if editable}
+          <div class="button image" on:click={onImageClick}><img src="/photo.svg" alt="+img" title="+img" /></div>
+        {/if}
         {#if source}
+          {#if labelUnique}<div class="button update" on:click={onUpdateClick}>
+              <img src="/arrow.clockwise.svg" alt="update" title="update" />
+            </div>{/if}
           <div class="button source" on:click={onSourceClick}>
-            <span class="link-icon" />{path}
+            <img src="/external-link.svg" alt={path} title={path} /><span class="optional-label">&nbsp;{path}</span>
           </div>
-          {#if labelUnique}<div class="button update" on:click={onUpdateClick}>↓update</div>{/if}
         {/if}
         <div class="button cancel" on:click={onCancelClick}>{editable ? "cancel" : "close"}</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
@@ -1472,17 +1476,28 @@
     border-top-right-radius: 5px;
     border-bottom-right-radius: 5px;
   }
-  /* external link icon for source button, from https://stackoverflow.com/a/52058198 */
-  :global(.link-icon) {
+
+  .button img {
     width: 20px;
     height: 20px;
-    margin-right: 1px;
-    background: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2Ij48cGF0aCBkPSJNOSAyTDkgMyAxMi4zIDMgNiA5LjMgNi43IDEwIDEzIDMuNyAxMyA3IDE0IDcgMTQgMlpNNCA0QzIuOSA0IDIgNC45IDIgNkwyIDEyQzIgMTMuMSAyLjkgMTQgNCAxNEwxMCAxNEMxMS4xIDE0IDEyIDEzLjEgMTIgMTJMMTIgNyAxMSA4IDExIDEyQzExIDEyLjYgMTAuNiAxMyAxMCAxM0w0IDEzQzMuNCAxMyAzIDEyLjYgMyAxMkwzIDZDMyA1LjQgMy40IDUgNCA1TDggNSA5IDRaIi8+PC9zdmc+)
-      no-repeat;
-    background-size: contain;
-    display: inline-block;
+    min-width: 20px; /* necessary on smaller device */
     vertical-align: middle;
+    filter: invert(100%);
   }
+
+  /* adjust img style for external-link.svg icon, pre-inverted and padded 2px */
+  .button.source img {
+    filter: none;
+    width: 22px;
+    height: 22px;
+    margin: -2px;
+  }
+
+  /* adjust img style for photo.svg icon, which has some vertical padding */
+  .button.image img {
+    margin: -2px 0;
+  }
+
   .bordered .item-menu {
     top: 0;
     right: 0;
@@ -2171,6 +2186,11 @@
     :global(.item .deps-summary),
     :global(.item .dependents-summary) {
       bottom: -9px; /* works better with fonts on iPhone */
+    }
+
+    /* drop optional labels for buttons with icons/symbols */
+    .optional-label {
+      display: none;
     }
 
     /* smaller menu fonts can take a little more weight */
