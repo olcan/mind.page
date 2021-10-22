@@ -28,7 +28,16 @@ service cloud.firestore {
 							 (request.auth.uid == request.resource.data.user &&
 							  request.auth.uid == resource.data.user && 
 							  exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-	  	}
+	  }
+
+		// github_webhooks collection
+		// - only admin can write (except above rules also apply if documents have 'user' field)
+		// - logged in <user> can read
+    match /github_webhooks/{item} {
+			allow write: if false;
+			allow read: if exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+		
 	}
 }
 service firebase.storage {

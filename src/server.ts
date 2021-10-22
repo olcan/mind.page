@@ -102,6 +102,20 @@ const sapperServer = express().use(
     res.cookie = req.cookies["__session"] || "";
     next();
   },
+  // handle POST for webhooks
+  express.json(),
+  (req, res, next) => {
+    if (req.path == "/github_webhooks") {
+      console.log("received /github_webhooks", req.body);
+      firebaseAdmin().firestore().collection("github_webhooks").add({
+        time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
+        body: req.body,
+      });
+      res.status(200).end();
+    } else {
+      next();
+    }
+  },
   // TODO: remove 'as any' when typescript error is fixed
   sapper.middleware({
     session: (req, res) => ({
