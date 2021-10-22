@@ -2598,14 +2598,14 @@
         text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
         break;
       }
-      case "/_develop": {
+      case "/_edit": {
         if (editingItems.length == 0) {
-          alert("/_develop: no item selected");
+          alert("/_edit: no item selected");
           return;
         }
         const item = items[editingItems[0]];
         if (!item.attr) {
-          alert(`/_develop: selected item ${item.name} was not installed via /_install command`);
+          alert(`/_edit: selected item ${item.name} was not installed via /_install command`);
           return;
         }
         // make installed item (persistently) editable
