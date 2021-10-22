@@ -2604,13 +2604,13 @@
           return;
         }
         const item = items[editingItems[0]];
-        if (!item.attr) {
-          alert(`/_edit: selected item ${item.name} was not installed via /_install command`);
-          return;
-        }
         // make installed item (persistently) editable
-        item.editable = item.attr.editable = true;
-        saveItem(item.id);
+        if (item.attr && !item.attr.editable) {
+          item.attr.editable = true;
+          saveItem(item.id);
+        }
+        item.editable = true;
+        tick().then(() => textArea(item.index)?.focus());
         lastEditorChangeTime = 0; // disable debounce even if editor focused
         onEditorChange("");
         return;
