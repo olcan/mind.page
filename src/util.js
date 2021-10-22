@@ -153,6 +153,17 @@ export function parseTags(text) {
   };
 }
 
+export function parseLabel(text, keep_case = false) {
+  const lctext = text.toLowerCase();
+  const tags = parseTags(lctext);
+  // if item stats with visible #tag, it is taken as a "label" for the item
+  // (we allow some html tags/macros to precede the label tag for styling purposes)
+  const header = lctext.replace(/^<.*>\s+#/, "#").match(/^.*?(?:\n|$)/)[0];
+  const label = header.startsWith(tags.visible[0]) ? tags.visible[0] : "";
+  if (keep_case) return label ? text.replace(/^<.*>\s+#/, "#").match(/^#\S+/)[0] : "";
+  return label;
+}
+
 export function renderTag(tag) {
   return tag.replace(/^#_?\/*(?=[^\/])/, "");
 }

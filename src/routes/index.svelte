@@ -181,6 +181,7 @@
     if (index === undefined) throw new Error(`item ${id} deleted`);
     return items[index];
   }
+  const __item = item; // alternative naming in case item is used to refer to a specific item
 
   const log_levels = ["debug", "info", "log", "warn", "error"];
 
@@ -2843,7 +2844,8 @@
               })
               .catch(console.error);
             return;
-          } else if (cmd == "/_install") {
+          } else if (cmd == "/_install" || cmd == "/_update") {
+            const updating = cmd == "/_update";
             // install item from specified github source
             let [path, repo, branch, owner, token] = args.split(/\s+/);
             if (!repo) repo = "mind.items";
@@ -2852,7 +2854,7 @@
             if (!token) token = localStorage.getItem("mindpage_github_token"); // try localStorage
             if (!token) token = null; // no token, use unauthenticated client
             if (!path) {
-              alert("usage: /_install path [repo branch owner token]");
+              alert(`usage: ${cmd} path [repo branch owner token]`);
               return;
             }
             // check file extension in path
@@ -2860,12 +2862,11 @@
             // .markdown is also supported but preferred more for sync/backup/export purposes
             if (!path.includes(".")) path += ".md";
             else if (!path.endsWith(".md") && !path.endsWith(".markdown")) {
-              alert(`/_install: invalid file extension in path '${path}'`);
+              alert(`${cmd}: invalid file extension in path '${path}'`);
               return;
             }
             const Octokit = window["Octokit"];
             const github = token ? new Octokit({ auth: token }) : new Octokit();
-            // console.log("/_install", path, repo, branch, owner, token);
             const start = Date.now();
             (async () => {
               try {
@@ -2881,7 +2882,7 @@
                   if (token) localStorage.setItem("mindpage_github_token", token);
                   else token = null; // no token, use unauthenticated client
                 }
-                _modal({ content: `Installing ${path} ...`, background: "block" });
+                _modal({ content: (updating ? "Updating" : "Installing") + ` ${path} ...`, background: "block" });
                 // retrieve text
                 const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
                 let text = decodeBase64(data.content);
@@ -2913,7 +2914,7 @@
                 text = text.trim(); // trim any spaces (github likes to add an extra line to files)
                 // extract colon-suffixed embed path in block types
                 let embeds = [];
-                text = text.replace(/```\S+:(\S+?)\n(.*?)```/gs, (m, sfx, body) => {
+                text = text.replace(/```\S+:(\S+?)\n(.*?)\n```/gs, (m, sfx, body) => {
                   if (sfx.includes(".")) {
                     // process & drop suffix as embed path
                     let path = sfx; // may be relative to container item path (attr.path)
@@ -2950,7 +2951,7 @@
                   }
                 }
                 // replace embed block body with embed contents
-                text = text.replace(/```(\S+):(\S+?)\n(.*?)```/gs, (m, pfx, sfx, body) => {
+                text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
                   if (sfx.includes(".")) {
                     let path = sfx; // may be relative to container item path (attr.path)
                     if (!path.startsWith("/") && attr.path.includes("/", 1))
@@ -2958,12 +2959,48 @@
                     // store original body in attr.embeds to allow item to be edited and pushed back
                     // note if same path is embedded multiple times, only the last body is retained
                     attr.embeds.find((e) => e.path == path).body = body;
-                    return "```" + pfx + ":" + sfx + "\n" + embed_text[path].trim() + "\n```";
+                    return "```" + pfx + ":" + sfx + "\n" + embed_text[path] + "\n```";
                   }
                   return m;
                 });
 
-                const item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
+                // if item with same name alredy exists, replace (after confirmation depending on command)
+                const label = parseLabel(text, true /*keep_case*/);
+                let item;
+                if (updating) {
+                  if (!label) {
+                    alert(`could not determine item name for update from ${path}`);
+                    return;
+                  } else if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
+                    alert(`found multiple items labeled ${label}, can not update from ${path}`);
+                    return;
+                  } else if (!_exists(label)) {
+                    alert(`missing item ${label} to update from ${path}`);
+                    return;
+                  }
+                  item = _item(label);
+                  __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
+                  item.write(text, "");
+                } else {
+                  // installing
+                  if (label && _exists(label, false /*allow_multiple*/)) {
+                    const replace = await _modal_update({
+                      content: `Replace existing item ${label}?`,
+                      confirm: "Replace",
+                      cancel: "Cancel",
+                      background: "cancel",
+                    });
+                    if (!replace) {
+                      console.warn(`cancelled installation of ${path} due to existing item ${label}`);
+                      return;
+                    }
+                    item = _item(label);
+                    __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
+                    item.write(text, "");
+                  } else {
+                    item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
+                  }
+                }
                 // wait for full dom update
                 await tick();
                 await update_dom();
@@ -2981,8 +3018,8 @@
                 // modal does not block background activity (e.g. save spinner, console, etc)
                 // _modal_update({ content: `Installed ${path} (${item.name})`, confirm: "OK", background: "confirm" });
               } catch (e) {
-                console.error("/_install failed: " + e);
-                alert("/_install failed: " + e);
+                console.error(cmd + " failed: " + e);
+                alert(cmd + " failed: " + e);
               } finally {
                 _modal_close();
               }
@@ -3838,6 +3875,7 @@
     extractBlock,
     blockRegExp,
     parseTags,
+    parseLabel,
     renderTag,
     invalidateElemCache,
     checkElemCache,
