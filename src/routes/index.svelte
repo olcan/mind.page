@@ -2503,7 +2503,7 @@
       // reset focus for generated text
       let textarea = textArea(-1);
       textarea.selectionStart = textarea.selectionEnd = 0;
-      let item = onEditorDone(text, null, false, run, editing);
+      let item = onEditorDone(text, null, false, run, editing, null, true /*ignore_command*/);
       // run programmatic initializer function if any
       try {
         if (obj.init) Promise.resolve(obj.init(item)).catch(handleError);
@@ -2526,7 +2526,8 @@
     cancelled: boolean = false,
     run: boolean = false,
     editing = null,
-    attr = null
+    attr = null,
+    ignore_command = false
   ) {
     editorText = text; // in case invoked without setting editorText
     const key = e?.code || e?.key;
@@ -2572,549 +2573,556 @@
     // force editing if text is empty
     if (!text.trim()) editing = true;
 
-    switch (text.trim()) {
-      case "/_signout": {
-        if (!signedin) {
-          alert("already signed out");
-          return;
-        }
-        signOut();
-        return;
-      }
-      case "/_signin": {
-        if (signedin) {
-          alert("already signed in");
-          return;
-        }
-        signIn();
-        return;
-      }
-      case "/_reload": {
-        location.reload();
-        return;
-      }
-      case "/_count": {
-        text = `${editingItems.length} items are selected`;
-        break;
-      }
-      case "/_times": {
-        if (editingItems.length == 0) {
-          alert("/_times: no item selected");
-          return;
-        }
-        const item = items[editingItems[0]];
-        text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
-        break;
-      }
-      case "/_edit": {
-        if (editingItems.length == 0) {
-          alert("/_edit: no item selected");
-          return;
-        }
-        const item = items[editingItems[0]];
-        // make installed item (persistently) editable
-        if (item.attr && !item.attr.editable) {
-          item.attr.editable = true;
-          saveItem(item.id);
-        }
-        item.editable = true;
-        tick().then(() => textArea(item.index)?.focus());
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
-        return;
-      }
-      case "/_updates": {
-        if (editingItems.length == 0) {
-          alert("/_updates: no item selected");
-          return;
-        }
-        const item = items[editingItems[0]];
-        if (!item.attr) {
-          alert(`/_updates: selected item ${item.name} was not installed via /_install command`);
-          return;
-        }
-        const attr = item.attr;
-        const history = attr.source.replace("/blob/", "/commits/");
-        const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`;
-        const max_updates_shown = 5;
-        const Octokit = window["Octokit"];
-        const github = attr.token ? new Octokit({ auth: attr.token }) : new Octokit();
-
-        (async () => {
-          try {
-            let { data } = await github.repos.listCommits({ ...attr, sha: attr.branch, per_page: 100 });
-            const time_ago = itemTimeString(new Date(data[0].commit.author.date).getTime(), true) + " ago";
-            // _prepend_ any updates for any embeds so that they are treated as updates to container item
-            if (attr.embeds) {
-              for (let embed of attr.embeds) {
-                const resp = await github.repos.listCommits({
-                  ...attr,
-                  path: embed.path,
-                  sha: attr.branch,
-                  per_page: 100,
-                });
-                const index = resp.data.findIndex((commit) => commit.sha == embed.sha);
-                if (index >= 0) resp.data.length = index;
-                const embed_source = `https://github.com/${attr.owner}/${attr.repo}/blob/${attr.branch}/${embed.path}`;
-                for (let update of resp.data)
-                  update.commit.message = `[${embed.path}](${embed_source}) ` + update.commit.message.trim();
-                data = resp.data.concat(data);
-              }
-            }
-            if (data[0].sha == attr.sha) {
-              // no updates!
-              _modal({
-                content:
-                  `No updates available for [${attr.path}](${attr.source}).  \n` +
-                  `[Last update](${installed_update}) (_installed_) was ${time_ago}.  \n` +
-                  `See [history](${history}) for past updates.`,
-              });
-            } else {
-              // there are updates!
-              const index = data.findIndex((commit) => commit.sha == attr.sha);
-              let update_count = index < 0 ? data.length + "+" : index;
-              update_count += update_count === 1 ? " update" : " updates";
-              if (index >= 0) data.length = index;
-              _modal({
-                content:
-                  `${update_count} available for [${attr.path}](${attr.source}):  \n` +
-                  data
-                    .sort((a, b) => new Date(b.commit.author.date).getTime() - new Date(a.commit.author.date).getTime())
-                    .slice(0, max_updates_shown)
-                    .map(
-                      (update) =>
-                        `- [${update.sha.slice(0, 7)}](${update.html_url}) ${update.commit.message.trim()}  \n`
-                    )
-                    .join("") +
-                  (data.length > max_updates_shown ? `- ... +${data.length - max_updates_shown} more  \n` : "") +
-                  "\n" +
-                  `Last [installed update](${installed_update}) was ${time_ago}.  \n` +
-                  `See [history](${history}) for all updates.`,
-              });
-            }
-          } catch (e) {
-            console.error(e);
+    if (!ignore_command) {
+      switch (text.trim()) {
+        case "/_signout": {
+          if (!signedin) {
+            alert("already signed out");
+            return;
           }
-        })();
-
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
-        return;
-      }
-      case "/_dependencies": {
-        if (editingItems.length == 0) {
-          alert("/_dependencies: no item selected");
+          signOut();
           return;
         }
-        if (editingItems.length > 1) {
-          alert("/_dependencies: too many items selected");
-          return;
-        }
-        text = items[editingItems[0]].depsString;
-        clearLabel = true;
-        break;
-      }
-      case "/_dependents": {
-        if (editingItems.length == 0) {
-          alert("/_dependents: no item selected");
-          return;
-        }
-        if (editingItems.length > 1) {
-          alert("/_dependents: too many items selected");
-          return;
-        }
-        text = items[editingItems[0]].dependentsString;
-        clearLabel = true;
-        break;
-      }
-      case "/_backup": {
-        if (readonly) return;
-        let added = 0;
-        items.forEach((item) => {
-          firestore()
-            .collection("history")
-            .add({
-              item: item.id,
-              user: user.uid,
-              time: item.time,
-              text: item.text,
-            })
-            .then((doc) => {
-              console.debug(`"added ${++added} of ${items.length} items to history`);
-            })
-            .catch(console.error);
-        });
-        return;
-      }
-      case "/_welcome": {
-        firestore()
-          .collection("items")
-          .doc("QbtH06q6y6GY4ONPzq8N")
-          .get()
-          .then((doc) => onEditorDone(doc.data().text))
-          .catch(console.error);
-        return;
-      }
-      case "/_tweet": {
-        if (editingItems.length == 0) {
-          alert("/_tweet: no item selected");
-          return;
-        }
-        if (editingItems.length > 1) {
-          alert("/_tweet: too many items selected");
-          return;
-        }
-        let item = items[editingItems[0]];
-        location.href = "twitter://post?message=" + encodeURIComponent(item.text);
-        return;
-      }
-      case "/_duplicate": {
-        if (editingItems.length == 0) {
-          alert("/_duplicate: no item selected");
-          return;
-        }
-        if (editingItems.length > 1) {
-          alert("/_duplicate: too many items selected");
-          return;
-        }
-        let item = items[editingItems[0]];
-        time = item.time;
-        text = item.text;
-        editing = true;
-        break;
-      }
-      case "/_undelete": {
-        if (deletedItems.length == 0) {
-          alert("/_undelete: nothing to undelete (in this session)");
-          return;
-        }
-        // NOTE: undelete command does NOT restore item id and associated history in firebase or github
-        time = deletedItems[0].time;
-        attr = deletedItems[0].attr;
-        text = deletedItems[0].text;
-        deletedItems.shift();
-        editing = false;
-        break;
-      }
-      case "/_invert": {
-        inverted = !inverted;
-        localStorage.setItem("mindpage_inverted", inverted ? "true" : "false");
-        lastEditorChangeTime = 0; // disable debounce even if editor focused
-        onEditorChange("");
-        return;
-      }
-      case "/_green_screen": {
-        window["_green_screen"] = green_screen = !green_screen;
-        localStorage.setItem("mindpage_green_screen", green_screen ? "true" : "false");
-        return;
-      }
-      default: {
-        if (text.match(/^\/\w+/)) {
-          // NOTE: text is untrimmed, so no whitespace before /
-          const cmd = text.match(/^\/\w+/)[0];
-          const args = text
-            .replace(/^\/\w+/, "")
-            .replace(/([`\\$])/g, "\\$1")
-            .trim();
-
-          if (cmd == "/_zoom") {
-            if (args) localStorage.setItem("mindpage_zoom", args);
-            else localStorage.removeItem("mindpage_zoom");
-            zoom = args; // will affect next checkLayout call
-            lastEditorChangeTime = 0; // disable debounce even if editor focused
-            onEditorChange("");
+        case "/_signin": {
+          if (signedin) {
+            alert("already signed in");
             return;
-          } else if (cmd == "/_narrate") {
-            narrating = !narrating;
-            if (narrating) {
-              localStorage.setItem("mindpage_narrating", args);
-              localStorage.setItem("mindpage_green_screen", "true");
-              window["_green_screen"] = green_screen = true;
-            } else {
-              const video = document.querySelector("#webcam-video") as HTMLVideoElement;
-              if (video) {
-                (video.srcObject as any)?.getTracks().forEach((track) => track.stop());
-                video.srcObject = null;
+          }
+          signIn();
+          return;
+        }
+        case "/_reload": {
+          location.reload();
+          return;
+        }
+        case "/_count": {
+          text = `${editingItems.length} items are selected`;
+          break;
+        }
+        case "/_times": {
+          if (editingItems.length == 0) {
+            alert("/_times: no item selected");
+            return;
+          }
+          const item = items[editingItems[0]];
+          text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`;
+          break;
+        }
+        case "/_edit": {
+          if (editingItems.length == 0) {
+            alert("/_edit: no item selected");
+            return;
+          }
+          const item = items[editingItems[0]];
+          // make installed item (persistently) editable
+          if (item.attr && !item.attr.editable) {
+            item.attr.editable = true;
+            saveItem(item.id);
+          }
+          item.editable = true;
+          tick().then(() => textArea(item.index)?.focus());
+          lastEditorChangeTime = 0; // disable debounce even if editor focused
+          onEditorChange("");
+          return;
+        }
+        case "/_updates": {
+          if (editingItems.length == 0) {
+            alert("/_updates: no item selected");
+            return;
+          }
+          const item = items[editingItems[0]];
+          if (!item.attr) {
+            alert(`/_updates: selected item ${item.name} was not installed via /_install command`);
+            return;
+          }
+          const attr = item.attr;
+          const history = attr.source.replace("/blob/", "/commits/");
+          const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`;
+          const max_updates_shown = 5;
+          const Octokit = window["Octokit"];
+          const github = attr.token ? new Octokit({ auth: attr.token }) : new Octokit();
+
+          (async () => {
+            try {
+              let { data } = await github.repos.listCommits({ ...attr, sha: attr.branch, per_page: 100 });
+              const time_ago = itemTimeString(new Date(data[0].commit.author.date).getTime(), true) + " ago";
+              // _prepend_ any updates for any embeds so that they are treated as updates to container item
+              if (attr.embeds) {
+                for (let embed of attr.embeds) {
+                  const resp = await github.repos.listCommits({
+                    ...attr,
+                    path: embed.path,
+                    sha: attr.branch,
+                    per_page: 100,
+                  });
+                  const index = resp.data.findIndex((commit) => commit.sha == embed.sha);
+                  if (index >= 0) resp.data.length = index;
+                  const embed_source = `https://github.com/${attr.owner}/${attr.repo}/blob/${attr.branch}/${embed.path}`;
+                  for (let update of resp.data)
+                    update.commit.message = `[${embed.path}](${embed_source}) ` + update.commit.message.trim();
+                  data = resp.data.concat(data);
+                }
               }
-              localStorage.removeItem("mindpage_narrating");
+              if (data[0].sha == attr.sha) {
+                // no updates!
+                _modal({
+                  content:
+                    `No updates available for [${attr.path}](${attr.source}).  \n` +
+                    `[Last update](${installed_update}) (_installed_) was ${time_ago}.  \n` +
+                    `See [history](${history}) for past updates.`,
+                });
+              } else {
+                // there are updates!
+                const index = data.findIndex((commit) => commit.sha == attr.sha);
+                let update_count = index < 0 ? data.length + "+" : index;
+                update_count += update_count === 1 ? " update" : " updates";
+                if (index >= 0) data.length = index;
+                _modal({
+                  content:
+                    `${update_count} available for [${attr.path}](${attr.source}):  \n` +
+                    data
+                      .sort(
+                        (a, b) => new Date(b.commit.author.date).getTime() - new Date(a.commit.author.date).getTime()
+                      )
+                      .slice(0, max_updates_shown)
+                      .map(
+                        (update) =>
+                          `- [${update.sha.slice(0, 7)}](${update.html_url}) ${update.commit.message.trim()}  \n`
+                      )
+                      .join("") +
+                    (data.length > max_updates_shown ? `- ... +${data.length - max_updates_shown} more  \n` : "") +
+                    "\n" +
+                    `Last [installed update](${installed_update}) was ${time_ago}.  \n` +
+                    `See [history](${history}) for all updates.`,
+                });
+              }
+            } catch (e) {
+              console.error(e);
             }
-            lastEditorChangeTime = 0; // disable debounce even if editor focused
-            onEditorChange("");
+          })();
+
+          lastEditorChangeTime = 0; // disable debounce even if editor focused
+          onEditorChange("");
+          return;
+        }
+        case "/_dependencies": {
+          if (editingItems.length == 0) {
+            alert("/_dependencies: no item selected");
             return;
-          } else if (cmd == "/_example") {
+          }
+          if (editingItems.length > 1) {
+            alert("/_dependencies: too many items selected");
+            return;
+          }
+          text = items[editingItems[0]].depsString;
+          clearLabel = true;
+          break;
+        }
+        case "/_dependents": {
+          if (editingItems.length == 0) {
+            alert("/_dependents: no item selected");
+            return;
+          }
+          if (editingItems.length > 1) {
+            alert("/_dependents: too many items selected");
+            return;
+          }
+          text = items[editingItems[0]].dependentsString;
+          clearLabel = true;
+          break;
+        }
+        case "/_backup": {
+          if (readonly) return;
+          let added = 0;
+          items.forEach((item) => {
             firestore()
-              .collection("items")
-              .where("user", "==", "anonymous")
-              .orderBy("time", "desc")
-              .get()
-              .then((examples) => {
-                alert(`retrieved ${examples.docs.length} example items`);
+              .collection("history")
+              .add({
+                item: item.id,
+                user: user.uid,
+                time: item.time,
+                text: item.text,
+              })
+              .then((doc) => {
+                console.debug(`"added ${++added} of ${items.length} items to history`);
               })
               .catch(console.error);
+          });
+          return;
+        }
+        case "/_welcome": {
+          firestore()
+            .collection("items")
+            .doc("QbtH06q6y6GY4ONPzq8N")
+            .get()
+            .then((doc) => onEditorDone(doc.data().text, null, false, false, false, null, true /*ignore command*/))
+            .catch(console.error);
+          return;
+        }
+        case "/_tweet": {
+          if (editingItems.length == 0) {
+            alert("/_tweet: no item selected");
             return;
-          } else if (cmd == "/_install" || cmd == "/_update") {
-            const updating = cmd == "/_update";
-            // install item from specified github source
-            let [path, repo, branch, owner, token] = args.split(/\s+/);
-            if (!repo) repo = "mind.items";
-            if (!branch) branch = "master";
-            if (!owner) owner = "olcan";
-            if (!token) token = localStorage.getItem("mindpage_github_token"); // try localStorage
-            if (!token) token = null; // no token, use unauthenticated client
-            if (!path) {
-              alert(`usage: ${cmd} path [repo branch owner token]`);
+          }
+          if (editingItems.length > 1) {
+            alert("/_tweet: too many items selected");
+            return;
+          }
+          let item = items[editingItems[0]];
+          location.href = "twitter://post?message=" + encodeURIComponent(item.text);
+          return;
+        }
+        case "/_duplicate": {
+          if (editingItems.length == 0) {
+            alert("/_duplicate: no item selected");
+            return;
+          }
+          if (editingItems.length > 1) {
+            alert("/_duplicate: too many items selected");
+            return;
+          }
+          let item = items[editingItems[0]];
+          time = item.time;
+          text = item.text;
+          editing = true;
+          break;
+        }
+        case "/_undelete": {
+          if (deletedItems.length == 0) {
+            alert("/_undelete: nothing to undelete (in this session)");
+            return;
+          }
+          // NOTE: undelete command does NOT restore item id and associated history in firebase or github
+          time = deletedItems[0].time;
+          attr = deletedItems[0].attr;
+          text = deletedItems[0].text;
+          deletedItems.shift();
+          editing = false;
+          break;
+        }
+        case "/_invert": {
+          inverted = !inverted;
+          localStorage.setItem("mindpage_inverted", inverted ? "true" : "false");
+          lastEditorChangeTime = 0; // disable debounce even if editor focused
+          onEditorChange("");
+          return;
+        }
+        case "/_green_screen": {
+          window["_green_screen"] = green_screen = !green_screen;
+          localStorage.setItem("mindpage_green_screen", green_screen ? "true" : "false");
+          return;
+        }
+        default: {
+          if (text.match(/^\/\w+/)) {
+            // NOTE: text is untrimmed, so no whitespace before /
+            const cmd = text.match(/^\/\w+/)[0];
+            const args = text
+              .replace(/^\/\w+/, "")
+              .replace(/([`\\$])/g, "\\$1")
+              .trim();
+
+            if (cmd == "/_zoom") {
+              if (args) localStorage.setItem("mindpage_zoom", args);
+              else localStorage.removeItem("mindpage_zoom");
+              zoom = args; // will affect next checkLayout call
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange("");
               return;
-            }
-            // if path is specified as label, extract path from matching item
-            let label;
-            if (path.startsWith("#")) {
-              label = path;
-              if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
-                alert(`can not update multiple items labeled ${label}`);
-                return;
-              } else if (!_exists(label)) {
-                alert(`missing item ${label}`);
+            } else if (cmd == "/_narrate") {
+              narrating = !narrating;
+              if (narrating) {
+                localStorage.setItem("mindpage_narrating", args);
+                localStorage.setItem("mindpage_green_screen", "true");
+                window["_green_screen"] = green_screen = true;
+              } else {
+                const video = document.querySelector("#webcam-video") as HTMLVideoElement;
+                if (video) {
+                  (video.srcObject as any)?.getTracks().forEach((track) => track.stop());
+                  video.srcObject = null;
+                }
+                localStorage.removeItem("mindpage_narrating");
+              }
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange("");
+              return;
+            } else if (cmd == "/_example") {
+              firestore()
+                .collection("items")
+                .where("user", "==", "anonymous")
+                .orderBy("time", "desc")
+                .get()
+                .then((examples) => {
+                  alert(`retrieved ${examples.docs.length} example items`);
+                })
+                .catch(console.error);
+              return;
+            } else if (cmd == "/_install" || cmd == "/_update") {
+              const updating = cmd == "/_update";
+              // install item from specified github source
+              let [path, repo, branch, owner, token] = args.split(/\s+/);
+              if (!repo) repo = "mind.items";
+              if (!branch) branch = "master";
+              if (!owner) owner = "olcan";
+              if (!token) token = localStorage.getItem("mindpage_github_token"); // try localStorage
+              if (!token) token = null; // no token, use unauthenticated client
+              if (!path) {
+                alert(`usage: ${cmd} path [repo branch owner token]`);
                 return;
               }
-              path = _item(label).attr.path;
-            }
-            // check file extension in path
-            // default (and preferred) extension is .md for installable items
-            // .markdown is also supported but preferred more for sync/backup/export purposes
-            if (!path.includes(".")) path += ".md";
-            else if (!path.endsWith(".md") && !path.endsWith(".markdown")) {
-              alert(`${cmd}: invalid file extension in path '${path}'`);
-              return;
-            }
-            const Octokit = window["Octokit"];
-            const github = token ? new Octokit({ auth: token }) : new Octokit();
-            const start = Date.now();
-            (async () => {
-              try {
-                // if no token, prompt for it, also mentioning rate limits
-                if (!token) {
-                  token = await _modal({
-                    content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access can be severely throttled by GitHub.`,
-                    confirm: "Use Token",
-                    cancel: "Skip",
-                    input: "",
-                    password: false,
+              // if path is specified as label, extract path from matching item
+              let label;
+              if (path.startsWith("#")) {
+                label = path;
+                if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
+                  alert(`can not update multiple items labeled ${label}`);
+                  return;
+                } else if (!_exists(label)) {
+                  alert(`missing item ${label}`);
+                  return;
+                }
+                path = _item(label).attr.path;
+              }
+              // check file extension in path
+              // default (and preferred) extension is .md for installable items
+              // .markdown is also supported but preferred more for sync/backup/export purposes
+              if (!path.includes(".")) path += ".md";
+              else if (!path.endsWith(".md") && !path.endsWith(".markdown")) {
+                alert(`${cmd}: invalid file extension in path '${path}'`);
+                return;
+              }
+              const Octokit = window["Octokit"];
+              const github = token ? new Octokit({ auth: token }) : new Octokit();
+              const start = Date.now();
+              (async () => {
+                try {
+                  // if no token, prompt for it, also mentioning rate limits
+                  if (!token) {
+                    token = await _modal({
+                      content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access can be severely throttled by GitHub.`,
+                      confirm: "Use Token",
+                      cancel: "Skip",
+                      input: "",
+                      password: false,
+                    });
+                    if (token) localStorage.setItem("mindpage_github_token", token);
+                    else token = null; // no token, use unauthenticated client
+                  }
+                  _modal({
+                    content: (updating ? "Updating" : "Installing") + ` ${updating && label ? label : path} ...`,
+                    background: "block",
                   });
-                  if (token) localStorage.setItem("mindpage_github_token", token);
-                  else token = null; // no token, use unauthenticated client
-                }
-                _modal({
-                  content: (updating ? "Updating" : "Installing") + ` ${updating && label ? label : path} ...`,
-                  background: "block",
-                });
-                // retrieve text
-                const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
-                let text = decodeBase64(data.content);
-                // retrieve commit sha (allows comparison to later versions)
-                const {
-                  data: [{ sha }],
-                } = await github.repos.listCommits({
-                  owner,
-                  repo,
-                  sha: branch,
-                  path,
-                  per_page: 1,
-                });
-                const attr = {
-                  sha,
-                  editable: false,
-                  source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
-                  path,
-                  repo,
-                  branch,
-                  owner,
-                  token /* to authenticate for updates */,
-                  embeds: null, // may be filled in below
-                };
+                  // retrieve text
+                  const { data } = await github.repos.getContent({ owner, repo, ref: branch, path });
+                  let text = decodeBase64(data.content);
+                  // retrieve commit sha (allows comparison to later versions)
+                  const {
+                    data: [{ sha }],
+                  } = await github.repos.listCommits({
+                    owner,
+                    repo,
+                    sha: branch,
+                    path,
+                    per_page: 1,
+                  });
+                  const attr = {
+                    sha,
+                    editable: false,
+                    source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
+                    path,
+                    repo,
+                    branch,
+                    owner,
+                    token /* to authenticate for updates */,
+                    embeds: null, // may be filled in below
+                  };
 
-                // pre-process text before creating item
-                // this is mostly fine since we use commit sha to detect changes
-                // any changes may need to be undone if installed item is later edited and pushed back
-                text = text.trim(); // trim any spaces (github likes to add an extra line to files)
-                // extract colon-suffixed embed path in block types
-                let embeds = [];
-                text = text.replace(/```\S+:(\S+?)\n(.*?)\n```/gs, (m, sfx, body) => {
-                  if (sfx.includes(".")) {
-                    // process & drop suffix as embed path
-                    let path = sfx; // may be relative to container item path (attr.path)
-                    if (!path.startsWith("/") && attr.path.includes("/", 1))
-                      path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
-                    embeds.push(path);
-                  }
-                  return m;
-                });
-                // fetch embed text and latest commit sha
-                let embed_text = {};
-                for (let path of _.uniq(embeds)) {
-                  try {
-                    const { data } = await github.repos.getContent({
-                      owner,
-                      repo,
-                      ref: branch,
-                      path,
-                    });
-                    embed_text[path] = decodeBase64(data.content);
+                  // pre-process text before creating item
+                  // this is mostly fine since we use commit sha to detect changes
+                  // any changes may need to be undone if installed item is later edited and pushed back
+                  text = text.trim(); // trim any spaces (github likes to add an extra line to files)
+                  // extract colon-suffixed embed path in block types
+                  let embeds = [];
+                  text = text.replace(/```\S+:(\S+?)\n(.*?)\n```/gs, (m, sfx, body) => {
+                    if (sfx.includes(".")) {
+                      // process & drop suffix as embed path
+                      let path = sfx; // may be relative to container item path (attr.path)
+                      if (!path.startsWith("/") && attr.path.includes("/", 1))
+                        path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
+                      embeds.push(path);
+                    }
+                    return m;
+                  });
+                  // fetch embed text and latest commit sha
+                  let embed_text = {};
+                  for (let path of _.uniq(embeds)) {
+                    try {
+                      const { data } = await github.repos.getContent({
+                        owner,
+                        repo,
+                        ref: branch,
+                        path,
+                      });
+                      embed_text[path] = decodeBase64(data.content);
 
-                    const {
-                      data: [{ sha }],
-                    } = await github.repos.listCommits({
-                      owner,
-                      repo,
-                      sha: branch,
-                      path,
-                      per_page: 1,
-                    });
-                    attr.embeds = (attr.embeds ?? []).concat({ path, sha });
-                  } catch (e) {
-                    throw new Error(`failed to embed '${path}'; error: ${e}`);
+                      const {
+                        data: [{ sha }],
+                      } = await github.repos.listCommits({
+                        owner,
+                        repo,
+                        sha: branch,
+                        path,
+                        per_page: 1,
+                      });
+                      attr.embeds = (attr.embeds ?? []).concat({ path, sha });
+                    } catch (e) {
+                      throw new Error(`failed to embed '${path}'; error: ${e}`);
+                    }
                   }
-                }
-                // replace embed block body with embed contents
-                text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
-                  if (sfx.includes(".")) {
-                    let path = sfx; // may be relative to container item path (attr.path)
-                    if (!path.startsWith("/") && attr.path.includes("/", 1))
-                      path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
-                    // store original body in attr.embeds to allow item to be edited and pushed back
-                    // note if same path is embedded multiple times, only the last body is retained
-                    attr.embeds.find((e) => e.path == path).body = body;
-                    return "```" + pfx + ":" + sfx + "\n" + embed_text[path] + "\n```";
-                  }
-                  return m;
-                });
+                  // replace embed block body with embed contents
+                  text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
+                    if (sfx.includes(".")) {
+                      let path = sfx; // may be relative to container item path (attr.path)
+                      if (!path.startsWith("/") && attr.path.includes("/", 1))
+                        path = attr.path.substr(0, attr.path.indexOf("/", 1)) + "/" + path;
+                      // store original body in attr.embeds to allow item to be edited and pushed back
+                      // note if same path is embedded multiple times, only the last body is retained
+                      attr.embeds.find((e) => e.path == path).body = body;
+                      return "```" + pfx + ":" + sfx + "\n" + embed_text[path] + "\n```";
+                    }
+                    return m;
+                  });
 
-                // if item with same name alredy exists, replace (after confirmation depending on command)
-                // we extract label from retrieved item, even if label was specified in command
-                label = parseLabel(text, true /*keep_case*/);
-                let item;
-                if (updating) {
-                  if (!label) {
-                    alert(`could not determine item name for update from ${path}`);
-                    return;
-                  } else if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
-                    alert(`found multiple items labeled ${label}, can not update from ${path}`);
-                    return;
-                  } else if (!_exists(label)) {
-                    alert(`missing item ${label} to update from ${path}`);
-                    return;
-                  }
-                  item = _item(label);
-                  __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
-                  item.write(text, "");
-                } else {
-                  // installing
-                  if (label && _exists(label, false /*allow_multiple*/)) {
-                    const replace = await _modal_update({
-                      content: `Replace existing item ${label}?`,
-                      confirm: "Replace",
-                      cancel: "Cancel",
-                      background: "cancel",
-                    });
-                    if (!replace) {
-                      console.warn(`cancelled installation of ${path} due to existing item ${label}`);
+                  // TODO: install new/missing dependencies and wait for those to complete
+                  // TODO: delete removed dependencies
+
+                  // if item with same name alredy exists, replace (after confirmation depending on command)
+                  // we extract label from retrieved item, even if label was specified in command
+                  label = parseLabel(text, true /*keep_case*/);
+                  let item;
+                  if (updating) {
+                    if (!label) {
+                      alert(`could not determine item name for update from ${path}`);
+                      return;
+                    } else if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
+                      alert(`found multiple items labeled ${label}, can not update from ${path}`);
+                      return;
+                    } else if (!_exists(label)) {
+                      alert(`missing item ${label} to update from ${path}`);
                       return;
                     }
                     item = _item(label);
                     __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
                     item.write(text, "");
                   } else {
-                    item = onEditorDone(text, null, false /*cancelled*/, false /*run*/, false /*editing*/, attr);
+                    // installing
+                    if (label && _exists(label, false /*allow_multiple*/)) {
+                      const replace = await _modal_update({
+                        content: `Replace existing item ${label}?`,
+                        confirm: "Replace",
+                        cancel: "Cancel",
+                        background: "cancel",
+                      });
+                      if (!replace) {
+                        console.warn(`cancelled installation of ${path} due to existing item ${label}`);
+                        return;
+                      }
+                      item = _item(label);
+                      __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
+                      item.write(text, "");
+                    } else {
+                      item = onEditorDone(text, null, false, false, false, attr, true /*ignore_command*/);
+                    }
                   }
+                  // wait for full dom update
+                  await tick();
+                  await update_dom();
+                  // invoke _install(item) if defined
+                  _modal_close(); // allow _install to display own modals
+                  if (item.text.includes("_install")) {
+                    try {
+                      _item(item.id).eval(`if (typeof _install == 'function') _install(_item('${item.id}'))`, {
+                        trigger: "command",
+                      });
+                    } catch (e) {} // already logged, just continue
+                  }
+                  console.log(
+                    (updating ? "updated" : "installed") + ` ${path} (${item.name}) in ${Date.now() - start}ms`
+                  );
+                } catch (e) {
+                  console.error(cmd + " failed: " + e);
+                  alert(cmd + " failed: " + e);
+                } finally {
+                  _modal_close();
                 }
-                // wait for full dom update
-                await tick();
-                await update_dom();
-                // invoke _install(item) if defined
-                _modal_close(); // allow _install to display own modals
-                if (item.text.includes("_install")) {
-                  try {
-                    _item(item.id).eval(`if (typeof _install == 'function') _install(_item('${item.id}'))`, {
-                      trigger: "command",
-                    });
-                  } catch (e) {} // already logged, just continue
-                }
-                console.log(
-                  (updating ? "updated" : "installed") + ` ${path} (${item.name}) in ${Date.now() - start}ms`
-                );
-              } catch (e) {
-                console.error(cmd + " failed: " + e);
-                alert(cmd + " failed: " + e);
-              } finally {
-                _modal_close();
-              }
-            })();
+              })();
 
-            lastEditorChangeTime = 0; // disable debounce even if editor focused
-            onEditorChange("");
-            return;
-          } else if (_exists("#commands" + cmd)) {
-            function handleError(e) {
-              const log = _item("#commands" + cmd).get_log({ since: "eval", level: "error" });
-              let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
-              alert(msg);
-            }
-            try {
-              let cmd_item = items[_item("#commands" + cmd).index];
-              Promise.resolve(
-                _item("#commands" + cmd).eval(`run(\`${args}\`)`, {
-                  trigger: "command",
-                  async: cmd_item.deepasync, // run async if item is async or has async deps
-                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-                })
-              )
-                .then((obj) => {
-                  handleCommandReturn(cmd, cmd_item, obj, handleError);
-                })
-                .catch(handleError);
-            } catch (e) {
-              handleError(e);
-              throw e;
-            }
-            return;
-          } else {
-            // as last effort, invoke on first listener that handles _on_command_<name>
-            let found_listener = false;
-            for (let item of items) {
-              if (!item.listen) continue;
-              const name = cmd.substring(1);
-              if (!item.text.includes("_on_command_" + name)) continue;
-              found_listener = true;
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange("");
+              return;
+            } else if (_exists("#commands" + cmd)) {
               function handleError(e) {
-                const log = _item(item.id).get_log({ since: "eval", level: "error" });
-                let msg = [`${item.name} _on_command_${name}(\`${args}\`) failed: `, ...log, e].join("\n");
+                const log = _item("#commands" + cmd).get_log({ since: "eval", level: "error" });
+                let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join("\n");
                 alert(msg);
               }
-              const ret = _item(item.id).eval(
-                `(typeof _on_command_${name} == 'function' ? _on_command_${name}(\`${args}\`) : null)`,
-                {
-                  trigger: "listen",
-                  async: item.deepasync, // run async if item is async or has async deps
-                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+              try {
+                let cmd_item = items[_item("#commands" + cmd).index];
+                Promise.resolve(
+                  _item("#commands" + cmd).eval(`run(\`${args}\`)`, {
+                    trigger: "command",
+                    async: cmd_item.deepasync, // run async if item is async or has async deps
+                    async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                  })
+                )
+                  .then((obj) => {
+                    handleCommandReturn(cmd, cmd_item, obj, handleError);
+                  })
+                  .catch(handleError);
+              } catch (e) {
+                handleError(e);
+                throw e;
+              }
+              return;
+            } else {
+              // as last effort, invoke on first listener that handles _on_command_<name>
+              let found_listener = false;
+              for (let item of items) {
+                if (!item.listen) continue;
+                const name = cmd.substring(1);
+                if (!item.text.includes("_on_command_" + name)) continue;
+                found_listener = true;
+                function handleError(e) {
+                  const log = _item(item.id).get_log({ since: "eval", level: "error" });
+                  let msg = [`${item.name} _on_command_${name}(\`${args}\`) failed: `, ...log, e].join("\n");
+                  alert(msg);
                 }
-              );
-              if (ret === null) continue; // did not handle command
-              Promise.resolve(ret)
-                .then((obj) => {
-                  handleCommandReturn(cmd, item, obj, handleError);
-                })
-                .catch(handleError);
-              found_listener = true;
-              break; // stop on first listener handling command
+                const ret = _item(item.id).eval(
+                  `(typeof _on_command_${name} == 'function' ? _on_command_${name}(\`${args}\`) : null)`,
+                  {
+                    trigger: "listen",
+                    async: item.deepasync, // run async if item is async or has async deps
+                    async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                  }
+                );
+                if (ret === null) continue; // did not handle command
+                Promise.resolve(ret)
+                  .then((obj) => {
+                    handleCommandReturn(cmd, item, obj, handleError);
+                  })
+                  .catch(handleError);
+                found_listener = true;
+                break; // stop on first listener handling command
+              }
+              if (!found_listener) alert(`unknown command ${cmd}`);
+              return;
             }
-            if (!found_listener) alert(`unknown command ${cmd}`);
-            return;
+          } else if (text.match(/^\/\s+/s)) {
+            // clear /(space) as a mechanism to disable search
+            // (onEditorChange already ignores text starting with /)
+            // text = text.replace(/^\/\s+/s, "");
           }
-        } else if (text.match(/^\/\s+/s)) {
-          // clear /(space) as a mechanism to disable search
-          // (onEditorChange already ignores text starting with /)
-          // text = text.replace(/^\/\s+/s, "");
+          // editing = text.trim().length == 0; // if text is empty, continue editing
         }
-        // editing = text.trim().length == 0; // if text is empty, continue editing
       }
     }
 
