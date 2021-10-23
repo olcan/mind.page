@@ -2232,7 +2232,9 @@
     // skip if not updating deps (implies invoked from initialize(), i.e. not new/modified item)
     if (update_deps) {
       if (!prev_init && item.init) console.warn(`new _init item ${item.name} may require reload`);
-      if (!prev_welcome && item.welcome) console.warn(`new _welcome item ${item.name} may require reload`);
+      else if (!prev_welcome && item.welcome) console.warn(`new _welcome item ${item.name} may require reload`);
+      else if (item.init) console.warn(`modified _init item ${item.name} may require reload`);
+      else if (item.welcome) console.warn(`modified _welcome item ${item.name} may require reload`);
     }
 
     // compute expanded tags including prefixes
