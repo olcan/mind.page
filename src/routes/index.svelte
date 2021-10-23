@@ -172,6 +172,9 @@
     window["_delay"] = _delay;
     window["_update_dom"] = update_dom;
     window["_decrypt_item"] = decryptItem;
+    window["_parse_tags"] = parseTags;
+    window["_parse_label"] = parseLabel;
+    window["_special_tag"] = isSpecialTag;
   }
 
   // private function for looking up item given its id
@@ -1645,16 +1648,13 @@
       // calculate missing tags (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
+      // hidden "special" tags are not considered "missing" since they toggle special features
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       // NOTE: tagCounts include prefix tags, deduplicated at item level
       item.missingTags = item.tagsVisible
-        .filter((t) => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
+        .filter((t) => t != item.label && (tagCounts.get(t) || 0) <= 1)
         .concat(item.tagsHidden.filter((t) => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1));
 
-      // allow special tags to be missing if they are visible
-      item.missingTags = item.missingTags.concat(
-        item.tagsVisible.filter((t) => t != item.label && isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
-      );
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
       item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null;
