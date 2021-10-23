@@ -2886,7 +2886,7 @@
                 // if no token, prompt for it, also mentioning rate limits
                 if (!token) {
                   token = await _modal({
-                    content: `Please enter your GitHub [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Although you can skip the token when accessing public repos, using a token is strongly recommended due to strict rate limits enforced by GitHub for unauthenticated users.`,
+                    content: `MindPage needs your GitHub [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access strictly throttled by GitHub.`,
                     confirm: "Use Token",
                     cancel: "Skip",
                     input: "",
