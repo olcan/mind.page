@@ -1398,8 +1398,8 @@
       tag == "#autorun" ||
       tag == "#spell" ||
       tag == "#nospell" ||
-      tag.match(/^#pin(?:\/|$)/) ||
-      tag.match(/\/pin(?:\/|$)/)
+      !!tag.match(/^#pin(?:\/|$)/) ||
+      !!tag.match(/\/pin(?:\/|$)/)
     );
   }
 
