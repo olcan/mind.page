@@ -2228,15 +2228,6 @@
     // name is always unique and either unique label or id:<id>
     item.name = item.labelUnique ? item.labelText : "id:" + item.id;
 
-    // warn about new _init or _welcome items
-    // skip if not updating deps (implies invoked from initialize(), i.e. not new/modified item)
-    if (update_deps) {
-      if (!prev_init && item.init) console.warn(`new _init item ${item.name} may require reload`);
-      else if (!prev_welcome && item.welcome) console.warn(`new _welcome item ${item.name} may require reload`);
-      else if (item.init) console.warn(`modified _init item ${item.name} may require reload`);
-      else if (item.welcome) console.warn(`modified _welcome item ${item.name} may require reload`);
-    }
-
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || [];
     item.tagsExpanded = item.tags.slice();
@@ -2269,8 +2260,20 @@
       if (item.deephash != prevDeepHash && !item.log && !keep_time) item.time = Date.now();
       item.deepasync = item.async || item.deps.some((id) => items[indexFromId.get(id)].async);
 
+      // warn about new _init or _welcome items
+      // doing this under update_deps ensures item is new or modified (vs initialized)
+      if (item.init && !prev_init) console.warn(`new _init item ${item.name} may require reload`);
+      else if (item.welcome && !prev_welcome) console.warn(`new _welcome item ${item.name} may require reload`);
+
       // if deephash has changed, invoke _on_item_change on all _listen items
+      // also warn about modified (based on deephash) _init or _welcome items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
+        const item = items[indexFromId.get(id)];
+        if (item.init || item.welcome)
+          console.warn(
+            `${dependency ? "dependency-" : ""}modified ${item.init ? "init" : "welcome"} ` +
+              `item ${item.name} may require reload`
+          );
         setTimeout(() => {
           const deleted = !indexFromId.has(id);
           items.forEach((item) => {
