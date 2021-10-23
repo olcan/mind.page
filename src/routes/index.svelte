@@ -174,6 +174,7 @@
     window["_decrypt_item"] = decryptItem;
     window["_parse_tags"] = parseTags;
     window["_parse_label"] = parseLabel;
+    window["_resolve_tags"] = resolveTags;
     window["_special_tag"] = isSpecialTag;
   }
 
@@ -2124,6 +2125,15 @@
       .join(" ");
   }
 
+  function resolveTags(label, tags) {
+    return tags.map((tag) => {
+      if (tag == label) return tag;
+      else if (tag.startsWith("#//")) return label.replace(/\/[^\/]*$/, "") + tag.substring(2);
+      else if (tag.startsWith("#/")) return label + tag.substring(1);
+      else return tag;
+    });
+  }
+
   let tagCounts = new Map<string, number>();
   function itemTextChanged(
     index: number,
@@ -2173,21 +2183,13 @@
     if (item.labelUnique == undefined) item.labelUnique = false;
     if (item.labelPrefixes == undefined) item.labelPrefixes = [];
     if (item.label) {
-      // convert relative tags to absolute
-      const resolveTag = (tag) =>
-        tag == item.label
-          ? tag
-          : tag.startsWith("#//")
-          ? item.label.replace(/\/[^\/]*$/, "") + tag.substring(2)
-          : tag.startsWith("#/")
-          ? item.label + tag.substring(1)
-          : tag;
-      item.tags = item.tags.map(resolveTag);
-      item.tagsVisible = item.tagsVisible.map(resolveTag);
-      item.tagsHidden = item.tagsHidden.map(resolveTag);
-      item.tagsRaw = item.tagsRaw.map(resolveTag);
-      item.tagsAlt = item.tagsAlt.map(resolveTag);
-      item.tagsHiddenAlt = item.tagsHiddenAlt.map(resolveTag);
+      // resolve tags relative to label
+      item.tags = resolveTags(item.label, item.tags);
+      item.tagsVisible = resolveTags(item.label, item.tagsVisible);
+      item.tagsHidden = resolveTags(item.label, item.tagsHidden);
+      item.tagsRaw = resolveTags(item.label, item.tagsRaw);
+      item.tagsAlt = resolveTags(item.label, item.tagsAlt);
+      item.tagsHiddenAlt = resolveTags(item.label, item.tagsHiddenAlt);
     }
     if (item.label != prevLabel) {
       item.labelUnique = false;
