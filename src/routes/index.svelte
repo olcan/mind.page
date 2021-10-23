@@ -2270,7 +2270,7 @@
       // also warn about modified (based on deephash) _init or _welcome items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
         const item = items[indexFromId.get(id)];
-        if ((item.init || item.welcome) && id != new_init_welcome_item_id)
+        if ((item.init || item.welcome) && id != new_init_welcome_item_id && !dependency)
           console.warn(
             `${dependency ? "dependency-" : ""}modified ${item.init ? "init" : "welcome"} ` +
               `item ${item.name} may require reload`
