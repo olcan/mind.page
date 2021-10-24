@@ -3301,7 +3301,7 @@
       if (index == undefined) return // item was deleted
       let item = items[index]
       item.savedTime = savedItem.time
-      item.savedAttr = _.cloneDeep(savedItem.attr)
+      item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
       item.savedText = savedItem.text
       item.saving = false
       items[index] = item // trigger dom update
