@@ -2869,7 +2869,9 @@
                 alert(`usage: ${cmd} path [repo branch owner token]`);
                 return;
               }
-              // if path is specified as label, extract path from matching item
+              // if path is specified as #label, extract path from named item
+              // note path==label is not required in general, indeed labels could be missing or non-unique
+              // however path==label is required for dependencies (see below) so their paths can be inferred
               let label;
               if (path.startsWith("#")) {
                 label = path;
@@ -2996,13 +2998,10 @@
                     return m;
                   });
 
-                  // TODO: install/update all dependencies using await and confirming item.name == tag (lowercase)
-                  // TODO: delete removed dependencies of existing item
-
-                  // if item with same name alredy exists, replace (after confirmation depending on command)
-                  // we extract label from retrieved item, even if label was specified in command
-                  label = parseLabel(text, true /*keep_case*/);
+                  // extract label from text and check existence if updating
                   let item;
+                  label = parseLabel(text);
+                  // if updating, label should uniquely match an existing (named) item
                   if (updating) {
                     if (!label) {
                       alert(`could not determine item name for update from ${path}`);
@@ -3014,12 +3013,41 @@
                       alert(`missing item ${label} to update from ${path}`);
                       return;
                     }
-                    item = _item(label);
-                    __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
-                    item.write(text, "");
-                  } else {
-                    // installing
-                    if (label && _exists(label, false /*allow_multiple*/)) {
+                  }
+
+                  // install/update dependencies based on item text
+                  // dependency paths MUST match the (resolved) hidden tags
+                  if (label) {
+                    const deps = resolveTags(
+                      label,
+                      parseTags(text).hidden.filter((t) => !isSpecialTag(t))
+                    );
+                    for (let dep of deps) {
+                      const update = _exists(dep, false /*allow_multiple*/); // update if possible
+                      console.log((update ? "updating" : "installing") + ` dependency ${dep} for ${label} ...`);
+                      const dep_path = dep.slice(1); // path assumed same as tag
+                      const command = `${update ? "/_update" : "/_install"} ${dep_path} ${repo} ${branch} ${owner} ${
+                        token || ""
+                      }`;
+                      const dep_item = await onEditorDone(command);
+                      if (!dep_item) {
+                        alert(`failed to ${update ? "update" : "install"} dependency ${dep} for ${label}`);
+                        return;
+                      } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+                        alert(
+                          `invalid name ${dep_item.name} for ${
+                            update ? "updated" : "installed"
+                          } dependency ${dep} of ${label}`
+                        );
+                        return;
+                      }
+                    }
+                  }
+
+                  // replace existing item or create new item
+                  if (label && _exists(label, false /*allow_multiple*/)) {
+                    // confirm replacement if installing
+                    if (!updating) {
                       const replace = await _modal_update({
                         content: `Replace existing ${label}?`,
                         confirm: "Replace",
@@ -3030,16 +3058,18 @@
                         console.warn(`cancelled installation of ${path} due to existing item ${label}`);
                         return;
                       }
-                      item = _item(label);
-                      __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
-                      item.write(text, "");
-                    } else {
-                      item = onEditorDone(text, null, false, false, false, attr, true /*ignore_command*/);
                     }
+                    item = _item(label);
+                    __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable });
+                    item.write(text, "");
+                  } else {
+                    item = onEditorDone(text, null, false, false, false, attr, true /*ignore_command*/);
                   }
-                  // wait for full dom update
+
+                  // wait for dom update
                   await tick();
                   await update_dom();
+
                   // invoke _install(item) if defined
                   _modal_close(); // allow _install to display own modals
                   if (item.text.includes("_install")) {
@@ -3049,13 +3079,15 @@
                       });
                     } catch (e) {} // already logged, just continue
                   }
+
+                  // log completion and return item to indicate successful install/update
                   console.log(
                     (updating ? "updated" : "installed") + ` ${path} (${item.name}) in ${Date.now() - start}ms`
                   );
-                  return item; // indicates successful install/update
+                  return item;
                 } catch (e) {
-                  console.error(cmd + " failed: " + e);
-                  alert(cmd + " failed: " + e);
+                  console.error(`${updating ? "update" : "install"} failed for ${path}: ` + e);
+                  alert(`${updating ? "update" : "install"} failed for ${path}: ` + e);
                 } finally {
                   _modal_close();
                 }
