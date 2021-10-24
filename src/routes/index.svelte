@@ -2893,7 +2893,11 @@
               const Octokit = window["Octokit"];
               const github = token ? new Octokit({ auth: token }) : new Octokit();
               const start = Date.now();
-              (async () => {
+
+              // clear command and return promise for processing ...
+              lastEditorChangeTime = 0; // disable debounce even if editor focused
+              onEditorChange("");
+              return (async () => {
                 try {
                   // if no token, prompt for it, also mentioning rate limits
                   if (!token) {
@@ -2992,8 +2996,8 @@
                     return m;
                   });
 
-                  // TODO: install new/missing dependencies and wait for those to complete
-                  // TODO: delete removed dependencies
+                  // TODO: install/update all dependencies using await and confirming item.name == tag (lowercase)
+                  // TODO: delete removed dependencies of existing item
 
                   // if item with same name alredy exists, replace (after confirmation depending on command)
                   // we extract label from retrieved item, even if label was specified in command
@@ -3017,7 +3021,7 @@
                     // installing
                     if (label && _exists(label, false /*allow_multiple*/)) {
                       const replace = await _modal_update({
-                        content: `Replace existing item ${label}?`,
+                        content: `Replace existing ${label}?`,
                         confirm: "Replace",
                         cancel: "Cancel",
                         background: "cancel",
@@ -3048,6 +3052,7 @@
                   console.log(
                     (updating ? "updated" : "installed") + ` ${path} (${item.name}) in ${Date.now() - start}ms`
                   );
+                  return item; // indicates successful install/update
                 } catch (e) {
                   console.error(cmd + " failed: " + e);
                   alert(cmd + " failed: " + e);
@@ -3055,10 +3060,6 @@
                   _modal_close();
                 }
               })();
-
-              lastEditorChangeTime = 0; // disable debounce even if editor focused
-              onEditorChange("");
-              return;
             } else if (_exists("#commands" + cmd)) {
               function handleError(e) {
                 const log = _item("#commands" + cmd).get_log({ since: "eval", level: "error" });
