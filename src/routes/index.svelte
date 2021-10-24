@@ -1821,10 +1821,10 @@
     // auto-show session items if no position-based toggles, otherwise use minimal
     hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
     // hideIndex = hideIndexMinimal;
-    // if editor text is not modified, we can only show more items
+    // if editor text is not modified, we can not show less items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex)
-    // if editor text is modified to be empty, we can only show less items
-    if (editorTextModified && !editorText) Math.min(hideIndex, prevHideIndex)
+    // if editor text is empty, we can not show more items either
+    if (!editorText) hideIndex = Math.min(hideIndex, prevHideIndex)
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal;
 
