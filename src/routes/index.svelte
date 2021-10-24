@@ -3301,7 +3301,7 @@
       if (index == undefined) return // item was deleted
       let item = items[index]
       item.savedTime = savedItem.time
-      item.savedAttr = savedItem.attr
+      item.savedAttr = _.cloneDeep(savedItem.attr)
       item.savedText = savedItem.text
       item.saving = false
       items[index] = item // trigger dom update
@@ -3462,7 +3462,7 @@
       // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
       // user: user.uid, // allows us to use set() instead of update()
       time: item.time,
-      attr: item.attr,
+      attr: _.cloneDeep(item.attr),
       text: item.text,
     }
 
@@ -3524,7 +3524,7 @@
     onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
     deletedItems.unshift({
       time: item.savedTime,
-      attr: item.savedAttr,
+      attr: _.cloneDeep(item.savedAttr),
       text: item.savedText,
     }) // for /undelete
     if (!readonly && item.savedId) {
@@ -3551,7 +3551,7 @@
     // we also do not restore attr
     if (cancelled) {
       // item.time = item.savedTime;
-      // item.attr = item.savedAttr;
+      // item.attr = _.cloneDeep(item.savedAttr);
       item.text = item.savedText
     }
 
@@ -4085,7 +4085,7 @@
       item.admin = adminItems.has(item.id)
       item.savedId = item.id
       item.savedTime = item.time
-      item.savedAttr = item.attr
+      item.savedAttr = _.cloneDeep(item.attr)
       item.savedText = item.text
     })
     finalizeStateOnEditorChange = true // make initial empty state final
@@ -4469,7 +4469,7 @@
                       id: doc.id,
                       savedId: doc.id,
                       savedTime: savedItem.time,
-                      savedAttr: savedItem.attr,
+                      savedAttr: _.cloneDeep(savedItem.attr),
                       savedText: savedItem.text,
                     })
                     items = [item, ...items]
@@ -4521,7 +4521,7 @@
                     onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
                     deletedItems.unshift({
                       time: item.savedTime,
-                      attr: item.savedAttr,
+                      attr: _.cloneDeep(item.savedAttr),
                       text: item.savedText,
                     }) // for /undelete
                   } else if (change.type == 'modified') {
@@ -4546,8 +4546,9 @@
                     if (index === undefined) return // nothing to modify
                     let item = items[index]
                     item.time = item.savedTime = savedItem.time
-                    item.attr = item.savedAttr = savedItem.attr
                     item.text = item.savedText = savedItem.text
+                    item.attr = savedItem.attr
+                    item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
                       item.text,
