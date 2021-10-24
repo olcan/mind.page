@@ -2912,12 +2912,9 @@
                     content: (updating ? 'Updating' : 'Installing') + ` ${updating && label ? label : path} ...`,
                     background: 'block',
                   })
-                  // retrieve text
-                  const { data } = await github.repos.getContent({ owner, repo, ref: branch, path })
-                  let text = decodeBase64(data.content)
                   // retrieve commit sha (allows comparison to later versions)
                   const {
-                    data: [{ sha }],
+                    data: [{ sha = 0 } = {}],
                   } = await github.repos.listCommits({
                     owner,
                     repo,
@@ -2925,6 +2922,11 @@
                     path,
                     per_page: 1,
                   })
+                  if (!sha) throw new Error(`${cmd}: missing commit for ${path}`)
+                  // retrieve text at this commit sha
+                  const { data } = await github.repos.getContent({ owner, repo, ref: sha, path })
+                  let text = decodeBase64(data.content)
+
                   const attr = {
                     sha,
                     editable: false,
@@ -2957,16 +2959,8 @@
                   let embed_text = {}
                   for (let path of _.uniq(embeds)) {
                     try {
-                      const { data } = await github.repos.getContent({
-                        owner,
-                        repo,
-                        ref: branch,
-                        path,
-                      })
-                      embed_text[path] = decodeBase64(data.content)
-
                       const {
-                        data: [{ sha }],
+                        data: [{ sha = 0 } = {}],
                       } = await github.repos.listCommits({
                         owner,
                         repo,
@@ -2974,6 +2968,14 @@
                         path,
                         per_page: 1,
                       })
+                      if (!sha) throw new Error(`${cmd}: missing commit for embed ${path}`)
+                      const { data } = await github.repos.getContent({
+                        owner,
+                        repo,
+                        ref: sha,
+                        path,
+                      })
+                      embed_text[path] = decodeBase64(data.content)
                       attr.embeds = (attr.embeds ?? []).concat({ path, sha })
                     } catch (e) {
                       throw new Error(`failed to embed '${path}'; error: ${e}`)
@@ -2998,16 +3000,10 @@
                   label = parseLabel(text)
                   // if updating, label should uniquely match an existing (named) item
                   if (updating) {
-                    if (!label) {
-                      alert(`could not determine item name for update from ${path}`)
-                      return
-                    } else if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
-                      alert(`found multiple items labeled ${label}, can not update from ${path}`)
-                      return
-                    } else if (!_exists(label)) {
-                      alert(`missing item ${label} to update from ${path}`)
-                      return
-                    }
+                    if (!label) throw new Error(`${cmd}: could not determine item name for update from ${path}`)
+                    else if (idsFromLabel.get(label.toLowerCase())?.length > 1)
+                      throw new Error(`${cmd}: found multiple items labeled ${label}, can not update from ${path}`)
+                    else if (!_exists(label)) throw new Error(`${cmd}: missing item ${label} to update from ${path}`)
                   }
 
                   // install/update dependencies based on item text
@@ -3026,15 +3022,15 @@
                       }`
                       const dep_item = await onEditorDone(command)
                       if (!dep_item) {
-                        alert(`failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`)
-                        return
+                        throw new Error(
+                          `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
+                        )
                       } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-                        alert(
-                          `invalid name ${dep_item.name} for ${
+                        throw new Error(
+                          `${cmd}: invalid name ${dep_item.name} for ${
                             update ? 'updated' : 'installed'
                           } dependency ${dep} of ${label}`
                         )
-                        return
                       }
                     }
                   }
@@ -3141,7 +3137,7 @@
                 found_listener = true
                 break // stop on first listener handling command
               }
-              if (!found_listener) alert(`unknown command ${cmd}`)
+              if (!found_listener) alert(`unknown command ${cmd} ${args}`)
               return
             }
           } else if (text.match(/^\/\s+/s)) {
