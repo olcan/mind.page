@@ -4635,7 +4635,16 @@
           let replay = true // true until replay below
           log_levels.forEach(function (verb) {
             console[verb] = function (...args) {
-              if (!replay) console['_' + verb](...args)
+              // NOTE: we indicate full eval stack as prefix
+              let prefix = evalStack
+                .map(id => items[indexFromId.get(id)].name)
+                .filter((n, j, nJ) => n != nJ[j - 1]) // remove consecutive duplicates
+                .join(' ')
+              if (prefix) prefix = '[' + prefix + '] '
+              if (!replay) {
+                if (prefix) console['_' + verb](prefix, ...args)
+                else console['_' + verb](...args)
+              }
               if (!consolediv) {
                 console['_warn']('consolediv not ready')
                 return
@@ -4643,12 +4652,6 @@
               var elem = document.createElement('div')
               if (verb.endsWith('error')) verb = 'error'
               elem.classList.add('console-' + verb)
-              // NOTE: we indicate full eval stack as prefix (not available for replayed logs)
-              let prefix = evalStack
-                .map(id => items[indexFromId.get(id)].name)
-                .filter((n, j, nJ) => n != nJ[j - 1]) // remove consecutive duplicates
-                .join(' ')
-              if (prefix) prefix = '[' + prefix + '] '
               let text = ''
               if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0])
               else text = args.join(' ') + '\n'
