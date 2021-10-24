@@ -16,5 +16,6 @@
   "diffEditor.renderSideBySide": false,
   "javascript.suggest.autoImports": false,
   "typescript.suggest.autoImports": false,
-  "editor.tabSize": 2
+  "editor.tabSize": 2,
+  "editor.rulers": [120]
 }
