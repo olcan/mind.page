@@ -2525,6 +2525,7 @@
   ) {
     editorText = text // in case invoked without setting editorText
     const key = e?.code || e?.key
+    window['_mindbox_return'] = undefined // set on non-empty returns for MindBox.create
     if (cancelled) {
       if (key == 'Escape') {
         setTimeout(() => textArea(-1).blur()) // requires dispatch on chrome
@@ -2891,10 +2892,9 @@
               const start = Date.now()
 
               // clear command and return promise for processing ...
-              // also store promise as window._pending_install for external use
               lastEditorChangeTime = 0 // disable debounce even if editor focused
               onEditorChange('')
-              return (window['_pending_install'] = (async () => {
+              return (window['_mindbox_return'] = (async () => {
                 try {
                   // if no token, prompt for it, also mentioning rate limits
                   if (!token) {
@@ -3283,7 +3283,7 @@
       })
       .catch(console.error)
 
-    return _item(item.id) // return reference to created item
+    return (window['_mindbox_return'] = _item(item.id)) // return created item
   }
 
   function focusOnNearestEditingItem(index: number) {
