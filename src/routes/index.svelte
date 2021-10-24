@@ -2891,9 +2891,10 @@
               const start = Date.now()
 
               // clear command and return promise for processing ...
+              // also store promise as window._pending_install for external use
               lastEditorChangeTime = 0 // disable debounce even if editor focused
               onEditorChange('')
-              return (async () => {
+              return (window['_pending_install'] = (async () => {
                 try {
                   // if no token, prompt for it, also mentioning rate limits
                   if (!token) {
@@ -3085,7 +3086,7 @@
                 } finally {
                   _modal_close()
                 }
-              })()
+              })())
             } else if (_exists('#commands' + cmd)) {
               function handleError(e) {
                 const log = _item('#commands' + cmd).get_log({ since: 'eval', level: 'error' })
