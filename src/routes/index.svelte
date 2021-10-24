@@ -1823,8 +1823,8 @@
     // hideIndex = hideIndexMinimal;
     // if editor text is not modified, we can not show less items
     if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex)
-    // if editor text is empty, we can not show more items either (up to hideIndexMinimal)
-    if (!editorText) hideIndex = Math.min(hideIndex, Math.max(prevHideIndex, hideIndexMinimal))
+    // if editor text is modified empty, we can not show more items (above hideIndexMinimal)
+    if (editorTextModified && !editorText) hideIndex = Math.min(hideIndex, Math.max(prevHideIndex, hideIndexMinimal))
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal;
 
