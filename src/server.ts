@@ -1,19 +1,19 @@
-import sirv from "sirv";
-import express from "express";
-import compression from "compression";
-import cookieParser from "cookie-parser";
-import * as sapper from "@sapper/server";
-import https from "https";
-import fs from "fs";
+import sirv from 'sirv'
+import express from 'express'
+import compression from 'compression'
+import cookieParser from 'cookie-parser'
+import * as sapper from '@sapper/server'
+import https from 'https'
+import fs from 'fs'
 
-const { PORT, NODE_ENV } = process.env;
-const dev = NODE_ENV === "development"; // NOTE: production for 'firebase serve'
+const { PORT, NODE_ENV } = process.env
+const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
 
 function get_hostdir(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
-  let hostname = (req.headers["x-forwarded-host"] || req.headers["host"]).toString();
-  globalThis.hostname = hostname = hostname.replace(/:.+$/, ""); // drop port number
-  return ["mind.page", "mindbox.io", "olcan.com"].includes(hostname) ? hostname : "other";
+  let hostname = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
+  globalThis.hostname = hostname = hostname.replace(/:.+$/, '') // drop port number
+  return ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
 }
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
@@ -24,164 +24,164 @@ function get_hostdir(req) {
 // standalone (s) should hide chrome toolbar but may show if app navigates outside scope
 // browser (b) runs in a regular browser tab or window
 // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
-const paths = [];
+const paths = []
 for (let i = 0; i < 10; i++) {
-  paths.push(`/${i}f/`); // fullscreen
-  paths.push(`/${i}s/`); // standalone (default)
-  paths.push(`/${i}m/`); // minimal-ui
-  paths.push(`/${i}b/`); // browser
-  paths.push(`/${i}/`); // default (standalone)
+  paths.push(`/${i}f/`) // fullscreen
+  paths.push(`/${i}s/`) // standalone (default)
+  paths.push(`/${i}m/`) // minimal-ui
+  paths.push(`/${i}b/`) // browser
+  paths.push(`/${i}/`) // default (standalone)
 }
 // display-only prefixes
-paths.push("/f/");
-paths.push("/s/");
-paths.push("/m/");
-paths.push("/b/");
+paths.push('/f/')
+paths.push('/s/')
+paths.push('/m/')
+paths.push('/b/')
 // default global-scope standalone-display prefix
-paths.push("/");
+paths.push('/')
 
 const sapperServer = express().use(
   paths,
   compression({ threshold: 0 }),
   // TODO: remove 'as any' when typescript error is fixed
-  sirv("static", { dev, dotfiles: true /* in case .DS_Store is created */ }) as any,
+  sirv('static', { dev, dotfiles: true /* in case .DS_Store is created */ }) as any,
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
-    const hostdir = get_hostdir(req);
+    const hostdir = get_hostdir(req)
     // serve /manifest.json from any path (to allow scoping in manifest)
-    if (req.path.endsWith("/manifest.json")) {
-      const scope = req.originalUrl.replace(/manifest\.json[?]?.*$/, "");
+    if (req.path.endsWith('/manifest.json')) {
+      const scope = req.originalUrl.replace(/manifest\.json[?]?.*$/, '')
       res.json({
         scope: scope,
         // NOTE: start_url is not allowed to be outside scope, and if there is redirect it can force address bar for app
         start_url: scope,
         name: globalThis.hostname + scope.slice(0, -1),
         short_name: globalThis.hostname + scope.slice(0, -1),
-        display: scope.includes("f")
-          ? "fullscreen"
-          : scope.includes("s")
-          ? "standalone"
-          : scope.includes("m")
-          ? "minimal-ui"
-          : scope.includes("b")
-          ? "browser"
-          : "standalone",
-        background_color: "#111",
-        theme_color: "#111",
+        display: scope.includes('f')
+          ? 'fullscreen'
+          : scope.includes('s')
+          ? 'standalone'
+          : scope.includes('m')
+          ? 'minimal-ui'
+          : scope.includes('b')
+          ? 'browser'
+          : 'standalone',
+        background_color: '#111',
+        theme_color: '#111',
         icons: [
           {
-            src: hostdir + "/apple-touch-icon.png",
-            sizes: "180x180",
-            type: "image/png",
+            src: hostdir + '/apple-touch-icon.png',
+            sizes: '180x180',
+            type: 'image/png',
           },
           {
-            src: hostdir + "/android-chrome-192x192.png",
-            sizes: "192x192",
-            type: "image/png",
+            src: hostdir + '/android-chrome-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
           },
           {
-            src: hostdir + "/android-chrome-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
+            src: hostdir + '/android-chrome-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
           },
         ],
-      });
-    } else if (req.path == "/apple-touch-icon.png") {
-      res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
-    } else if (req.path == "/favicon.ico") {
-      res.sendFile(process.env["PWD"] + "/static/" + hostdir + req.path);
-    } else if (req.path == "/icon.png") {
-      res.sendFile(process.env["PWD"] + "/static/" + hostdir + "/favicon.ico");
+      })
+    } else if (req.path == '/apple-touch-icon.png') {
+      res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
+    } else if (req.path == '/favicon.ico') {
+      res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
+    } else if (req.path == '/icon.png') {
+      res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
     } else {
-      next();
+      next()
     }
   },
   cookieParser(),
   (req, res, next) => {
-    res.cookie = req.cookies["__session"] || "";
-    next();
+    res.cookie = req.cookies['__session'] || ''
+    next()
   },
   // handle POST for webhooks
   express.json(),
   (req, res, next) => {
-    if (req.path == "/github_webhooks") {
-      console.log("received /github_webhooks", req.body);
-      firebaseAdmin().firestore().collection("github_webhooks").add({
+    if (req.path == '/github_webhooks') {
+      console.log('received /github_webhooks', req.body)
+      firebaseAdmin().firestore().collection('github_webhooks').add({
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
-      });
-      res.status(200).end();
+      })
+      res.status(200).end()
     } else {
-      next();
+      next()
     }
   },
   // TODO: remove 'as any' when typescript error is fixed
   sapper.middleware({
     session: (req, res) => ({
-      cookie: res["cookie"],
+      cookie: res['cookie'],
     }),
   }) as any
-);
+)
 
 // listen if firebase is not handling the server ...
-if (!("FIREBASE_CONFIG" in process.env)) {
-  sapperServer.listen(PORT).on("error", (err) => {
-    if (err) console.log("error", err);
-  });
+if (!('FIREBASE_CONFIG' in process.env)) {
+  sapperServer.listen(PORT).on('error', err => {
+    if (err) console.log('error', err)
+  })
   // also listen on HTTPS port ...
   const server = https
     .createServer(
       {
-        key: fs.readFileSync("static/ssl-dev/ca.key"),
-        cert: fs.readFileSync("static/ssl-dev/ca.crt"),
+        key: fs.readFileSync('static/ssl-dev/ca.key'),
+        cert: fs.readFileSync('static/ssl-dev/ca.crt'),
       },
       sapperServer
     )
     .listen(443, () => {
-      console.log("HTTPS server listening on https://localhost:443");
+      console.log('HTTPS server listening on https://localhost:443')
     })
-    .on("error", (err) => {
-      if (err) console.log("error", err);
-    });
+    .on('error', err => {
+      if (err) console.log('error', err)
+    })
 }
 
-import { firebaseAdmin } from "../firebase.js";
+import { firebaseAdmin } from '../firebase.js'
 
 // server-side preload hidden from client-side code
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`
-process["server-preload"] = async (page, session) => {
+process['server-preload'] = async (page, session) => {
   // console.debug("preloading, client?", typeof window !== undefined, page, session);
-  return {}; // disable server preload for now, even for anonymous account
+  return {} // disable server preload for now, even for anonymous account
 
-  let user = null;
-  if (session.cookie == "signin_pending") {
-    return {}; // signin pending, do not waste time retrieving data
-  } else if (!session.cookie || page.query.user == "anonymous") {
-    user = { uid: "anonymous" };
+  let user = null
+  if (session.cookie == 'signin_pending') {
+    return {} // signin pending, do not waste time retrieving data
+  } else if (!session.cookie || page.query.user == 'anonymous') {
+    user = { uid: 'anonymous' }
   } else {
     // NOTE: we no longer preload for non-anonymous accounts because it slows down initial page load for larger accounts, and firebase realtime can be much more efficient due to client-side caching
-    return {};
+    return {}
     // user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
     // if (!user) return { error: "invalid/expired session cookie" };
   }
   let items = await firebaseAdmin()
     .firestore()
-    .collection("items") // server always reads from primary collection
-    .where("user", "==", user.uid) // important since otherwise firebaseAdmin has full access
-    .orderBy("time", "desc")
-    .get();
+    .collection('items') // server always reads from primary collection
+    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
+    .orderBy('time', 'desc')
+    .get()
   // console.debug(`retrieved ${items.docs.length} items for user '${user.uid}'`);
   return {
     // NOTE: we use _preload suffix to avoid replacing items on back/forward
-    items_preload: items.docs.map((doc) =>
+    items_preload: items.docs.map(doc =>
       Object.assign(doc.data(), {
         id: doc.id,
         updateTime: doc.updateTime.seconds,
         createTime: doc.createTime.seconds,
       })
     ),
-  };
-};
+  }
+}
 
-export { sapperServer }; // for use as handler in index.js
+export { sapperServer } // for use as handler in index.js

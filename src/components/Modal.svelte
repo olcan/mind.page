@@ -1,27 +1,27 @@
 <script lang="ts">
-  import marked from "marked";
-  import { numberWithCommas } from "../util.js";
-  export let onPastedImage = (url: string, file: File, size_handler = null) => {};
+  import marked from 'marked'
+  import { numberWithCommas } from '../util.js'
+  export let onPastedImage = (url: string, file: File, size_handler = null) => {}
 
-  let content = "";
-  let confirm = "";
-  let cancel = "";
-  let input = null;
-  let password = false;
-  let username = "";
-  let autocomplete = "";
-  let images = false;
-  let canConfirm = (input: string) => input.length > 0;
-  let onConfirm = (input = null) => {};
-  let onCancel = () => {};
-  let background = ""; // can be "confirm", "cancel", or "block"; default ("") is block OR hide if no confirm/cancel buttons
-  let selected_images = []; // used internally for file input
-  let ready_image_count = 0;
-  let visible = false;
-  let enabled = false;
+  let content = ''
+  let confirm = ''
+  let cancel = ''
+  let input = null
+  let password = false
+  let username = ''
+  let autocomplete = ''
+  let images = false
+  let canConfirm = (input: string) => input.length > 0
+  let onConfirm = (input = null) => {}
+  let onCancel = () => {}
+  let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR hide if no confirm/cancel buttons
+  let selected_images = [] // used internally for file input
+  let ready_image_count = 0
+  let visible = false
+  let enabled = false
   $: enabled =
     (input == null || canConfirm(input)) &&
-    (!images || (selected_images.length > 0 && ready_image_count == selected_images.length));
+    (!images || (selected_images.length > 0 && ready_image_count == selected_images.length))
 
   const defaults = {
     content,
@@ -36,18 +36,18 @@
     onConfirm,
     onCancel,
     background,
-  };
+  }
 
-  let inputelem: HTMLInputElement;
-  let _promise, _resolve;
-  let dispatchTime;
+  let inputelem: HTMLInputElement
+  let _promise, _resolve
+  let dispatchTime
   export function show(options) {
-    const last_promise = _promise;
-    return (_promise = new Promise((resolve) => {
-      _resolve = resolve;
-      dispatchTime = Date.now();
+    const last_promise = _promise
+    return (_promise = new Promise(resolve => {
+      _resolve = resolve
+      dispatchTime = Date.now()
       Promise.resolve(last_promise).then(() => {
-        ({
+        ;({
           content,
           confirm,
           cancel,
@@ -60,38 +60,38 @@
           onConfirm,
           onCancel,
           background,
-        } = Object.assign({ ...defaults }, options));
+        } = Object.assign({ ...defaults }, options))
         // console.debug(options, confirm, cancel);
-        selected_images = [];
-        ready_image_count = 0;
-        visible = true;
+        selected_images = []
+        ready_image_count = 0
+        visible = true
 
         // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
         // chrome fails to trigger onchange and enable confirm button despite autofill
-        const isSafari = navigator.userAgent.toLowerCase().indexOf("safari/") > -1;
+        const isSafari = navigator.userAgent.toLowerCase().indexOf('safari/') > -1
         if (!isSafari && input != null && autocomplete) {
-          const origDispatchTime = dispatchTime;
+          const origDispatchTime = dispatchTime
           const checkForChromeAutofill = () => {
-            if (!visible || dispatchTime != origDispatchTime) return; // cancel
+            if (!visible || dispatchTime != origDispatchTime) return // cancel
             try {
-              if (inputelem?.matches(":-internal-autofill-selected")) {
-                input = inputelem.value; // did not work in experiments but just in case
-                enabled = true;
+              if (inputelem?.matches(':-internal-autofill-selected')) {
+                input = inputelem.value // did not work in experiments but just in case
+                enabled = true
               }
-              setTimeout(checkForChromeAutofill, 100);
+              setTimeout(checkForChromeAutofill, 100)
             } catch (e) {
               // report errors as warnings
-              console.warn(e);
+              console.warn(e)
             }
-          };
-          checkForChromeAutofill(); // start checking
+          }
+          checkForChromeAutofill() // start checking
         }
-      });
-    }).finally(() => (_promise = null)));
+      })
+    }).finally(() => (_promise = null)))
   }
 
   export function update(options) {
-    ({
+    ;({
       content,
       confirm,
       cancel,
@@ -120,98 +120,98 @@
         background,
       },
       options
-    ));
-    return Promise.resolve(_promise);
+    ))
+    return Promise.resolve(_promise)
   }
 
   export function hide() {
-    visible = false;
-    if (_resolve) _resolve();
-    return Promise.resolve(_promise);
+    visible = false
+    if (_resolve) _resolve()
+    return Promise.resolve(_promise)
   }
 
   export function isVisible() {
-    return visible;
+    return visible
   }
 
   function _onConfirm(e = null) {
-    e?.stopPropagation();
-    e?.preventDefault();
-    if (!enabled) return;
-    visible = false;
-    const out = images ? selected_images : input != null ? input : true;
-    onConfirm(out);
-    _resolve(out);
+    e?.stopPropagation()
+    e?.preventDefault()
+    if (!enabled) return
+    visible = false
+    const out = images ? selected_images : input != null ? input : true
+    onConfirm(out)
+    _resolve(out)
   }
 
   function _onCancel(e = null) {
-    e?.stopPropagation();
-    e?.preventDefault();
-    if (!cancel) return;
-    visible = false;
-    const out = images ? [] : input != null ? null : false;
-    onCancel();
-    _resolve(out);
+    e?.stopPropagation()
+    e?.preventDefault()
+    if (!cancel) return
+    visible = false
+    const out = images ? [] : input != null ? null : false
+    onCancel()
+    _resolve(out)
   }
 
   function onBackgroundClick(e = null) {
-    if (e && (e.target as HTMLElement).closest(".modal")) return; // ignore click on modal
-    e?.stopPropagation();
-    e?.preventDefault();
-    if (!confirm && !cancel && background.toLowerCase() != "block") hide();
-    else if (confirm && background.toLowerCase() == "confirm") _onConfirm(e);
-    else if (cancel && background.toLowerCase() == "cancel") _onCancel(e);
+    if (e && (e.target as HTMLElement).closest('.modal')) return // ignore click on modal
+    e?.stopPropagation()
+    e?.preventDefault()
+    if (!confirm && !cancel && background.toLowerCase() != 'block') hide()
+    else if (confirm && background.toLowerCase() == 'confirm') _onConfirm(e)
+    else if (cancel && background.toLowerCase() == 'cancel') _onCancel(e)
     // else block
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    const key = e.code || e.key; // for android compatibility
+    const key = e.code || e.key // for android compatibility
     // NOTE: modal is on top of the page and handles ALL key events
-    if (!visible) return; // ignore if not visible
+    if (!visible) return // ignore if not visible
 
     // always stop Enter and Escape
     // also stop all non-modal non-modifier key events as a modal should
     if (
-      key == "Enter" ||
-      key == "Escape" ||
-      (!(e.target as HTMLElement).closest(".modal") && !e.metaKey && !e.ctrlKey && !e.altKey)
+      key == 'Enter' ||
+      key == 'Escape' ||
+      (!(e.target as HTMLElement).closest('.modal') && !e.metaKey && !e.ctrlKey && !e.altKey)
     ) {
-      e.stopPropagation();
-      e.preventDefault();
+      e.stopPropagation()
+      e.preventDefault()
     }
 
     // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
     setTimeout(() => {
-      if (key == "Enter") _onConfirm();
-      else if (key == "Escape") onBackgroundClick();
-    });
+      if (key == 'Enter') _onConfirm()
+      else if (key == 'Escape') onBackgroundClick()
+    })
   }
 
   function onFilesSelected(e) {
-    let input = e.target as HTMLInputElement;
-    selected_images = [];
-    ready_image_count = 0;
+    let input = e.target as HTMLInputElement
+    selected_images = []
+    ready_image_count = 0
     Array.from(input.files).map((file, index) => {
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(file)
       let image = {
         url: url,
         name: file.name,
         type: file.type,
         fname: null,
         size: null,
-      };
-      selected_images.push(image);
+      }
+      selected_images.push(image)
       Promise.resolve(
-        onPastedImage(url, file, (size) => {
-          if (selected_images[index]?.url != url) return; // cancelled
-          selected_images[index].size = size;
+        onPastedImage(url, file, size => {
+          if (selected_images[index]?.url != url) return // cancelled
+          selected_images[index].size = size
         })
-      ).then((fname) => {
-        if (selected_images[index]?.url != url) return; // cancelled
-        selected_images[index].fname = fname;
-        ready_image_count++;
-      });
-    });
+      ).then(fname => {
+        if (selected_images[index]?.url != url) return // cancelled
+        selected_images[index].fname = fname
+        ready_image_count++
+      })
+    })
   }
 </script>
 
@@ -250,11 +250,11 @@
             {#if image.fname}
               Ready to insert "{image.name}" ({numberWithCommas(Math.ceil(image.size / 1024))} KB) as "{image.fname}".
             {:else if image.size != null}
-              {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ({numberWithCommas(
+              {window['_user'].uid == 'anonymous' ? 'Processing' : 'Uploading'} "{image.name}" ({numberWithCommas(
                 Math.ceil(image.size / 1024)
               )} KB) ...
             {:else}
-              {window["_user"].uid == "anonymous" ? "Processing" : "Uploading"} "{image.name}" ...
+              {window['_user'].uid == 'anonymous' ? 'Processing' : 'Uploading'} "{image.name}" ...
             {/if}
             <br />
           {/each}
@@ -277,9 +277,9 @@
 {#if visible}
   <script>
     setTimeout(() => {
-      document.activeElement?.blur();
-      document.querySelector("#modal-input")?.focus();
-    });
+      document.activeElement?.blur()
+      document.querySelector('#modal-input')?.focus()
+    })
   </script>
 {/if}
 
@@ -328,7 +328,7 @@
     box-sizing: border-box;
     margin: 10px 0;
   }
-  input[type="file"] {
+  input[type='file'] {
     display: none;
   }
   label.button {
@@ -396,7 +396,7 @@
   /* basic styling for markdown elements, similar to those in Item.svelte */
   :global(.modal code) {
     font-size: 15px; /* 2px smaller looks better */
-    font-family: "JetBrains Mono", monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-weight: 400; /* heavier better w/ light modal background */
     background: #ddd;
     white-space: pre-wrap;

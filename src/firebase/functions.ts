@@ -1,11 +1,11 @@
-import * as functions from "firebase-functions";
+import * as functions from 'firebase-functions'
 
 // use sapperServer exported from server.ts
-import { sapperServer } from "../../__sapper__/build/server/server.js";
+import { sapperServer } from '../../__sapper__/build/server/server.js'
 exports.ssr = functions.https.onRequest((request, response) => {
-  request.baseUrl = ""; // fixes 404s with 'firebase serve'
-  sapperServer(request, response);
-});
+  request.baseUrl = '' // fixes 404s with 'firebase serve'
+  sapperServer(request, response)
+})
 
 // // Create and Deploy Your First Cloud Functions
 // // https://firebase.google.com/docs/functions/write-firebase-functions

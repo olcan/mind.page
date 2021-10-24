@@ -1,10 +1,10 @@
-import * as sapper from "@sapper/app";
+import * as sapper from '@sapper/app'
 
 // set up window.Octokit and window.sha1 for Github API
-import { Octokit } from "../node_modules/@octokit/rest";
-import sha1 from "js-sha1";
-window["Octokit"] = Octokit;
-window["sha1"] = sha1;
+import { Octokit } from '../node_modules/@octokit/rest'
+import sha1 from 'js-sha1'
+window['Octokit'] = Octokit
+window['sha1'] = sha1
 
 // // import firebase
 // // see https://www.npmjs.com/package/firebase
@@ -18,10 +18,10 @@ window["sha1"] = sha1;
 // window._ = _;
 
 // comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
-window["_client_start_time"] = Math.round(performance.now());
+window['_client_start_time'] = Math.round(performance.now())
 sapper.start({
-  target: document.querySelector("#sapper"),
-});
+  target: document.querySelector('#sapper'),
+})
 
 // disable service workers
 // if (navigator.serviceWorker) {
