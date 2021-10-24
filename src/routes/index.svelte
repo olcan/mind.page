@@ -4643,7 +4643,10 @@
               if (verb.endsWith('error')) verb = 'error'
               elem.classList.add('console-' + verb)
               // NOTE: we indicate full eval stack as prefix (not available for replayed logs)
-              let prefix = evalStack.map(id => items[indexFromId.get(id)].name).join(' ')
+              let prefix = evalStack
+                .map(id => items[indexFromId.get(id)].name)
+                .filter((n, j, nJ) => n != nJ[j - 1]) // remove consecutive duplicates
+                .join(' ')
               if (prefix) prefix = '[' + prefix + '] '
               let text = ''
               if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0])
