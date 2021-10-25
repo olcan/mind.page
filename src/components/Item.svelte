@@ -1872,7 +1872,8 @@
     background: #222;
     border: 1px dashed #ddd;
   }
-  :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) {
+  /* :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) { */
+  :global(.item mark.hidden:not(.missing)) {
     display: none;
   }
   /* hide tags more aggressively in menu items */
