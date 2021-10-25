@@ -91,7 +91,7 @@
   // _items returns any number of matches, most recent first
   function _items(label: string = '') {
     const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map(item => item.id)) || []
-    return _.sortBy(ids.map(_item), item => -item.time)
+    return _.sortBy(ids.map(id=>_item(id)), item => -item.time)
   }
 
   // _labels returns labels in use, optionally filtered by selector (label,ids):boolean
