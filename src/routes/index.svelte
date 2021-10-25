@@ -91,7 +91,10 @@
   // _items returns any number of matches, most recent first
   function _items(label: string = '') {
     const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map(item => item.id)) || []
-    return _.sortBy(ids.map(id=>_item(id)), item => -item.time)
+    return _.sortBy(
+      ids.map(id => _item(id)),
+      item => -item.time
+    )
   }
 
   // _labels returns labels in use, optionally filtered by selector (label,ids):boolean
@@ -5385,7 +5388,7 @@
                 running={item.running}
                 admin={item.admin}
                 source={item.source}
-                path={item.attr?.path}
+                path={item.attr ? item.attr.path : ''}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
                 showLogs={item.showLogs}
                 height={item.height}
