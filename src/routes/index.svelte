@@ -45,17 +45,20 @@
     })
   }
 
-  function _item(name: string): any {
+  // returns item with name (unique label)
+  // returns null if missing, or if multiple items match label
+  // logs errors to console.error unless log_errors=false
+  function _item(name: string, log_errors = true): any {
     if (!name) return null
     let item
     if (name.startsWith('#')) {
       // item is specified by unique label (i.e. name)
       const ids = idsFromLabel.get(name.toLowerCase())
       if (!ids || ids.length == 0) {
-        console.error(`_item '${name}' not found`)
+        if (log_errors) console.error(`_item '${name}' not found`)
         return null
       } else if (ids.length > 1) {
-        console.error(`_item '${name}' is ambiguous (${ids.length} items)`)
+        if (log_errors) console.error(`_item '${name}' is ambiguous (${ids.length} items)`)
         return null
       }
       item = items[indexFromId.get(ids[0])]
@@ -63,7 +66,7 @@
       // item is specified by id, with optional id: prefix to be dropped
       const index = indexFromId.get(name.startsWith('id:') ? name.substring(3) : name)
       if (index === undefined) {
-        console.error(`_item '${name}' not found`)
+        if (log_errors) console.error(`_item '${name}' not found`)
         return null
       }
       item = items[index]
