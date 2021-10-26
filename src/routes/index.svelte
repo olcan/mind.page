@@ -4291,7 +4291,7 @@
           items = []
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
-          initTime = Date.now() // indicate initialization started
+          initTime = window['_init_time'] = Date.now() // indicate initialization started
           initialize()
         }
       }
@@ -4579,7 +4579,7 @@
                   } else if (firebase_snapshot_errors > 0) {
                     alert(`failed init w/ ${firebase_snapshot_errors} errors; see console for details, reload to retry`)
                   } else {
-                    initTime = Date.now()
+                    initTime = window['_init_time'] = Date.now()
                     initialize()
                   }
                 }
