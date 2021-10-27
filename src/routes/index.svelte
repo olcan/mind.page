@@ -2945,22 +2945,19 @@
                     embeds: null, // may be filled in below
                   }
 
-                  // pre-process text before creating item
-                  // this is mostly fine since we use commit sha to detect changes
-                  // any changes may need to be undone if installed item is later edited and pushed back
-                  text = text.trim() // trim any spaces (github likes to add an extra line to files)
-                  // extract colon-suffixed embed path in block types
+                  // trim spaces, esp. since github likes to add an extra line
+                  // this is fine since we use commit sha to detect changes
+                  text = text.trim()
+                  // extract embed paths
                   let embeds = []
-                  text = text.replace(/```\S+:(\S+?)\n(.*?)\n```/gs, (m, sfx, body) => {
-                    if (sfx.includes('.')) {
-                      // process & drop suffix as embed path
-                      let path = sfx // may be relative to container item path (attr.path)
-                      if (!path.startsWith('/') && attr.path.includes('/', 1))
-                        path = attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
-                      embeds.push(path)
-                    }
-                    return m
-                  })
+                  for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs)) {
+                    if (!sfx.includes('.')) continue // not path
+                    // process & drop suffix as embed path
+                    let path = sfx // may be relative to container item path (attr.path)
+                    if (!path.startsWith('/') && attr.path.includes('/', 1))
+                      path = attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
+                    embeds.push(path)
+                  }
                   // fetch embed text and latest commit sha
                   let embed_text = {}
                   for (let path of _.uniq(embeds)) {
