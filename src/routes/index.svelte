@@ -2950,14 +2950,12 @@
                   text = text.trim()
                   // extract embed paths
                   let embeds = []
-                  for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs)) {
-                    if (!sfx.includes('.')) continue // not path
-                    // process & drop suffix as embed path
-                    let path = sfx // may be relative to container item path (attr.path)
-                    if (!path.startsWith('/') && attr.path.includes('/', 1))
-                      path = attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
-                    embeds.push(path)
+                  function resolve_embed_path(path, attr) {
+                    if (path.startsWith('/') || !attr.path.includes('/', 1)) return path
+                    return attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
                   }
+                  for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
+                    if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
                   // fetch embed text and latest commit sha
                   let embed_text = {}
                   for (let path of _.uniq(embeds)) {
@@ -2987,9 +2985,7 @@
                   // replace embed block body with embed contents
                   text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
                     if (sfx.includes('.')) {
-                      let path = sfx // may be relative to container item path (attr.path)
-                      if (!path.startsWith('/') && attr.path.includes('/', 1))
-                        path = attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
+                      const path = resolve_embed_path(sfx, attr)
                       // store original body in attr.embeds to allow item to be edited and pushed back
                       // note if same path is embedded multiple times, only the last body is retained
                       attr.embeds.find(e => e.path == path).body = body
