@@ -3060,11 +3060,11 @@
                   await tick()
                   await update_dom()
 
-                  // invoke _install(item) if defined
-                  _modal_close() // allow _install to display own modals
-                  if (item.text.includes('_install')) {
+                  // invoke _on_install(item) if defined
+                  _modal_close() // allow _on_install to display own modals
+                  if (item.text.includes('_on_install')) {
                     try {
-                      _item(item.id).eval(`if (typeof _install == 'function') _install(_item('${item.id}'))`, {
+                      _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
                         trigger: 'command',
                       })
                     } catch (e) {} // already logged, just continue
