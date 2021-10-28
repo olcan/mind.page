@@ -287,6 +287,8 @@
   let enterIndentation = ''
   let lastKeyDown
   let lastKeyDownTime = 0
+  let createClosure
+  let createClosureModifierKeys
 
   function onKeyDown(e: any) {
     onEditorKeyDown(e)
@@ -323,6 +325,9 @@
     // ignore modifier keys, and otherwise stop propagation outside of editor
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return
     else e.stopPropagation()
+
+    // reset create closure (see setup below)
+    createClosure = createClosureModifierKeys = null
 
     // optionally disable Cmd/Ctrl bracket (commonly used as forward/back shortcuts) inside editor
     // TODO: figure out an alternative to this (also for RightArrow/LeftArrow) for iOS15 if necessary
@@ -403,15 +408,25 @@
       return
     }
 
-    // create item with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
+    // create/run with Cmd/Ctrl+S or Shift/Cmd/Ctrl+Enter
+    // NOTE: onDone callback is delayed until all modifier keys are released in order to prevent modifiers from affecting behavior, e.g. for window.open
     if (createOnAnyModifiers) {
       if (
         (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
         (key == 'KeyS' && (e.metaKey || e.ctrlKey) && !e.shiftKey)
       ) {
         e.preventDefault()
-        onDone((text = textarea.value), e, false, key == 'Enter' && (e.metaKey || e.ctrlKey) /*run*/)
-        return
+        const run = key == 'Enter' && (e.metaKey || e.ctrlKey)
+        createClosure = () => {
+          onDone((text = textarea.value), e, false, run)
+          createClosure = createClosureModifierKeys = null
+        }
+        createClosureModifierKeys = {
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+        }
       }
     } else {
       if (
@@ -420,7 +435,17 @@
         (key == 'KeyS' && (e.metaKey || e.ctrlKey) && !e.shiftKey)
       ) {
         e.preventDefault()
-        onDone((text = textarea.value), e, false, key == 'Enter' && (e.metaKey || e.ctrlKey) /*run*/)
+        const run = key == 'Enter' && (e.metaKey || e.ctrlKey)
+        createClosure = () => {
+          onDone((text = textarea.value), e, false, run)
+          createClosure = createClosureModifierKeys = null
+        }
+        createClosureModifierKeys = {
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+        }
         return
       }
 
@@ -538,11 +563,27 @@
     const key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
 
-    // console.debug("Editor.onKeyUp", e, key);
+    // console.debug('Editor.onKeyUp', e, key)
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
-    if (key.match(/^(Meta|Alt|Control|Shift)/)) return
-    else e.stopPropagation()
+    if (key.match(/^(Meta|Alt|Control|Shift)/)) {
+      // clear createClosureModifierKeys and trigger createClosure when cleared
+      if (createClosureModifierKeys) {
+        if (key.match(/^Meta/)) createClosureModifierKeys.metaKey = false
+        else if (key.match(/^Alt/)) createClosureModifierKeys.altKey = false
+        else if (key.match(/^Control/)) createClosureModifierKeys.ctrlKey = false
+        else if (key.match(/^Shift/)) createClosureModifierKeys.shiftKey = false
+        if (
+          !createClosureModifierKeys.metaKey &&
+          !createClosureModifierKeys.altKey &&
+          !createClosureModifierKeys.ctrlKey &&
+          !createClosureModifierKeys.shiftKey
+        ) {
+          createClosure()
+        }
+      }
+      return
+    } else e.stopPropagation()
 
     // indent lines created by Enter (based on state recorded in onKeyDown above)
     if (
