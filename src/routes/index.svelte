@@ -2626,6 +2626,22 @@
           onEditorChange('')
           return
         }
+        case '/_unedit': {
+          if (editingItems.length == 0) {
+            alert('/_unedit: no item selected')
+            return
+          }
+          const item = items[editingItems[0]]
+          // make installed item (persistently) uneditable
+          if (item.attr && item.attr.editable) {
+            item.attr.editable = false
+            saveItem(item.id)
+          }
+          item.editable = false
+          lastEditorChangeTime = 0 // disable debounce even if editor focused
+          onEditorChange('')
+          return
+        }
         case '/_updates': {
           if (editingItems.length == 0) {
             alert('/_updates: no item selected')
