@@ -2968,7 +2968,7 @@
                   let embeds = []
                   function resolve_embed_path(path, attr) {
                     if (path.startsWith('/') || !attr.path.includes('/', 1)) return path
-                    return attr.path.substr(0, attr.path.indexOf('/', 1)) + '/' + path
+                    return attr.path.substr(0, attr.path.lastIndexOf('/', 1)) + '/' + path
                   }
                   for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
                     if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
