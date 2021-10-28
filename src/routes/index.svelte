@@ -4806,12 +4806,13 @@
     }
 
     // let unmodified DigitX select/target corresponding item if named, touch it otherwise
-    // let Digit0 scroll target (if any) to ~center
+    // let Digit0 scroll target to ~center, or scroll to top if no target
     if (key.match(/Digit\d+/) && !modified) {
       const index = parseInt(key.match(/\d+/)?.shift()) - 1
       if (index == -1) {
         const target = document.querySelector(`.super-container.target`) as HTMLElement
         if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
+        else document.body.scrollTo(0, headerdiv.offsetTop) // just scroll to top
         return
       }
       const item = items[index]
