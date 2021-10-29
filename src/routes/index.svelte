@@ -495,7 +495,7 @@
     write(text: string, type: string = '_output', options = {}) {
       text = typeof text == 'string' ? text : '' + JSON.stringify(text)
       // confirm if write is too big
-      const writeConfirmLength = 16 * 1024
+      const writeConfirmLength = 64 * 1024
       if (text.length >= writeConfirmLength) {
         if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return // cancel write
       }
@@ -3062,10 +3062,7 @@
                         continue
                       }
                       const update = _exists(dep, false /*allow_multiple*/) // update if possible
-                      console.log(
-                        (update ? 'updating' : 'installing') +
-                          ` dependency ${dep} for ${label} ...`
-                      )
+                      console.log((update ? 'updating' : 'installing') + ` dependency ${dep} for ${label} ...`)
                       const command = `${update ? '/_update' : '/_install'} ${dep_path} ${repo} ${branch} ${owner} ${
                         token || ''
                       } <- ${[label, ...dependents].join(' <- ')}`
@@ -3477,7 +3474,7 @@
     if (jsout instanceof Promise) jsout = undefined
     // stringify output
     if (jsout !== undefined && typeof jsout != 'string') jsout = '' + JSON.stringify(jsout)
-    const outputConfirmLength = 16 * 1024
+    const outputConfirmLength = 64 * 1024
     if (jsout !== undefined && jsout.length >= outputConfirmLength)
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
     // append _output and _log and update for changes
