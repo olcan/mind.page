@@ -891,6 +891,10 @@
     error(...args) {
       this.invoke(() => console.error(...args))
     }
+    fatal(...args) {
+      const stack = new Error().stack.split('\n').join(' <- ')
+      throw new Error(`${args.join(' ')} @ ${this.name} @ ${stack}`)
+    }
 
     // delay = promise resolved after specified time
     delay(ms) {
