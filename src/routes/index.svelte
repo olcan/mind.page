@@ -2130,12 +2130,14 @@
   }
 
   function resolveTags(label, tags) {
-    return tags.map(tag => {
-      if (tag == label) return tag
-      else if (tag.startsWith('#//')) return label.replace(/\/[^\/]*$/, '') + tag.substring(2)
-      else if (tag.startsWith('#/')) return label + tag.substring(1)
-      else return tag
-    })
+    return tags
+      .map(tag => {
+        if (tag == label) return tag
+        else if (tag.startsWith('#//')) return label.replace(/\/[^\/]*$/, '') + tag.substring(2)
+        else if (tag.startsWith('#/')) return label + tag.substring(1)
+        else return tag
+      })
+      .filter(t => !t.startsWith('#/')) // "resolved" tags can not start with #/ by convention
   }
 
   let tagCounts = new Map<string, number>()
@@ -2837,7 +2839,7 @@
           if (text.match(/^\/\w+/)) {
             // NOTE: text is untrimmed, so no whitespace before /
             const cmd = text.match(/^\/\w+/)[0]
-            const args = text
+            let args = text
               .replace(/^\/\w+/, '')
               .replace(/([`\\$])/g, '\\$1')
               .trim()
@@ -2879,6 +2881,17 @@
               return
             } else if (cmd == '/_install' || cmd == '/_update') {
               const updating = cmd == '/_update'
+              // parse dependents in suffix separated using <-
+              // (used below to avoid following cyclic dependencies)
+              let dependents = []
+              if (args.includes('<-')) {
+                dependents = args
+                  .substring(args.indexOf('<-'))
+                  .split('<-')
+                  .map(s => s.trim())
+                  .filter(s => s)
+                args = args.substring(0, args.indexOf('<-')).trim()
+              }
               // install item from specified github source
               let [path, repo, branch, owner, token] = args.split(/\s+/)
               if (!repo) repo = 'mind.items'
@@ -2888,6 +2901,12 @@
               if (!token) token = null // no token, use unauthenticated client
               if (!path) {
                 alert(`usage: ${cmd} path [repo branch owner token]`)
+                return
+              }
+              // drop optional leading slash in paths for consistency
+              if (path.startsWith('/')) path = path.substring(1)
+              if (path.startsWith('/')) {
+                alert(`invalid path '${path}'`)
                 return
               }
               // if path is specified as #label, extract path from named item
@@ -3033,12 +3052,23 @@
                       parseTags(text).hidden.filter(t => !isSpecialTag(t))
                     )
                     for (let dep of deps) {
-                      const update = _exists(dep, false /*allow_multiple*/) // update if possible
-                      console.log((update ? 'updating' : 'installing') + ` dependency ${dep} for ${label} ...`)
                       const dep_path = dep.slice(1) // path assumed same as tag
+                      if (dep_path.startsWith('/'))
+                        // should not happen w/ resolved tags
+                        throw new Error('invalid dependency path: ' + dep_path)
+                      // skip circular dependencies
+                      if (dependents.includes(dep)) {
+                        console.warn(`${cmd}: skipping circular dependency ${dep} for ${label}`)
+                        continue
+                      }
+                      const update = _exists(dep, false /*allow_multiple*/) // update if possible
+                      console.log(
+                        (update ? 'updating' : 'installing') +
+                          ` dependency ${dep} for ${label} ...`
+                      )
                       const command = `${update ? '/_update' : '/_install'} ${dep_path} ${repo} ${branch} ${owner} ${
                         token || ''
-                      }`
+                      } <- ${[label, ...dependents].join(' <- ')}`
                       const dep_item = await onEditorDone(command)
                       if (!dep_item) {
                         throw new Error(
