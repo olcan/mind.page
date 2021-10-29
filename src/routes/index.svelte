@@ -130,8 +130,8 @@
   }
 
   // _modal_close closes modal manually
-  function _modal_close() {
-    return modal.hide()
+  function _modal_close(out = undefined) {
+    return modal.close(out)
   }
 
   // _modal_update updates existing modal without closing it

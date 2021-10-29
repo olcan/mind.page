@@ -14,7 +14,7 @@
   let canConfirm = (input: string) => input.length > 0
   let onConfirm = (input = null) => {}
   let onCancel = () => {}
-  let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR hide if no confirm/cancel buttons
+  let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR close if no confirm/cancel buttons
   let selected_images = [] // used internally for file input
   let ready_image_count = 0
   let visible = false
@@ -124,9 +124,9 @@
     return Promise.resolve(_promise)
   }
 
-  export function hide() {
+  export function close(out = undefined) {
     visible = false
-    if (_resolve) _resolve()
+    if (_resolve) _resolve(out)
     return Promise.resolve(_promise)
   }
 
@@ -158,7 +158,7 @@
     if (e && (e.target as HTMLElement).closest('.modal')) return // ignore click on modal
     e?.stopPropagation()
     e?.preventDefault()
-    if (!confirm && !cancel && background.toLowerCase() != 'block') hide()
+    if (!confirm && !cancel && background.toLowerCase() != 'block') close()
     else if (confirm && background.toLowerCase() == 'confirm') _onConfirm(e)
     else if (cancel && background.toLowerCase() == 'cancel') _onCancel(e)
     // else block
