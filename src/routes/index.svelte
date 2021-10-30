@@ -278,6 +278,13 @@
       item(this.id).editable = editable
       items = items // trigger svelte render
     }
+    get pushable(): boolean {
+      return item(this.id).pushable
+    }
+    set pushable(pushable: boolean) {
+      item(this.id).pushable = pushable
+      items = items // trigger svelte render
+    }
     get source(): string {
       return item(this.id).source
     }
@@ -1669,7 +1676,8 @@
 
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
-      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null
+      // mark 'has error' on error or warnings, OR if item is marked 'pushable'
+      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null || item.pushable
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -3762,6 +3770,14 @@
     onEditorDone('/_update ' + items[index].label)
   }
 
+  function onItemPush(index: number) {
+    if (!_item('#pusher')) {
+      alert(`can not push ${items[index].name}, #pusher must be installed first`)
+      return
+    }
+    onEditorDone('/push ' + items[index].label)
+  }
+
   function editItem(index: number) {
     items[index].editing = true
     editingItems.push(index)
@@ -4034,6 +4050,7 @@
     if (!item.attr) item.attr = null // default to null for older items missing attr
     item.editable = item.attr?.editable ?? true
     item.source = item.attr?.source ?? null
+    item.pushable = false
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.target = false
@@ -5417,6 +5434,7 @@
                 onRun={onItemRun}
                 onTouch={onItemTouch}
                 onUpdate={onItemUpdate}
+                onPush={onItemPush}
                 onResized={onItemResized}
                 onEscape={onItemEscape}
                 {onImageRendering}
@@ -5431,6 +5449,7 @@
                 bind:editing={item.editing}
                 bind:focused={item.focused}
                 editable={item.editable}
+                pushable={item.pushable}
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}

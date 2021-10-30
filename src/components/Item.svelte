@@ -18,6 +18,7 @@
   import { Circle, Circle2 } from 'svelte-loading-spinners'
   import Editor from './Editor.svelte'
   export let editable = true
+  export let pushable = false
   export let editing = false
   export let focused = false
   export let saving = false
@@ -80,6 +81,7 @@
   export let onRun = (index: number = -1) => {}
   export let onTouch = (index: number, e: MouseEvent = null) => {}
   export let onUpdate = (index: number) => {}
+  export let onPush = (index: number) => {}
   export let onResized = (id, container, trigger: string) => {}
   export let onImageRendering = (src: string): string => {
     return ''
@@ -166,6 +168,12 @@
     e.stopPropagation()
     e.preventDefault()
     onUpdate(index)
+  }
+
+  function onPushClick(e) {
+    e.stopPropagation()
+    e.preventDefault()
+    onPush(index)
   }
 
   function onDeleteClick(e) {
@@ -1329,6 +1337,7 @@
     class:showLogs
     class:bordered={error || warning || running || target}
     class:editable
+    class:pushable
     class:runnable
     class:saveable
     class:scripted
@@ -1343,10 +1352,17 @@
         {#if editable}
           <div class="button image" on:click={onImageClick}><img src="/photo.svg" alt="+img" title="+img" /></div>
         {/if}
+        {#if pushable}
+          <div class="button push" on:click={onPushClick}>
+            <img src="/arrow.up.svg" alt="push" title="push" />
+          </div>
+        {/if}
+        {#if source && labelUnique}
+          <div class="button update" on:click={onUpdateClick}>
+            <img src="/arrow.clockwise.svg" alt="update" title="update" />
+          </div>
+        {/if}
         {#if source}
-          {#if labelUnique}<div class="button update" on:click={onUpdateClick}>
-              <img src="/arrow.clockwise.svg" alt="update" title="update" />
-            </div>{/if}
           <div class="button source" on:click={onSourceClick}>
             <img src="/external-link.svg" alt={path} title={path} /><span class="optional-label">&nbsp;{path}</span>
           </div>
@@ -1495,6 +1511,15 @@
     margin: -2px 0;
   }
 
+  /* use smaller push icon, full-height arrow feels too much */
+  .button.push img {
+    width: 18px;
+    height: 18px;
+  }
+  .button.push {
+    background: #dd6;
+  }
+
   .bordered .item-menu {
     top: 0;
     right: 0;
@@ -1636,7 +1661,8 @@
   .target_context.editing {
     border-radius: 5px;
   }
-  .warning {
+  .warning,
+  .pushable {
     border-color: #663;
   }
   .error {
