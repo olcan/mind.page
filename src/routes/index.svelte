@@ -139,6 +139,11 @@
     return modal.update(options)
   }
 
+  // _modal_visible returns true iff modal is visible
+  function _modal_visible() {
+    return modal.isVisible()
+  }
+
   // _delay is just setTimeout wrapped in a promise
   function _delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -175,6 +180,7 @@
     window['_modal'] = _modal
     window['_modal_close'] = _modal_close
     window['_modal_update'] = _modal_update
+    window['_modal_visible'] = _modal_visible
     window['_delay'] = _delay
     window['_update_dom'] = update_dom
     window['_decrypt_item'] = decryptItem
