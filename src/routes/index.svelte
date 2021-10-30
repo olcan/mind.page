@@ -5955,7 +5955,7 @@
   .column-padding {
     height: 70vh;
   }
-  .column:first-child/*.focused*/ .column-padding {
+  .column:first-child .column-padding {
     background: #171717; /* matches .header-container unfocused background */
   }
   .column:first-child.editorFocused .column-padding {
@@ -5973,37 +5973,28 @@
     margin-right: 1px; /* consistent w/ 1px padding-left of .super-container */
   }
 
-  /*
-  :global(.column:not(.focused) .header),
-  :global(.column:not(.focused) .super-container),
-  :global(.column:not(.focused) .toggle) {
-    opacity: 0.25;
+  :global(.items:not(.focused) .item-menu),
+  :global(.items:not(.focused) .log-summary),
+  :global(.items:not(.focused) .deps-summary),
+  :global(.items:not(.focused) .dependents-summary),
+  :global(.items:not(.focused) .deps-and-dependents) {
+    opacity: 0.5 !important;
   }
-  :global(.column:not(.focused) .super-container.target_context) {
+  :global(.items:not(.focused) .column-padding),
+  :global(.items:not(.focused) .header) {
     opacity: 0.5;
   }
-  :global(.column:not(.focused) .super-container.target),
-  :global(.column:not(.focused) .super-container.editing) {
-    opacity: 0.8;
+  :global(.items:not(.focused) .super-container),
+  :global(.items:not(.focused) .toggle) {
+    opacity: 0.75;
   }
-  */
-
-  /*
-  :global(.column:not(.focused) .container) {
-    background: transparent !important;
-    border-color: transparent !important;
+  :global(.items:not(.focused) .super-container.target_context) {
+    opacity: 0.85;
   }
-  */
-
-  /*
-  :global(.column:not(.focused) .item-menu),
-  :global(.column:not(.focused) .log-summary),
-  :global(.column:not(.focused) .deps-summary),
-  :global(.column:not(.focused) .dependents-summary),
-  :global(.column:not(.focused) .deps-and-dependents) {
-    visibility: hidden;
+  :global(.items:not(.focused) .super-container.target),
+  :global(.items:not(.focused) .super-container.editing) {
+    opacity: 0.95;
   }
-  */
 
   .column.hidden {
     position: absolute;
