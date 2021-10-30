@@ -1349,22 +1349,28 @@
       <div class="edit-menu">
         {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
         {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
-        {#if editable}
-          <div class="button image" on:click={onImageClick}><img src="/photo.svg" alt="+img" title="+img" /></div>
-        {/if}
         {#if pushable}
           <div class="button push" on:click={onPushClick}>
             <img src="/arrow.up.svg" alt="push" title="push" />
+            <!-- <span class="optional-label">push</span> -->
           </div>
         {/if}
         {#if source && labelUnique}
           <div class="button update" on:click={onUpdateClick}>
             <img src="/arrow.clockwise.svg" alt="update" title="update" />
+            <!-- <span class="optional-label">update</span> -->
           </div>
         {/if}
         {#if source}
           <div class="button source" on:click={onSourceClick}>
-            <img src="/external-link.svg" alt={path} title={path} /><span class="optional-label">&nbsp;{path}</span>
+            <img src="/external-link.svg" alt={path} title={path} />
+            <span class="optional-label">{path}</span>
+          </div>
+        {/if}
+        {#if editable}
+          <div class="button image" on:click={onImageClick}>
+            <img src="/photo.fill.svg" alt="+img" title="+img" />
+            <!-- <span class="optional-label">img</span> -->
           </div>
         {/if}
         <div class="button cancel" on:click={onCancelClick}>{editable ? 'cancel' : 'close'}</div>
@@ -1509,6 +1515,7 @@
   /* adjust img style for photo.svg icon, which has some vertical padding */
   .button.image img {
     margin: -2px 0;
+    opacity: 0.75; /* lighten photo background */
   }
 
   /* use smaller push icon, full-height arrow feels too much */
@@ -1518,6 +1525,10 @@
   }
   .button.push {
     background: #dd6;
+  }
+
+  .optional-label {
+    margin-left: 2px;
   }
 
   .bordered .item-menu {
