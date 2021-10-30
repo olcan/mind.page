@@ -1926,6 +1926,10 @@
   :global(.item blockquote br:last-child) {
     display: inline;
   }
+  /* preserve <br> inside tables */
+  :global(.item table br:last-child) {
+    display: inline;
+  }
 
   :global(.item mark.hidden.missing) {
     border-color: #f88;
