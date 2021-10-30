@@ -136,7 +136,6 @@
 
   // _modal_update updates existing modal without closing it
   function _modal_update(options) {
-    if (!modal.isVisible()) throw new Error('_modal_update: modal is not visible')
     return modal.update(options)
   }
 
