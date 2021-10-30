@@ -275,15 +275,20 @@
       return item(this.id).editable
     }
     set editable(editable: boolean) {
-      item(this.id).editable = editable
+      const _item = item(this.id)
+      if (_item.editable == editable) return // no change
+      _item.editable = editable
       items = items // trigger svelte render
     }
     get pushable(): boolean {
       return item(this.id).pushable
     }
     set pushable(pushable: boolean) {
-      item(this.id).pushable = pushable
-      items = items // trigger svelte render
+      const _item = item(this.id)
+      if (_item.pushable == pushable) return // no change
+      _item.pushable = pushable
+      // items = items // trigger svelte render
+      onEditorChange(editorText) // trigger re-ranking since pushability can affect it
     }
     get source(): string {
       return item(this.id).source
@@ -1784,10 +1789,12 @@
     )
 
     // determine "tail" index after which items are ordered purely by time
-    // (also including editing log items which are edited in place)
+    // (also including editing items, including log items which are edited in place)
+    // (also including hasError items which need to be prominent)
     let tailIndex = items.findIndex(item => item.id === null)
     items.splice(tailIndex, 1)
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.editing) + 1)
+    tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.hasError) + 1)
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
     const prevHideIndex = hideIndex // to possibly take max later (see below)
