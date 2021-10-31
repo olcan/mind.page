@@ -446,7 +446,7 @@
       // indicate item name in comments for certain types of reads
       if (type == 'js' || type == 'webppl') content.push(`/* ${type} @ ${item.name} */`)
       else if (type == 'html') content.push(`<!-- ${type} @ ${item.name} -->`)
-      let text = type ? extractBlock(item.text, type) : item.text
+      let text = type ? extractBlock(item.text, type, options['keep_empty_lines']) : item.text
       if (options['replace_ids']) text = text.replace(/(^|[^\\])\$id/g, '$1' + item.id)
       if (!options['exclude_async'] || !item.deepasync) content.push(text)
       // console.debug(content);
