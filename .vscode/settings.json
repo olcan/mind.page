@@ -1,11 +1,4 @@
 {
-  "editor.wrappingIndent": "indent",
-  "editor.wordWrap": "on",
-  "git.enableSmartCommit": true,
-  "editor.minimap.enabled": false,
-  "breadcrumbs.enabled": true,
-  "workbench.activityBar.visible": true,
-  "workbench.statusBar.visible": true,
   "editor.formatOnSave": true,
   "editor.formatOnPaste": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
