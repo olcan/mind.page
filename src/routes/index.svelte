@@ -602,6 +602,11 @@
       if (save) saveItem(this.id)
     }
 
+    // triggers a save to persistent store, even if item is not modified
+    save() {
+      saveItem(this.id)
+    }
+
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
       initItems() // initialize items if not already done, usually due to macros at first render
