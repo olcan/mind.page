@@ -4119,7 +4119,7 @@
           const paths = [attr.path, ...(attr.embeds?.map(e => e.path) ?? [])].map(path => path.replace(/^\//, ''))
           if (paths.includes(changed_path)) {
             console.log(`found affected item ${item.name}`)
-            updateItemFromLocalRepo(_item(item.id))
+            previewItemFromLocalRepo(_item(item.id))
           }
         })
       })
@@ -4134,11 +4134,15 @@
     return attr.path.substr(0, attr.path.lastIndexOf('/')) + '/' + path
   }
 
-  async function updateItemFromLocalRepo(item) {
+  async function previewItemFromLocalRepo(item) {
     const start = Date.now()
     const attr = item.attr
     const { repo, path } = attr
-    console.log(`updating ${item.name} from ${repo}/${path} ...`)
+    if (!item.editable) {
+      console.log(`preview skipped for uneditable ${item.name} from ${repo}/${path} ...`)
+      return
+    }
+    console.log(`previewing ${item.name} from ${repo}/${path} ...`)
     try {
       // fetch text from from local repo via server
       const resp = await fetch(`/file/${repo}/${path}`)
@@ -4155,10 +4159,10 @@
         for (let dep of deps) {
           if (_exists(dep)) {
             if (!_exists(dep, false /*allow_multiple*/))
-              console.warn(`invalid (ambiguous) dependency ${dep} for ${label}`)
+              console.warn(`invalid (ambiguous) preview dependency ${dep} for ${label}`)
             continue
           }
-          console.log(`installing dependency ${dep} for ${label} ...`)
+          console.log(`installing preview dependency ${dep} for ${label} ...`)
           const dep_path = dep.slice(1) // path assumed same as tag
           const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
           const dep_item = await onEditorDone(command)
@@ -4167,7 +4171,7 @@
           } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
             throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
           }
-          console.log(`installed dependency ${dep} for ${label}`)
+          console.log(`installed preview dependency ${dep} for ${label}`)
         }
       }
 
@@ -4204,12 +4208,12 @@
         const prev_name = item.name
         item.write(text, '' /*, { keep_time: true }*/)
         if (item.name != prev_name)
-          console.warn(`renaming update for ${item.name} (was ${prev_name}) from ${repo}/${path}`)
+          console.warn(`renaming preview for ${item.name} (was ${prev_name}) from ${repo}/${path}`)
       }
 
-      console.log(`updated ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
+      console.log(`previewed ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
     } catch (e) {
-      console.error(`update failed for ${item.name} from ${repo}/${path}: ${e}`)
+      console.error(`preview failed for ${item.name} from ${repo}/${path}: ${e}`)
     }
   }
 
