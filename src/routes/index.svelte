@@ -3079,10 +3079,6 @@
                   text = text.trim()
                   // extract embed paths
                   let embeds = []
-                  function resolve_embed_path(path, attr) {
-                    if (path.startsWith('/') || !attr.path.includes('/', 1)) return path
-                    return attr.path.substr(0, attr.path.lastIndexOf('/')) + '/' + path
-                  }
                   for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
                     if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
                   // fetch embed text and latest commit sha
@@ -3189,7 +3185,7 @@
                     }
                     item = _item(label)
                     // confirm if updating "pushable" item w/ unpushed changes
-                    if (updating && item.pushable) {
+                    if (updating && item.pushable && item.text != text) {
                       await _modal_close() // force-close any existing modal
                       const overwrite = await _modal({
                         content: `Overwrite unpushed changes in ${item.name}?`,
@@ -3212,14 +3208,16 @@
                   await tick()
                   await update_dom()
 
-                  // invoke _on_install(item) if defined
-                  await _modal_close() // allow _on_install to display own modals
-                  if (item.text.includes('_on_install')) {
-                    try {
-                      _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
-                        trigger: 'command',
-                      })
-                    } catch (e) {} // already logged, just continue
+                  if (!updating) {
+                    // invoke _on_install(item) if defined
+                    await _modal_close() // allow _on_install to display own modals
+                    if (item.text.includes('_on_install')) {
+                      try {
+                        _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
+                          trigger: 'command',
+                        })
+                      } catch (e) {} // already logged, just continue
+                    }
                   }
 
                   // clear pushable flag to resume auto-side-push to source
@@ -3229,6 +3227,10 @@
                   console.log(
                     (updating ? 'updated' : 'installed') + ` ${path} (${item.name}) in ${Date.now() - start}ms`
                   )
+
+                  // start watching repo path (if not already being watched) for newly installed item
+                  if (!updating) watchLocalRepo(item.attr.repo)
+
                   return item
                 } catch (e) {
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
@@ -4090,6 +4092,127 @@
     })
   }
 
+  let watching = new Set()
+  async function watchLocalRepo(repo) {
+    if (hostname != 'localhost') return // can not watch outside localhost
+    if (watching.has(repo)) return
+    watching.add(repo)
+    _watchLocalRepo(repo)
+    console.log(`watching local repo ${repo} ...`)
+  }
+  async function _watchLocalRepo(repo) {
+    try {
+      const resp = await fetch(`/watch/${repo}`)
+      if (resp.status != 200) {
+        console.error(`failed to watch local repo ${repo}`)
+        return
+      }
+      const events = await resp.json()
+      const changed_paths = events.filter(e => e.event == 'change').map(e => e.path.replace(/^\//, ''))
+      changed_paths.forEach(changed_path => {
+        console.log(`detected change in local repo path ${changed_path}`)
+        items.forEach(item => {
+          if (!item.attr) return // item not installed
+          if (item.attr.repo != repo) return // item not from modified local repo
+          const attr = item.attr
+          // calculate item paths, including any embeds, removing slash prefixes
+          const paths = [attr.path, ...(attr.embeds?.map(e => e.path) ?? [])].map(path => path.replace(/^\//, ''))
+          if (paths.includes(changed_path)) {
+            console.log(`found affected item ${item.name}`)
+            updateItemFromLocalRepo(_item(item.id))
+          }
+        })
+      })
+      setTimeout(() => _watchLocalRepo(repo), 1000)
+    } catch (e) {
+      console.error(`failed to watch local repo ${repo}: `, e)
+    }
+  }
+
+  function resolve_embed_path(path, attr) {
+    if (path.startsWith('/') || !attr.path.includes('/', 1)) return path
+    return attr.path.substr(0, attr.path.lastIndexOf('/')) + '/' + path
+  }
+
+  async function updateItemFromLocalRepo(item) {
+    const start = Date.now()
+    const attr = item.attr
+    const { repo, path } = attr
+    console.log(`updating ${item.name} from ${repo}/${path} ...`)
+    try {
+      // fetch text from from local repo via server
+      const resp = await fetch(`/file/${repo}/${path}`)
+      let text = await resp.text()
+
+      // install missing dependencies based on updated text
+      // dependency paths MUST match the (resolved) hidden tags
+      const label = parseLabel(text)
+      if (label) {
+        const deps = resolveTags(
+          label,
+          parseTags(text).hidden.filter(t => !isSpecialTag(t))
+        )
+        for (let dep of deps) {
+          if (_exists(dep)) {
+            if (!_exists(dep, false /*allow_multiple*/))
+              console.warn(`invalid (ambiguous) dependency ${dep} for ${label}`)
+            continue
+          }
+          console.log(`installing dependency ${dep} for ${label} ...`)
+          const dep_path = dep.slice(1) // path assumed same as tag
+          const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
+          const dep_item = await onEditorDone(command)
+          if (!dep_item) {
+            throw new Error(`failed to install dependency ${dep} for ${label}`)
+          } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+            throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
+          }
+          console.log(`installed dependency ${dep} for ${label}`)
+        }
+      }
+
+      // extract embed paths from updated text
+      // number of embeds can change here if item text is updated
+      let embeds = []
+      for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
+        if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
+
+      // fetch embed text from local repo via server
+      let embed_text = {}
+      for (let path of _.uniq(embeds)) {
+        try {
+          const resp = await fetch(`/file/${repo}/${path}`)
+          embed_text[path] = await resp.text()
+        } catch (e) {
+          throw new Error(`failed to embed '${path}': ${e}`)
+        }
+      }
+
+      // replace embed block body with (updated) embed text
+      text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
+        if (!sfx.includes('.')) return m // not path
+        const path = resolve_embed_path(sfx, attr)
+        // store original body in attr.embeds
+        // only last body is retained for multiple embeds of same path
+        attr.embeds.find(e => e.path == path).body = body
+        return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
+      })
+
+      // write text to item if modified
+      // log warning if update changed item name
+      if (text != item.text) {
+        const prev_name = item.name
+        item.write(text, '' /*, { keep_time: true }*/)
+        if (item.name != prev_name)
+          console.warn(`renaming update for ${item.name} (was ${prev_name}) from ${repo}/${path}`)
+      }
+
+      console.log(`updated ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
+    } catch (e) {
+      console.error(`update failed for ${item.name} from ${repo}/${path}: ${e}`)
+    }
+  }
+
   import { onMount } from 'svelte'
   import {
     hashCode,
@@ -4899,6 +5022,7 @@
         }
 
         // evaluate _on_welcome items once initialization is done, welcome dialog is dismissed, dom is fully updated
+        // on localhost, start watching local repo paths for installed items
         Promise.all([initialization, welcome])
           .then(update_dom)
           .then(() => {
@@ -4908,6 +5032,10 @@
                 _item(item.id).eval("if (typeof _on_welcome == 'function') _on_welcome()", { trigger: 'welcome' })
               } catch (e) {} // already logged, just continue welcome eval
             })
+            if (hostname == 'localhost')
+              items.forEach(item => {
+                if (item.attr?.repo) watchLocalRepo(item.attr?.repo)
+              })
           })
 
         init_log('initialized document')
