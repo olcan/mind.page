@@ -5,11 +5,12 @@ import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
-const chokidar = require('chokidar')
-const path_events = {} // recorded fs events for /watch/... requests
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
+
+const chokidar = dev ? require('chokidar') : null
+const path_events = {} // recorded fs events for /watch/... requests
 
 function get_hostdir(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
