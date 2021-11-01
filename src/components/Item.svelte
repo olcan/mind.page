@@ -1357,7 +1357,7 @@
         {/if}
         {#if source && labelUnique}
           <div class="button update" on:click={onUpdateClick}>
-            <img src="/arrow.clockwise.svg" alt="update" title="update" />
+            <img src="/arrow.down.svg" alt="update" title="update" />
             <!-- <span class="optional-label">update</span> -->
           </div>
         {/if}
@@ -1525,6 +1525,12 @@
   }
   .button.push {
     background: #dd6;
+  }
+
+  /* use smaller update/pull icon, full-height arrow feels too much */
+  .button.update img {
+    width: 18px;
+    height: 18px;
   }
 
   .optional-label {
