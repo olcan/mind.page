@@ -93,6 +93,8 @@ const sapperServer = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
+    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/file/')) {
+      res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
     } else {
       next()
     }
