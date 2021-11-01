@@ -3143,6 +3143,9 @@
                     } catch (e) {} // already logged, just continue
                   }
 
+                  // clear pushable flag on item
+                  item.pushable = false
+
                   // log completion and return item to indicate successful install/update
                   console.log(
                     (updating ? 'updated' : 'installed') + ` ${path} (${item.name}) in ${Date.now() - start}ms`
