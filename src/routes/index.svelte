@@ -2969,6 +2969,7 @@
                 try {
                   // if no token, prompt for it, also mentioning rate limits
                   if (!token) {
+                    await _modal_close() // force-close any existing modal
                     token = await _modal({
                       content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access can be severely throttled by GitHub.`,
                       confirm: 'Use Token',
@@ -2979,6 +2980,8 @@
                     if (token) localStorage.setItem('mindpage_github_token', token)
                     else token = null // no token, use unauthenticated client
                   }
+                  // NOTE: force-closing modals is especially important since install/update can be invoked recursively for dependencies ...
+                  await _modal_close() // force-close any existing modal
                   _modal({
                     content: (updating ? 'Updating' : 'Installing') + ` ${updating && label ? label : path} ...`,
                     background: 'block',
@@ -3111,6 +3114,7 @@
                   if (label && _exists(label, false /*allow_multiple*/)) {
                     // confirm replacement if installing
                     if (!updating) {
+                      await _modal_close() // force-close any existing modal
                       const replace = await _modal_update({
                         content: `Replace existing ${label}?`,
                         confirm: 'Replace',
@@ -3123,6 +3127,20 @@
                       }
                     }
                     item = _item(label)
+                    // confirm if updating "pushable" item w/ unpushed changes
+                    if (updating && item.pushable) {
+                      await _modal_close() // force-close any existing modal
+                      const overwrite = await _modal({
+                        content: `Overwrite unpushed changes in ${item.name}?`,
+                        confirm: 'Overwrite',
+                        cancel: 'Cancel',
+                        background: 'cancel',
+                      })
+                      if (!overwrite) {
+                        console.warn(`cancelled update of ${path} due to unpushed changes in ${item.name}`)
+                        return
+                      }
+                    }
                     __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable })
                     item.write(text, '')
                   } else {
@@ -3134,7 +3152,7 @@
                   await update_dom()
 
                   // invoke _on_install(item) if defined
-                  _modal_close() // allow _on_install to display own modals
+                  await _modal_close() // allow _on_install to display own modals
                   if (item.text.includes('_on_install')) {
                     try {
                       _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
@@ -3155,7 +3173,7 @@
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                 } finally {
-                  _modal_close()
+                  await _modal_close()
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
