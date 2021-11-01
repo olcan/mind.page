@@ -5,6 +5,8 @@ import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
+const chokidar = require('chokidar')
+const path_events = {} // recorded fs events for /watch/... requests
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -95,6 +97,19 @@ const sapperServer = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
     } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
+    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/watch/')) {
+      const req_path = req.path.slice(6)
+      const watch_path = process.env['PWD'].replace('/mind.page', req.path.slice(6))
+      if (!path_events[watch_path]) {
+        path_events[watch_path] = []
+        chokidar.watch(watch_path, { ignoreInitial: true, ignored: /(^|[\/\\])\../ }).on('all', (event, path) => {
+          if (path.length > watch_path.length) path = path.replace(watch_path, '')
+          path_events[watch_path].push({ event, path })
+        })
+        console.log(`server now watching ${watch_path} ...`)
+      }
+      res.json(path_events[watch_path])
+      path_events[watch_path] = []
     } else {
       next()
     }
