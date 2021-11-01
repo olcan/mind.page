@@ -2905,6 +2905,68 @@
                 })
                 .catch(console.error)
               return
+            } else if (cmd == '/_watch') {
+              if (hostname != 'localhost') {
+                alert(`/_watch: can not watch on ${hostname}`)
+                return
+              }
+              // TODO: take filename and item and write to item whenever file changes!
+              let [name, file] = args.split(/\s+/)
+              if (!name || !file) {
+                alert(`usage: ${cmd} name file`)
+                return
+              }
+              // look up item
+              const item = _item(name)
+              if (!item) {
+                alert(`${cmd}: item '${name}' missing or ambiguous`)
+                return
+              }
+              ;(async () => {
+                try {
+                  // look up file
+                  const resp = await fetch(`/file/${file}`)
+                  if (resp.status != 200) {
+                    alert(`${cmd}: failed to fetch file '${file}'`)
+                    return
+                  }
+                  const text = await resp.text()
+                  if (text != item.text) {
+                    alert(`${cmd}: contents of file ${file} does not match item ${name}`)
+                    return
+                  }
+                  console.log(`watching file ${file} for item ${name} ...`)
+                  item.dispatch_task(
+                    `${cmd} ${file}`,
+                    async () => {
+                      const resp = await fetch(`/file/${file}`)
+                      if (resp.status != 200) {
+                        console.error(`${cmd}: failed to fetch file '${file}'`)
+                        return
+                      }                      
+                      const text = await resp.text()
+                      if (text != item.text) {
+                        console.log(`detected changes to ${file} for item ${name}`)
+                        item.write(text, '')
+                      }
+                    },
+                    0,
+                    1000
+                  )
+                } catch (e) {
+                  console.error(`${cmd}: failed to read file ${file}: ` + e)
+                  alert(`${cmd}: failed to read ${file}: ` + e)
+                }
+              })()
+              lastEditorChangeTime = 0 // disable debounce even if editor focused
+              onEditorChange('')
+              return
+
+              // const start = Date.now()
+              // const resp = await fetch('/file/mind.items/util.md')
+              // const text = await resp.text()
+              // console.log(`local read took ${Date.now()-start}ms`)
+              // text
             } else if (cmd == '/_install' || cmd == '/_update') {
               const updating = cmd == '/_update'
               // parse dependents in suffix separated using <-
