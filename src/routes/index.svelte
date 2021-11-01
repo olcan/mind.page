@@ -2910,7 +2910,6 @@
                 alert(`/_watch: can not watch on ${hostname}`)
                 return
               }
-              // TODO: take filename and item and write to item whenever file changes!
               let [name, file] = args.split(/\s+/)
               if (!name || !file) {
                 alert(`usage: ${cmd} name file`)
@@ -2943,7 +2942,7 @@
                       if (resp.status != 200) {
                         console.error(`${cmd}: failed to fetch file '${file}'`)
                         return
-                      }                      
+                      }
                       const text = await resp.text()
                       if (text != item.text) {
                         console.log(`detected changes to ${file} for item ${name}`)
