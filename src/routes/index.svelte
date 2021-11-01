@@ -3143,7 +3143,7 @@
                     } catch (e) {} // already logged, just continue
                   }
 
-                  // clear pushable flag on item
+                  // clear pushable flag to resume auto-side-push to source
                   item.pushable = false
 
                   // log completion and return item to indicate successful install/update
