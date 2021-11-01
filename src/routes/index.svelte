@@ -293,10 +293,6 @@
     get source(): string {
       return item(this.id).source
     }
-    set source(source: string) {
-      item(this.id).source = source
-      items = items // trigger svelte render
-    }
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
       // return document.getElementById("item-" + this.id);
