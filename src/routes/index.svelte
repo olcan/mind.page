@@ -3549,7 +3549,7 @@
     if (index == undefined) return
     items[index].showLogs = true
     const dispatchTime = (items[index].showLogsTime = Date.now())
-    if (autohide_after > 0) {
+    if (autohide_after >= 0) {
       setTimeout(() => {
         let index = indexFromId.get(id)
         if (index == undefined) return
