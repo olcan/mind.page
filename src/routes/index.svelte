@@ -287,11 +287,7 @@
       const _item = item(this.id)
       if (_item.pushable == pushable) return // no change
       _item.pushable = pushable
-      // items = items // trigger svelte render
       onEditorChange(editorText) // trigger re-ranking since pushability can affect it
-    }
-    get source(): string {
-      return item(this.id).source
     }
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
@@ -2643,11 +2639,6 @@
             return
           }
           const item = items[editingItems[0]]
-          // make installed item (persistently) editable
-          if (item.attr && !item.attr.editable) {
-            item.attr.editable = true
-            saveItem(item.id)
-          }
           item.editable = true
           tick().then(() => textArea(item.index)?.focus())
           lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -2660,11 +2651,6 @@
             return
           }
           const item = items[editingItems[0]]
-          // make installed item (persistently) uneditable
-          if (item.attr && item.attr.editable) {
-            item.attr.editable = false
-            saveItem(item.id)
-          }
           item.editable = false
           lastEditorChangeTime = 0 // disable debounce even if editor focused
           onEditorChange('')
@@ -3060,7 +3046,6 @@
 
                   const attr = {
                     sha,
-                    editable: false,
                     source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
                     path,
                     repo,
@@ -3194,7 +3179,7 @@
                         return
                       }
                     }
-                    __item(item.id).attr = Object.assign(attr, { editable: item.attr.editable })
+                    __item(item.id).attr = attr
                     item.write(text, '')
                   } else {
                     item = onEditorDone(text, null, false, false, false, attr, true /*ignore_command*/)
@@ -3310,7 +3295,7 @@
       savedId: null, // filled in below after save
       savedTime: 0, // filled in onItemSaved
       savedAttr: null, // filled in onItemSaved
-      savedText: '', // filled in onItemSaved (also means delete on cancell, no confirm on delete)
+      savedText: '', // filled in onItemSaved (also means delete on cancel & skip confirm on delete)
     })
     items = [item, ...items]
 
@@ -4265,9 +4250,8 @@
   function initItemState(item, index, state = {}) {
     // state used in onEditorChange
     if (!item.attr) item.attr = null // default to null for older items missing attr
-    item.editable = item.attr?.editable ?? true
-    item.source = item.attr?.source ?? null
-    item.pushable = false
+    item.editable = !item.attr // default is editable unless installed (i.e. has attr)
+    item.pushable = false // default is false
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.target = false
@@ -4364,12 +4348,13 @@
     items.forEach((item, index) => indexFromId.set(item.id, index))
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false /*update_deps*/) // deps handled below after index assignment
-      initItemState(item, index)
-      item.admin = adminItems.has(item.id)
-      item.savedId = item.id
-      item.savedTime = item.time
-      item.savedAttr = _.cloneDeep(item.attr)
-      item.savedText = item.text
+      initItemState(item, index, {
+        admin: adminItems.has(item.id),
+        savedId: item.id,
+        savedTime: item.time,
+        savedAttr: _.cloneDeep(item.attr),
+        savedText: item.text,
+      })
     })
     finalizeStateOnEditorChange = true // make initial empty state final
     onEditorChange('') // initial sorting
@@ -5498,6 +5483,13 @@
       }
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);
       item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) // sync global_store on item
+      // invoke _on_global_store_remote_change() on item if defined
+      if (_item(id).text.includes('_on_global_store_remote_change')) {
+        try {
+          _item(id).eval(`if (typeof _on_global_store_remote_change == 'function') _on_global_store_remote_change()`)
+        } catch (e) {} // already logged, just continue
+      }
+      // invalidate element cache and force re-render
       _item(id).invalidate_elem_cache(true /*force_render*/)
       return
     }
@@ -5675,7 +5667,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
-                source={item.source}
+                source={item.attr ? item.attr.source : ''}
                 path={item.attr ? item.attr.path : ''}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
                 showLogs={item.showLogs}
