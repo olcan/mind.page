@@ -276,19 +276,33 @@
     }
     set editable(editable: boolean) {
       const _item = item(this.id)
-      if (_item.editable == editable) return // no change
-      _item.editable = editable
-      items = items // trigger svelte render
+      if (_item.editable != editable) {
+        _item.editable = editable
+        items = items // trigger svelte render
+      }
+      // if item was installed (has attr), also update/save in attr
+      if (this.attr && this.attr['editable'] !== editable) {
+        this.attr['editable'] = editable
+        this.save()
+      }
     }
+
     get pushable(): boolean {
       return item(this.id).pushable
     }
     set pushable(pushable: boolean) {
       const _item = item(this.id)
-      if (_item.pushable == pushable) return // no change
-      _item.pushable = pushable
-      onEditorChange(editorText) // trigger re-ranking since pushability can affect it
+      if (_item.pushable != pushable) {
+        _item.pushable = pushable
+        onEditorChange(editorText) // trigger re-ranking since pushability can affect it
+      }
+      // if item was installed (has attr), also update/save in attr
+      if (this.attr && this.attr['pushable'] !== pushable) {
+        this.attr['pushable'] = pushable
+        this.save()
+      }
     }
+
     get elem(): HTMLElement {
       // NOTE: we return the super-container as it is available even when editing
       // return document.getElementById("item-" + this.id);
@@ -2639,7 +2653,7 @@
             return
           }
           const item = items[editingItems[0]]
-          item.editable = true
+          _item(item.id).editable = true // set via _Item setter
           tick().then(() => textArea(item.index)?.focus())
           lastEditorChangeTime = 0 // disable debounce even if editor focused
           onEditorChange('')
@@ -2651,7 +2665,7 @@
             return
           }
           const item = items[editingItems[0]]
-          item.editable = false
+          _item(item.id).editable = false // set via _Item setter
           lastEditorChangeTime = 0 // disable debounce even if editor focused
           onEditorChange('')
           return
@@ -3046,6 +3060,8 @@
 
                   const attr = {
                     sha,
+                    editable: false,
+                    pushable: false,
                     source: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
                     path,
                     repo,
@@ -4258,8 +4274,9 @@
   function initItemState(item, index, state = {}) {
     // state used in onEditorChange
     if (!item.attr) item.attr = null // default to null for older items missing attr
-    item.editable = !item.attr // default is editable unless installed (i.e. has attr)
-    item.pushable = false // default is false
+    // NOTE: editable and pushable are transient UX state unless saved in item.attr
+    item.editable = item.attr?.editable ?? true
+    item.pushable = item.attr?.pushable ?? false
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.target = false
@@ -4748,6 +4765,9 @@
                       savedAttr: _.cloneDeep(savedItem.attr),
                       savedText: savedItem.text,
                     })
+                    // update mutable ux properties from item.attr
+                    item.editable = item.attr.editable ?? true
+                    item.pushable = item.attr.pushable ?? false
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index))
@@ -4824,6 +4844,9 @@
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
                     item.attr = savedItem.attr
+                    // update mutable ux properties from item.attr
+                    item.editable = item.attr.editable ?? true
+                    item.pushable = item.attr.pushable ?? false
                     item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
