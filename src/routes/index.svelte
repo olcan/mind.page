@@ -4768,8 +4768,8 @@
                       savedText: savedItem.text,
                     })
                     // update mutable ux properties from item.attr
-                    item.editable = item.attr.editable ?? true
-                    item.pushable = item.attr.pushable ?? false
+                    item.editable = item.attr?.editable ?? true
+                    item.pushable = item.attr?.pushable ?? false
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index))
@@ -4847,8 +4847,8 @@
                     item.text = item.savedText = savedItem.text
                     item.attr = savedItem.attr
                     // update mutable ux properties from item.attr
-                    item.editable = item.attr.editable ?? true
-                    item.pushable = item.attr.pushable ?? false
+                    item.editable = item.attr?.editable ?? true
+                    item.pushable = item.attr?.pushable ?? false
                     item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
