@@ -95,9 +95,11 @@
         )
         // NOTE: symmetric delimiters (e.g. `code`) are handled separately w/ _lazy_ matching (.*?) of content
         .replace(/(^|[^\\])(``?)(.*?)(``?)/g, (m, pfx, begin, content, end) => {
-          if (begin == end && (begin == '`' || begin == '``'))
+          if (begin == end && (begin == '`' || begin == '``')) {
+            // undo any tag highlighting inside highlighted sections
+            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
             return pfx + `<span class="code">${begin + content + end}</span>`
-          else return m
+          } else return m
         })
     )
   }
