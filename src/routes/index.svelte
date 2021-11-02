@@ -4219,6 +4219,8 @@
       // write text to item if modified
       // log warning if update changed item name
       if (text != item.text) {
+        // immediately mark item pushable until cleared via (auto-)push
+        item.pushable = true
         const prev_name = item.name
         item.write(text, '' /*, { keep_time: true }*/)
         if (item.name != prev_name)
