@@ -4411,22 +4411,6 @@
 
     initItems()
 
-    // if fragment corresponds to an item tag or id, focus on that item immediately ...
-    if (items.length > 0 && location.href.match(/#.+$/)) {
-      const tag = decodeURI(location.href.match(/#.+$/)[0])
-      // if it is a valid item id, then we convert it to name
-      const index = indexFromId.get(tag.substring(1))
-      if (index !== undefined) {
-        replaceStateOnEditorChange = true // replace state
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(items[index].name)
-      } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
-        replaceStateOnEditorChange = true // replace state
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(tag)
-      }
-    }
-
     processed = true
     // init_log(`processed ${items.length} items`);
 
@@ -5046,21 +5030,46 @@
           })
         }
 
-        // evaluate _on_welcome items once initialization is done, welcome dialog is dismissed, dom is fully updated
-        // on localhost, start watching local repo paths for installed items
+        // once initialization is done, welcome dialog is dismissed, dom is fully updated ...
         Promise.all([initialization, welcome])
           .then(update_dom)
           .then(() => {
+            // evaluate _on_welcome on welcome items
             items.forEach(item => {
               if (!item.welcome) return
               try {
                 _item(item.id).eval("if (typeof _on_welcome == 'function') _on_welcome()", { trigger: 'welcome' })
               } catch (e) {} // already logged, just continue welcome eval
             })
-            if (hostname == 'localhost')
+
+            // on localhost, start watching local repo paths for installed items
+            if (hostname == 'localhost') {
               items.forEach(item => {
                 if (item.attr?.repo) watchLocalRepo(item.attr?.repo)
               })
+            }
+
+            // if fragment corresponds to an item tag or id, focus on that item ...
+            if (location.href.match(/#.+$/)) {
+              const tag = decodeURI(location.href.match(/#.+$/)[0])
+              // if it is a valid item id, then we convert it to name
+              const index = indexFromId.get(tag.substring(1))
+              if (index !== undefined) {
+                replaceStateOnEditorChange = true // replace state
+                lastEditorChangeTime = 0 // disable debounce even if editor focused
+                onEditorChange(items[index].name)
+              } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
+                replaceStateOnEditorChange = true // replace state
+                lastEditorChangeTime = 0 // disable debounce even if editor focused
+                onEditorChange(tag)
+              }
+              tick()
+                .then(update_dom)
+                .then(() => {
+                  const target = document.querySelector(`.super-container.target`) as HTMLElement
+                  if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
+                })
+            }
           })
 
         init_log('initialized document')
