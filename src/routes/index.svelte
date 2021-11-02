@@ -4109,7 +4109,7 @@
     try {
       const resp = await fetch(`/watch/${repo}`)
       if (resp.status != 200) {
-        console.error(`error watching local repo ${repo}: ${resp.statusText}; will retry in 10s ...`)
+        console.warn(`error watching local repo ${repo}: ${resp.statusText}; will retry in 10s ...`)
         setTimeout(() => _watchLocalRepo(repo), 10000)
         return
       }
@@ -4131,7 +4131,7 @@
       })
       setTimeout(() => _watchLocalRepo(repo), 1000)
     } catch (e) {
-      console.error(`error watching local repo ${repo}: ${e}; will retry in 10s...`)
+      console.warn(`error watching local repo ${repo}: ${e}; will retry in 10s...`)
       setTimeout(() => _watchLocalRepo(repo), 10000)
     }
   }
