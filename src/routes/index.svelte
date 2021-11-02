@@ -475,8 +475,8 @@
     // accessor for console log associated with item
     // levels are listed below, default level ("info") excludes debug messages
     // since can be "run" (default), "eval", or any epoch time (same as Date.now)
-    // item can be "self" (default), specific item name (label or id), or "any"
-    // if item is suffixed with '?', then lines w/ empty stack are included
+    // source can be "self" (default), specific item name (label or id), or "any"
+    // if source is suffixed with '?', then lines w/ empty stack are included
     get_log(options = {}) {
       let since = options['since'] || 'run'
       if (since == 'run') since = item(this.id).lastRunTime
@@ -490,14 +490,14 @@
         console.error(`get_log: invalid level '${options['level']}', should be one of: ${log_levels}`)
         return []
       }
-      let name = options['item'] || 'self'
+      let name = options['source'] || 'self'
       let allow_empty_stack = false
       if (name.endsWith('?')) {
         name = name.slice(0, -1)
         allow_empty_stack = true
       }
       if (name != 'self' && name != 'any' && !item(name)) {
-        console.error(`get_log: item '${name}' not found`)
+        console.error(`get_log: unknown source '${name}'`)
         return []
       }
       const filter = options['filter']
@@ -588,7 +588,7 @@
           since: 'run',
           level: 'info',
           type: '_log',
-          item: 'self',
+          source: 'self',
         },
         item(this.id).log_options, // may be undefined
         options
@@ -598,7 +598,7 @@
     }
 
     write_log_any(options = {}) {
-      return this.write_log(Object.assign({ item: 'any' }, item(this.id).log_options, options))
+      return this.write_log(Object.assign({ source: 'any' }, item(this.id).log_options, options))
     }
 
     show_logs(autohide_after: number = 15000) {
