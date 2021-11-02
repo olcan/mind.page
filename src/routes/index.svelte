@@ -476,6 +476,7 @@
     // levels are listed below, default level ("info") excludes debug messages
     // since can be "run" (default), "eval", or any epoch time (same as Date.now)
     // item can be "self" (default), specific item name (label or id), or "any"
+    // if item is suffixed with '?', then lines w/ empty stack are included
     get_log(options = {}) {
       let since = options['since'] || 'run'
       if (since == 'run') since = item(this.id).lastRunTime
@@ -489,7 +490,12 @@
         console.error(`get_log: invalid level '${options['level']}', should be one of: ${log_levels}`)
         return []
       }
-      const name = options['item'] || 'self'
+      let name = options['item'] || 'self'
+      let allow_empty_stack = false
+      if (name.endsWith('?')) {
+        name = name.slice(0, -1)
+        allow_empty_stack = true
+      }
       if (name != 'self' && name != 'any' && !item(name)) {
         console.error(`get_log: item '${name}' not found`)
         return []
@@ -502,12 +508,13 @@
         return []
       }
       let log = []
+
       const filter_id = name == 'self' ? this.id : name == 'any' ? '' : item(name).id
       for (let i = consoleLog.length - 1; i >= 0; --i) {
         const entry = consoleLog[i]
         if (entry.time < since) break
         if (entry.level < level) continue
-        if (filter_id && !entry.stack.includes(filter_id)) continue
+        if (filter_id && (!allow_empty_stack || entry.stack.length > 0) && !entry.stack.includes(filter_id)) continue
         if (filter && !filter(entry)) continue
         let prefix = entry.type == 'log' ? '' : entry.type.toUpperCase() + ': '
         if (prefix == 'WARN: ') prefix = 'WARNING: '
