@@ -496,7 +496,7 @@
         name = name.slice(0, -1)
         allow_empty_stack = true
       }
-      if (name != 'self' && name != 'any' && !item(name)) {
+      if (name != 'self' && name != 'any' && !_item(name, false)) {
         console.error(`get_log: unknown source '${name}'`)
         return []
       }
@@ -509,7 +509,7 @@
       }
       let log = []
 
-      const filter_id = name == 'self' ? this.id : name == 'any' ? '' : item(name).id
+      const filter_id = name == 'self' ? this.id : name == 'any' ? '' : _item(name, false).id
       for (let i = consoleLog.length - 1; i >= 0; --i) {
         const entry = consoleLog[i]
         if (entry.time < since) break
