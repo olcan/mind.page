@@ -446,7 +446,10 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
-            str = str.replace(tagRegex, (m, pfx, tag) => {
+            str = str.replace(tagRegex, (m, pfx, tag, offset, orig_str) => {
+              // skip tag if inside inline code block `...#tag...`
+              if (orig_str.slice(offset).match(/^[^\n]*`/) && orig_str.slice(0, offset).match(/`[^\n]*$/)) return m
+
               // drop hidden tag prefix
               const hidden = tag.startsWith('#_')
               tag = tag.replace(/^#_/, '#')
