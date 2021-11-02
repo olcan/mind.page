@@ -5062,6 +5062,8 @@
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
                 onEditorChange(tag)
+              } else {
+                alert(`item ${tag} missing or ambiguous`)
               }
               tick()
                 .then(update_dom)
