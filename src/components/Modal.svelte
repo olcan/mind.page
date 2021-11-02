@@ -1,5 +1,5 @@
 <script lang="ts">
-  import marked from 'marked'
+  import { marked } from 'marked'
   import { numberWithCommas } from '../util.js'
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
 
@@ -217,7 +217,7 @@
 
 <div class="background" class:visible on:click={onBackgroundClick}>
   <div class="modal">
-    {#if content}{@html marked(content)}{/if}
+    {#if content}{@html marked.parse(content)}{/if}
     {#if input != null}
       <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
       <form>

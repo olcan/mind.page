@@ -56,7 +56,7 @@
     "firebase-functions-test": "^0.3.3",
     "js-sha1": "^0.6.0",
     "lodash": "^4.17.21",
-    "marked": "^3.0.8",
+    "marked": "^4.0.0",
     "rollup": "^2.59.0",
     "rollup-plugin-svelte": "^7.1.0",
     "rollup-plugin-terser": "^7.0.2",
