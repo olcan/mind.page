@@ -3189,12 +3189,20 @@
                   await tick()
                   await update_dom()
 
+                  // invoke _on_install(item)|_on_update(item) if defined as function
+                  await _modal_close() // allow these functions to display own modals
                   if (!updating) {
-                    // invoke _on_install(item) if defined
-                    await _modal_close() // allow _on_install to display own modals
                     if (item.text.includes('_on_install')) {
                       try {
                         _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
+                          trigger: 'command',
+                        })
+                      } catch (e) {} // already logged, just continue
+                    }
+                  } else {
+                    if (item.text.includes('_on_update')) {
+                      try {
+                        _item(item.id).eval(`if (typeof _on_update == 'function') _on_update(_item('${item.id}'))`, {
                           trigger: 'command',
                         })
                       } catch (e) {} // already logged, just continue
