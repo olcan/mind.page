@@ -4156,21 +4156,21 @@
         return
       }
       const events = await resp.json()
-      const changed_paths = events.filter(e => e.event == 'change').map(e => e.path.replace(/^\//, ''))
-      changed_paths.forEach(changed_path => {
+      const changed_paths = _.uniq(events.filter(e => e.event == 'change').map(e => e.path.replace(/^\//, '')))
+      for (const changed_path of changed_paths) {
         console.log(`detected change in local repo path ${changed_path}`)
-        items.forEach(item => {
-          if (!item.attr) return // item not installed
-          if (item.attr.repo != repo) return // item not from modified local repo
+        for (const item of items) {
+          if (!item.attr) continue // item not installed
+          if (item.attr.repo != repo) continue // item not from modified local repo
           const attr = item.attr
           // calculate item paths, including any embeds, removing slash prefixes
           const paths = [attr.path, ...(attr.embeds?.map(e => e.path) ?? [])].map(path => path.replace(/^\//, ''))
           if (paths.includes(changed_path)) {
             console.log(`found affected item ${item.name}`)
-            previewItemFromLocalRepo(_item(item.id))
+            await previewItemFromLocalRepo(_item(item.id))
           }
-        })
-      })
+        }
+      }
       setTimeout(() => _watchLocalRepo(repo), 1000)
     } catch (e) {
       console.warn(`error watching local repo ${repo}: ${e}; will retry in 10s...`)
@@ -4251,18 +4251,38 @@
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
-      // write text to item if modified
+      // confirm preview if modified
+      if (text != item.text) {
+        if (initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time) {
+          console.log(`skipping preview confirmation on this instance (${initTime})`)
+        } else {
+          const confirmed = await _modal({
+            content: `Preview changes in local repo \`${repo}\`?`,
+            confirm: 'Preview',
+            cancel: 'Skip',
+          })
+          if (!confirmed) {
+            console.warn(`preview skipped by user for ${item.name} from ${repo}/${path}`)
+            return
+          }
+        }
+      }
+
+      // write text to item if modified (still, after confirmation step)
       // log warning if update changed item name
       if (text != item.text) {
+        // record init time for app instance that can auto-preview w/o confirmation
+        saveHiddenItem('preview', { auto_previewer_init_time: initTime })
         // immediately mark item pushable until cleared via (auto-)push
         item.pushable = true
         const prev_name = item.name
         item.write(text, '' /*, { keep_time: true }*/)
         if (item.name != prev_name)
           console.warn(`renaming preview for ${item.name} (was ${prev_name}) from ${repo}/${path}`)
+        console.log(`previewed ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
+      } else {
+        console.log(`preview skipped (no change) for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
       }
-
-      console.log(`previewed ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
     } catch (e) {
       console.error(`preview failed for ${item.name} from ${repo}/${path}: ${e}`)
     }
