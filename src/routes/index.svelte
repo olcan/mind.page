@@ -1734,8 +1734,8 @@
 
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
-      // mark 'has error' on error or warnings, OR if item is marked 'pushable'
-      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null || item.pushable
+      // mark 'has error' on error or warnings
+      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -1837,17 +1837,18 @@
         b.missingTags.length - a.missingTags.length ||
         // errors
         b.hasError - a.hasError ||
+        // pushables
+        b.pushable - a.pushable ||
         // time (most recent first)
         b.time - a.time
     )
 
     // determine "tail" index after which items are ordered purely by time
     // (also including editing items, including log items which are edited in place)
-    // (also including hasError items which need to be prominent)
+    // (also including hasError and pushable items which need to be prominent)
     let tailIndex = items.findIndex(item => item.id === null)
     items.splice(tailIndex, 1)
-    tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.editing) + 1)
-    tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.hasError) + 1)
+    tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.editing || item.hasError || item.pushable) + 1)
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
     const prevHideIndex = hideIndex // to possibly take max later (see below)
