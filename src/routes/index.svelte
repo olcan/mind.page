@@ -969,7 +969,7 @@
 
     // delay = promise resolved after specified time
     delay(ms) {
-      return this.promise(resolve => setTimeout(resolve, ms))
+      return this.promise(resolve => this.dispatch(resolve, ms))
     }
 
     // return array of uploaded image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
