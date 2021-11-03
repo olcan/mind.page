@@ -381,6 +381,22 @@
       if (modified) this.invalidate_elem_cache(true /*force_render*/)
       if (_.isEmpty(_item.local_store)) localStorage.removeItem(key)
       else if (modified) localStorage.setItem(key, JSON.stringify(_item.local_store))
+
+      // if modified, invoke _on_local_store_change(id) on all listener items
+      if (modified) {
+        items.forEach(item => {
+          if (!item.listen) return
+          if (!item.text.includes('_on_local_store_change')) return
+          try {
+            _item(item.id).eval(
+              `if (typeof _on_local_store_change == 'function') _on_local_store_change('${this.id}')`,
+              {
+                trigger: 'listen',
+              }
+            )
+          } catch (e) {} // already logged, just continue
+        })
+      }
     }
 
     // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
@@ -395,7 +411,7 @@
         return _item.global_store || (_item.global_store = {})
       }
       if (anonymous) {
-        if (!_item.global_store) _item.global_store = this.local_store['_anonymous_global_store'] || {}
+        if (!_item.global_store) _item.global_store = _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
         setTimeout(() => this.save_global_store())
         return _item.global_store
       }
@@ -417,16 +433,35 @@
         setTimeout(() => this.save_global_store(), 1000)
         return
       }
+      let modified = false
       if (anonymous) {
+        // emulate global store using local store
+        modified = !_.isEqual(_item.global_store, this.local_store['_anonymous_global_store'] || {})
         if (_.isEmpty(_item.global_store)) delete this.local_store['_anonymous_global_store']
-        else this.local_store['_anonymous_global_store'] = _item.global_store
-        return
+        else if (modified) this.local_store['_anonymous_global_store'] = _.cloneDeep(_item.global_store)
+      } else {
+        const name = 'global_store_' + _item.savedId
+        modified = !_.isEqual(_item.global_store, hiddenItemsByName.get(name)?.item || {})
+        if (modified) this.invalidate_elem_cache(true /*force_render*/)
+        if (_.isEmpty(_item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
+        else if (modified) saveHiddenItem(name, _.cloneDeep(_item.global_store))
       }
-      const name = 'global_store_' + _item.savedId
-      const modified = !_.isEqual(_item.global_store, hiddenItemsByName.get(name)?.item || {})
-      if (modified) this.invalidate_elem_cache(true /*force_render*/)
-      if (_.isEmpty(_item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
-      else if (modified) saveHiddenItem(name, _.cloneDeep(_item.global_store))
+
+      // if modified, invoke _on_global_store_change(id, false) on all listener items
+      if (modified) {
+        items.forEach(item => {
+          if (!item.listen) return
+          if (!item.text.includes('_on_global_store_change')) return
+          try {
+            _item(item.id).eval(
+              `if (typeof _on_global_store_change == 'function') _on_global_store_change('${this.id}',false)`,
+              {
+                trigger: 'listen',
+              }
+            )
+          } catch (e) {} // already logged, just continue
+        })
+      }
     }
 
     // separate store used for debugging
@@ -5535,13 +5570,23 @@
         return
       }
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);
-      item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) // sync global_store on item
-      // invoke _on_global_store_remote_change() on item if defined
-      if (_item(id).text.includes('_on_global_store_remote_change')) {
+      item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {} // sync global_store on item
+
+      // invoke _on_global_store_change(id, true) on all listener items
+      // NOTE: "deletions" of hidden item correspond to a change to empty store {}
+      items.forEach(item => {
+        if (!item.listen) return
+        if (!item.text.includes('_on_global_store_change')) return
         try {
-          _item(id).eval(`if (typeof _on_global_store_remote_change == 'function') _on_global_store_remote_change()`)
+          _item(item.id).eval(
+            `if (typeof _on_global_store_change == 'function') _on_global_store_change('${id}',true)`,
+            {
+              trigger: 'listen',
+            }
+          )
         } catch (e) {} // already logged, just continue
-      }
+      })
+
       // invalidate element cache and force re-render
       _item(id).invalidate_elem_cache(true /*force_render*/)
       return
