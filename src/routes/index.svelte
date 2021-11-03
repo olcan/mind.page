@@ -4149,7 +4149,7 @@
   }
   async function _watchLocalRepo(repo) {
     try {
-      const resp = await fetch(`/watch/${repo}`)
+      const resp = await fetch(`/watch/${initTime}/${repo}`)
       if (resp.status != 200) {
         console.warn(`error watching local repo ${repo}: ${resp.statusText}; will retry in 10s ...`)
         setTimeout(() => _watchLocalRepo(repo), 10000)

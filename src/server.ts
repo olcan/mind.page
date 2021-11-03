@@ -10,7 +10,7 @@ const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
 
 const chokidar = dev ? require('chokidar') : null
-const path_events = {} // recorded fs events for /watch/... requests
+const events = {} // recorded fs events for /watch/... requests
 
 function get_hostdir(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
@@ -99,18 +99,24 @@ const sapperServer = express().use(
     } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
     } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/watch/')) {
-      const req_path = req.path.slice(6)
-      const watch_path = process.env['PWD'].replace('/mind.page', req.path.slice(6))
-      if (!path_events[watch_path]) {
-        path_events[watch_path] = []
+      const [m, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
+      if (!client_id || !req_path) {
+        console.warn('invalid watch path ' + req.path)
+        res.status(400).send('invalid watch path ' + req.path)
+        return
+      }
+      const watch_path = process.env['PWD'].replace('/mind.page', req_path)
+      const key = client_id + ':' + watch_path
+      if (!events[key]) {
+        events[key] = []
         chokidar.watch(watch_path, { ignoreInitial: true, ignored: /(^|[\/\\])\../ }).on('all', (event, path) => {
           if (path.length > watch_path.length) path = path.replace(watch_path, '')
-          path_events[watch_path].push({ event, path })
+          events[key].push({ event, path })
         })
-        console.log(`server now watching ${watch_path} ...`)
+        console.log(`server now watching ${watch_path} for client ${client_id} ...`)
       }
-      res.json(path_events[watch_path])
-      path_events[watch_path] = []
+      res.json(events[key])
+      events[key] = []
     } else {
       next()
     }
