@@ -4253,7 +4253,8 @@
 
       // confirm preview if modified
       if (text != item.text) {
-        if (initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time) {
+        // NOTE: for now we always confirm previews to prevent rendering/pushing small intermediate changes that may be reflexively saved, that are not intended for preview
+        if (false && initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time) {
           console.log(`skipping preview confirmation on this instance (${initTime})`)
         } else {
           const confirmed = await _modal({
