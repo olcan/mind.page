@@ -4183,7 +4183,7 @@
     return attr.path.substr(0, attr.path.lastIndexOf('/')) + '/' + path
   }
 
-  async function previewItemFromLocalRepo(item) {
+  async function previewItemFromLocalRepo(item, skip_confirmation = false) {
     const start = Date.now()
     const attr = item.attr
     const { repo, path } = attr
@@ -4252,9 +4252,13 @@
       })
 
       // confirm preview if modified
+      // restart after confirmation in case file was modified again
       if (text != item.text) {
         // NOTE: for now we always confirm previews to prevent rendering/pushing small intermediate changes that may be reflexively saved, that are not intended for preview
-        if (false && initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time) {
+        if (
+          skip_confirmation ||
+          (false && initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time)
+        ) {
           console.log(`skipping preview confirmation on this instance (${initTime})`)
         } else {
           const confirmed = await _modal({
@@ -4266,6 +4270,9 @@
             console.warn(`preview skipped by user for ${item.name} from ${repo}/${path}`)
             return
           }
+          // restart preview (this time w/o confirmation) to fetch latest file
+          console.log(`preview restarted for ${item.name} from ${repo}/${path} after confirmation`)
+          return await previewItemFromLocalRepo(item, true /* skip_confirmation */)
         }
       }
 
