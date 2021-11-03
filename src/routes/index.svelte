@@ -891,7 +891,7 @@
 
     // dispatch = setTimeout on attached function
     dispatch(func, delay_ms = 0) {
-      setTimeout(this.attach(func), delay_ms)
+      return setTimeout(this.attach(func), delay_ms)
     }
 
     // dispatches function as a named task that can be cancelled or repeated
