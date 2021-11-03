@@ -1137,7 +1137,7 @@
     itemdiv.querySelectorAll('input[type=file]').forEach((input: HTMLInputElement) => {
       input.accept = 'image/*,application/pdf' // accept only images
       input.onchange = function (e: InputEvent) {
-        window['_modal']({ content: 'Inserting selected images ...' })
+        const modal = window['_modal']({ content: 'Inserting selected images ...' })
         let total_size = 0
         Promise.all(
           Array.from(input.files).map(file =>
@@ -1152,7 +1152,7 @@
           )
         )
           .then((fnames: any) => {
-            setTimeout(window['_modal_close'], 0) // increase delay for testing
+            setTimeout(() => window['_modal_close'](modal), 0) // increase delay for testing
             const zoom = Math.round(1000 / window.devicePixelRatio) / 1000
             const images = fnames
               .map(fname => {

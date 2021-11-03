@@ -129,19 +129,19 @@
     return modal.show(options)
   }
 
-  // _modal_close closes modal manually
-  function _modal_close(out = undefined) {
-    return modal.close(out)
+  // _modal_close closes/cancels all modals or specified modal w/ optional output
+  function _modal_close(promise = undefined, output = undefined) {
+    return modal.close(promise, output)
   }
 
-  // _modal_update updates existing modal without closing it
-  function _modal_update(options) {
-    return modal.update(options)
+  // _modal_update updates an existing modal w/ given options
+  function _modal_update(promise, options) {
+    return modal.update(promise, options)
   }
 
-  // _modal_visible returns true iff modal is visible
-  function _modal_visible() {
-    return modal.isVisible()
+  // _modal_visible returns true if specified (or any) modal is visible
+  function _modal_visible(promise = undefined) {
+    return modal.visible(promise)
   }
 
   // _delay is just setTimeout wrapped in a promise
@@ -3068,7 +3068,7 @@
                 try {
                   // if no token, prompt for it, also mentioning rate limits
                   if (!token) {
-                    await _modal_close() // force-close any existing modal
+                    await _modal_close() // close/cancel all modals
                     token = await _modal({
                       content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access can be severely throttled by GitHub.`,
                       confirm: 'Use Token',
@@ -3080,7 +3080,7 @@
                     else token = null // no token, use unauthenticated client
                   }
                   // NOTE: force-closing modals is especially important since install/update can be invoked recursively for dependencies ...
-                  await _modal_close() // force-close any existing modal
+                  await _modal_close() // close/cancel all modals
                   _modal({
                     content: (updating ? 'Updating' : 'Installing') + ` ${updating && label ? label : path} ...`,
                     background: 'block',
@@ -3210,8 +3210,8 @@
                   if (label && _exists(label, false /*allow_multiple*/)) {
                     // confirm replacement if installing
                     if (!updating) {
-                      await _modal_close() // force-close any existing modal
-                      const replace = await _modal_update({
+                      await _modal_close() // close/cancel all modals
+                      const replace = await _modal({
                         content: `Replace existing ${label}?`,
                         confirm: 'Replace',
                         cancel: 'Cancel',
@@ -3225,7 +3225,7 @@
                     item = _item(label)
                     // confirm if updating "pushable" item w/ unpushed changes
                     if (updating && item.pushable && item.text != text) {
-                      await _modal_close() // force-close any existing modal
+                      await _modal_close() // close/cancel all modals
                       const overwrite = await _modal({
                         content: `Overwrite unpushed changes in ${item.name}?`,
                         confirm: 'Overwrite',
@@ -3248,7 +3248,7 @@
                   await update_dom()
 
                   // invoke _on_install(item)|_on_update(item) if defined as function
-                  await _modal_close() // allow these functions to display own modals
+                  await _modal_close() // close/cancel all modals
                   if (!updating) {
                     if (item.text.includes('_on_install')) {
                       try {
@@ -3283,7 +3283,7 @@
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                 } finally {
-                  await _modal_close()
+                  await _modal_close() // close/cancel all modals
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
@@ -5158,9 +5158,9 @@
 
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
 
-    // console.debug(e, initialized, modal.isVisible());
+    // console.debug(e, initialized, modal.visible());
     if (!initialized) return
-    if (modal.isVisible()) return
+    if (modal.visible()) return // ignore keys when modal is visible
 
     // disable arrow keys to prevent ambiguous behavior
     if (key.startsWith('Arrow')) e.preventDefault()

@@ -17,7 +17,7 @@
   let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR close if no confirm/cancel buttons
   let selected_images = [] // used internally for file input
   let ready_image_count = 0
-  let visible = false
+  let _visible = false
   let enabled = false
   $: enabled =
     (input == null || canConfirm(input)) &&
@@ -39,14 +39,29 @@
   }
 
   let inputelem: HTMLInputElement
-  let _promise, _resolve
-  let dispatchTime
+  let pending_options = new Map() // options for pending modals
+  let pending_outputs = new Map() // outputs for cancelled modals
+  let promise_pending // promise for all modals (visible AND pending)
+  let promise_visible // promise for currently visible modal
+  let resolve_visible // resolve callback for visible promise
   export function show(options) {
-    return (_promise = Promise.allSettled([_promise]).then(
+    const promise = (promise_pending = Promise.allSettled([promise_pending]).then(
       () =>
         new Promise(resolve => {
-          _resolve = resolve
-          dispatchTime = Date.now()
+          promise_visible = promise
+          resolve_visible = resolve
+          // fetch/remove options from pending option map
+          // if no options, modal was cancelled before shown
+          const options = pending_options.get(promise)
+          pending_options.delete(promise)
+          if (!options) {
+            const output = pending_outputs.get(promise)
+            pending_outputs.delete(promise)
+            resolve_visible(output)
+            promise_visible = null
+            resolve_visible = null
+            _visible = false
+          }
           ;({
             content,
             confirm,
@@ -64,15 +79,15 @@
           // console.debug(options, confirm, cancel);
           selected_images = []
           ready_image_count = 0
-          visible = true
+          _visible = true
 
           // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
           // chrome fails to trigger onchange and enable confirm button despite autofill
           const isSafari = navigator.userAgent.toLowerCase().indexOf('safari/') > -1
           if (!isSafari && input != null && autocomplete) {
-            const origDispatchTime = dispatchTime
+            const promise_visible_at_dispatch = promise_visible
             const checkForChromeAutofill = () => {
-              if (!visible || dispatchTime != origDispatchTime) return // cancel
+              if (promise_visible != promise_visible_at_dispatch) return // cancel
               try {
                 if (inputelem?.matches(':-internal-autofill-selected')) {
                   input = inputelem.value // did not work in experiments but just in case
@@ -88,9 +103,21 @@
           }
         })
     ))
+    // store options in pending_options, subject to change in update()
+    pending_options.set(promise, options)
+    return promise
   }
 
-  export function update(options) {
+  // update specific modal identified by its promise
+  // could be any modal, visible or pending
+  export function update(promise, options) {
+    // if modal is not visible yet, just update pending options and return
+    if (promise_visible != promise) {
+      if (!pending_options.has(promise)) throw new Error(`invalid promise for modal update`)
+      pending_options.set(promise, options)
+      return promise
+    }
+    // update visible modal
     ;({
       content,
       confirm,
@@ -121,44 +148,76 @@
       },
       options
     ))
-    return Promise.resolve(_promise)
+    return promise
   }
 
-  export function close(out = undefined) {
-    visible = false
-    if (_resolve) _resolve(out)
-    return Promise.resolve(_promise)
+  // close/cancel all modals or specific modal identified by its promise
+  // can also resolve specific modal w/ specified output
+  export function close(promise = undefined, output = undefined) {
+    if (!promise) {
+      // cancel all pending modals w/ undefined output
+      if (output) throw new Error(`can not return output when closing all modals`)
+      pending_options.clear() // cancel all pending modals
+      // NOTE: we allow modals closed earlier to get any specified outputs
+      // pending_outputs.clear() // also clear pending outputs (forcing undefined)
+    } else {
+      // close specified modal
+      // if modal is not visible yet, just cancel and return
+      // cancel means move promise from pending_options to pending_outputs
+      if (promise_visible != promise) {
+        if (!pending_options.has(promise)) throw new Error(`invalid promise for modal close`)
+        pending_options.delete(promise) // cancel promise
+        pending_outputs.set(promise, output) // save output for resolve
+        return promise
+      }
+    }
+    // resolve and close any visible modal
+    if (_visible) {
+      resolve_visible(output)
+      promise_visible = null
+      resolve_visible = null
+      _visible = false
+    }
+    return promise
   }
 
-  export function isVisible() {
-    return visible
+  // returns true iff specified (or any) modal is visible
+  export function visible(promise = undefined) {
+    if (promise) return promise_visible == promise
+    return _visible
   }
 
   function _onConfirm(e = null) {
     e?.stopPropagation()
     e?.preventDefault()
     if (!enabled) return
-    visible = false
-    const out = images ? selected_images : input != null ? input : true
-    onConfirm(out)
-    _resolve(out)
+    const output = images ? selected_images : input != null ? input : true
+    onConfirm(output)
+    // resolve and close visible modal
+    resolve_visible(output)
+    promise_visible = null
+    resolve_visible = null
+    _visible = false
   }
 
   function _onCancel(e = null) {
     e?.stopPropagation()
     e?.preventDefault()
     if (!cancel) return
-    visible = false
-    const out = images ? [] : input != null ? null : false
     onCancel()
-    _resolve(out)
+    // resolve and close visible modal
+    const output = images ? [] : input != null ? null : false
+    resolve_visible(output)
+    promise_visible = null
+    resolve_visible = null
+    _visible = false
   }
 
   function onBackgroundClick(e = null) {
     if (e && (e.target as HTMLElement).closest('.modal')) return // ignore click on modal
     e?.stopPropagation()
     e?.preventDefault()
-    if (!confirm && !cancel && background.toLowerCase() != 'block') close()
+    if (!confirm && !cancel && background.toLowerCase() != 'block') close(promise_visible)
     else if (confirm && background.toLowerCase() == 'confirm') _onConfirm(e)
     else if (cancel && background.toLowerCase() == 'cancel') _onCancel(e)
     // else block
@@ -167,7 +226,7 @@
   function onKeyDown(e: KeyboardEvent) {
     const key = e.code || e.key // for android compatibility
     // NOTE: modal is on top of the page and handles ALL key events
-    if (!visible) return // ignore if not visible
+    if (!_visible) return // ignore if not visible
 
     // always stop Enter and Escape
     // also stop all non-modal non-modifier key events as a modal should
@@ -215,7 +274,7 @@
   }
 </script>
 
-<div class="background" class:visible on:click={onBackgroundClick}>
+<div class="background" class:visible={_visible} on:click={onBackgroundClick}>
   <div class="modal">
     {#if content}{@html marked.parse(content)}{/if}
     {#if input != null}
@@ -274,7 +333,7 @@
   </div>
 </div>
 
-{#if visible}
+{#if _visible}
   <script>
     setTimeout(() => {
       document.activeElement?.blur()

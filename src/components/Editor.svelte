@@ -653,7 +653,7 @@
         // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
         // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
         // onPastedImage(url, file);
-        window['_modal']({ content: 'Inserting pasted image ...' })
+        const modal = window['_modal']({ content: 'Inserting pasted image ...' })
         Promise.resolve(
           onPastedImage(url, file, size => {
             window['_modal_update']({
@@ -662,7 +662,7 @@
           })
         )
           .then(fname => {
-            setTimeout(window['_modal_close'], 0) // increase delay for testing
+            setTimeout(() => window['_modal_close'](modal), 0) // increase delay for testing
             const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`
             textarea.focus()
             textarea.selectionStart = selectionStart // fix for android (see note above)
