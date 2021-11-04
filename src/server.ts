@@ -113,7 +113,7 @@ const sapperServer = express().use(
           if (path.length > watch_path.length) path = path.replace(watch_path, '')
           events[key].push({ event, path })
         })
-        console.log(`server now watching ${watch_path} for client ${client_id} ...`)
+        console.log(`server watching ${req_path} for client ${client_id}`)
       }
       res.json(events[key])
       events[key] = []
