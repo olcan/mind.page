@@ -19,6 +19,7 @@
   import Editor from './Editor.svelte'
   export let editable = true
   export let pushable = false
+  export let previewable = false
   export let editing = false
   export let focused = false
   export let saving = false
@@ -82,6 +83,7 @@
   export let onTouch = (index: number, e: MouseEvent = null) => {}
   export let onUpdate = (index: number) => {}
   export let onPush = (index: number) => {}
+  export let onPreview = (index: number) => {}
   export let onResized = (id, container, trigger: string) => {}
   export let onImageRendering = (src: string): string => {
     return ''
@@ -119,7 +121,9 @@
     if (clickable && clickable['_clickable'](e)) return true
     if (window.getSelection().type == 'Range') return // ignore click if text is selected
     if (editing) return // already editing
-    onEditing(index, (editing = true), false /* cancelled */, false /* run */, e)
+    // if item is previewable, then preview instead of edit
+    if (previewable) onPreview(index)
+    else onEditing(index, (editing = true), false /* cancelled */, false /* run */, e)
   }
 
   function onRunClick(e) {
@@ -1341,6 +1345,7 @@
     class:bordered={error || warning || running || target}
     class:editable
     class:pushable
+    class:previewable
     class:runnable
     class:saveable
     class:scripted
@@ -1684,6 +1689,9 @@
   .warning,
   .pushable {
     border-color: #663;
+  }
+  .previewable {
+    border-color: #f6f;
   }
   .error {
     border-color: #633;

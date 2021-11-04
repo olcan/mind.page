@@ -294,6 +294,7 @@
       const _item = item(this.id)
       if (_item.pushable != pushable) {
         _item.pushable = pushable
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
       // if item was installed (has attr), also update/save in attr
@@ -1839,19 +1840,23 @@
         b.hasError - a.hasError ||
         // pushables
         b.pushable - a.pushable ||
+        // previewables
+        b.previewable - a.previewable ||
         // time (most recent first)
         b.time - a.time
     )
 
     // determine "tail" index after which items are ordered purely by time
     // (also including editing items, including log items which are edited in place)
-    // (also including hasError and pushable items which need to be prominent)
+    // (also including hasError, pushable, and previewable items which need to be prominent)
     let tailIndex = items.findIndex(item => item.id === null)
     items.splice(tailIndex, 1)
-    tailIndex = Math.max(tailIndex, _.findLastIndex(items, item => item.editing || item.hasError || item.pushable) + 1)
+    tailIndex = Math.max(
+      tailIndex,
+      _.findLastIndex(items, item => item.editing || item.hasError || item.pushable || item.previewable) + 1
+    )
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
-    const prevHideIndex = hideIndex // to possibly take max later (see below)
     hideIndex = hideIndexFromRanking
 
     // update layout (used below, e.g. aboveTheFold, editingItems, etc)
@@ -1906,10 +1911,6 @@
     // auto-show session items if no position-based toggles, otherwise use minimal
     hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
     // hideIndex = hideIndexMinimal;
-    // if editor text is not modified, we can not show less items
-    if (!editorTextModified) hideIndex = Math.max(hideIndex, prevHideIndex)
-    // if editor text is modified empty, we can not show more items (above hideIndexMinimal)
-    // if (editorTextModified && !editorText) hideIndex = Math.min(hideIndex, Math.max(prevHideIndex, hideIndexMinimal))
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal;
 
@@ -2091,6 +2092,7 @@
     if (items[index].time > newestTime) console.warn('invalid item time')
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log) {
       items[index].time = Date.now()
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(editorText) // item time has changed
     }
   }
@@ -2231,6 +2233,7 @@
     item.runnable = item.lctext.match(/\s*```\w+_input(?:_hidden|_removed)?(?:\s|$)/)
     item.scripted = item.lctext.match(/<script.*?>/)
     item.macroed = item.lctext.match(/<<.*?>>/) || item.lctext.match(/@\{.*?\}@/)
+    item.previewable = item.previewText && item.previewText != text
 
     const tags = parseTags(item.lctext)
     item.tags = tags.all
@@ -2964,7 +2967,7 @@
                 try {
                   // look up file
                   const resp = await fetch(`/file/${file}`)
-                  if (resp.status != 200) {
+                  if (!resp.ok) {
                     alert(`${cmd}: failed to fetch file '${file}'`)
                     return
                   }
@@ -2978,7 +2981,7 @@
                     `${cmd} ${file}`,
                     async () => {
                       const resp = await fetch(`/file/${file}`)
-                      if (resp.status != 200) {
+                      if (!resp.ok) {
                         console.error(`${cmd}: failed to fetch file '${file}'`)
                         return
                       }
@@ -3922,6 +3925,10 @@
     onEditorDone('/push ' + items[index].label)
   }
 
+  function onItemPreview(index: number) {
+    previewItem(items[index])
+  }
+
   function editItem(index: number) {
     items[index].editing = true
     editingItems.push(index)
@@ -4143,7 +4150,17 @@
   let watching = new Set()
   async function watchLocalRepo(repo) {
     if (hostname != 'localhost') return // can not watch outside localhost
-    if (watching.has(repo)) return
+    if (watching.has(repo)) return // already watching repo
+    // fetch initial previews from local repo
+    console.log(`fetching previews from local repo ${repo} ...`)
+    const start = Date.now()
+    for (const item of items) {
+      if (!item.attr) continue // item not installed
+      if (item.attr.repo != repo) continue // item not from modified local repo
+      await fetchPreview(item)
+    }
+    console.log(`fetched previews from local repo ${repo} in ${Date.now() - start}ms`)
+    // start watching
     watching.add(repo)
     _watchLocalRepo(repo)
     console.log(`watching local repo ${repo} ...`)
@@ -4151,7 +4168,7 @@
   async function _watchLocalRepo(repo) {
     try {
       const resp = await fetch(`/watch/${initTime}/${repo}`)
-      if (resp.status != 200) {
+      if (!resp.ok) {
         console.warn(`error watching local repo ${repo}: ${resp.statusText}; will retry in 10s ...`)
         setTimeout(() => _watchLocalRepo(repo), 10000)
         return
@@ -4166,10 +4183,7 @@
           const attr = item.attr
           // calculate item paths, including any embeds, removing slash prefixes
           const paths = [attr.path, ...(attr.embeds?.map(e => e.path) ?? [])].map(path => path.replace(/^\//, ''))
-          if (paths.includes(changed_path)) {
-            console.log(`found affected item ${item.name}`)
-            await previewItemFromLocalRepo(_item(item.id))
-          }
+          if (paths.includes(changed_path)) await fetchPreview(item)
         }
       }
       setTimeout(() => _watchLocalRepo(repo), 1000)
@@ -4184,46 +4198,14 @@
     return attr.path.substr(0, attr.path.lastIndexOf('/')) + '/' + path
   }
 
-  async function previewItemFromLocalRepo(item, skip_confirmation = false) {
+  async function fetchPreview(item) {
     const start = Date.now()
     const attr = item.attr
     const { repo, path } = attr
-    if (!item.editable) {
-      console.log(`preview skipped for uneditable ${item.name} from ${repo}/${path} ...`)
-      return
-    }
-    console.log(`previewing ${item.name} from ${repo}/${path} ...`)
     try {
       // fetch text from from local repo via server
       const resp = await fetch(`/file/${repo}/${path}`)
       let text = await resp.text()
-
-      // install missing dependencies based on updated text
-      // dependency paths MUST match the (resolved) hidden tags
-      const label = parseLabel(text)
-      if (label) {
-        const deps = resolveTags(
-          label,
-          parseTags(text).hidden.filter(t => !isSpecialTag(t))
-        )
-        for (let dep of deps) {
-          if (_exists(dep)) {
-            if (!_exists(dep, false /*allow_multiple*/))
-              console.warn(`invalid (ambiguous) preview dependency ${dep} for ${label}`)
-            continue
-          }
-          console.log(`installing preview dependency ${dep} for ${label} ...`)
-          const dep_path = dep.slice(1) // path assumed same as tag
-          const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
-          const dep_item = await onEditorDone(command)
-          if (!dep_item) {
-            throw new Error(`failed to install dependency ${dep} for ${label}`)
-          } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-            throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
-          }
-          console.log(`installed preview dependency ${dep} for ${label}`)
-        }
-      }
 
       // extract embed paths from updated text
       // number of embeds can change here if item text is updated
@@ -4252,49 +4234,63 @@
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
-      // confirm preview if modified
-      // restart after confirmation in case file was modified again
-      if (text != item.text) {
-        // NOTE: for now we always confirm previews to prevent rendering/pushing small intermediate changes that may be reflexively saved, that are not intended for preview
-        if (
-          skip_confirmation ||
-          (false && initTime == hiddenItemsByName.get('preview')?.item.auto_previewer_init_time)
-        ) {
-          console.log(`skipping preview confirmation on this instance (${initTime})`)
-        } else {
-          const confirmed = await _modal({
-            content: `Preview changes in local repo \`${repo}\`?`,
-            confirm: 'Preview',
-            cancel: 'Skip',
-          })
-          if (!confirmed) {
-            console.warn(`preview skipped by user for ${item.name} from ${repo}/${path}`)
-            return
-          }
-          // restart preview (this time w/o confirmation) to fetch latest file
-          console.log(`preview restarted for ${item.name} from ${repo}/${path} after confirmation`)
-          return await previewItemFromLocalRepo(item, true /* skip_confirmation */)
-        }
+      // save preview text on item for previewItem()
+      const was_previewable = item.previewable
+      item.previewText = text
+      item.previewable = item.previewText != item.text
+      // if previewability changed, trigger re-ranking since previewability can affect ranking
+      if (item.previewable != was_previewable) {
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(editorText)
       }
-
-      // write text to item if modified (still, after confirmation step)
-      // log warning if update changed item name
-      if (text != item.text) {
-        // record init time for app instance that can auto-preview w/o confirmation
-        saveHiddenItem('preview', { auto_previewer_init_time: initTime })
-        // immediately mark item pushable until cleared via (auto-)push
-        item.pushable = true
-        const prev_name = item.name
-        item.write(text, '' /*, { keep_time: true }*/)
-        if (item.name != prev_name)
-          console.warn(`renaming preview for ${item.name} (was ${prev_name}) from ${repo}/${path}`)
-        console.log(`previewed ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
-      } else {
-        console.log(`preview skipped (no change) for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
-      }
+      console.log(`fetched preview for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
     } catch (e) {
-      console.error(`preview failed for ${item.name} from ${repo}/${path}: ${e}`)
+      console.error(`failed to fetch preview for ${item.name} from ${repo}/${path}: ${e}`)
     }
+  }
+
+  async function previewItem(item) {
+    if (!item.previewable) throw new Error('item not previewable')
+    if (!item.previewText) throw new Error('preview item missing preview text')
+    if (item.text == item.previewText) throw new Error('item marked previweable w/o changes')
+    if (!item.attr) throw new Error('preview item missing attr')
+    const attr = item.attr
+    const { repo, path } = attr
+    const text = item.previewText
+
+    // install missing dependencies based on updated text
+    // dependency paths MUST match the (resolved) hidden tags
+    const label = parseLabel(text)
+    if (label) {
+      const deps = resolveTags(
+        label,
+        parseTags(text).hidden.filter(t => !isSpecialTag(t))
+      )
+      for (let dep of deps) {
+        if (_exists(dep)) {
+          if (!_exists(dep, false /*allow_multiple*/))
+            console.warn(`invalid (ambiguous) preview dependency ${dep} for ${label}`)
+          continue
+        }
+        console.log(`installing preview dependency ${dep} for ${label} ...`)
+        const dep_path = dep.slice(1) // path assumed same as tag
+        const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
+        const dep_item = await onEditorDone(command)
+        if (!dep_item) {
+          throw new Error(`failed to install dependency ${dep} for ${label}`)
+        } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+          throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
+        }
+        console.log(`installed preview dependency ${dep} for ${label}`)
+      }
+    }
+
+    item.pushable = true // mark pushable until pushed
+    const prev_name = item.name
+    _item(item.id).write(text, '' /*, { keep_time: true }*/)
+    if (item.name != prev_name) console.warn(`preview renamed ${item.name} (was ${prev_name}) from ${repo}/${path}`)
+    item.previewable = item.text != item.previewText // should be false now
+    console.log(`previewed ${item.name} from ${repo}/${path}`)
   }
 
   import { onMount } from 'svelte'
@@ -4352,6 +4348,8 @@
     // NOTE: editable and pushable are transient UX state unless saved in item.attr
     item.editable = item.attr?.editable ?? true
     item.pushable = item.attr?.pushable ?? false
+    item.previewable = false // should be true iff previewText && previewText != text
+    item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.target = false
@@ -5110,9 +5108,9 @@
 
             // on localhost, start watching local repo paths for installed items
             if (hostname == 'localhost') {
-              items.forEach(item => {
-                if (item.attr?.repo) watchLocalRepo(item.attr?.repo)
-              })
+              ;(async () => {
+                for (const item of items) if (item.attr?.repo) await watchLocalRepo(item.attr?.repo)
+              })()
             }
 
             // if fragment corresponds to an item tag or id, focus on that item ...
@@ -5776,6 +5774,7 @@
                 onTouch={onItemTouch}
                 onUpdate={onItemUpdate}
                 onPush={onItemPush}
+                onPreview={onItemPreview}
                 onResized={onItemResized}
                 onEscape={onItemEscape}
                 {onImageRendering}
@@ -5791,6 +5790,7 @@
                 bind:focused={item.focused}
                 editable={item.editable}
                 pushable={item.pushable}
+                previewable={item.previewable}
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
