@@ -683,7 +683,8 @@
           count_unescaped(expr, '`') % 2 == 0 &&
           count_unescaped(expr, "'") % 2 == 0 &&
           count_unescaped(expr, '"') % 2 == 0 &&
-          count_unescaped(expr, '/*') == count_unescaped(expr, '*/') &&
+          // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
+          (count_unescaped(expr, '/*') == count_unescaped(expr, '*/') || count_unescaped(expr, '/') % 2 == 0) &&
           count_unescaped(expr, '{') == count_unescaped(expr, '}') &&
           count_unescaped(expr, '[') == count_unescaped(expr, ']') &&
           count_unescaped(expr, '(') == count_unescaped(expr, ')')
