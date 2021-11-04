@@ -2230,7 +2230,9 @@
     item.runnable = item.lctext.match(/\s*```\w+_input(?:_hidden|_removed)?(?:\s|$)/)
     item.scripted = item.lctext.match(/<script.*?>/)
     item.macroed = item.lctext.match(/<<.*?>>/) || item.lctext.match(/@\{.*?\}@/)
-    item.previewable = item.previewText && item.previewText != text
+    // changes in mindpage can reset (but not set) previewable flag
+    // only changes in local repo (detected in fetchPreview) can set previewable
+    if (text == item.previewText) item.previewable = false
 
     const tags = parseTags(item.lctext)
     item.tags = tags.all
