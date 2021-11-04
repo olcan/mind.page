@@ -38,10 +38,13 @@
 
   function update_dom() {
     return new Promise(resolve => {
-      // skip animation frame to ensure DOM is updated for running=true
-      // (otherwise only option is an arbitrary delay since polling DOM does not work)
-      // (see https://stackoverflow.com/a/57659371 and other answers to that question)
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
+      // 'tick' first to ensure svelte update
+      tick().then(() => {
+        // skip animation frame to ensure DOM is updated for running=true
+        // (otherwise only option is an arbitrary delay since polling DOM does not work)
+        // (see https://stackoverflow.com/a/57659371 and other answers to that question)
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      })
     })
   }
 
@@ -1287,30 +1290,28 @@
     }
 
     const dispatchTime = Date.now()
-    tick()
-      .then(update_dom)
-      .then(() => {
-        const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
-        if (activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
-          focusedEditElement.focus()
-          if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
-          lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
-        } else if (_.min(topMovers) < items.length && !narrating) {
-          const itemTop = _.min(
-            topMovers.map(index => {
-              if (index == items.length) return Infinity // nothing in this column
-              const div = document.querySelector('#super-container-' + items[index].id)
-              if (!div) return Infinity // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop
-            })
-          )
-          // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
-          // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-          if (itemTop - 100 < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
-          topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
-        }
-      })
+    update_dom().then(() => {
+      const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
+      if (activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
+        focusedEditElement.focus()
+        if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
+        lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
+      } else if (_.min(topMovers) < items.length && !narrating) {
+        const itemTop = _.min(
+          topMovers.map(index => {
+            if (index == items.length) return Infinity // nothing in this column
+            const div = document.querySelector('#super-container-' + items[index].id)
+            if (!div) return Infinity // item hidden, have to ignore
+            return (div as HTMLElement).offsetTop
+          })
+        )
+        // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
+        // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
+        if (itemTop - 100 < document.body.scrollTop)
+          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+        topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
+      }
+    })
   }
 
   let images = new Map<string, string>() // permanent fname to temporary url
@@ -1846,15 +1847,14 @@
         b.time - a.time
     )
 
+    // certain items need prominence to be considered in hide index and toggle point computations
+    // note for editing items, log items which are edited "in place" and can be quite far down
+    const needs_prominence = item => item.target || item.editing || item.hasError || item.pushable || item.previewable
+
     // determine "tail" index after which items are ordered purely by time
-    // (also including editing items, including log items which are edited in place)
-    // (also including hasError, pushable, and previewable items which need to be prominent)
     let tailIndex = items.findIndex(item => item.id === null)
     items.splice(tailIndex, 1)
-    tailIndex = Math.max(
-      tailIndex,
-      _.findLastIndex(items, item => item.editing || item.hasError || item.pushable || item.previewable) + 1
-    )
+    tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
     hideIndex = hideIndexFromRanking
@@ -1867,8 +1867,9 @@
     toggles = []
 
     // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
-    let unpinnedIndex = _.findLastIndex(items, item => item.pinned || item.editing || item.target) + 1
-    let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || item.editing || item.target) + 1
+    // we include target + everything included above in hideIndexFromRanking to ensure prominence
+    let unpinnedIndex = _.findLastIndex(items, item => item.pinned || needs_prominence(item)) + 1
+    let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
     if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
       toggles.push({
         start: unpinnedIndex,
@@ -2062,26 +2063,24 @@
     if (narrating) return
     // scroll up (or down) to target item if needed
     if (items.findIndex(item => item.target) >= 0) {
-      tick()
-        .then(update_dom)
-        .then(() => {
-          let topTargets = new Array(columnCount).fill(items.length)
-          items.forEach((item, index) => {
-            if (item.target && index < topTargets[item.column]) topTargets[item.column] = index
-          })
-          const itemTop = _.min(
-            topTargets.map(index => {
-              if (index == items.length) return Infinity // nothing in this column
-              const div = document.querySelector('#super-container-' + items[index].id)
-              if (!div) return Infinity // item hidden, have to ignore
-              return (div as HTMLElement).offsetTop
-            })
-          )
-          if (itemTop == Infinity) return // nothing to scroll to
-          // if item is too far up or down, bring it to ~upper-middle, snapping up to header
-          if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+      update_dom().then(() => {
+        let topTargets = new Array(columnCount).fill(items.length)
+        items.forEach((item, index) => {
+          if (item.target && index < topTargets[item.column]) topTargets[item.column] = index
         })
+        const itemTop = _.min(
+          topTargets.map(index => {
+            if (index == items.length) return Infinity // nothing in this column
+            const div = document.querySelector('#super-container-' + items[index].id)
+            if (!div) return Infinity // item hidden, have to ignore
+            return (div as HTMLElement).offsetTop
+          })
+        )
+        if (itemTop == Infinity) return // nothing to scroll to
+        // if item is too far up or down, bring it to ~upper-middle, snapping up to header
+        if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
+          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+      })
     }
   }
 
@@ -2131,9 +2130,7 @@
     if (typeof e.state.hideIndex == 'number') hideIndex = Math.max(hideIndex, e.state.hideIndex)
     // if (narrating) return;
     // scroll to last recorded scroll position at this state
-    tick()
-      .then(update_dom)
-      .then(() => document.body.scrollTo(0, e.state.scrollPosition || 0))
+    update_dom().then(() => document.body.scrollTo(0, e.state.scrollPosition || 0))
   }
 
   function resetUser() {
@@ -2911,6 +2908,8 @@
               .replace(/^\/\w+/, '')
               .replace(/([`\\$])/g, '\\$1')
               .trim()
+            // for commands we provide whitespace-split args as additional arguments
+            const cmd_args = [args, ...args.split(/\s+/)].map(arg => `\`${arg}\``)
 
             if (cmd == '/_zoom') {
               if (args) localStorage.setItem('mindpage_zoom', args)
@@ -3248,7 +3247,6 @@
                   }
 
                   // wait for dom update
-                  await tick()
                   await update_dom()
 
                   // invoke _on_install(item)|_on_update(item) if defined as function
@@ -3293,13 +3291,13 @@
             } else if (_exists('#commands' + cmd)) {
               function handleError(e) {
                 const log = _item('#commands' + cmd).get_log({ since: 'eval', level: 'error' })
-                let msg = [`#commands${cmd} run(\`${args}\`) failed:`, ...log, e].join('\n')
+                let msg = [`#commands${cmd} run(${cmd_args}) failed:`, ...log, e].join('\n')
                 alert(msg)
               }
               try {
                 let cmd_item = items[_item('#commands' + cmd).index]
                 Promise.resolve(
-                  _item('#commands' + cmd).eval(`run(\`${args}\`)`, {
+                  _item('#commands' + cmd).eval(`run(${cmd_args})`, {
                     trigger: 'command',
                     async: cmd_item.deepasync, // run async if item is async or has async deps
                     async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
@@ -3324,11 +3322,11 @@
                 found_listener = true
                 function handleError(e) {
                   const log = _item(item.id).get_log({ since: 'eval', level: 'error' })
-                  let msg = [`${item.name} _on_command_${name}(\`${args}\`) failed: `, ...log, e].join('\n')
+                  let msg = [`${item.name} _on_command_${name}(${cmd_args}) failed: `, ...log, e].join('\n')
                   alert(msg)
                 }
                 const ret = _item(item.id).eval(
-                  `(typeof _on_command_${name} == 'function' ? _on_command_${name}(\`${args}\`) : null)`,
+                  `(typeof _on_command_${name} == 'function' ? _on_command_${name}(${cmd_args}) : null)`,
                   {
                     trigger: 'listen',
                     async: item.deepasync, // run async if item is async or has async deps
@@ -3818,15 +3816,13 @@
       // scroll up to item to bring it to ~upper-middle of page, snapping up to header
       // (most helpful for items that are much taller when editing)
       if (!narrating) {
-        tick()
-          .then(update_dom)
-          .then(() => {
-            const div = document.querySelector('#super-container-' + item.id)
-            if (!div) return // item deleted or hidden
-            const itemTop = (div as HTMLElement).offsetTop
-            if (itemTop - 100 < document.body.scrollTop)
-              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
-          })
+        update_dom().then(() => {
+          const div = document.querySelector('#super-container-' + item.id)
+          if (!div) return // item deleted or hidden
+          const itemTop = (div as HTMLElement).offsetTop
+          if (itemTop - 100 < document.body.scrollTop)
+            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+        })
       }
     }
   }
@@ -3882,7 +3878,7 @@
     else {
       // touch first to avoid delayed scroll-to-top on cpu-intensive runs
       onItemTouch(index)
-      tick().then(update_dom).then(runItem)
+      update_dom().then(runItem)
     }
   }
 
@@ -3935,45 +3931,43 @@
   }
 
   function restoreItemEditor(id) {
-    tick()
-      .then(update_dom)
-      .then(() => {
-        const textarea = textArea(indexFromId.get(id))
-        if (!textarea) return
-        textarea.focus()
+    update_dom().then(() => {
+      const textarea = textArea(indexFromId.get(id))
+      if (!textarea) return
+      textarea.focus()
 
-        // NOTE: this prevents some consistent overscrolling on iphone (e.g. for new items created below other items, e.g. #todo items), but downside is that there may be no scrolling ipad/iphone for deep log line edits; a more recent fix was to disable restoreItemEditor call for new item creation because it may not be necessary (see onEditorDone)
-        // if (ios || android) return; // ios and android have built-in focus scrolling that works better
+      // NOTE: this prevents some consistent overscrolling on iphone (e.g. for new items created below other items, e.g. #todo items), but downside is that there may be no scrolling ipad/iphone for deep log line edits; a more recent fix was to disable restoreItemEditor call for new item creation because it may not be necessary (see onEditorDone)
+      // if (ios || android) return; // ios and android have built-in focus scrolling that works better
 
-        // update vertical padding in case it is out of date
-        // could help w/ caret position calculation below, but unconfirmed empirically
-        updateVerticalPadding()
+      // update vertical padding in case it is out of date
+      // could help w/ caret position calculation below, but unconfirmed empirically
+      updateVerticalPadding()
 
-        // calculate caret position
-        // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
-        const backdrop = textarea.closest('.editor')?.querySelector('.backdrop')
-        if (!backdrop) return // unable to locate backdrop div for caret position
-        const clone = backdrop.cloneNode(true) as HTMLDivElement
-        clone.style.visibility = 'hidden'
-        backdrop.parentElement.insertBefore(clone, backdrop)
-        ;(clone.firstChild as HTMLElement).innerHTML =
-          _.escape(textarea.value.substring(0, textarea.selectionStart)) +
-          `<span>${textarea.value.substring(textarea.selectionStart) || ' '}</span>`
-        const span = clone.querySelector('span')
-        let elem = span as HTMLElement
-        let caretTop = span.offsetTop
-        while (!elem.offsetParent.isSameNode(document.body)) {
-          elem = elem.offsetParent as HTMLElement
-          caretTop += elem.offsetTop
-        }
-        clone.remove()
+      // calculate caret position
+      // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
+      const backdrop = textarea.closest('.editor')?.querySelector('.backdrop')
+      if (!backdrop) return // unable to locate backdrop div for caret position
+      const clone = backdrop.cloneNode(true) as HTMLDivElement
+      clone.style.visibility = 'hidden'
+      backdrop.parentElement.insertBefore(clone, backdrop)
+      ;(clone.firstChild as HTMLElement).innerHTML =
+        _.escape(textarea.value.substring(0, textarea.selectionStart)) +
+        `<span>${textarea.value.substring(textarea.selectionStart) || ' '}</span>`
+      const span = clone.querySelector('span')
+      let elem = span as HTMLElement
+      let caretTop = span.offsetTop
+      while (!elem.offsetParent.isSameNode(document.body)) {
+        elem = elem.offsetParent as HTMLElement
+        caretTop += elem.offsetTop
+      }
+      clone.remove()
 
-        // if caret is too far up or down, bring it to ~upper-middle of page
-        // allow going above header for more reliable scrolling on mobile (esp. on ios)
-        // if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
-        if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200)
-          document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4))
-      })
+      // if caret is too far up or down, bring it to ~upper-middle of page
+      // allow going above header for more reliable scrolling on mobile (esp. on ios)
+      // if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
+      if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200)
+        document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4))
+    })
   }
 
   let lastEditItem
@@ -5129,12 +5123,10 @@
               } else {
                 alert(`item ${tag} missing or ambiguous`)
               }
-              tick()
-                .then(update_dom)
-                .then(() => {
-                  const target = document.querySelector(`.super-container.target`) as HTMLElement
-                  if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
-                })
+              update_dom().then(() => {
+                const target = document.querySelector(`.super-container.target`) as HTMLElement
+                if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
+              })
             }
           })
 
