@@ -118,15 +118,6 @@
     )
   }
 
-  // _hash returns a fast hash of given string, array, object, etc
-  function _hash(x, stringifier = JSON.stringify) {
-    if (x?._hash) return x._hash
-    if (typeof x == 'undefined') return undefined
-    if (typeof x == 'function') return hashCode('' + x)
-    if (typeof x == 'string') return hashCode(x)
-    return hashCode(stringifier(x))
-  }
-
   // _modal shows a modal dialog
   function _modal(options) {
     return modal.show(options)
@@ -179,7 +170,6 @@
     window['_exists'] = _exists
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
-    window['_hash'] = _hash
     window['_modal'] = _modal
     window['_modal_close'] = _modal_close
     window['_modal_update'] = _modal_update
@@ -191,6 +181,22 @@
     window['_parse_label'] = parseLabel
     window['_resolve_tags'] = resolveTags
     window['_special_tag'] = isSpecialTag
+    // hashing and encoding/decoding functions
+    window['_hash'] = hash
+    window['_hash_32_djb2'] = hash_32_djb2
+    window['_hash_32_fnv1a'] = hash_32_fnv1a
+    window['_hash_32_murmur3'] = hash_32_murmur3
+    window['_hash_52_fnv1a'] = hash_52_fnv1a
+    window['_hash_64_fnv1a'] = hash_64_fnv1a
+    window['_hash_128_murmur3_x64'] = hash_128_murmur3_x64
+    window['_hash_128_murmur3_x86'] = hash_128_murmur3_x86
+    window['_hash_160_sha1'] = hash_160_sha1
+    window['_encode_utf8'] = encode_utf8
+    window['_decode_utf8'] = decode_utf8
+    window['_encode_utf8_array'] = encode_utf8_array
+    window['_decode_utf8_array'] = decode_utf8_array
+    window['_encode_base64'] = encode_base64
+    window['_decode_base64'] = decode_base64
   }
 
   // private function for looking up item given its id
@@ -1308,22 +1314,22 @@
       reader.onload = e => {
         let str = e.target.result as string
         if (size_handler) size_handler(str.length)
-        const hash = hashCode(str).toString()
-        const fname = `${user.uid}/images/${hash}` // short fname is just hash
+        const file_hash = hash(str)
+        const fname = `${user.uid}/images/${file_hash}` // short fname is just hash
         if (readonly) images.set(fname, url) // skip upload
         if (images.has(fname)) {
-          resolve(hash)
+          resolve(file_hash)
           return
         }
         if (anonymous) {
           // console.debug(`uploading image ${fname} (${str.length} bytes) ...`);
-          const ref = firebase().storage().ref().child(`${user.uid}/images/${hash}`)
+          const ref = firebase().storage().ref().child(`${user.uid}/images/${file_hash}`)
           ref
             .put(file) // gets mime type from file.type
             .then(snapshot => {
               console.debug(`uploaded image ${fname} (${str.length} bytes) in ${Date.now() - start}ms`)
               images.set(fname, url)
-              resolve(hash)
+              resolve(file_hash)
             })
             .catch(e => {
               console.error(e)
@@ -1335,13 +1341,13 @@
               // console.debug(
               //   `uploading encrypted image ${fname} (${cipher.length} bytes, ${str.length} original) ...`
               // );
-              const ref = firebase().storage().ref().child(`${user.uid}/images/${hash}`)
+              const ref = firebase().storage().ref().child(`${user.uid}/images/${file_hash}`)
               ref
                 .putString(cipher)
                 .then(snapshot => {
                   console.debug(`uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms`)
                   images.set(fname, url)
-                  resolve(hash)
+                  resolve(file_hash)
                 })
                 .catch(e => {
                   console.error(e)
@@ -1932,7 +1938,7 @@
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
-      const orderHash = hashCode(items.map(item => item.id).join())
+      const orderHash = hash(items.map(item => item.id).join())
       if (editorText != history.state.editorText || orderHash != history.state.orderHash) {
         // need to update history
         const state = {
@@ -2208,7 +2214,7 @@
   ) {
     // console.debug("itemTextChanged", index);
     let item = items[index]
-    item.hash = hashCode(text)
+    item.hash = hash(text)
     item.lctext = text.toLowerCase()
     item.runnable = item.lctext.match(/\s*```\w+_input(?:_hidden|_removed)?(?:\s|$)/)
     item.scripted = item.lctext.match(/<script.*?>/)
@@ -2319,7 +2325,7 @@
       // console.debug("updated dependencies:", item.deps);
 
       const prevDeepHash = item.deephash
-      item.deephash = hashCode(
+      item.deephash = hash(
         item.deps
           .map(id => items[indexFromId.get(id)].hash)
           .concat(item.hash)
@@ -2379,7 +2385,7 @@
             // update deps & deephash (triggers re-rendering and cache invalidation)
             depitem.deps = itemDeps(depindex)
             const depitem_prevDeepHash = depitem.deephash
-            depitem.deephash = hashCode(
+            depitem.deephash = hash(
               depitem.deps
                 .map(id => items[indexFromId.get(id)].hash)
                 .concat(depitem.hash)
@@ -3086,7 +3092,7 @@
                   if (!sha) throw new Error(`${cmd}: missing commit for ${path}`)
                   // retrieve text at this commit sha
                   const { data } = await github.repos.getContent({ owner, repo, ref: sha, path })
-                  let text = decodeBase64(data.content)
+                  let text = decode_base64(data.content)
 
                   // parse label from text
                   // if path was specified as #label, then parsed label must match
@@ -3153,7 +3159,7 @@
                         ref: sha,
                         path,
                       })
-                      embed_text[path] = decodeBase64(data.content)
+                      embed_text[path] = decode_base64(data.content)
                       attr.embeds = (attr.embeds ?? []).concat({ path, sha })
                     } catch (e) {
                       throw new Error(`failed to embed '${path}'; error: ${e}`)
@@ -4283,7 +4289,7 @@
         if (!dep_item) {
           throw new Error(`failed to install dependency ${dep} for ${label}`)
         } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-          // name/path consistency should be enforced by _install for dependency 
+          // name/path consistency should be enforced by _install for dependency
           throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
         }
         console.log(`installed preview dependency ${dep} for ${label}`)
@@ -4300,7 +4306,6 @@
 
   import { onMount } from 'svelte'
   import {
-    hashCode,
     numberWithCommas,
     extractBlock,
     blockRegExp,
@@ -4310,7 +4315,21 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
-    decodeBase64,
+    encode_base64,
+    decode_base64,
+    encode_utf8,
+    decode_utf8,
+    encode_utf8_array,
+    decode_utf8_array,
+    hash,
+    hash_32_djb2,
+    hash_32_fnv1a,
+    hash_32_murmur3,
+    hash_52_fnv1a,
+    hash_64_fnv1a,
+    hash_128_murmur3_x64,
+    hash_128_murmur3_x86,
+    hash_160_sha1,
   } from '../util.js'
 
   let consoleLog = []
@@ -4465,7 +4484,7 @@
     items.forEach((item, index) => {
       // initialize deps, deephash, missing tags/labels
       item.deps = itemDeps(index)
-      item.deephash = hashCode(
+      item.deephash = hash(
         item.deps
           .map(id => items[indexFromId.get(id)].hash)
           .concat(item.hash)

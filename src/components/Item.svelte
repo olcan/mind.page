@@ -7,13 +7,13 @@
   import {
     highlight,
     extractBlock,
-    hashCode,
     parseTags,
     renderTag,
     isBalanced,
     numberWithCommas,
     invalidateElemCache,
     adoptCachedElem,
+    hash as _hash,
   } from '../util.js'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
@@ -243,7 +243,7 @@
     version: number
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
-    const cache_key = 'html-' + hashCode(Array.from(arguments).slice(1).toString())
+    const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
     if (!window['_html_cache'][id]) window['_html_cache'][id] = {}
     if (window['_html_cache'][id].hasOwnProperty(cache_key)) {
       // console.debug("toHTML skipped");

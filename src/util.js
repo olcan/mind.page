@@ -1,32 +1,8 @@
-// from https://github.com/darkskyapp/string-hash/blob/master/index.js
-export function hashCode(str) {
-  let hash = 5381 // see https://stackoverflow.com/q/10696223
-  let i = str.length
-  while (i) hash = (hash * 33) ^ str.charCodeAt(--i)
-  /* JavaScript does bitwise operations (like XOR, above) on 32-bit signed
-   * integers. Since we want the results to be always positive, convert the
-   * signed int to an unsigned by doing an unsigned bitshift. */
-  return hash >>> 0
-}
-
 // from https://stackoverflow.com/a/2901298
 export function numberWithCommas(x) {
   var parts = x.toString().split('.')
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return parts.join('.')
-}
-
-// from https://stackoverflow.com/a/30106551
-export function decodeBase64(str) {
-  // Going backwards: from bytestream, to percent-encoding, to original string
-  return decodeURIComponent(
-    atob(str)
-      .split('')
-      .map(function (c) {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-      })
-      .join('')
-  )
 }
 
 export function blockRegExp(type_regex) {
@@ -51,55 +27,6 @@ export function extractBlock(text, type, keep_empty_lines = false) {
         .join('\n')
         .trim()
 }
-
-// import "highlight.js/styles/sunburst.css";
-// import hljs from "highlight.js/lib/core"; // NOTE: needs npm i @types/highlight.js -s
-
-// // custom registration function that can extend highlighting for all languages
-// function registerLanguage(name, func) {
-//   const custom_func = function (hljs) {
-//     let def = func(hljs);
-//     // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
-//     // (e.g. the individual characters could be interpreted in latex)
-//     const comment = hljs.COMMENT(/\\?;{___/, /___}/, { className: "comment-custom", relevance: 0 });
-//     if (!def.contains) def.contains = [comment];
-//     else def.contains.unshift(comment);
-//     return def;
-//   };
-//   hljs.registerLanguage(name, custom_func);
-// }
-
-// import plaintext from "highlight.js/lib/languages/plaintext.js";
-// registerLanguage("plaintext", plaintext);
-// import javascript from "highlight.js/lib/languages/javascript.js";
-// registerLanguage("javascript", javascript);
-// import typescript from "highlight.js/lib/languages/typescript.js";
-// registerLanguage("typescript", typescript);
-// import coffeescript from "highlight.js/lib/languages/coffeescript.js";
-// registerLanguage("coffeescript", coffeescript);
-// import python from "highlight.js/lib/languages/python.js";
-// registerLanguage("python", python);
-
-// import css from "highlight.js/lib/languages/css.js";
-// registerLanguage("css", css);
-// import json from "highlight.js/lib/languages/json.js";
-// registerLanguage("json", json);
-// import xml from "highlight.js/lib/languages/xml.js";
-// registerLanguage("xml", xml); // includes html
-// import glsl from "highlight.js/lib/languages/glsl.js";
-// registerLanguage("glsl", glsl);
-// import latex from "highlight.js/lib/languages/latex.js";
-// registerLanguage("latex", latex); // includes tex
-
-// import swift from "highlight.js/lib/languages/swift";
-// registerLanguage("swift", swift);
-// // NOTE: mathematica is ~135KB, ~10-20x other languages, consider dropping if problematic
-// import mathematica from "highlight.js/lib/languages/mathematica";
-// registerLanguage("mathematica", mathematica);
-
-// hljs.registerAliases(["js_input", "webppl_input", "webppl"], { languageName: "javascript" });
-// hljs.registerAliases(["math", "mathjax"], { languageName: "latex" });
-// hljs.configure({ tabReplace: "  " });
 
 export function highlight(code, language) {
   if (!window.hljs) return code
@@ -251,4 +178,409 @@ export function checkElemCache() {
       }
     })
   })
+}
+
+import utf8 from 'utf8' // ~18K
+
+// utf16 -> utf8
+export function encode_utf8(str) {
+  return utf8.encode(str)
+}
+
+// utf8 -> utf16
+export function decode_utf8(utf8) {
+  return utf8.decode(utf8)
+}
+
+// utf16 -> utf8 array (Uint8Array)
+const utf8_encoder = new TextEncoder('utf-8')
+export function encode_utf8_array(str) {
+  return utf8_encoder.encode(str) // string (utf16) -> Uint8Array
+}
+
+// utf8 array (Uint8Array) -> utf16
+const utf8_decoder = new TextDecoder('utf-8')
+export function decode_utf8_array(utf8) {
+  return utf8_decoder.decode(utf8) // Uint8Array -> string (utf16)
+}
+
+// utf16 -> base64(ascii)
+export function encode_base64(str) {
+  return utf8.encode(str).toString('base64')
+}
+
+// base64(ascii) -> utf16
+export function decode_base64(base64) {
+  return utf8.decode(Buffer.from(base64, 'base64'))
+}
+
+// generic hasher that handles non-strings
+// if x._hash is defined, uses that as a pre-computed hash
+// default stringifier is toString for functions, JSON.stringify otherwise
+// default hasher is hash_64_fnv1a, returns 64-bit hex string
+export function hash(x, stringifier, hasher) {
+  if (typeof x == 'undefined') return undefined
+  if (x._hash) return x._hash // precomputed hash
+  if (typeof x != 'string') {
+    stringifier ??= typeof x == 'function' ? x => x.toString() : JSON.stringify
+    x = stringifier(x)
+  }
+  hasher ??= hash_64_fnv1a
+  return hasher(x)
+}
+
+// utf16 -> 32-bit integer using classical dbj2 algorithm, xor variant
+export function hash_32_djb2(str) {
+  str = encode_utf8(str) // classical dbj2 was designed for bytes (unsigned char)
+  let hash = 5381 // see https://stackoverflow.com/q/10696223
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i) // xor variant
+  }
+  return hash >>> 0
+}
+
+// ~135K is too big so we copy relevant parts below
+// import fnv1a from 'fnv-plus'
+
+// utf16 -> 32-bit integer using fnv-1a algorithm
+// _hash32_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L341
+export function hash_32_fnv1a(str) {
+  var c,
+    i,
+    l = str.length,
+    t0 = 0,
+    v0 = 0x9dc5,
+    t1 = 0,
+    v1 = 0x811c
+
+  for (i = 0; i < l; i++) {
+    c = str.charCodeAt(i)
+    if (c < 128) {
+      v0 ^= c
+    } else if (c < 2048) {
+      v0 ^= (c >> 6) | 192
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= (c & 63) | 128
+    } else if ((c & 64512) == 55296 && i + 1 < l && (str.charCodeAt(i + 1) & 64512) == 56320) {
+      c = 65536 + ((c & 1023) << 10) + (str.charCodeAt(++i) & 1023)
+      v0 ^= (c >> 18) | 240
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= ((c >> 12) & 63) | 128
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= (c & 63) | 128
+    } else {
+      v0 ^= (c >> 12) | 224
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 403
+      t1 = v1 * 403
+      t1 += v0 << 8
+      v1 = (t1 + (t0 >>> 16)) & 65535
+      v0 = t0 & 65535
+      v0 ^= (c & 63) | 128
+    }
+    t0 = v0 * 403
+    t1 = v1 * 403
+    t1 += v0 << 8
+    v1 = (t1 + (t0 >>> 16)) & 65535
+    v0 = t0 & 65535
+  }
+
+  return ((v1 << 16) >>> 0) + v0
+}
+
+// utf16 -> 52-bit integer using fnv-1a algorithm
+// _hash52_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L436
+export function hash_52_fnv1a(str) {
+  var c,
+    i,
+    l = str.length,
+    t0 = 0,
+    v0 = 0x2325,
+    t1 = 0,
+    v1 = 0x8422,
+    t2 = 0,
+    v2 = 0x9ce4,
+    t3 = 0,
+    v3 = 0xcbf2
+
+  for (i = 0; i < l; i++) {
+    c = str.charCodeAt(i)
+    if (c < 128) {
+      v0 ^= c
+    } else if (c < 2048) {
+      v0 ^= (c >> 6) | 192
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    } else if ((c & 64512) == 55296 && i + 1 < l && (str.charCodeAt(i + 1) & 64512) == 56320) {
+      c = 65536 + ((c & 1023) << 10) + (str.charCodeAt(++i) & 1023)
+      v0 ^= (c >> 18) | 240
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 12) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    } else {
+      v0 ^= (c >> 12) | 224
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    }
+    t0 = v0 * 435
+    t1 = v1 * 435
+    t2 = v2 * 435
+    t3 = v3 * 435
+    t2 += v0 << 8
+    t3 += v1 << 8
+    t1 += t0 >>> 16
+    v0 = t0 & 65535
+    t2 += t1 >>> 16
+    v1 = t1 & 65535
+    v3 = (t3 + (t2 >>> 16)) & 65535
+    v2 = t2 & 65535
+  }
+
+  return (v3 & 15) * 281474976710656 + v2 * 4294967296 + v1 * 65536 + (v0 ^ (v3 >> 4))
+}
+
+// utf16 -> 64-bit hex string using fnv-1a algorithm
+// _hash64_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L530
+export function hash_64_fnv1a(str) {
+  var c,
+    i,
+    l = str.length,
+    t0 = 0,
+    v0 = 0x2325,
+    t1 = 0,
+    v1 = 0x8422,
+    t2 = 0,
+    v2 = 0x9ce4,
+    t3 = 0,
+    v3 = 0xcbf2
+
+  for (i = 0; i < l; i++) {
+    c = str.charCodeAt(i)
+    if (c < 128) {
+      v0 ^= c
+    } else if (c < 2048) {
+      v0 ^= (c >> 6) | 192
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    } else if ((c & 64512) == 55296 && i + 1 < l && (str.charCodeAt(i + 1) & 64512) == 56320) {
+      c = 65536 + ((c & 1023) << 10) + (str.charCodeAt(++i) & 1023)
+      v0 ^= (c >> 18) | 240
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 12) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    } else {
+      v0 ^= (c >> 12) | 224
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= ((c >> 6) & 63) | 128
+      t0 = v0 * 435
+      t1 = v1 * 435
+      t2 = v2 * 435
+      t3 = v3 * 435
+      t2 += v0 << 8
+      t3 += v1 << 8
+      t1 += t0 >>> 16
+      v0 = t0 & 65535
+      t2 += t1 >>> 16
+      v1 = t1 & 65535
+      v3 = (t3 + (t2 >>> 16)) & 65535
+      v2 = t2 & 65535
+      v0 ^= (c & 63) | 128
+    }
+    t0 = v0 * 435
+    t1 = v1 * 435
+    t2 = v2 * 435
+    t3 = v3 * 435
+    t2 += v0 << 8
+    t3 += v1 << 8
+    t1 += t0 >>> 16
+    v0 = t0 & 65535
+    t2 += t1 >>> 16
+    v1 = t1 & 65535
+    v3 = (t3 + (t2 >>> 16)) & 65535
+    v2 = t2 & 65535
+  }
+
+  return (
+    hl[v3 >> 8] + hl[v3 & 255] + hl[v2 >> 8] + hl[v2 & 255] + hl[v1 >> 8] + hl[v1 & 255] + hl[v0 >> 8] + hl[v0 & 255]
+  )
+}
+
+// https://github.com/cimi/murmurhash3js-revisited is a more robust fork of murmurhash3 that uses uint8 arrays instead of strings w/ chopped code points (see https://github.com/pid/murmurHash3js/issues/3#issue-364485381)
+import murmur3 from 'murmurhash3js-revisited' // ~6K
+
+// utf16 -> 32-bit integer using 32-bit murmurhash v3 algorithm, x86 variant
+// optimized for x86 (32-bit) architectures
+export function hash_32_murmur3(str) {
+  return murmur3.x86.hash32(encode_utf8_array(str))
+}
+
+// utf16 -> 128-bit hex string using 128-bit murmurhash v3 algorithm, x86 variant
+// optimized for x86 (32-bit) architectures
+export function hash_128_murmur3_x86(str) {
+  return murmur3.x86.hash128(encode_utf8_array(str))
+}
+
+// utf16 -> 128-bit hex string using 128-bit murmurhash v3 algorithm, x64 variant
+// optimized for x64 (64-bit) architectures
+export function hash_128_murmur3_x64(str) {
+  return murmur3.x64.hash128(encode_utf8_array(str))
+}
+
+import sha1 from 'js-sha1' // ~16K
+
+// utf16 -> 160-bit hex string using sha1 algorithm
+export function hash_160_sha1(str) {
+  return sha1(encode_utf8_array(str)).hex()
 }
