@@ -3106,6 +3106,31 @@
                   const { data } = await github.repos.getContent({ owner, repo, ref: sha, path })
                   let text = decodeBase64(data.content)
 
+                  // parse label from text
+                  // if path was specified as #label, then parsed label must match
+                  const parsed_label = parseLabel(text)
+                  if (label && label != parsed_label) {
+                    throw new Error(
+                      `${cmd}: parsed label '${parsed_label}' for ${path} does not match specified label '${label}'`
+                    )
+                  }
+                  // if installing/updating a dependency, then specified path must match parsed label
+                  if (dependents.length && parsed_label + '.md' != path) {
+                    throw new Error(
+                      `${cmd}: parsed label '${parsed_label}' is invalid for dependency at ${path} for dependents ${dependents.join(
+                        ' <- '
+                      )}`
+                    )
+                  }
+                  label = parsed_label
+                  // if updating, label must uniquely match an existing (named) item
+                  if (updating) {
+                    if (!label) throw new Error(`${cmd}: could not determine item name for update from ${path}`)
+                    else if (idsFromLabel.get(label.toLowerCase())?.length > 1)
+                      throw new Error(`${cmd}: found multiple items labeled ${label}, can not update from ${path}`)
+                    else if (!_exists(label)) throw new Error(`${cmd}: missing item ${label} to update from ${path}`)
+                  }
+
                   const attr = {
                     sha,
                     editable: false,
@@ -3164,17 +3189,6 @@
                     return m
                   })
 
-                  // extract label from text and check existence if updating
-                  let item
-                  label = parseLabel(text)
-                  // if updating, label should uniquely match an existing (named) item
-                  if (updating) {
-                    if (!label) throw new Error(`${cmd}: could not determine item name for update from ${path}`)
-                    else if (idsFromLabel.get(label.toLowerCase())?.length > 1)
-                      throw new Error(`${cmd}: found multiple items labeled ${label}, can not update from ${path}`)
-                    else if (!_exists(label)) throw new Error(`${cmd}: missing item ${label} to update from ${path}`)
-                  }
-
                   // install/update dependencies based on item text
                   // dependency paths MUST match the (resolved) hidden tags
                   if (label) {
@@ -3213,6 +3227,7 @@
                   }
 
                   // replace existing item or create new item
+                  let item // item being updated/installed
                   if (label && _exists(label, false /*allow_multiple*/)) {
                     // confirm replacement if installing
                     if (!updating) {
@@ -4254,6 +4269,15 @@
     const attr = item.attr
     const { repo, path } = attr
     const text = item.previewText
+
+    // disallow renaming preview
+    const parsed_label = parseLabel(text)
+    if (parsed_label != item.name) {
+      alert(
+        `preview failed: parsed label '${parsed_label}' does not match current name ${item.name} for preview from ${repo}/${path}`
+      )
+      return
+    }
 
     // install missing dependencies based on updated text
     // dependency paths MUST match the (resolved) hidden tags
