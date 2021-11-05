@@ -221,7 +221,7 @@ export function decode_base64(base64) {
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
 export function hash(x, stringifier, hasher) {
   if (typeof x == 'undefined') return undefined
-  if (x?._hash) return x._hash // precomputed hash
+  if (x && x._hash) return x._hash // precomputed hash
   if (typeof x != 'string') {
     stringifier ??= typeof x == 'function' ? x => x.toString() : JSON.stringify
     x = stringifier(x)
