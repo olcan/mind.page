@@ -206,12 +206,12 @@ export function decode_utf8_array(utf8) {
 
 // utf16 -> base64(ascii)
 export function encode_base64(str) {
-  return utf8.encode(str).toString('base64')
+  return btoa(utf8.encode(str))
 }
 
 // base64(ascii) -> utf16
 export function decode_base64(base64) {
-  return utf8.decode(Buffer.from(base64, 'base64'))
+  return utf8.decode(atob(base64))
 }
 
 // generic hasher that handles non-strings
