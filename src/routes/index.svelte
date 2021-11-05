@@ -3217,6 +3217,7 @@
                           `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
                         )
                       } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+                        // name/path consistency should be enforced by _install|_update
                         throw new Error(
                           `${cmd}: invalid name ${dep_item.name} for ${
                             update ? 'updated' : 'installed'
@@ -4300,6 +4301,7 @@
         if (!dep_item) {
           throw new Error(`failed to install dependency ${dep} for ${label}`)
         } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+          // name/path consistency should be enforced by _install for dependency 
           throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
         }
         console.log(`installed preview dependency ${dep} for ${label}`)
