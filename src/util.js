@@ -435,6 +435,11 @@ export function hash_52_fnv1a(str) {
 
 // utf16 -> 64-bit hex string using fnv-1a algorithm
 // _hash64_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L530
+// note dependency on a precomputed hl array outside of function scope
+let hl = new Array(256)
+for (let i = 0; i < 256; i++) {
+  hl[i] = ((i >> 4) & 15).toString(16) + (i & 15).toString(16)
+}
 export function hash_64_fnv1a(str) {
   var c,
     i,
@@ -562,25 +567,37 @@ import murmur3 from 'murmurhash3js-revisited' // ~6K
 
 // utf16 -> 32-bit integer using 32-bit murmurhash v3 algorithm, x86 variant
 // optimized for x86 (32-bit) architectures
-export function hash_32_murmur3(str) {
-  return murmur3.x86.hash32(encode_utf8_array(str))
+// also accepts utf8 arrays (Uint8Array)
+export function hash_32_murmur3(x) {
+  if (typeof x == 'string') x = encode_utf8_array(x)
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  return murmur3.x86.hash32(x)
 }
 
 // utf16 -> 128-bit hex string using 128-bit murmurhash v3 algorithm, x86 variant
 // optimized for x86 (32-bit) architectures
-export function hash_128_murmur3_x86(str) {
-  return murmur3.x86.hash128(encode_utf8_array(str))
+// also accepts utf8 arrays (Uint8Array)
+export function hash_128_murmur3_x86(x) {
+  if (typeof x == 'string') x = encode_utf8_array(x)
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  return murmur3.x86.hash128(x)
 }
 
 // utf16 -> 128-bit hex string using 128-bit murmurhash v3 algorithm, x64 variant
 // optimized for x64 (64-bit) architectures
-export function hash_128_murmur3_x64(str) {
-  return murmur3.x64.hash128(encode_utf8_array(str))
+// also accepts utf8 arrays (Uint8Array)
+export function hash_128_murmur3_x64(x) {
+  if (typeof x == 'string') x = encode_utf8_array(x)
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  return murmur3.x64.hash128(x)
 }
 
 import sha1 from 'js-sha1' // ~16K
 
 // utf16 -> 160-bit hex string using sha1 algorithm
-export function hash_160_sha1(str) {
-  return sha1(encode_utf8_array(str)).hex()
+// also accepts utf8 arrays (Uint8Array)
+export function hash_160_sha1(x) {
+  if (typeof x == 'string') x = encode_utf8_array(x)
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  return sha1(x).hex()
 }
