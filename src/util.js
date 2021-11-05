@@ -216,11 +216,12 @@ export function decode_base64(base64) {
 
 // generic hasher that handles non-strings
 // if x._hash is defined, uses that as a pre-computed hash
+// hash of undefined is also undefined, but null is hashed (as object)
 // default stringifier is toString for functions, JSON.stringify otherwise
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
 export function hash(x, stringifier, hasher) {
   if (typeof x == 'undefined') return undefined
-  if (x._hash) return x._hash // precomputed hash
+  if (x?._hash) return x._hash // precomputed hash
   if (typeof x != 'string') {
     stringifier ??= typeof x == 'function' ? x => x.toString() : JSON.stringify
     x = stringifier(x)
