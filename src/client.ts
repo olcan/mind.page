@@ -2,9 +2,13 @@ import * as sapper from '@sapper/app'
 
 // set up window.Octokit and window.sha1 for Github API
 import { Octokit } from '../node_modules/@octokit/rest'
-import sha1 from 'js-sha1'
 window['Octokit'] = Octokit
+import sha1 from 'js-sha1'
 window['sha1'] = sha1
+import murmur3 from 'murmurhash3js'
+window['murmur3'] = murmur3
+import fnv1a from 'fnv-plus'
+window['fnv1a'] = fnv1a
 
 // // import firebase
 // // see https://www.npmjs.com/package/firebase
