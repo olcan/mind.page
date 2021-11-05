@@ -188,8 +188,8 @@ export function encode_utf8(str) {
 }
 
 // utf8 -> utf16
-export function decode_utf8(utf8) {
-  return utf8.decode(utf8)
+export function decode_utf8(utf8_str) {
+  return utf8.decode(utf8_str)
 }
 
 // utf16 -> utf8 array (Uint8Array)
