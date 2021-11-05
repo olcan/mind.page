@@ -3103,7 +3103,7 @@
                     )
                   }
                   // if installing/updating a dependency, then specified path must match parsed label
-                  if (dependents.length && parsed_label + '.md' != path) {
+                  if (dependents.length && parsed_label.slice(1) + '.md' != path) {
                     throw new Error(
                       `${cmd}: parsed label '${parsed_label}' is invalid for dependency at ${path} for dependents ${dependents.join(
                         ' <- '
