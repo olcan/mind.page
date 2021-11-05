@@ -224,7 +224,7 @@ export function hash(x, stringifier, hasher) {
   if (x && x._hash) return x._hash // precomputed hash
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
-    if (typeof x == 'function') x = x.toString()
+    else if (typeof x == 'function') x = x.toString()
     else x = JSON.stringify(x)
   }
   if (hasher) return hasher(x)
