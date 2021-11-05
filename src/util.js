@@ -180,7 +180,7 @@ export function checkElemCache() {
   })
 }
 
-import utf8 from 'utf8' // ~18K
+import utf8 from '../node_modules/utf8' // ~18K
 
 // utf16 -> utf8
 export function encode_utf8(str) {
@@ -241,7 +241,7 @@ export function hash_32_djb2(str) {
 }
 
 // ~135K is too big so we copy relevant parts below
-// import fnv1a from 'fnv-plus'
+// import fnv1a from '../node_modules/fnv-plus'
 
 // utf16 -> 32-bit integer using fnv-1a algorithm
 // _hash32_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L341
@@ -564,7 +564,7 @@ export function hash_64_fnv1a(str) {
 }
 
 // https://github.com/cimi/murmurhash3js-revisited is a more robust fork of murmurhash3 that uses uint8 arrays instead of strings w/ chopped code points (see https://github.com/pid/murmurHash3js/issues/3#issue-364485381)
-import murmur3 from 'murmurhash3js-revisited' // ~6K
+import murmur3 from '../node_modules/murmurhash3js-revisited' // ~6K
 
 // utf16 -> 32-bit integer using 32-bit murmurhash v3 algorithm, x86 variant
 // optimized for x86 (32-bit) architectures
@@ -593,7 +593,7 @@ export function hash_128_murmur3_x64(x) {
   return murmur3.x64.hash128(x)
 }
 
-import sha1 from 'js-sha1' // ~16K
+import sha1 from '../node_modules/js-sha1' // ~16K
 
 // utf16 -> 160-bit hex string using sha1 algorithm
 // also accepts utf8 arrays (Uint8Array)
