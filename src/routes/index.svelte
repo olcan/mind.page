@@ -669,25 +669,6 @@
         // this is an inner wrapper that excludes any context prefix (see below for outer wrapper)
         // we attempt to insert return to last returnable (+balanced) expression to maintain ~eval semantics
         // NOTE: we can be conservative about returns since can be added manually if missed here
-        function count_unescaped(str, substr) {
-          if (substr.length == 0) throw 'substr can not be empty'
-          let count = 0
-          let pos = 0
-          while ((pos = str.indexOf(substr, pos)) >= 0) {
-            if (str[pos - 1] != '\\') count++
-            pos += substr.length
-          }
-          return count
-        }
-        const expr_balanced = expr =>
-          count_unescaped(expr, '`') % 2 == 0 &&
-          count_unescaped(expr, "'") % 2 == 0 &&
-          count_unescaped(expr, '"') % 2 == 0 &&
-          // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
-          (count_unescaped(expr, '/*') == count_unescaped(expr, '*/') || count_unescaped(expr, '/') % 2 == 0) &&
-          count_unescaped(expr, '{') == count_unescaped(expr, '}') &&
-          count_unescaped(expr, '[') == count_unescaped(expr, ']') &&
-          count_unescaped(expr, '(') == count_unescaped(expr, ')')
 
         const expr_returnable = expr =>
           // check for reserved keywords, see https://www.w3schools.com/js/js_reserved.asp
@@ -706,7 +687,7 @@
           // then we check expression for being balanced+returnable
           let try_lines // try full lines below?
           evaljs = evaljs.replace(/(.*(?:\n(?! )|;|^)\s*)(.+?)$/s, (m, pfx, expr) => {
-            if (!expr_balanced(expr)) {
+            if (!isBalanced(expr)) {
               // if not balanced, try finding an expression at line level (see below)
               try_lines = true
               return pfx + expr
@@ -719,7 +700,7 @@
             const try_last_line = (js, lines_below = '') =>
               js.replace(/(.*(?:\n(?! )|^)\s*)(.+?)$/s, (m, pfx, expr) => {
                 expr += lines_below
-                if (!expr_balanced(expr)) try_last_line('' + pfx, '' + expr)
+                if (!isBalanced(expr)) try_last_line('' + pfx, '' + expr)
                 else evaljs = pfx + (expr_returnable(expr) ? 'return ' : '') + expr
                 return m
               })
@@ -763,6 +744,7 @@
       // evaluate inline @{eval_macros}@
       let macroIndex = 0
       const replaceMacro = (m, pfx, js) => {
+        if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
         try {
           let out = this.eval(js, {
             trigger: 'eval_macro_' + macroIndex++,
@@ -4325,6 +4307,7 @@
     parseTags,
     parseLabel,
     renderTag,
+    isBalanced,
     invalidateElemCache,
     checkElemCache,
     decodeBase64,

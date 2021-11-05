@@ -173,6 +173,30 @@ export function renderTag(tag) {
 //   return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
 // }
 
+function count_unescaped(str, substr) {
+  if (substr.length == 0) throw 'substr can not be empty'
+  let count = 0
+  let pos = 0
+  while ((pos = str.indexOf(substr, pos)) >= 0) {
+    if (str[pos - 1] != '\\') count++
+    pos += substr.length
+  }
+  return count
+}
+
+export function isBalanced(expr) {
+  return (
+    count_unescaped(expr, '`') % 2 == 0 &&
+    count_unescaped(expr, "'") % 2 == 0 &&
+    count_unescaped(expr, '"') % 2 == 0 &&
+    // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
+    (count_unescaped(expr, '/*') == count_unescaped(expr, '*/') || count_unescaped(expr, '/') % 2 == 0) &&
+    count_unescaped(expr, '{') == count_unescaped(expr, '}') &&
+    count_unescaped(expr, '[') == count_unescaped(expr, ']') &&
+    count_unescaped(expr, '(') == count_unescaped(expr, ')')
+  )
+}
+
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
   if (!window['_elem_cache'][id]) return

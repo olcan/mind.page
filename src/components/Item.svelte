@@ -10,6 +10,7 @@
     hashCode,
     parseTags,
     renderTag,
+    isBalanced,
     numberWithCommas,
     invalidateElemCache,
     adoptCachedElem,
@@ -255,6 +256,7 @@
     let hasMacroErrors = false
     let macroIndex = 0
     const replaceMacro = (m, pfx, js) => {
+      if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
       try {
         let out = window['_item'](id).eval(js, {
           trigger: 'macro_' + macroIndex++,
