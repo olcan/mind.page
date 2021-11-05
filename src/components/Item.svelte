@@ -1692,15 +1692,15 @@
   .pushable {
     border-color: #663;
   }
-  .previewable {
-    border-color: #f6f;
-  }
   .error {
     border-color: #633;
   }
   .running {
     /* border-color: #246; */
     border-color: #4af; /* dimmed by .loading */
+  }
+  .previewable {
+    border-color: #f6f;
   }
   /* .item.saving {
     opacity: 0.5;
