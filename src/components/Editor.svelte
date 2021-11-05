@@ -659,7 +659,7 @@
         const modal = window['_modal']({ content: 'Inserting pasted image ...' })
         Promise.resolve(
           onPastedImage(url, file, size => {
-            window['_modal_update']({
+            window['_modal_update'](modal, {
               content: `Inserting pasted image (${numberWithCommas(Math.ceil(size / 1024))} KB) ...`,
             })
           })
