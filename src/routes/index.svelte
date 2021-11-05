@@ -990,7 +990,8 @@
       if (output == 'src') return srcs
       return Promise.all(
         srcs.map(src => {
-          if (src.match(/^\d+$/)) src = user.uid + '/images/' + src // prefix {uid}/images/ automatically
+          // prefix {uid}/images/ automatically for hex src
+          if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
           return new Promise((resolve, reject) => {
             if (images.has(src)) {
               // already available locally, convert to blob
@@ -1363,11 +1364,10 @@
       }
     })
   }
-
   function onImageRendering(src: string): string {
-    if (src.match(/^\d+$/)) src = user.uid + '/images/' + src // prefix {uid}/images/ automatically
+    // prefix {uid}/images/ automatically for hex src
+    if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
     if (!src.startsWith(user.uid + '/images/') && !src.startsWith('anonymous/images/')) return src // external image
-    if (src.match(/^\d+$/)) src = user.uid + '/images/' + src // prefix {uid}/images/ automatically
     if (images.has(src)) return images.get(src) // image ready
     return '/loading.gif' // image must be loaded
   }
@@ -1376,7 +1376,8 @@
     // console.debug("image rendered", img.src);
     if (!img.hasAttribute('_src')) return Promise.resolve() // nothing to do
     let src = img.getAttribute('_src')
-    if (src.match(/^\d+$/)) src = user.uid + '/images/' + src // prefix {uid}/images/ automatically
+    // prefix {uid}/images/ automatically for hex src
+    if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
     if (images.has(src)) {
       if (img.src != images.get(src)) img.src = images.get(src)
       img.removeAttribute('_loading')
