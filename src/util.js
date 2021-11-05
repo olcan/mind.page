@@ -223,11 +223,12 @@ export function hash(x, stringifier, hasher) {
   if (typeof x == 'undefined') return undefined
   if (x && x._hash) return x._hash // precomputed hash
   if (typeof x != 'string') {
-    stringifier ??= typeof x == 'function' ? x => x.toString() : JSON.stringify
-    x = stringifier(x)
+    if (stringifier) x = stringifier(x)
+    if (typeof x == 'function') x = x.toString()
+    else x = JSON.stringify(x)
   }
-  hasher ??= hash_64_fnv1a
-  return hasher(x)
+  if (hasher) return hasher(x)
+  return hash_64_fnv1a(x)
 }
 
 // utf16 -> 32-bit integer using classical dbj2 algorithm, xor variant
