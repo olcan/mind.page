@@ -599,5 +599,5 @@ import sha1 from 'js-sha1' // ~16K
 export function hash_160_sha1(x) {
   if (typeof x == 'string') x = encode_utf8_array(x)
   if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
-  return sha1(x).hex()
+  return sha1.hex(x)
 }
