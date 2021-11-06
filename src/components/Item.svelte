@@ -1534,7 +1534,7 @@
     height: 18px;
   }
   .button.push {
-    background: #dd6;
+    background: #f84;
   }
 
   /* use smaller update/pull icon, full-height arrow feels too much */
@@ -1688,8 +1688,7 @@
   .target_context.editing {
     border-radius: 5px;
   }
-  .warning,
-  .pushable {
+  .warning {
     border-color: #663;
   }
   .error {
@@ -1699,8 +1698,11 @@
     /* border-color: #246; */
     border-color: #4af; /* dimmed by .loading */
   }
+  .pushable {
+    border-color: #a52;
+  }
   .previewable {
-    border-color: #f6f;
+    border-color: #c7c;
   }
   /* .item.saving {
     opacity: 0.5;
