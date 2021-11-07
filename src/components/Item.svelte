@@ -272,6 +272,7 @@
       }
     }
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro)
+    // reserve @{...} syntax for "eval macros", see _Item.eval() in index.svelte
     //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
