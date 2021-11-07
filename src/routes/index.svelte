@@ -91,6 +91,20 @@
     }
   }
 
+  // creates a new item with the given text and options
+  // third argument (attr) is used internally for /_install
+  function _create(text, { run = false, edit = false } = {}, attr = null) {
+    return onEditorDone(
+      text,
+      null, // event=null for synthetic call, disables key handling, history, etc
+      false, // not cancelled
+      run === true, // run?
+      edit === true, // edit? true/false only, null (default) requires keyboard event
+      attr, // used internally for /_install
+      true // no command parsing since creating new item w/ text
+    )
+  }
+
   // _items returns any number of matches, most recent first
   function _items(label: string = '') {
     const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map(item => item.id)) || []
@@ -168,6 +182,7 @@
     window['_item'] = _item
     window['_items'] = _items
     window['_exists'] = _exists
+    window['_create'] = _create
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
     window['_modal'] = _modal
@@ -2566,17 +2581,15 @@
     } else {
       const text = obj.text
       // since we are async, we need to call onEditorDone again with run/editing set properly
-      // obj.{edit,run} can override defaults editing=true and run=false
-      let editing = true
+      // obj.{edit,run} can override defaults edit=true and run=false
+      let edit = true
       let run = false
-      if (obj.edit == true) editing = true
-      else if (obj.edit == false) editing = false
-      if (obj.run == true) run = true
-      else if (obj.run == false) run = false
+      if (typeof obj.edit == 'boolean') edit = obj.edit
+      if (typeof obj.run == 'boolean') run = obj.run
       // reset focus for generated text
       let textarea = textArea(-1)
       textarea.selectionStart = textarea.selectionEnd = 0
-      let item = onEditorDone(text, null, false, run, editing, null, true /*ignore_command*/)
+      let item = _create(text, { run, edit })
       // run programmatic initializer function if any
       try {
         if (obj.init) Promise.resolve(obj.init(item)).catch(handleError)
@@ -2643,7 +2656,7 @@
       editing = e && (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2
     }
     // disable running if Shift is held
-    if (e && e.shiftKey) run = false
+    if (e?.shiftKey) run = false
     // force editing if text is empty
     if (!text.trim()) editing = true
 
@@ -2835,7 +2848,7 @@
             .collection('items')
             .doc('QbtH06q6y6GY4ONPzq8N')
             .get()
-            .then(doc => onEditorDone(doc.data().text, null, false, false, false, null, true /*ignore command*/))
+            .then(doc => _create(doc.data().text))
             .catch(console.error)
           return
         }
@@ -3251,7 +3264,7 @@
                     __item(item.id).attr = attr
                     item.write(text, '')
                   } else {
-                    item = onEditorDone(text, null, false, false, false, attr, true /*ignore_command*/)
+                    item = _create(text, {}, attr)
                   }
 
                   // wait for dom update
