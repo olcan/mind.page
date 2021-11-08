@@ -196,7 +196,15 @@
     window['_parse_label'] = parseLabel
     window['_resolve_tags'] = resolveTags
     window['_special_tag'] = isSpecialTag
-    // hashing and encoding/decoding functions
+    // encoding/decoding/hashing functions
+    window['_encode'] = encode
+    window['_encode_utf8'] = encode_utf8
+    window['_encode_utf8_array'] = encode_utf8_array
+    window['_encode_base64'] = encode_base64
+    window['_decode'] = decode
+    window['_decode_utf8'] = decode_utf8
+    window['_decode_utf8_array'] = decode_utf8_array
+    window['_decode_base64'] = decode_base64
     window['_hash'] = hash
     window['_hash_32_djb2'] = hash_32_djb2
     window['_hash_32_fnv1a'] = hash_32_fnv1a
@@ -206,12 +214,6 @@
     window['_hash_128_murmur3_x64'] = hash_128_murmur3_x64
     window['_hash_128_murmur3_x86'] = hash_128_murmur3_x86
     window['_hash_160_sha1'] = hash_160_sha1
-    window['_encode_utf8'] = encode_utf8
-    window['_decode_utf8'] = decode_utf8
-    window['_encode_utf8_array'] = encode_utf8_array
-    window['_decode_utf8_array'] = decode_utf8_array
-    window['_encode_base64'] = encode_base64
-    window['_decode_base64'] = decode_base64
   }
 
   // private function for looking up item given its id
@@ -4329,12 +4331,14 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
-    encode_base64,
-    decode_base64,
+    encode,
     encode_utf8,
-    decode_utf8,
     encode_utf8_array,
+    encode_base64,
+    decode,
+    decode_utf8,
     decode_utf8_array,
+    decode_base64,
     hash,
     hash_32_djb2,
     hash_32_fnv1a,

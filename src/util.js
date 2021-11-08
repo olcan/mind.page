@@ -180,6 +180,53 @@ export function checkElemCache() {
   })
 }
 
+// encodes string (utf-16) into encoded string/array
+export function encode(str, encoding = 'base64') {
+  if (typeof str != 'string') throw new Error('can not encode non-string')
+  switch (encoding.toLowerCase()) {
+    case 'utf8':
+    case 'utf-8':
+      return encode_utf8(str)
+
+    case 'utf8_array':
+    case 'utf8-array':
+    case 'utf-8_array':
+    case 'utf-8-array':
+      return encode_utf8_array(str)
+
+    case 'base64':
+    case 'base-64':
+    case 'b64':
+      return encode_base64(str)
+
+    default:
+      throw new Error(`encode: unknown encoding '${encoding}'`)
+  }
+}
+
+// decodes string (utf-16) from encoded string/array
+export function decode(encoded, encoding = 'base64') {
+  switch (encoding.toLowerCase()) {
+    case 'utf8':
+    case 'utf-8':
+      return decode_utf8(encoded)
+
+    case 'utf8_array':
+    case 'utf8-array':
+    case 'utf-8_array':
+    case 'utf-8-array':
+      return decode_utf8_array(encoded)
+
+    case 'base64':
+    case 'base-64':
+    case 'b64':
+      return decode_base64(encoded)
+
+    default:
+      throw new Error(`decode: unknown encoding '${encoding}'`)
+  }
+}
+
 import utf8 from '../node_modules/utf8' // ~18K
 
 // utf16 -> utf8
@@ -215,13 +262,11 @@ export function decode_base64(base64) {
 }
 
 // generic hasher that handles non-strings
-// if x._hash is defined, uses that as a pre-computed hash
-// hash of undefined is also undefined, but null is hashed (as object)
+// hash of undefined is undefined, but null is hashed (as object)
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
 // default stringifier is toString for functions, JSON.stringify otherwise
 export function hash(x, hasher, stringifier) {
   if (typeof x == 'undefined') return undefined
-  if (x && x._hash) return x._hash // precomputed hash
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
     else if (typeof x == 'function') x = x.toString()
