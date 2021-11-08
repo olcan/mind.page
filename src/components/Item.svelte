@@ -1855,13 +1855,9 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
-  :global(.item pre code) {
-    margin-top: 5px;
-    background: none;
-    padding: 0;
-    border-radius: 0;
-  }
   :global(.item pre > code) {
+    background: none;
+    border-radius: 0;
     display: block;
     /* background: #171717; */
     /* border-radius: 4px; */

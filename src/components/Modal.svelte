@@ -469,4 +469,14 @@
   :global(.modal ul ul, .modal ol ol) {
     padding-left: 20px;
   }
+  :global(.modal pre > code) {
+    display: block;
+    background: #222;
+    color: #ddd;
+    border-radius: 4px;
+    padding: 2px 5px;
+    margin-top: 5px;
+    font-size: 80%;
+    line-height: 150%;
+  }
 </style>
