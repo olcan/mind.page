@@ -292,7 +292,7 @@ export function hash_32_djb2(str) {
 // utf16 -> 32-bit integer using fnv-1a algorithm
 // _hash32_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L341
 export function hash_32_fnv1a(str) {
-  var c,
+  let c,
     i,
     l = str.length,
     t0 = 0,
@@ -361,7 +361,7 @@ export function hash_32_fnv1a(str) {
 // utf16 -> 52-bit integer using fnv-1a algorithm
 // _hash52_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L436
 export function hash_52_fnv1a(str) {
-  var c,
+  let c,
     i,
     l = str.length,
     t0 = 0,
@@ -488,7 +488,7 @@ for (let i = 0; i < 256; i++) {
   hl[i] = ((i >> 4) & 15).toString(16) + (i & 15).toString(16)
 }
 export function hash_64_fnv1a(str) {
-  var c,
+  let c,
     i,
     l = str.length,
     t0 = 0,
