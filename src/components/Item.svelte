@@ -1144,16 +1144,16 @@
     itemdiv.querySelectorAll('input[type=file]').forEach((input: HTMLInputElement) => {
       input.accept = 'image/*,application/pdf' // accept only images
       input.onchange = function (e: InputEvent) {
-        const modal = window['_modal']({ content: 'Inserting selected images ...' })
+        const modal = window['_modal']('Inserting selected images ...')
         let total_size = 0
         Promise.all(
           Array.from(input.files).map(file =>
             Promise.resolve(
               onPastedImage(URL.createObjectURL(file), file, size => {
                 total_size += size
-                window['_modal_update']({
-                  content: `Inserting selected images (${numberWithCommas(Math.ceil(total_size / 1024))} KB) ...`,
-                })
+                window['_modal_update'](
+                  `Inserting selected images (${numberWithCommas(Math.ceil(total_size / 1024))} KB) ...`
+                )
               })
             )
           )

@@ -656,12 +656,13 @@
         // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
         // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
         // onPastedImage(url, file);
-        const modal = window['_modal']({ content: 'Inserting pasted image ...' })
+        const modal = window['_modal']('Inserting pasted image ...')
         Promise.resolve(
           onPastedImage(url, file, size => {
-            window['_modal_update'](modal, {
-              content: `Inserting pasted image (${numberWithCommas(Math.ceil(size / 1024))} KB) ...`,
-            })
+            window['_modal_update'](
+              modal,
+              `Inserting pasted image (${numberWithCommas(Math.ceil(size / 1024))} KB) ...`
+            )
           })
         )
           .then(fname => {

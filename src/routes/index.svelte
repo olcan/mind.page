@@ -133,8 +133,8 @@
   }
 
   // _modal shows a modal dialog
-  function _modal(options) {
-    return modal.show(options)
+  function _modal(content, options = {}) {
+    return modal.show(_.merge(typeof content == 'string' ? { content } : content, options))
   }
 
   // _modal_close closes/cancels all modals or specified modal w/ optional output
@@ -143,8 +143,8 @@
   }
 
   // _modal_update updates an existing modal w/ given options
-  function _modal_update(promise, options) {
-    return modal.update(promise, options)
+  function _modal_update(promise, content, options = {}) {
+    return modal.update(promise, _.merge(typeof content == 'string' ? { content } : content, options))
   }
 
   // _modal_visible returns true if specified (or any) modal is visible
@@ -2760,21 +2760,19 @@
               }
               if (data[0].sha == attr.sha) {
                 // no updates!
-                _modal({
-                  content:
-                    `No updates available for [${attr.path}](${attr.source}).  \n` +
+                _modal(
+                  `No updates available for [${attr.path}](${attr.source}).  \n` +
                     `[Last update](${installed_update}) (_installed_) was ${time_ago}.  \n` +
-                    `See [history](${history}) for past updates.`,
-                })
+                    `See [history](${history}) for past updates.`
+                )
               } else {
                 // there are updates!
                 const index = data.findIndex(commit => commit.sha == attr.sha)
                 let update_count = index < 0 ? data.length + '+' : index
                 update_count += update_count === 1 ? ' update' : ' updates'
                 if (index >= 0) data.length = index
-                _modal({
-                  content:
-                    `${update_count} available for [${attr.path}](${attr.source}):  \n` +
+                _modal(
+                  `${update_count} available for [${attr.path}](${attr.source}):  \n` +
                     data
                       .sort(
                         (a, b) => new Date(b.commit.author.date).getTime() - new Date(a.commit.author.date).getTime()
@@ -2788,8 +2786,8 @@
                     (data.length > max_updates_shown ? `- ... +${data.length - max_updates_shown} more  \n` : '') +
                     '\n' +
                     `Last [installed update](${installed_update}) was ${time_ago}.  \n` +
-                    `See [history](${history}) for all updates.`,
-                })
+                    `See [history](${history}) for all updates.`
+                )
               }
             } catch (e) {
               console.error(e)
