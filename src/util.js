@@ -38,10 +38,11 @@ export function highlight(code, language) {
       .split('\n')
       .map(line =>
         line
-          .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+          .replace(/^(ERROR:.+?)(; STACK:|$)/, '<span class="console-error">$1</span>$2')
           .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
           .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
           .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
+          .replace(/(; STACK:.+)$/, '<span class="console-debug">$1</span>')
       )
       .join('\n')
   }

@@ -974,7 +974,7 @@
     }
     fatal(...args) {
       const stack = new Error().stack.split('\n').join(' <- ')
-      throw new Error(`${args.join(' ')} @ ${this.name} @ ${stack}`)
+      throw new Error(`${args.join(' ')} @ ${this.name}; STACK: ${stack}`)
     }
 
     // delay = promise resolved after specified time
@@ -6218,10 +6218,10 @@
     white-space: pre-wrap;
   }
   :global(.console-debug) {
-    color: #555;
+    color: #666;
   }
   :global(.console-info) {
-    color: #666;
+    color: #777;
   }
   :global(.console-log) {
     color: #999;

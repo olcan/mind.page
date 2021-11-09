@@ -419,8 +419,9 @@
         // (to be consistent with detection/ordering logic in index.svelte onEditorChange)
         if (!insideBlock && str.match(/^(?:ERROR|WARNING):/)) {
           str = str
-            .replace(/^(ERROR:.*)$/, '<span class="console-error">$1</span>')
+            .replace(/^(ERROR:.+?)(; STACK:|$)/, '<span class="console-error">$1</span>$2')
             .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
+            .replace(/(; STACK:.+)$/, '<span class="console-debug">$1</span>')
         }
 
         // preserve line breaks by inserting <br>\n outside of code blocks
