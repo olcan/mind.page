@@ -478,5 +478,7 @@
     margin-top: 5px;
     font-size: 80%;
     line-height: 150%;
+    max-height: 300px;
+    overflow: scroll;
   }
 </style>
