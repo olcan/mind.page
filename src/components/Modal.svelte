@@ -469,16 +469,20 @@
   :global(.modal ul ul, .modal ol ol) {
     padding-left: 20px;
   }
-  :global(.modal pre > code) {
-    display: block;
-    background: #222;
-    color: #ddd;
-    border-radius: 4px;
-    padding: 2px 5px;
-    margin-top: 5px;
-    font-size: 80%;
-    line-height: 150%;
+  :global(.modal pre) {
+    max-width: 100%;
     max-height: 300px;
     overflow: scroll;
+    margin-top: 5px;
+    background: #222;
+    border-radius: 4px;
+  }
+  :global(.modal pre > code) {
+    display: block;
+    color: #ddd;
+    background: none;
+    padding: 2px 5px;
+    font-size: 12px;
+    line-height: 21px;
   }
 </style>
