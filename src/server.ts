@@ -150,9 +150,7 @@ const sapperServer = express().use(
 
 // listen if firebase is not handling the server ...
 if (!('FIREBASE_CONFIG' in process.env)) {
-  sapperServer.listen(PORT).on('error', err => {
-    if (err) console.log('error', err)
-  })
+  sapperServer.listen(PORT)
   // also listen on HTTPS port ...
   const server = https
     .createServer(
@@ -164,9 +162,6 @@ if (!('FIREBASE_CONFIG' in process.env)) {
     )
     .listen(443, () => {
       console.log('HTTPS server listening on https://localhost:443')
-    })
-    .on('error', err => {
-      if (err) console.log('error', err)
     })
 }
 
