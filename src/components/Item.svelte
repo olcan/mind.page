@@ -1854,6 +1854,9 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
+  :global(.item a code) {
+    background: none;
+  }
   :global(.item pre > code) {
     background: none;
     border-radius: 0;
@@ -1870,6 +1873,7 @@
     padding: 0 4px;
     border-radius: 4px;
     text-decoration: none;
+    display: inline-block; /* aligns much better around text */
   }
   :global(.item mark) {
     color: black;
