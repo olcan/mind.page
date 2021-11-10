@@ -375,6 +375,7 @@
     font-size: 17px;
     line-height: 24px;
     font-weight: 400;
+    word-wrap: break-word; /* same as .item */
   }
   input {
     -webkit-appearance: none;
