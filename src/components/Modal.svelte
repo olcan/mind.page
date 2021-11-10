@@ -272,11 +272,15 @@
       })
     })
   }
+
+  function replaceNakedURLs(text) {
+    return text.replace(/\b(https?:\/\/[^\s<>"]+)\b/g, '<a href="$1" target="_blank">$1</a>')
+  }
 </script>
 
 <div class="background" class:visible={_visible} on:click={onBackgroundClick}>
   <div class="modal">
-    {#if content}{@html marked.parse(content)}{/if}
+    {#if content}{@html replaceNakedURLs(marked.parse(content))}{/if}
     {#if input != null}
       <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
       <form>
@@ -376,6 +380,10 @@
     line-height: 24px;
     font-weight: 400;
     word-wrap: break-word; /* same as .item */
+  }
+  :global(.modal a) {
+    color: #79e;
+    text-decoration: none;
   }
   input {
     -webkit-appearance: none;
