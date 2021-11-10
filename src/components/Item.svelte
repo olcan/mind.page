@@ -2238,6 +2238,9 @@
       line-height: 24px;
       min-height: 45px; /* single line height */
     }
+    :global(.item a) {
+      line-height: 20px;
+    }
     /* NOTE: these font sizes should match those in Editor */
     :global(.item pre, .item code) {
       font-size: 11px;
@@ -2266,6 +2269,9 @@
       font-size: 14px;
       line-height: 23px;
       min-height: 45px; /* single line height */
+    }
+    :global(.item a) {
+      line-height: 19px;
     }
   }
 </style>
