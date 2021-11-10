@@ -1086,7 +1086,7 @@
 
     // invalidates element cache for item
     // often invoked from error handling code
-    // otherwise can force_render to ensure re-render even if deephash/time/html are unchanged
+    // otherwise can force_render to ensure re-render even if deephash/html are unchanged
     invalidate_elem_cache(force_render = false) {
       invalidateElemCache(this.id)
       if (force_render) {

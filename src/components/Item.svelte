@@ -101,7 +101,7 @@
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
     if (run && !cancelled) {
       invalidateElemCache(id)
-      version++ // ensure re-render even if deephash, time, and html are unchanged
+      version++ // ensure re-render even if deephash and html are unchanged
     }
     onEditing(index, (editing = false), cancelled, run, e)
   }
@@ -133,7 +133,7 @@
     e.stopPropagation()
     e.preventDefault()
     invalidateElemCache(id)
-    version++ // ensure re-render even if deephash, time, and html are unchanged
+    version++ // ensure re-render even if deephash and html are unchanged
     onRun(index)
   }
 
@@ -239,7 +239,6 @@
     matchingTermsSecondary: any, // space-separated string converted to Set
     depsString: string,
     dependentsString: string,
-    time: number,
     version: number
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
@@ -249,7 +248,7 @@
       // console.debug("toHTML skipped");
       return window['_html_cache'][id][cache_key]
     }
-    // console.debug("toHTML", name, deephash, time, version);
+    // console.debug("toHTML", name, deephash, version);
 
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0 // counter to distinguish positions of identical cached elements
@@ -716,7 +715,7 @@
     }
 
     // include time and version in html content so they are included in svelte content cache key
-    text += `<!-- time=${time} version=${version} -->`
+    text += `<!-- version=${version} -->`
 
     // do not cache with macro errors
     if (hasMacroErrors) return text
@@ -1214,7 +1213,7 @@
       // a version increment does not make sense since these scripts are considered part of the current version
       // also version increment can cause a render-error loop since elements are not cached no errors
       invalidateElemCache(id)
-      // version++; // ensure re-render even if deephash, time, and html are unchanged
+      // version++; // ensure re-render even if deephash and html are unchanged
 
       let pendingScripts = scripts.length
       let scriptErrors = []
@@ -1425,7 +1424,6 @@
           matchingTermsSecondary,
           depsString,
           dependentsString,
-          time,
           version
         )}
       </div>
