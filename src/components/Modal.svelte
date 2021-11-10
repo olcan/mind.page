@@ -491,7 +491,22 @@
     color: #ddd;
     background: none;
     padding: 2px 5px;
+    /* should be smaller than textarea (Editor.svelte) since modal has less width */
     font-size: 12px;
     line-height: 21px;
+  }
+
+  @media only screen and (max-width: 600px) {
+    :global(.modal pre > code) {
+      font-size: 11px;
+      line-height: 18px;
+    }
+  }
+
+  @media only screen and (max-width: 400px) {
+    :global(.modal pre > code) {
+      font-size: 10px;
+      line-height: 17px;
+    }
   }
 </style>
