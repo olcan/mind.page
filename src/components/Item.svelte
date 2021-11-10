@@ -1874,6 +1874,7 @@
     border-radius: 4px;
     text-decoration: none;
     display: inline-block; /* aligns much better around text */
+    line-height: 24px;
   }
   :global(.item mark) {
     color: black;
