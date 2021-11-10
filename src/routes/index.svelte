@@ -5403,17 +5403,25 @@
       }
     }
 
-    // clear non-empty editor on unmodified escape or backspace/arrowup/arrowleft (if not handled above)
-    if (editorText && (key == 'Escape' || key == 'Backspace' || key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
+    // clear editor on unmodified escape or backspace/arrowup/arrowleft (if not handled above)
+    // if editor is already empty, then unedit the last edited item (if any)
+    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
       e.preventDefault()
-      hideIndex = hideIndexMinimal
-      // this follows onTagClick behavior
-      editorText = ''
-      forceNewStateOnEditorChange = true // force new state
-      // finalizeStateOnEditorChange = true; // finalize state
-      lastEditorChangeTime = 0 // disable debounce even if editor focused
-      onEditorChange(editorText)
-      return
+      if (editorText) {
+        hideIndex = hideIndexMinimal
+        // this follows onTagClick behavior
+        editorText = ''
+        forceNewStateOnEditorChange = true // force new state
+        // finalizeStateOnEditorChange = true; // finalize state
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(editorText)
+        return
+      } else if (editingItems.length) {
+        // unedit the last edited item
+        const index = editingItems.pop()
+        items[index].editing = false
+        return
+      }
     }
 
     // resume-edit items on Shift-(save shortcut)
