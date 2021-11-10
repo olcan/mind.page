@@ -6238,7 +6238,7 @@
     color: yellow;
   }
   :global(.console-error) {
-    color: red;
+    color: #f55;
   }
   .status {
     padding: 4px;
