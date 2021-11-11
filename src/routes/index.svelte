@@ -4230,7 +4230,6 @@
           const resp = await fetch(`/file/${repo}/${path}`)
           if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
           embed_text[path] = await resp.text()
-          console.log('fetched embed path', path)
         } catch (e) {
           throw new Error(`failed to embed '${path}': ${e}`)
         }
