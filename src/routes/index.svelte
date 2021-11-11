@@ -617,6 +617,8 @@
         else __item.text = appendBlock(this.text, type, text)
       }
       if (!__item.log && !options['keep_time']) __item.time = Date.now()
+      // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
+      this.invalidate_elem_cache(true /*force_render*/)
       itemTextChanged(this.index, this.text, true, true, options['keep_time'])
       // dispatch onEditorChange to prevent index changes during eval
       setTimeout(() => {
