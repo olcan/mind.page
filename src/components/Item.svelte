@@ -1816,11 +1816,13 @@
     content: '✔︎'; /* could be: ✔︎✓ */
   }
 
-  /* column spacing for tables */
+  /* eliminate border spacing for tables */
+  /* add horizontal spacing via left-padding on non-first columns */
   :global(.item table) {
-    border-spacing: 10px 0;
-    border-collapse: separate;
-    margin-left: -10px;
+    border-spacing: 0;
+  }
+  :global(.item table td:not(:first-child)) {
+    padding-left: 10px;
   }
   :global(.item table td) {
     vertical-align: top;
