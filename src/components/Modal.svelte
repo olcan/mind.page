@@ -493,7 +493,7 @@
     padding: 2px 5px;
     /* should be smaller than textarea (Editor.svelte) since modal has less width */
     font-size: 12px;
-    line-height: 21px;
+    line-height: 19px;
   }
 
   @media only screen and (max-width: 600px) {
