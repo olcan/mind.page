@@ -3006,12 +3006,6 @@
               lastEditorChangeTime = 0 // disable debounce even if editor focused
               onEditorChange('')
               return
-
-              // const start = Date.now()
-              // const resp = await fetch('/file/mind.items/util.md')
-              // const text = await resp.text()
-              // console.log(`local read took ${Date.now()-start}ms`)
-              // text
             } else if (cmd == '/_install' || cmd == '/_update') {
               const updating = cmd == '/_update'
               // parse dependents in suffix separated using <-
@@ -4220,6 +4214,7 @@
     try {
       // fetch text from from local repo via server
       const resp = await fetch(`/file/${repo}/${path}`)
+      if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
       let text = await resp.text()
 
       // extract embed paths from updated text
@@ -4233,7 +4228,9 @@
       for (let path of _.uniq(embeds)) {
         try {
           const resp = await fetch(`/file/${repo}/${path}`)
+          if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
           embed_text[path] = await resp.text()
+          console.log('fetched embed path', path)
         } catch (e) {
           throw new Error(`failed to embed '${path}': ${e}`)
         }
@@ -4245,7 +4242,9 @@
         const path = resolve_embed_path(sfx, attr)
         // store original body in attr.embeds
         // only last body is retained for multiple embeds of same path
-        attr.embeds.find(e => e.path == path).body = body
+        const embed = attr.embeds.find(e => e.path == path)
+        if (embed) embed.body = body
+        else attr.embeds.push({ path, body }) // sha missing for new embed in preview
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
