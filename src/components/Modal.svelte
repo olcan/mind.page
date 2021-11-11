@@ -274,7 +274,25 @@
   }
 
   function replaceNakedURLs(text) {
-    return text.replace(/\b(https?:\/\/[^\s<>"]+)\b/g, '<a href="$1" target="_blank">$1</a>')
+    // replace naked urls w/ links <a href="$1" target="_blank">$1</a>
+    // similar to replaceURLs in Item.svelte but applied _after_ markdown->html conversion
+    // means this can replace urls e.g. in code blocks
+    return text.replace(/(^|.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+      // try to maintain html attributes, other url strings, etc
+      if (pfx.match(/[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
+      let sfx = ''
+      if (url[url.length - 1].match(/[\.,;:]/)) {
+        // move certain last characters out of the url
+        sfx = url[url.length - 1] + sfx
+        url = url.substring(0, url.length - 1)
+      }
+      try {
+        let obj = new URL(url)
+        return `${pfx}<a href="${url}" target="_blank">${url}</a>${sfx}`
+      } catch (_) {
+        return pfx + url + sfx
+      }
+    })
   }
 </script>
 
