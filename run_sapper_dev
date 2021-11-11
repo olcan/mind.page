@@ -1,0 +1,5 @@
+#!/bin/bash
+until npx sapper dev; do
+    echo "npx sapper dev crashed with exit code $?;  respawning..." >&2
+    sleep 1
+done
