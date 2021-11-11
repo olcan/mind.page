@@ -714,8 +714,8 @@
       text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`
     }
 
-    // include time and version in html content so they are included in svelte content cache key
-    text += `<!-- version=${version} -->`
+    // include html cache key in content to include in svelte content cache key and force svelte update whenever html is re-generated even if generated html is identical since arguments (in particular deephash and version) may capture changes not reflected in generated html
+    text += `<!-- html_cache_key=${cache_key} -->`
 
     // do not cache with macro errors
     if (hasMacroErrors) return text
