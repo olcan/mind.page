@@ -107,11 +107,19 @@
 
   // _items returns any number of matches, most recent first
   function _items(label: string = '') {
-    // try label as unique name (unique label or id)
-    const item = _item(label, false /*log_errors*/)
-    if (item) return [item]
-    // return any ids for non-unique label
-    const ids = (label ? idsFromLabel.get(label.toLowerCase()) : items.map(item => item.id)) || []
+    let ids
+    if (label) {
+      // try label as name (unique label or id)
+      const item = _item(label, false /*log_errors*/)
+      if (item) return [item]
+      // return any ids for non-unique label
+      ids = idsFromLabel.get(label.toLowerCase())
+    } else {
+      // return all items
+      ids = items.map(item => item.id)
+    }
+    if (!ids) return []
+    if (ids.length == 1) return [_item(ids[0])]
     return _.sortBy(
       ids.map(id => _item(id)),
       item => -item.time
