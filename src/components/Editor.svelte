@@ -60,7 +60,6 @@
         .replace(
           /(^|[^\\])([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*)(`[$][$]?|&gt;&gt;|\}@|--&gt;|(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
           (m, pfx, begin, content, end) => {
-            console.log('highlightOther', begin, end, content)
             // undo any tag highlighting inside highlighted sections
             content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
             if ((begin == '$`' && end == '`$') || (begin == '$$`' && end == '`$$'))
