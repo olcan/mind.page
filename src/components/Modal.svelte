@@ -498,9 +498,8 @@
   }
   :global(.modal pre) {
     max-width: 100%;
-    max-height: 300px;
+    max-height: 40vh; /* max 40% of viewport height */
     overflow: scroll;
-    margin-top: 5px;
     background: #222;
     border-radius: 4px;
   }
