@@ -1831,6 +1831,12 @@
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
+        // errors
+        b.hasError - a.hasError ||
+        // pushables
+        b.pushable - a.pushable ||
+        // previewables
+        b.previewable - a.previewable ||
         // # of matching (visible) tags from query
         b.tagMatches - a.tagMatches ||
         // label match (OR tag matches to prevent non-unique labels dominating tags)
@@ -1846,12 +1852,6 @@
         b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
         // missing tag prefixes
         b.missingTags.length - a.missingTags.length ||
-        // errors
-        b.hasError - a.hasError ||
-        // pushables
-        b.pushable - a.pushable ||
-        // previewables
-        b.previewable - a.previewable ||
         // time (most recent first)
         b.time - a.time
     )
