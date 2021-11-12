@@ -280,12 +280,9 @@
     return text.replace(/(^|.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
       // try to maintain html attributes, other url strings, etc
       if (pfx.match(/[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
-      let sfx = ''
-      if (url[url.length - 1].match(/[\.,;:]/)) {
-        // move certain last characters out of the url
-        sfx = url[url.length - 1] + sfx
-        url = url.substring(0, url.length - 1)
-      }
+      // move certain suffixes out of url into suffix
+      let sfx = url.match(/(?:[\.,;:]|:\d+:\d+)$/)[0] ?? ''
+      if (sfx) url = url.slice(0, -sfx.length)
       try {
         let obj = new URL(url)
         return `${pfx}<a href="${url}" target="_blank">${url}</a>${sfx}`
