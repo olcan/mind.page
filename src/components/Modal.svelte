@@ -281,7 +281,7 @@
       // try to maintain html attributes, other url strings, etc
       if (pfx.match(/[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
       // move certain suffixes out of url into suffix
-      let sfx = url.match(/(?:[\.,;:]|:\d+:\d+)$/)[0] ?? ''
+      let sfx = url.match(/(?:[\.,;:]|:\d+:\d+)$/)?.pop() ?? ''
       if (sfx) url = url.slice(0, -sfx.length)
       try {
         let obj = new URL(url)
