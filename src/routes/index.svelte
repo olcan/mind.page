@@ -2372,18 +2372,7 @@
       else if (item.welcome && !prev_welcome) console.warn(`new welcome item ${item.name} may require reload`)
       const new_init_welcome_item_id = (item.init && !prev_init) || (item.welcome && !prev_welcome) ? item.id : null
 
-      // if deephash has changed, invoke _on_change(item) if defined as function
-      if (item.deephash != prevDeepHash) {
-        if (item.text.includes('_on_change')) {
-          try {
-            _item(item.id).eval(`if (typeof _on_change == 'function') _on_change(_item('${item.id}'))`, {
-              trigger: 'change',
-            })
-          } catch (e) {} // already logged, just continue
-        }
-      }
-
-      // if deephash has changed, invoke _on_item_change on all _listen items
+      // if deephash has changed, invoke _on_item_change on all _listen (or self) items
       // also warn about modified (based on deephash) _init or _welcome items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
         const item = items[indexFromId.get(id)]
@@ -2395,13 +2384,13 @@
         setTimeout(() => {
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
-            if (!item.listen) return
+            if (!item.listen && item.id != id) return // must be listener or self
             if (!item.text.includes('_on_item_change')) return
             try {
               _item(item.id).eval(
                 `if (typeof _on_item_change == 'function') _on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
                 {
-                  trigger: 'listen',
+                  trigger: item.listen ? 'listen' : 'change',
                 }
               )
             } catch (e) {} // already logged, just continue
