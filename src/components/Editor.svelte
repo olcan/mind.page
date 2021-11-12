@@ -58,8 +58,9 @@
     return (
       text
         .replace(
-          /(^|[^\\])([$]?[$]`|&lt;&lt;|@\{|&lt;script.*?&gt;|&lt;[s]tyle&gt;|&lt;!--|&lt;[/\w])(.*)(`[$][$]?|&gt;&gt;|\}@|&lt;\/script&gt;|&lt;\/style&gt;|--&gt;|(?:\w|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
+          /(^|[^\\])([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*)(`[$][$]?|&gt;&gt;|\}@|--&gt;|(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
           (m, pfx, begin, content, end) => {
+            console.log('highlightOther', begin, end, content)
             // undo any tag highlighting inside highlighted sections
             content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
             if ((begin == '$`' && end == '`$') || (begin == '$$`' && end == '`$$'))
@@ -71,23 +72,10 @@
                 highlight(_.unescape(content), 'js') +
                 `<span class="macro-delimiter">${end}</span></span>`
               )
-            else if (begin.match(/&lt;script.*?&gt;/) && end.match(/&lt;\/script&gt;/))
-              return (
-                pfx +
-                highlight(_.unescape(begin), 'html') +
-                highlight(_.unescape(content), 'js') +
-                highlight(_.unescape(end), 'html')
-              )
-            else if (begin.match(/&lt;style&gt;/) && end.match(/&lt;\/style&gt;/))
-              return (
-                pfx +
-                highlight(_.unescape(begin), 'html') +
-                highlight(_.unescape(content), 'css') +
-                highlight(_.unescape(end), 'html')
-              )
+            // NOTE: this can match either a single html tag, e.g. <p> or a whole range of open/close tags, such as <script type="...">...</script>, and this turns out to be fine since the whole range can be highlighted as html either way
             else if (
-              (begin.match(/&lt;[/\w]/) && end.match(/(?:\w|&#39;|&quot;)&gt;/)) ||
-              (begin.match(/&lt;!--/) && end.match(/--&gt;/) && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
+              (begin == '&lt;' && end.match(/^(?:[/\w]|&#39;|&quot;)&gt;$/)) ||
+              (begin == '&lt;!--' && end == '--&gt;' && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
             )
               return pfx + highlight(_.unescape(begin + content + end), 'html')
             else return m
