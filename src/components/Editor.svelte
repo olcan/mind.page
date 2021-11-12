@@ -72,7 +72,7 @@
                 highlight(_.unescape(content), 'js') +
                 `<span class="macro-delimiter">${end}</span></span>`
               )
-            // NOTE: this can match either a single html tag, e.g. <p> or a whole range of open/close tags, such as <script type="...">...</script>, and this turns out to be fine since the whole range can be highlighted as html either way
+            // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
             else if (
               (begin == '&lt;' && end.match(/^(?:[/\w]|&#39;|&quot;)&gt;$/)) ||
               (begin == '&lt;!--' && end == '--&gt;' && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
