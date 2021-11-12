@@ -3946,7 +3946,7 @@
       alert(`can not push ${items[index].name}, #pusher must be installed first`)
       return
     }
-    onEditorDone('/push ' + items[index].label)
+    onEditorDone('/push ' + items[index].name)
   }
 
   function onItemPreview(index: number) {
