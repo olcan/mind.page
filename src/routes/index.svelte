@@ -527,6 +527,20 @@
       if (type == 'js' || type == 'webppl') content.push(`/* ${type} @ ${item.name} */`)
       else if (type == 'html') content.push(`<!-- ${type} @ ${item.name} -->`)
       let text = type ? extractBlock(item.text, type, options['keep_empty_lines']) : item.text
+      if (options['exclude_tests_and_benchmarks']) {
+        // simple regex matches top-level definitions w/ closing brace on new line; prior comments also removed following same regex in mind.items/util/core.js
+        text = text.replace(
+          /(?:^|\n)(?:(?:\/\/[^\n]*?\n)*)(?:async function|function|const|let) +(?:_test_|_benchmark_)\w+ *=? *\(.*?\) *(?:=>)? *\{.*?\n\}/gs,
+          ''
+        )
+        // also remove function name definitions, assuming flat array form; prior comments also removed following same regex in mind.items/util/core.js
+        text = text.replace(
+          /(?:^|\n)(?:(?:\/\/[^\n]*?\n)*)(?:const|let) +(?:_test_|_benchmark_)\w+_functions *=? *\[.*?\] *;? */gs,
+          ''
+        )
+      }
+      // remove any empty lines unless kept explicitly via options
+      if (!options['keep_empty_lines']) text = text.replace(/\n\s*\n/g, '\n')
       if (options['replace_ids']) text = text.replace(/(^|[^\\])\$id/g, '$1' + item.id)
       if (!options['exclude_async'] || !item.deepasync) content.push(text)
       // console.debug(content);
@@ -754,7 +768,10 @@
             // NOTE: by default, async deps are excluded unless async:true in options
             //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
             //       notable exceptions are async 'run' and async 'command' evals
-            Object.assign({ replace_ids: true, exclude_async_deps: !options['async'] }, options)
+            Object.assign(
+              { replace_ids: true, exclude_async_deps: !options['async'], exclude_tests_and_benchmarks: true },
+              options
+            )
           )
           evaljs = [prefix, evaljs].join(';\n').trim()
         }
