@@ -499,6 +499,7 @@
     overflow: scroll;
     background: #222;
     border-radius: 4px;
+    word-break: break-all; /* prevent horizontal expansion out of screen bounds */
   }
   :global(.modal pre > code) {
     display: block;
