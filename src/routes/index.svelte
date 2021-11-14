@@ -1,6 +1,5 @@
 <script lang="ts">
   import _ from 'lodash'
-  // import localForage from "localforage";
   import { isClient, firebase, firestore } from '../../firebase.js'
   import { Circle2 } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'

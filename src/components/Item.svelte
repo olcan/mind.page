@@ -1,8 +1,5 @@
 <script lang="ts">
   import _ from 'lodash'
-
-  // Markdown library requires import as ESM (ECMAScript module)
-  // See https://github.com/markedjs/marked/issues/1692#issuecomment-636596320
   import { marked } from 'marked'
   import {
     highlight,
