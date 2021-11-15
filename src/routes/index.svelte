@@ -390,17 +390,20 @@
     // "local" key-value store backed by localStorage
     // dispatches call to save_local_store to auto-save any synchronous changes
     // e.g. item.local_store.hello = "hello world" // saved automatically
+    // asynchronous changes must be saved manually via save_local_store
     get local_store(): object {
+      setTimeout(() => this.save_local_store())
+      return this._local_store
+    }
+
+    // direct local_store accessor w/o auto-save for sync changes
+    // any changes must be saved manually via save_local_store
+    get _local_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) {
-        setTimeout(() => this.save_local_store())
-        return _item.local_store || (_item.local_store = {})
-      }
+      if (!_item.savedId) return _item.local_store || (_item.local_store = {})
       const key = 'mindpage_item_store_' + _item.savedId
-      if (!_item.local_store) _item.local_store = JSON.parse(localStorage.getItem(key)) || {}
-      // dispatch save for synchronous changes
-      setTimeout(() => this.save_local_store())
+      _item.local_store ??= JSON.parse(localStorage.getItem(key)) || {}
       return _item.local_store
     }
 
@@ -440,23 +443,25 @@
     // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
     // dispatches call to save_global_store to auto-save any synchronous changes
     // e.g. item.global_store.hello = "hello world" // saved automatically
+    // asynchronous changes must be saved manually via save_local_store
     // redirects to local_store._anonymous_global_store for anonymous user
     get global_store(): object {
+      setTimeout(() => this.save_global_store())
+      return this._global_store
+    }
+
+    // direct global_store accessor w/o auto-save for sync changes
+    // any changes must be saved manually via save_global_store
+    get _global_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) {
-        setTimeout(() => this.save_global_store())
-        return _item.global_store || (_item.global_store = {})
-      }
+      if (!_item.savedId) return _item.global_store || (_item.global_store = {})
       if (anonymous) {
-        if (!_item.global_store) _item.global_store = _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
-        setTimeout(() => this.save_global_store())
-        return _item.global_store
+        _item.global_store ??= _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
+      } else {
+        const name = 'global_store_' + _item.savedId
+        _item.global_store ??= _.cloneDeep(hiddenItemsByName.get(name)?.item) || {}
       }
-      const name = 'global_store_' + _item.savedId
-      if (!_item.global_store) _item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {}
-      // dispatch save for any synchronous changes
-      setTimeout(() => this.save_global_store())
       return _item.global_store
     }
 
@@ -4329,7 +4334,7 @@
         const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
         const dep_item = await onEditorDone(command)
         if (!dep_item) {
-          throw new Error(`failed to install dependency ${dep} for ${label}`)
+          throw new Error(`failed to install preview dependency ${dep} for ${label}`)
         } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
           // name/path consistency should be enforced by _install for dependency
           throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
