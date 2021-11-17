@@ -10,6 +10,7 @@
     numberWithCommas,
     invalidateElemCache,
     adoptCachedElem,
+    countUnescaped,
     hash as _hash,
   } from '../util.js'
 
@@ -451,8 +452,12 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = str.replace(tagRegex, (m, pfx, tag, offset, orig_str) => {
-              // skip tag if inside inline code block `...#tag...`
-              if (orig_str.slice(offset).match(/^[^\n]*`/) && orig_str.slice(0, offset).match(/`[^\n]*$/)) return m
+              // skip tag if inside code block `...#tag...`
+              if (
+                countUnescaped(orig_str.slice(offset).match(/^[^\n]*/), '`') % 2 ||
+                countUnescaped(orig_str.slice(0, offset).match(/[^\n]*$/), '`') % 2
+              )
+                return m
 
               // drop hidden tag prefix
               const hidden = tag.startsWith('#_')

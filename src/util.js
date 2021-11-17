@@ -101,7 +101,7 @@ export function renderTag(tag) {
 //   return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
 // }
 
-function count_unescaped(str, substr) {
+export function countUnescaped(str, substr) {
   if (substr.length == 0) throw 'substr can not be empty'
   let count = 0
   let pos = 0
@@ -114,14 +114,14 @@ function count_unescaped(str, substr) {
 
 export function isBalanced(expr) {
   return (
-    count_unescaped(expr, '`') % 2 == 0 &&
-    count_unescaped(expr, "'") % 2 == 0 &&
-    count_unescaped(expr, '"') % 2 == 0 &&
+    countUnescaped(expr, '`') % 2 == 0 &&
+    countUnescaped(expr, "'") % 2 == 0 &&
+    countUnescaped(expr, '"') % 2 == 0 &&
     // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
-    (count_unescaped(expr, '/*') == count_unescaped(expr, '*/') || count_unescaped(expr, '/') % 2 == 0) &&
-    count_unescaped(expr, '{') == count_unescaped(expr, '}') &&
-    count_unescaped(expr, '[') == count_unescaped(expr, ']') &&
-    count_unescaped(expr, '(') == count_unescaped(expr, ')')
+    (countUnescaped(expr, '/*') == countUnescaped(expr, '*/') || countUnescaped(expr, '/') % 2 == 0) &&
+    countUnescaped(expr, '{') == countUnescaped(expr, '}') &&
+    countUnescaped(expr, '[') == countUnescaped(expr, ']') &&
+    countUnescaped(expr, '(') == countUnescaped(expr, ')')
   )
 }
 
