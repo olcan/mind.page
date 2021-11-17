@@ -1859,9 +1859,8 @@
         (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
         // listing item context position (includes labelPrefixes)
         context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
-        // position of (unique) label in listing item (item w/ unique label = first term)
-        // (listing is reversed so larger index is better and missing=-1)
-        listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
+        // target item (listing item or id-matching item)
+        b.target - a.target ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // errors
@@ -1870,6 +1869,9 @@
         b.pushable - a.pushable ||
         // previewables
         b.previewable - a.previewable ||
+        // position of (unique) label in listing item (item w/ unique label = first term)
+        // (listing is reversed so larger index is better and missing=-1)
+        listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
         // # of matching (visible) tags from query
         b.tagMatches - a.tagMatches ||
         // label match (OR tag matches to prevent non-unique labels dominating tags)
