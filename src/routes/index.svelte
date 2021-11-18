@@ -1552,6 +1552,8 @@
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
   //       Invoke updateItemLayout directly if only item sizes have changed.
   let sessionTime = Date.now()
+  let sessionStateHistory = [{ index: 0, editorText: '' }]
+  let sessionStateHistoryIndex = 0
   const editorDebounceTime = 500
   let lastEditorChangeTime = 0
   let matchingItemCount = 0
@@ -1997,6 +1999,7 @@
       if (editorText != history.state.editorText || orderHash != history.state.orderHash) {
         // need to update history
         const state = {
+          index: undefined, // set below depending on push vs replace
           editorText,
           unsavedTimes: items.filter(item => item.time != item.savedTime).map(item => _.pick(item, ['id', 'time'])),
           orderHash,
@@ -2005,9 +2008,16 @@
           final: finalizeStateOnEditorChange,
         }
         // console.debug(history.state.final ? "push" : "replace", state);
-        if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange))
-          history.pushState(state, editorText)
-        else history.replaceState(state, editorText)
+        if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
+          state.index = ++sessionStateHistoryIndex
+          sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
+          history.pushState(state, editorText || '(clear)')
+        } else {
+          state.index = sessionStateHistoryIndex
+          history.replaceState(state, editorText || '(clear)')
+        }
+        sessionStateHistory[sessionStateHistoryIndex] = history.state
+        sessionStateHistory = sessionStateHistory // trigger svelte update
       }
     }
     forceNewStateOnEditorChange = false // processed above
@@ -2034,7 +2044,9 @@
 
   function toggleItems(index: number) {
     hideIndex = index
-    history.replaceState(Object.assign(history.state, { hideIndex }), editorText)
+    history.replaceState(Object.assign(history.state, { hideIndex }), editorText || '(clear)')
+    sessionStateHistory[sessionStateHistoryIndex] = history.state
+    sessionStateHistory = sessionStateHistory // trigger svelte update
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -2147,6 +2159,7 @@
     items[index].showLogsTime = Date.now() // invalidates auto-hide
   }
 
+  let scrollToTopOnPopState = false
   function onPopState(e) {
     readonly = anonymous && !admin
     if (!e?.state) return // for fragment (#id) hrefs
@@ -2155,7 +2168,11 @@
       // console.warn("onPopState before init");
       return
     }
-    // console.debug("onPopState", e.state, items.length + " items");
+    //console.debug('onPopState', e.state, items.length + ' items')
+
+    // update session history index to the popped state
+    // note we could be going back or forward w/ jumps allowed
+    sessionStateHistoryIndex = e.state.index
 
     // restore editor text and unsaved times
     editorText = e.state.editorText || ''
@@ -2173,8 +2190,15 @@
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof e.state.hideIndex == 'number') hideIndex = Math.max(hideIndex, e.state.hideIndex)
     // if (narrating) return;
-    // scroll to last recorded scroll position at this state
-    update_dom().then(() => document.body.scrollTo(0, e.state.scrollPosition || 0))
+    update_dom().then(() => {
+      if (scrollToTopOnPopState) {
+        document.body.scrollTo(0, headerdiv.offsetTop)
+        scrollToTopOnPopState = false
+      } else {
+        // scroll to last recorded scroll position at this state
+        document.body.scrollTo(0, e.state.scrollPosition || 0)
+      }
+    })
   }
 
   function resetUser() {
@@ -4106,7 +4130,12 @@
       historyUpdatePending = true
       setTimeout(() => {
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
-        history.replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }), editorText)
+        history.replaceState(
+          Object.assign(history.state, { scrollPosition: document.body.scrollTop }),
+          editorText || '(clear)'
+        )
+        sessionStateHistory[sessionStateHistoryIndex] = history.state
+        sessionStateHistory = sessionStateHistory // trigger svelte update
         historyUpdatePending = false
       }, 250)
     }
@@ -5223,6 +5252,19 @@
     document.body.scrollTo(0, headerdiv.offsetTop)
   }
 
+  function onHistoryItemMouseDown(e, index) {
+    e.preventDefault() // prevent click & focus shift
+    e.stopPropagation()
+    // if index is current state, history.go would reload so we just scroll to top
+    if (index == sessionStateHistoryIndex) {
+      document.body.scrollTo(0, headerdiv.offsetTop)
+      return
+    } else {
+      scrollToTopOnPopState = true
+      history.go(index - sessionStateHistoryIndex)
+    }
+  }
+
   function onKeyDown(e: KeyboardEvent) {
     if (!e.metaKey) focus() // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
     const key = e.code || e.key // for android compatibility
@@ -5755,7 +5797,21 @@
         class:focused
         class:editorFocused
       >
-        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown} />
+        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown}>
+          {#if column == 0}
+            <div class="history">
+              {#each sessionStateHistory as state, index}
+                <div
+                  class="history-item"
+                  class:current={index == sessionStateHistoryIndex}
+                  on:mousedown={e => onHistoryItemMouseDown(e, index)}
+                >
+                  {state.editorText || '(clear)'}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
         {#if column == 0}
           <div class="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div class="header-container" class:focused={editorFocused}>
@@ -6370,6 +6426,7 @@
   /* column padding allows scrolling top items to ~anywhere on screen */
   .column-padding {
     height: 70vh;
+    position: relative; /* for absolute-positioned .history below */
   }
   .column:first-child .column-padding {
     background: #171717; /* matches .header-container unfocused background */
@@ -6500,11 +6557,31 @@
     display: none;
   }
 
+  .history {
+    position: absolute;
+    bottom: 0;
+  }
+  .history-item {
+    color: #444;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    border-radius: 4px;
+    padding: 5px;
+    padding-left: 17px; /* 10 for header, 10 for editor, +1 border, -4 margin, has to be updated if header padding-left is reduced <10 on smaller screens below */
+    margin-bottom: 2px;
+    width: fit-content;
+    cursor: pointer;
+  }
+  .history-item.current {
+    color: #777;
+  }
+
   /* override italic comment style of sunburst */
   :global(.hljs-comment) {
     font-style: normal;
     color: #666;
   }
+
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     .column:not(.multi-column) {
