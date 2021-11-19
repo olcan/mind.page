@@ -5876,7 +5876,7 @@
                     class:current={index == sessionStateHistoryIndex}
                     on:mousedown={e => onHistoryItemMouseDown(e, index)}
                   >
-                    {state.editorText.replace(/\s+/g, ' ').trim() || '(clear)'}
+                    {state.editorText.trim() || '(clear)'}
                   </div>
                 {/each}
               </div>
@@ -6573,16 +6573,24 @@
     position: absolute;
     top: 0;
     left: 0;
+    right: 0;
   }
   .history-container {
     position: absolute;
     bottom: 0; /* align bottom of history w/ top of header */
     left: 0;
+    right: 220px; /* easily clears buttons on upper right of editor */
+    pointer-events: none;
   }
   .history-item {
     color: #444;
+    pointer-events: auto;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     border-radius: 4px;
     padding: 5px;
     padding-left: 17px; /* 10 for header, 10 for editor, +1 border, -4 margin, has to be updated if header padding-left is reduced <10 on smaller screens below */
