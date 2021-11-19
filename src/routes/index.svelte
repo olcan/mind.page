@@ -5867,14 +5867,16 @@
                 </div>
               {/if}
               <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
-              <div class="history">
+            </div>
+            <div class="history">
+              <div class="history-container">
                 {#each sessionStateHistory as state, index}
                   <div
                     class="history-item"
                     class:current={index == sessionStateHistoryIndex}
                     on:mousedown={e => onHistoryItemMouseDown(e, index)}
                   >
-                    {state.editorText || '(clear)'}
+                    {state.editorText.replace(/\s+/g, ' ').trim() || '(clear)'}
                   </div>
                 {/each}
               </div>
@@ -6255,6 +6257,7 @@
   }
   .header {
     max-width: 100%;
+    position: relative;
   }
   .header-container {
     display: flex;
@@ -6568,9 +6571,13 @@
 
   .history {
     position: absolute;
+    top: 0;
+    left: 0;
+  }
+  .history-container {
+    position: absolute;
     bottom: 0;
     left: 0;
-    margin-bottom: 90px;
   }
   .history-item {
     color: #444;
