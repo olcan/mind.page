@@ -4120,6 +4120,16 @@
   let lastScrollTime = 0
   let historyUpdatePending = false
   function onScroll() {
+    // adjust header button text based on scroll position if visible
+    const y = document.body.scrollTop - headerdiv.offsetTop
+    if (y < 24) {
+      document.querySelectorAll('.header .button').forEach((button: HTMLElement) => {
+        const top_padding = 15 + Math.max(Math.min(0, y), -8)
+        button.style.paddingTop = top_padding + 'px'
+        button.style.paddingBottom = 15 - top_padding + 'px'
+      })
+    }
+
     // trigger focus on any fresh scrolling
     // in particular for mouse/trackpad input not detected via touchstart/mousedown/keydown
     // we ignore scroll events within 1s of window resize (found problematic on android but generally sensible)
@@ -6456,6 +6466,9 @@
   :global(.items:not(.focused) .column-padding),
   :global(.items:not(.focused) .header) {
     opacity: 0.5;
+  }
+  :global(.items:not(.focused) .header .buttons) {
+    opacity: 0;
   }
   :global(.items:not(.focused) .super-container),
   :global(.items:not(.focused) .toggle) {
