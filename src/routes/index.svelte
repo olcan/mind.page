@@ -6257,7 +6257,7 @@
   }
   .header {
     max-width: 100%;
-    position: relative;
+    position: relative; /* for .history to attach to top */
   }
   .header-container {
     display: flex;
@@ -6576,7 +6576,7 @@
   }
   .history-container {
     position: absolute;
-    bottom: 0;
+    bottom: 0; /* align bottom of history w/ top of header */
     left: 0;
   }
   .history-item {
