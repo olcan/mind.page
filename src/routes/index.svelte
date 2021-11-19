@@ -1549,6 +1549,25 @@
     return prefixes
   }
 
+  function urlForState(state) {
+    const text = state.editorText.trim()
+    if (text.match(/^#\S+$/) && _exists(text)) return '/#' + encodeURIComponent(text.slice(1)).replace(/%2F/g, '/')
+    else if (text.match(/^id:\w+$/)) return '/#' + encodeURIComponent(text.slice(3))
+    return '/'
+  }
+
+  function pushState(state) {
+    history.pushState(state, state.editorText || '(clear)', urlForState(state))
+    sessionStateHistory[sessionStateHistoryIndex] = history.state
+    sessionStateHistory = sessionStateHistory // trigger svelte update
+  }
+
+  function replaceState(state) {
+    history.replaceState(state, state.editorText || '(clear)', urlForState(state))
+    sessionStateHistory[sessionStateHistoryIndex] = history.state
+    sessionStateHistory = sessionStateHistory // trigger svelte update
+  }
+
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
   //       Invoke updateItemLayout directly if only item sizes have changed.
   let sessionTime = Date.now()
@@ -2011,13 +2030,11 @@
         if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
-          history.pushState(state, editorText || '(clear)')
+          pushState(state)
         } else {
           state.index = sessionStateHistoryIndex
-          history.replaceState(state, editorText || '(clear)')
+          replaceState(state)
         }
-        sessionStateHistory[sessionStateHistoryIndex] = history.state
-        sessionStateHistory = sessionStateHistory // trigger svelte update
       }
     }
     forceNewStateOnEditorChange = false // processed above
@@ -2044,9 +2061,7 @@
 
   function toggleItems(index: number) {
     hideIndex = index
-    history.replaceState(Object.assign(history.state, { hideIndex }), editorText || '(clear)')
-    sessionStateHistory[sessionStateHistoryIndex] = history.state
-    sessionStateHistory = sessionStateHistory // trigger svelte update
+    replaceState(Object.assign(history.state, { hideIndex }))
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -4140,10 +4155,7 @@
       historyUpdatePending = true
       setTimeout(() => {
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
-        history.replaceState(
-          Object.assign(history.state, { scrollPosition: document.body.scrollTop }),
-          editorText || '(clear)'
-        )
+        replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }))
         sessionStateHistory[sessionStateHistoryIndex] = history.state
         sessionStateHistory = sessionStateHistory // trigger svelte update
         historyUpdatePending = false
@@ -4447,6 +4459,7 @@
   let processed = false
   let initialized = false
   let maxRenderedAtInit = 100
+  let locationHrefAtInit
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems = new Map()
   let hiddenItemsByName = new Map()
@@ -4507,6 +4520,8 @@
   }
 
   async function initialize() {
+    locationHrefAtInit = location.href
+
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
     if (signingOut) return // encryption error
@@ -5228,26 +5243,36 @@
               })()
             }
 
-            // if fragment corresponds to an item tag or id, focus on that item ...
-            if (location.href.match(/#.+$/)) {
-              const tag = decodeURI(location.href.match(/#.+$/)[0])
+            // if initial url fragment corresponds to an item tag or id, focus on that item ...
+            // we have to use locationHrefAtInit since location is updated/cleared during init
+            let tag = locationHrefAtInit.match(/#.+$/)?.pop()
+            if (tag) {
+              tag = decodeURIComponent(tag)
               // if it is a valid item id, then we convert it to name
+              // this means tags that match item ids can not be linked to, which seems fine
               const index = indexFromId.get(tag.substring(1))
+              let unique = false
               if (index !== undefined) {
+                unique = true
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
                 onEditorChange(items[index].name)
-              } else if (idsFromLabel.get(tag.toLowerCase())?.length == 1) {
+              } else if (idsFromLabel.get(tag.toLowerCase())?.length) {
+                unique = idsFromLabel.get(tag.toLowerCase())?.length == 1
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
                 onEditorChange(tag)
               } else {
-                alert(`item ${tag} missing or ambiguous`)
+                alert(`url fragment ${tag} does not match any items`)
               }
-              update_dom().then(() => {
-                const target = document.querySelector(`.super-container.target`) as HTMLElement
-                if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
-              })
+              // if tag matches a unique item, scroll down to that item if needed
+              if (unique) {
+                update_dom().then(() => {
+                  const target = document.querySelector(`.super-container.target`) as HTMLElement
+                  if (target)
+                    document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+                })
+              }
             }
           })
 
