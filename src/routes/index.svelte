@@ -5807,21 +5807,7 @@
         class:focused
         class:editorFocused
       >
-        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown}>
-          {#if column == 0}
-            <div class="history">
-              {#each sessionStateHistory as state, index}
-                <div
-                  class="history-item"
-                  class:current={index == sessionStateHistoryIndex}
-                  on:mousedown={e => onHistoryItemMouseDown(e, index)}
-                >
-                  {state.editorText || '(clear)'}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown} />
         {#if column == 0}
           <div class="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div class="header-container" class:focused={editorFocused}>
@@ -5881,6 +5867,17 @@
                 </div>
               {/if}
               <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
+              <div class="history">
+                {#each sessionStateHistory as state, index}
+                  <div
+                    class="history-item"
+                    class:current={index == sessionStateHistoryIndex}
+                    on:mousedown={e => onHistoryItemMouseDown(e, index)}
+                  >
+                    {state.editorText || '(clear)'}
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
         {/if}
@@ -6436,7 +6433,6 @@
   /* column padding allows scrolling top items to ~anywhere on screen */
   .column-padding {
     height: 70vh;
-    position: relative; /* for absolute-positioned .history below */
   }
   .column:first-child .column-padding {
     background: #171717; /* matches .header-container unfocused background */
@@ -6573,6 +6569,8 @@
   .history {
     position: absolute;
     bottom: 0;
+    left: 0;
+    margin-bottom: 90px;
   }
   .history-item {
     color: #444;
