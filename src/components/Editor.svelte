@@ -848,6 +848,16 @@
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }
+  :global(textarea::selection) {
+    color: white;
+    background: rgb(180, 20, 20);
+    opacity: 1;
+  }
+  :global(textarea::-moz-selection) {
+    color: white;
+    background: rgb(180, 20, 20);
+    opacity: 1;
+  }
   .buttons {
     position: absolute;
     top: -30px; /* -15px (touches browser bar), -15 for additional padding */
