@@ -803,7 +803,6 @@
     position: relative;
     width: 100%;
     cursor: text;
-    padding-bottom: 2px; /* covers extra 2px of backdrop (see below), aligns correctly if item has outer border */
   }
   .backdrop,
   textarea {
@@ -812,13 +811,12 @@
     font-size: 14px;
     line-height: 24px;
     caret-color: red;
+    overflow: hidden;
+    position: absolute;
   }
   .backdrop {
     /* color: transparent; */
     color: #ddd;
-    position: absolute;
-    /* top: -1px; */ /* NOTE: backdrop is 2px taller (perhaps due to border) but aligns correctly */
-    overflow: hidden;
     width: 100%;
     background: #111;
     width: 100%;
@@ -834,7 +832,6 @@
     border: 1px solid #444;
   }
   textarea {
-    position: absolute;
     background: transparent;
     color: transparent;
     width: 100%;
@@ -843,7 +840,7 @@
     outline: none;
     border-radius: 0;
     border: 1px solid transparent;
-    overflow: hidden;
+    padding-bottom: 0;
     box-sizing: border-box;
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
@@ -857,7 +854,7 @@
     color: transparent;
     background: rgb(180, 20, 20, 0.25);
   } */
-  :global(textarea::selection) {
+  /* :global(textarea::selection) {
     color: white;
     background: rgb(180, 20, 20);
   }
@@ -865,6 +862,7 @@
     color: white;
     background: rgb(180, 20, 20);
   }
+   */
   .buttons {
     position: absolute;
     top: -30px; /* -15px (touches browser bar), -15 for additional padding */
