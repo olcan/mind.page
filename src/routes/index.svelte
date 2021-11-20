@@ -1550,10 +1550,13 @@
   }
 
   function urlForState(state) {
+    if (!initialized) return undefined // maintain url if initializing
     const text = state.editorText.trim()
-    if (text.match(/^#\S+$/) && _exists(text)) return '/#' + encodeURIComponent(text.slice(1)).replace(/%2F/g, '/')
-    else if (text.match(/^id:\w+$/)) return '/#' + encodeURIComponent(text.slice(3))
-    return '/'
+    const base = location.href.replace(/#.*$/, '')
+    if (text.match(/^#\S+$/) && _exists(text))
+      return base + '#' + encodeURIComponent(text.slice(1)).replace(/%2F/g, '/')
+    else if (text.match(/^id:\w+$/)) return base + '#' + encodeURIComponent(text.slice(3))
+    else return base
   }
 
   function pushState(state) {
@@ -5896,13 +5899,15 @@
             <div class="history">
               <div class="history-container">
                 {#each sessionStateHistory as state, index}
-                  <div
-                    class="history-item"
-                    class:current={index == sessionStateHistoryIndex}
-                    on:mousedown={e => onHistoryItemMouseDown(e, index)}
-                  >
-                    {state.editorText.trim() || '(clear)'}
-                  </div>
+                  {#if index < sessionStateHistory.length - 1 && state.editorText.trim()}
+                    <div
+                      class="history-item"
+                      class:current={index == sessionStateHistoryIndex}
+                      on:mousedown={e => onHistoryItemMouseDown(e, index)}
+                    >
+                      {state.editorText.trim() || '(clear)'}
+                    </div>
+                  {/if}
                 {/each}
               </div>
             </div>
