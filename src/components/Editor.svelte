@@ -848,15 +848,22 @@
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
   }
+  /* NOTE: transparent selection text in textarea allows backdrop highlights to show through but then selection background is on top of the text, which does not look great, and moving the backdrop to the front does not work because the caret and selection lives in the textarea */
+  /* :global(textarea::selection) {
+    color: transparent;
+    background: rgb(180, 20, 20, 0.25);
+  }
+  :global(textarea::-moz-selection) {
+    color: transparent;
+    background: rgb(180, 20, 20, 0.25);
+  } */
   :global(textarea::selection) {
     color: white;
     background: rgb(180, 20, 20);
-    opacity: 1;
   }
   :global(textarea::-moz-selection) {
     color: white;
     background: rgb(180, 20, 20);
-    opacity: 1;
   }
   .buttons {
     position: absolute;
