@@ -3221,9 +3221,6 @@
                     embeds: null, // may be filled in below
                   }
 
-                  // trim spaces, esp. since github likes to add an extra line
-                  // this is fine since we use commit sha to detect changes
-                  text = text.trim()
                   // extract embed paths
                   let embeds = []
                   for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
@@ -3719,8 +3716,8 @@
     if (!jsin && !item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/)) {
       jsin = `if (typeof _run != 'function') console.error('missing _run function for non-js _input block; enabling #_tag may be missing (e.g. #_typescript for ts_input)')`
     }
-    // always defer to _run function if defined, even if there is js_input, which enables custom handling/execution of js_input via _run function
-    jsin = [`if (typeof _run == 'function') return _run()`, jsin].join('\n')
+    // always defer to _run function if defined, even if there is js_input (for custom handling of js code), but allow skipping by returning null
+    jsin = [`if (typeof _run == 'function') { const out = _run(); if (out !== null) return out }`, jsin].join('\n')
     jsin = jsin.trim()
     // if (!jsin) return item.text // input missing or empty, ignore
     let jsout
