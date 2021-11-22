@@ -553,11 +553,13 @@
 
     // "deep read" function with include_deps=true as default
     read_deep(type: string, options: object = {}) {
+      if (!type) throw new Error('read_deep requires block type')
       return this.read(type, Object.assign({ include_deps: true }, options))
     }
 
     // read function intended for reading *_input blocks with code prefix
     read_input(type: string, options: object = {}) {
+      if (!type) throw new Error('read_input requires block type')
       return [
         this.read_deep(type, Object.assign({ replace_ids: true }, options)),
         this.read(type + '_input', options),
@@ -3713,11 +3715,14 @@
     // check js_input
     const async = item.deepasync
     let jsin = extractBlock(item.text, 'js_input')
-    // if js_input block is missing entirely (not just empty), then eval _run()
+    // if js_input block is missing (not just empty), then we depend on _run function handling a non-js input block (otherwise item should not be marked runnable) so we output an error message if _run function is missing
     if (!jsin && !item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/)) {
-      jsin = `typeof _run === 'undefined' ? console.error('_run undefined; enabling #_tag may be missing for *_input block (e.g. #_typescript for ts_input)') : _run()`
+      jsin = `if (typeof _run != 'function') console.error('missing _run function for non-js _input block; enabling #_tag may be missing (e.g. #_typescript for ts_input)')`
     }
-    if (!jsin) return item.text // input missing or empty, ignore
+    // always defer to _run function if defined, even if there is js_input, which enables custom handling/execution of js_input via _run function
+    jsin = [`if (typeof _run == 'function') return _run()`, jsin].join('\n')
+    jsin = jsin.trim()
+    // if (!jsin) return item.text // input missing or empty, ignore
     let jsout
     try {
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/ })
