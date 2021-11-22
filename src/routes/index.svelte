@@ -3846,9 +3846,15 @@
     // we do not restore time so item remains "soft touched"
     // we also do not restore attr
     if (cancelled) {
-      // item.time = item.savedTime;
-      // item.attr = _.cloneDeep(item.savedAttr);
-      item.text = item.savedText
+      // prompt for save if there are changes
+      if (item.text != item.savedText && !confirm(`Discard changes to ${item.name}?`)) {
+        item.editing = true
+        return
+      } else {
+        // item.time = item.savedTime;
+        // item.attr = _.cloneDeep(item.savedAttr);
+        item.text = item.savedText
+      }
     }
 
     if (editing) {

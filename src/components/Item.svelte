@@ -1386,7 +1386,7 @@
             <!-- <span class="optional-label">img</span> -->
           </div>
         {/if}
-        <div class="button cancel" on:click={onCancelClick}>{editable ? 'cancel' : 'close'}</div>
+        <div class="button cancel" on:click={onCancelClick}>close</div>
         <div class="button delete" on:click={onDeleteClick}>delete</div>
       </div>
 
