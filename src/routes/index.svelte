@@ -736,8 +736,8 @@
             /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|package|private|protected|public|return|short|static|super|switch|synchronized|throw|throws|transient|try|var|void|volatile|while|with|yield)(?:\W|$))/
           )
 
-        // do not insert return if js ends with a semicolon
-        if (!evaljs.match(/;\s*$/)) {
+        // do not insert return if js ends with a semicolon or comment
+        if (!evaljs.match(/(?:; *|\/\/.*)$/)) {
           // first try to insert return at partial-line (semicolon) level ...
           // regex looks for last semicolon OR _unindented_ new line OR whole js code block
           // regex takes any whitespace into prefix so it does not split return statement
@@ -4349,7 +4349,15 @@
       const was_previewable = item.previewable
       item.previewText = text
       item.previewable = item.previewText != item.text
-      // if previewability changed, trigger re-ranking since previewability can affect ranking
+      if (item.previewable) {
+        // auto-preview if all changed lines are blank or comment lines
+        // use simple algorithm to find single modified block range on both sides
+        let [tJ, tK] = [item.text.split('\n'), item.previewText.split('\n')]
+        while (tJ.length && tK.length && tJ[0] == tK[0]) tJ.shift(), tK.shift()
+        while (tJ.length && tK.length && tJ[tJ.length - 1] == tK[tK.length - 1]) tJ.pop(), tK.pop()
+        if (tJ.concat(tK).every((line: string) => !line.trim() || line.match(/ *\/\//))) await previewItem(item)
+      }
+      // if previewability changed, trigger re-ranking since affected
       if (item.previewable != was_previewable) {
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText)
