@@ -4350,12 +4350,15 @@
       item.previewText = text
       item.previewable = item.previewText != item.text
       if (item.previewable) {
-        // auto-preview if all changed lines are blank or comment lines
-        // use simple algorithm to find single modified block range on both sides
-        let [tJ, tK] = [item.text.split('\n'), item.previewText.split('\n')]
-        while (tJ.length && tK.length && tJ[0] == tK[0]) tJ.shift(), tK.shift()
-        while (tJ.length && tK.length && tJ[tJ.length - 1] == tK[tK.length - 1]) tJ.pop(), tK.pop()
-        if (tJ.concat(tK).every((line: string) => !line.trim() || line.match(/ *\/\//))) await previewItem(item)
+        // auto-preview if non-blank non-comment lines are unchanged
+        const requires_manual_preview = line => line.trim() && !line.match(/ *\/\//)
+        if (
+          _.isEqual(
+            item.text.split('\n').filter(requires_manual_preview),
+            item.previewText.split('\n').filter(requires_manual_preview)
+          )
+        )
+          await previewItem(item)
       }
       // if previewability changed, trigger re-ranking since affected
       if (item.previewable != was_previewable) {
