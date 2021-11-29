@@ -454,8 +454,8 @@
             str = str.replace(tagRegex, (m, pfx, tag, offset, orig_str) => {
               // skip tag if inside code block `...#tag...`
               if (
-                countUnescaped(orig_str.slice(offset).match(/^[^\n]*/), '`') % 2 ||
-                countUnescaped(orig_str.slice(0, offset).match(/[^\n]*$/), '`') % 2
+                countUnescaped(orig_str.slice(offset).match(/^.*/)[0], '`') % 2 ||
+                countUnescaped(orig_str.slice(0, offset).match(/.*$/)[0], '`') % 2
               )
                 return m
 
