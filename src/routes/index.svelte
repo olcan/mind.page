@@ -4345,6 +4345,9 @@
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
+      // decline preview if item is pushable but not due to preview
+      if (item.pushable && item.text != item.previewText) throw new Error(`item ${item.name} has non-preview changes`)
+
       // save preview text on item for previewItem()
       const was_previewable = item.previewable
       item.previewText = text
@@ -4354,8 +4357,8 @@
         const requires_manual_preview = line => line.trim() && !line.match(/ *\/\//)
         if (
           _.isEqual(
-            extractBlock(item.text,'.*').split('\n').filter(requires_manual_preview),
-            extractBlock(item.previewText,'.*').split('\n').filter(requires_manual_preview)
+            extractBlock(item.text, '.*').split('\n').filter(requires_manual_preview),
+            extractBlock(item.previewText, '.*').split('\n').filter(requires_manual_preview)
           )
         )
           await previewItem(item)
@@ -4367,7 +4370,9 @@
       }
       console.log(`fetched preview for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
     } catch (e) {
-      console.error(`failed to fetch preview for ${item.name} from ${repo}/${path}: ${e}`)
+      const msg = `failed to fetch preview for ${item.name} from ${repo}/${path}: ${e}`
+      console.error(msg)
+      alert(msg)
     }
   }
 
