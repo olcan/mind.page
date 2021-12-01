@@ -4346,7 +4346,8 @@
       })
 
       // decline preview if item is pushable but not due to preview
-      if (item.pushable && item.text != item.previewText) throw new Error(`item ${item.name} has non-preview changes`)
+      if (item.pushable && item.text != item.previewText && item.text != text)
+        throw new Error(`item ${item.name} has non-preview changes`)
 
       // save preview text on item for previewItem()
       const was_previewable = item.previewable
