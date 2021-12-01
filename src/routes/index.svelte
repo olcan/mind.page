@@ -4345,10 +4345,6 @@
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
-      // decline preview if item is pushable but not due to preview
-      if (item.pushable && item.text != item.previewText && item.text != text)
-        throw new Error(`item ${item.name} has non-preview changes`)
-
       // save preview text on item for previewItem()
       const was_previewable = item.previewable
       item.previewText = text
@@ -4385,6 +4381,17 @@
     const attr = item.attr
     const { repo, path } = attr
     const text = item.previewText
+
+    // confirm preview if item has non-preview changes
+    if (
+      item.pushable &&
+      item.text != item.previewText &&
+      hash(item.text) != item.local_store._preview_hash &&
+      !confirm(`item ${item.name} has non-preview changes; overwrite to preview anyway?`)
+    ) {
+      console.warn(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
+      return
+    }
 
     // disallow renaming preview
     const parsed_label = parseLabel(text)
@@ -4428,6 +4435,8 @@
     _item(item.id).write(text, '' /*, { keep_time: true }*/)
     if (item.name != prev_name) console.warn(`preview renamed ${item.name} (was ${prev_name}) from ${repo}/${path}`)
     item.previewable = item.text != item.previewText // should be false now
+    // store preview text hash to be able to detect preview changes across reloads
+    item.local_store._preview_hash = hash(item.previewText)
     console.log(`previewed ${item.name} from ${repo}/${path}`)
   }
 
