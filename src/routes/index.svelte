@@ -4351,7 +4351,7 @@
       item.previewable = item.previewText != item.text
       if (item.previewable) {
         // auto-preview if non-blank non-comment lines are unchanged across all code blocks
-        const requires_manual_preview = line => line.trim() && !line.match(/ *\/\//)
+        const requires_manual_preview = line => line.trim() && !line.match(/^ *\/\//)
         if (
           _.isEqual(
             extractBlock(item.text, '.*').split('\n').filter(requires_manual_preview),
