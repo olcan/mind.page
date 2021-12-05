@@ -6419,6 +6419,7 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    word-break: break-all;
   }
   .status .console-summary {
     position: absolute;
@@ -6432,6 +6433,7 @@
     overflow: hidden;
     padding-left: 4px;
     cursor: pointer;
+    white-space: nowrap;
   }
   .status.hasDots {
     cursor: pointer;
