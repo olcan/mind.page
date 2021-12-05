@@ -4389,7 +4389,7 @@
     if (
       item.pushable &&
       item.text != item.previewText &&
-      hash(item.text) != item.local_store._preview_hash &&
+      hash(item.text) != _item(item.id).local_store._preview_hash &&
       !confirm(`item ${item.name} has non-preview changes; overwrite to preview anyway?`)
     ) {
       console.warn(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
@@ -4439,7 +4439,7 @@
     if (item.name != prev_name) console.warn(`preview renamed ${item.name} (was ${prev_name}) from ${repo}/${path}`)
     item.previewable = item.text != item.previewText // should be false now
     // store preview text hash to be able to detect preview changes across reloads
-    item.local_store._preview_hash = hash(item.previewText)
+    _item(item.id).local_store._preview_hash = hash(item.previewText)
     console.log(`previewed ${item.name} from ${repo}/${path}`)
   }
 
