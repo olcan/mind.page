@@ -394,6 +394,8 @@
 
     const parentLabel = label.replace(/\/[^\/]*$/, '')
     const parentLabelText = labelText.replace(/\/[^\/]*$/, '')
+    const grandParentLabel = label.replace(/\/[^\/]*?\/[^\/]*$/, '')
+    const grandParentLabelText = labelText.replace(/\/[^\/]*?\/[^\/]*$/, '')
 
     let insideBlock = false
     let lastLine = ''
@@ -463,7 +465,8 @@
               const hidden = tag.startsWith('#_')
               tag = tag.replace(/^#_/, '#')
               // make relative tags absolute
-              if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
+              if (label && tag != label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
+              else if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
               else if (label && tag != label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
 
               const lctag = tag.toLowerCase()
@@ -479,7 +482,7 @@
               if (classNames) classNames = ` class="${classNames}"`
 
               // shorten tag if possible
-              // we can shorten both children (<label>/child) and siblings (<parentLabel>/sibling)
+              // we can shorten children (<label>/child) and siblings (<parentLabel>/sibling) and parent-siblings (<grandParentLabel>/parent)
               let reltag = tag
               if (
                 label &&
@@ -496,6 +499,14 @@
                 tag.substring(0, parentLabel.length) == parentLabelText
               )
                 reltag = '#' + tag.substring(parentLabel.length)
+              else if (
+                grandParentLabel &&
+                tag != labelText &&
+                tag.length > grandParentLabel.length &&
+                tag[grandParentLabel.length] == '/' &&
+                tag.substring(0, grandParentLabel.length) == grandParentLabelText
+              )
+                reltag = '#' + tag.substring(grandParentLabel.length)
 
               // shorten selected labels
               if (
@@ -569,7 +580,8 @@
         // tag link
         let tag = href
         // make relative tag absolute
-        if (label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
+        if (label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
+        else if (label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
         else if (label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
         const lctag = tag.toLowerCase()
         let classNames = 'link'

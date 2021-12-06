@@ -2295,6 +2295,7 @@
     return tags
       .map(tag => {
         if (tag == label) return tag
+        else if (tag.startsWith('#///')) return label.replace(/\/[^\/]*?\/[^\/]*$/, '') + tag.substring(3)
         else if (tag.startsWith('#//')) return label.replace(/\/[^\/]*$/, '') + tag.substring(2)
         else if (tag.startsWith('#/')) return label + tag.substring(1)
         else return tag
