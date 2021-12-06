@@ -1780,6 +1780,8 @@
                 )
               )
             )
+      // do not duplicate primary matching terms in secondary
+      item.matchingTermsSecondary = _.difference(item.matchingTermsSecondary, item.matchingTerms)
 
       // item is considered matching if primary terms match
       // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)

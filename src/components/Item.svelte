@@ -888,15 +888,34 @@
 
       let terms = highlightTerms.split(' ').filter(t => t)
       if (label) {
+        if (label == '#util/core') console.log('before', terms, highlightTerms)
+        // expand terms for shortening, mirroring "reltag" logic in toHTML
+        // one difference here is that terms are lowercased so labelText is irrelevant
+        // another difference is that we drop the '/' from the suffix tag for matching
+        const parentLabel = label.replace(/\/[^\/]*$/, '')
+        const grandParentLabel = label.replace(/\/[^\/]*?\/[^\/]*$/, '')
         terms.slice().forEach((term: string) => {
-          if (
-            term[0] == '#' &&
-            term.length > label.length &&
-            term[label.length] == '/' &&
-            term.substring(0, label.length) == label
+          if (term[0] != '#') return
+          if (term.length > label.length && term[label.length] == '/' && term.substring(0, label.length) == label)
+            terms.push('#' + term.substring(label.length + 1))
+          else if (
+            parentLabel &&
+            term.length > parentLabel.length &&
+            term != label &&
+            term[parentLabel.length] == '/' &&
+            term.substring(0, parentLabel.length) == parentLabel
           )
-            terms.push('#' + term.substring(label.length))
+            terms.push('#' + term.substring(parentLabel.length + 1))
+          else if (
+            grandParentLabel &&
+            term.length > grandParentLabel.length &&
+            term != label &&
+            term[grandParentLabel.length] == '/' &&
+            term.substring(0, grandParentLabel.length) == grandParentLabel
+          )
+            terms.push('#' + term.substring(grandParentLabel.length + 1))
         })
+        if (label == '#util/core') console.log('after', terms)
       }
 
       if (terms.length == 0) return
