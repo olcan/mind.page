@@ -544,7 +544,12 @@
         )
       }
       // remove any empty lines unless kept explicitly via options
-      if (!options['keep_empty_lines']) text = text.replace(/\n\s*\n/g, '\n')
+      if (!options['keep_empty_lines']) text = text.replace(/(^|\n)\s*(?:\n|$)/g, '$1').trim() // trim for last \n
+
+      // remove comment lines (for js type) unless kept explicitly via options
+      if (type == 'js' && !options['keep_comment_lines'])
+        text = text.replace(/(^|\n)(?:\s*\/\/.*?(?:\n|$))+/g, '$1').trim() // trim for last \n
+
       if (options['replace_ids']) text = text.replace(/(^|[^\\])\$id/g, '$1' + item.id)
       if (!options['exclude_async'] || !item.deepasync) content.push(text)
       // console.debug(content);
@@ -722,6 +727,9 @@
 
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
+        // remove comment lines
+        evaljs = evaljs.replace(/(^|\n)(?:\s*\/\/.*?(?:\n|$))+/g, '$1').trim() // trim for last \n
+
         // apply _returning_ wrapper for evaljs for additional scoping
         // this is an inner wrapper that excludes any context prefix (see below for outer wrapper)
         // we attempt to insert return to last returnable (+balanced) expression to maintain ~eval semantics
@@ -736,8 +744,8 @@
             /^(?:\s*[})\].,:]|(?:abstract|arguments|boolean|break|byte|case|catch|char|class|const|continue|debugger|default|delete|do|double|else|enum|eval|export|extends|final|finally|float|for|function|goto|if|implements|import|in|instanceof|int|interface|let|long|native|package|private|protected|public|return|short|static|super|switch|synchronized|throw|throws|transient|try|var|void|volatile|while|with|yield)(?:\W|$))/
           )
 
-        // do not insert return if js ends with a semicolon or comment
-        if (!evaljs.match(/(?:; *|\/\/.*)$/)) {
+        // do not insert return if js ends with a semicolon
+        if (!evaljs.match(/;\s*$/)) {
           // first try to insert return at partial-line (semicolon) level ...
           // regex looks for last semicolon OR _unindented_ new line OR whole js code block
           // regex takes any whitespace into prefix so it does not split return statement
@@ -6553,7 +6561,7 @@
   :global(.items:not(.focused) .super-container:is(.target, .editing, .pushable, .previewable)) {
     opacity: 0.95;
   }
-  
+
   .column.hidden {
     position: absolute;
     left: -100000px;
