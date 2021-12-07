@@ -2700,8 +2700,10 @@
   let sessionHistory = []
   let sessionHistoryIndex = 0
   let tempIdFromSavedId = new Map<string, string>()
+  let installed_dependencies = new Set<string>()
   let editorText = ''
   let editor
+
   function onEditorDone(
     text: string,
     e: any = null,
@@ -3113,6 +3115,7 @@
                   .filter(s => s)
                 args = args.substring(0, args.indexOf('<-')).trim()
               }
+
               // install item from specified github source
               let [path, repo, branch, owner, token] = args.split(/\s+/)
               if (!repo) repo = 'mind.items'
@@ -3153,6 +3156,20 @@
                 alert(`${cmd}: invalid file extension in path '${path}'`)
                 return
               }
+
+              // if no dependents (root command), initialize dependency set to de-duplicate indirect dependencies
+              // otherwise add the dependency set, or cancel if already added
+              if (dependents.length == 0) installed_dependencies = new Set()
+              else {
+                if (installed_dependencies.has(path)) {
+                  console.log(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
+                  lastEditorChangeTime = 0 // disable debounce even if editor focused
+                  onEditorChange('')
+                  return 'skipped' // indicate skipped dependency
+                }
+                installed_dependencies.add(path)
+              }
+
               const Octokit = window['Octokit']
               const github = token ? new Octokit({ auth: token }) : new Octokit()
               const start = Date.now()
@@ -3299,17 +3316,19 @@
                         token || ''
                       } <- ${[label, ...dependents].join(' <- ')}`
                       const dep_item = await onEditorDone(command)
-                      if (!dep_item) {
-                        throw new Error(
-                          `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
-                        )
-                      } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-                        // name/path consistency should be enforced by _install|_update
-                        throw new Error(
-                          `${cmd}: invalid name ${dep_item.name} for ${
-                            update ? 'updated' : 'installed'
-                          } dependency ${dep} of ${label}`
-                        )
+                      if (dep_item != 'skipped') {
+                        if (!dep_item) {
+                          throw new Error(
+                            `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
+                          )
+                        } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+                          // name/path consistency should be enforced by _install|_update
+                          throw new Error(
+                            `${cmd}: invalid name ${dep_item.name} for ${
+                              update ? 'updated' : 'installed'
+                            } dependency ${dep} of ${label}`
+                          )
+                        }
                       }
                     }
                   }
@@ -3356,7 +3375,6 @@
                   await update_dom()
 
                   // invoke _on_install(item)|_on_update(item) if defined as function
-                  await _modal_close() // close/cancel all modals
                   if (!updating) {
                     if (item.text.includes('_on_install')) {
                       try {
@@ -3391,7 +3409,11 @@
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                 } finally {
-                  await _modal_close() // close/cancel all modals
+                  // close modal and clear dependencies if this is the root command w/o dependents
+                  if (dependents.length == 0) {
+                    await _modal_close() // close/cancel all modals
+                    installed_dependencies = null
+                  }
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
