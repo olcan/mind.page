@@ -6550,11 +6550,10 @@
   :global(.items:not(.focused) .super-container.target_context) {
     opacity: 0.85;
   }
-  :global(.items:not(.focused) .super-container.target),
-  :global(.items:not(.focused) .super-container.editing) {
+  :global(.items:not(.focused) .super-container:is(.target, .editing, .pushable, .previewable)) {
     opacity: 0.95;
   }
-
+  
   .column.hidden {
     position: absolute;
     left: -100000px;

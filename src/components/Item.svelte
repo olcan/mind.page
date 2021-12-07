@@ -1358,6 +1358,8 @@
   class:hidden
   class:target
   class:target_context
+  class:pushable
+  class:previewable
   class:timed={timeString.length > 0}
 >
   {#if timeString}
