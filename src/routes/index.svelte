@@ -3365,6 +3365,9 @@
                         return
                       }
                     }
+                    // maintain pushable and editable flags updated separately below
+                    attr.pushable = item.pushable
+                    attr.editable = item.editable
                     __item(item.id).attr = attr
                     item.write(text, '')
                   } else {
@@ -3395,6 +3398,9 @@
 
                   // clear pushable flag to resume auto-side-push to source
                   item.pushable = false
+
+                  // reset editability to discourage editing after updating to remote state
+                  item.editable = false
 
                   // log completion and return item to indicate successful install/update
                   console.log(
