@@ -1067,8 +1067,9 @@
     setTimeout(highlightClosure)
 
     // indicate errors/warnings and context/target items
-    error = itemdiv.querySelector('.console-error,.macro-error,mark.missing') != null
-    warning = itemdiv.querySelector('.console-warn') != null
+    // NOTE: .error and .warning classes can be used to trigger a visual indication of errors/warnings, but ranking is handled separately in index.svelte (in onEditorChange)
+    error = itemdiv.querySelector('.console-error,.macro-error,mark.missing,.error') != null
+    warning = itemdiv.querySelector('.console-warn,.warning') != null
 
     // trigger typesetting of any math elements
     // NOTE: we do this async to see if we can load MathJax async in template.html

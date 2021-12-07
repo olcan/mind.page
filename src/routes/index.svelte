@@ -1806,8 +1806,10 @@
 
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
-      // mark 'has error' on error or warnings
-      item.hasError = item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) != null
+      // mark 'has error' on any logged errors or warnings
+      // also mark if item has any failed _tests in its global store (set by #tester)
+      item.hasError =
+        item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) || _.values(item.global_store?._tests).some(t => !t.ok)
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
