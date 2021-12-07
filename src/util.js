@@ -206,7 +206,7 @@ export function stringify(x) {
   return _stringify_object(x)
 }
 
-function stringify_object(x) {
+function _stringify_object(x) {
   // _.entries uses .entries() for maps
   return '{' + _.entries(x).map(([k, v]) => `${k}:${stringify(v)}`) + '}'
 }
