@@ -212,7 +212,9 @@ function stringify_object(x) {
 }
 
 function _unindent(fstr) {
-  const indent = fstr.match(/\n( +)\} *$/)?.pop()
+  const indent_match = fstr.match(/\n( +)\} *$/)
+  if (!indent_match) return fstr
+  const indent = indent_match[0]
   if (indent) fstr = fstr.replace(new RegExp(`^${indent}`, 'gm'), '')
   return fstr
 }
