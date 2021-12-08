@@ -182,33 +182,21 @@ export function checkElemCache() {
 }
 
 // converts x to a string
+// mainly uses JSON.stringify
+// only exceptions are undefined, non-Object/Array objects, and functions
 export function stringify(x) {
-  if (x === undefined) return 'undefined'
-  if (x === null) return 'null'
-  // string as is
-  if (typeof x == 'string') return `'${x}'`
-  // boolean toString
-  if (typeof x == 'boolean') return x.toString()
-  // integer toString w/ commas, from https://stackoverflow.com/a/2901298
-  if (Number.isInteger(x)) return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  // number toString
-  if (typeof x == 'number') return x.toString()
-  // function toString w/ ()=> prefix dropped
+  if (x === undefined) return 'undefined' // can not be parsed back
+  if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
-    return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (Object.keys(x).length ? _stringify_object(x) : '')
-  // array elements stringified recursively
-  if (Array.isArray(x)) return '[' + x.map(stringify) + ']'
-  // at this point
-  if (typeof x != 'object') throw new Error('cannot stringify ' + x)
-  // object values stringified recursively
-  // toString used if overloaded (e.g. Date)
-  if (x.toString !== Object.prototype.toString) return x.toString()
-  return _stringify_object(x)
+    return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
+  const json = JSON.stringify(x)
+  if (json) return json
+  return `[${typeof x} ${x.constructor.name} ${x}]` // ultimate fallback
 }
 
 function _stringify_object(x) {
   // _.entries uses .entries() for maps
-  return '{' + _.entries(x).map(([k, v]) => `${k}:${stringify(v)}`) + '}'
+  return `[${typeof x} ${x.constructor.name}] {` + _.entries(x).map(([k, v]) => `${k}:${stringify(v)}`) + '}'
 }
 
 function _unindent(fstr) {
