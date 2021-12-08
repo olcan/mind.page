@@ -93,7 +93,9 @@
   // creates a new item with the given text and options
   // third argument (attr) is used internally for /_install
   function _create(text, { run = false, edit = false } = {}, attr = null) {
-    return onEditorDone(
+    const prev_text = editorText // to be immediately restored below
+    ignoreEditorChanges = true // prevent reranking & layout
+    const item = onEditorDone(
       text,
       null, // event=null for synthetic call, disables key handling, history, etc
       false, // not cancelled
@@ -102,6 +104,10 @@
       attr, // used internally for /_install
       true // no command parsing since creating new item w/ text
     )
+    ignoreEditorChanges = false // resume tracking changes
+    lastEditorChangeTime = 0 // disable debounce even if editor focused
+    onEditorChange(prev_text)
+    return item
   }
 
   // _items returns any number of matches, most recent first
@@ -1588,6 +1594,7 @@
   let sessionStateHistory = [{ index: 0, editorText: '' }]
   let sessionStateHistoryIndex = 0
   const editorDebounceTime = 500
+  let ignoreEditorChanges = false
   let lastEditorChangeTime = 0
   let matchingItemCount = 0
   let textLength = 0
@@ -1603,6 +1610,7 @@
   let editorChangesWithTimeKept = new Set()
 
   function onEditorChange(text: string, keep_times = false) {
+    if (ignoreEditorChanges) return
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -3861,6 +3869,8 @@
       item.text = item.savedText // in case text was cleared to trigger deletion on onItemEditing
       return false
     }
+    const navigated = editorText.trim().toLowerCase() == item.name.toLowerCase()
+    if (navigated) editorText = '' // clear query
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
@@ -3877,6 +3887,8 @@
     if (!readonly && item.savedId) {
       firestore().collection('items').doc(item.savedId).delete().catch(console.error)
     }
+    // if deleted item was being navigated, go back to previous state
+    // if (navigated && sessionStateHistoryIndex > 0) update_dom().then(() => history.back())
     return true
   }
 

@@ -888,7 +888,6 @@
 
       let terms = highlightTerms.split(' ').filter(t => t)
       if (label) {
-        if (label == '#util/core') console.log('before', terms, highlightTerms)
         // expand terms for shortening, mirroring "reltag" logic in toHTML
         // one difference here is that terms are lowercased so labelText is irrelevant
         // another difference is that we drop the '/' from the suffix tag for matching
@@ -915,7 +914,6 @@
           )
             terms.push('#' + term.substring(grandParentLabel.length + 1))
         })
-        if (label == '#util/core') console.log('after', terms)
       }
 
       if (terms.length == 0) return
