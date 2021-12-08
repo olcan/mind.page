@@ -3396,9 +3396,6 @@
                     }
                   }
 
-                  // clear pushable flag to resume auto-side-push to source
-                  item.pushable = false
-
                   // reset editability to discourage editing after updating to remote state
                   item.editable = false
 
@@ -3410,16 +3407,27 @@
                   // start watching repo path (if not already being watched) for newly installed item
                   if (!updating) watchLocalRepo(item.attr.repo)
 
+                  // if this is root command (w/o dependents), finalize modals and trigger push if needed
+                  if (dependents.length == 0) {
+                    await _modal_close() // close/cancel all modals
+                    await _modal({
+                      content: `${updating ? 'Updated' : 'Installed'} ${item.name}`,
+                      confirm: 'OK',
+                      background: 'confirm',
+                    })
+                    // also push item if it was marked pushable
+                    // #pusher should exist since it sets pushable, but we check anyway ...
+                    if (item.pushable) {
+                      if (_item('#pusher')) onEditorDone('/push ' + item.name)
+                      else alert(`unable to push item ${item.name} due to missing (deleted?) #pusher`)
+                      // item.pushable = false // clear flag even if push command failed
+                    }
+                  }
+
                   return item
                 } catch (e) {
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
-                } finally {
-                  // close modal and clear dependencies if this is the root command w/o dependents
-                  if (dependents.length == 0) {
-                    await _modal_close() // close/cancel all modals
-                    installed_dependencies = null
-                  }
                 }
               })())
             } else if (_exists('#commands' + cmd)) {

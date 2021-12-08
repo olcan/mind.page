@@ -61,6 +61,7 @@
             promise_visible = null
             resolve_visible = null
             _visible = false
+            return
           }
           ;({
             content,
