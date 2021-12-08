@@ -207,6 +207,7 @@
     window['_parse_label'] = parseLabel
     window['_resolve_tags'] = resolveTags
     window['_special_tag'] = isSpecialTag
+    window['_stringify'] = stringify
     // encoding/decoding/hashing functions
     window['_encode'] = encode
     window['_encode_utf8'] = encode_utf8
@@ -623,7 +624,7 @@
     }
 
     write(text: string, type: string = '_output', options = {}) {
-      text = typeof text == 'string' ? text : '' + JSON.stringify(text)
+      text = typeof text == 'string' ? text : '' + stringify(text)
       // confirm if write is too big
       const writeConfirmLength = 64 * 1024
       if (text.length >= writeConfirmLength) {
@@ -3776,7 +3777,7 @@
     // ignore output if Promise
     if (jsout instanceof Promise) jsout = undefined
     // stringify output
-    if (jsout !== undefined && typeof jsout != 'string') jsout = '' + JSON.stringify(jsout)
+    if (jsout !== undefined && typeof jsout != 'string') jsout = '' + stringify(jsout)
     const outputConfirmLength = 64 * 1024
     if (jsout !== undefined && jsout.length >= outputConfirmLength)
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
@@ -4263,7 +4264,7 @@
   function errorMessage(e) {
     if (!e) return undefined
     // Some client libraries (e.g. Google API JS client) return an embedded 'error' property, which can itself be a non-standard object with various details (e.g. HTTP error code, message, details, etc), so we just stringify the whole object to provide the most information possible.
-    if (!e.message && e.error) return JSON.stringify(e)
+    if (!e.message && e.error) return stringify(e)
     // NOTE: for UnhandledPromiseRejection, Event object is placed in e.reason
     // NOTE: we log url for "error" Events that do not have message/reason
     //       (see https://www.w3schools.com/jsref/event_onerror.asp)
@@ -4503,7 +4504,7 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
-    // stringify,
+    stringify,
     encode,
     encode_utf8,
     encode_utf8_array,
