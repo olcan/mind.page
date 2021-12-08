@@ -3869,8 +3869,12 @@
       item.text = item.savedText // in case text was cleared to trigger deletion on onItemEditing
       return false
     }
+    // clear query if deleted item is being navigated
     const navigated = editorText.trim().toLowerCase() == item.name.toLowerCase()
-    if (navigated) editorText = '' // clear query
+    if (navigated) {
+      replaceStateOnEditorChange = true // do not create new entry
+      editorText = '' // clear query (onEditorChange invoked below)
+    }
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
