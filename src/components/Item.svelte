@@ -279,7 +279,10 @@
     })
 
     // unwrap _markdown(_*) and _md(_*) blocks that are not removed/hidden
-    text = text.replace(/(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden)).*?\n)(.*?)\n\s*```/gs, '$1$2')
+    text = text.replace(
+      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?)\n\s*```/gs,
+      '$1$2'
+    )
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : ''
     matchingTerms = new Set<string>(matchingTerms.split(' ').filter(t => t))
