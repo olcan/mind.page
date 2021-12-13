@@ -2474,6 +2474,7 @@
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
             if (!item.listen && item.id != id) return // must be listener or self
+            if (!item.listen && remote) return // only listeners get remote changes
             if (!item.text.includes('_on_item_change')) return
             try {
               _item(item.id).eval(
