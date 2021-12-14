@@ -3312,11 +3312,12 @@
                   })
 
                   // install/update dependencies based on item text
+                  // all tags (not just hidden tags) are considered dependencies
                   // dependency paths MUST match the (resolved) hidden tags
                   if (label) {
                     const deps = resolveTags(
                       label,
-                      parseTags(text).hidden.filter(t => !isSpecialTag(t))
+                      parseTags(text).all.filter(t => t != label && !isSpecialTag(t))
                     )
                     for (let dep of deps) {
                       const dep_path = dep.slice(1) // path assumed same as tag
@@ -4486,13 +4487,14 @@
       return
     }
 
-    // install missing dependencies based on updated text
+    // install missing "dependencies" based on updated text
+    // all tags (not just hidden tags) are considered dependencies
     // dependency paths MUST match the (resolved) hidden tags
     const label = parseLabel(text)
     if (label) {
       const deps = resolveTags(
         label,
-        parseTags(text).hidden.filter(t => !isSpecialTag(t))
+        parseTags(text).all.filter(t => t != label && !isSpecialTag(t))
       )
       for (let dep of deps) {
         if (_exists(dep)) {
