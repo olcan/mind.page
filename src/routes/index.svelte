@@ -3438,9 +3438,11 @@
                 } catch (e) {
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
+                  // close/cancel all modals on error
+                  await _modal_close()
                 } finally {
-                  if (dependents.length == 0)
-                    await _modal_close() // close/cancel all modals
+                  // close/cancel all modals for root command (w/o dependents) only
+                  if (dependents.length == 0) await _modal_close()
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
