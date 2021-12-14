@@ -3183,7 +3183,7 @@
                   lastEditorChangeTime = 0 // disable debounce even if editor focused
                   onEditorChange('')
                   // note item label is dependency path minus default .md suffix
-                  return _item('#' + path.replace(/\.md$/,'')) // return dependency
+                  return _item('#' + path.replace(/\.md$/, '')) // return dependency
                 }
                 installed_dependencies.add(path)
               }
@@ -3329,7 +3329,7 @@
                         console.warn(`${cmd}: skipping circular dependency ${dep} for ${label}`)
                         continue
                       }
-                      const update = _exists(dep, false /*allow_multiple*/) // update if possible
+                      const update = _exists(dep) // update if possible
                       console.log((update ? 'updating' : 'installing') + ` dependency ${dep} for ${label} ...`)
                       const command = `${update ? '/_update' : '/_install'} ${dep_path} ${repo} ${branch} ${owner} ${
                         token || ''
