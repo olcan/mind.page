@@ -3182,7 +3182,8 @@
                   console.log(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
                   lastEditorChangeTime = 0 // disable debounce even if editor focused
                   onEditorChange('')
-                  return _item('#' + path) // return dependency
+                  // note item label is dependency path minus default .md suffix
+                  return _item('#' + path.replace(/\.md$/,'')) // return dependency
                 }
                 installed_dependencies.add(path)
               }
@@ -3238,7 +3239,7 @@
                       `${cmd}: parsed label '${parsed_label}' for ${path} does not match specified label '${label}'`
                     )
                   }
-                  // if installing/updating a dependency, then specified path must match parsed label
+                  // if installing/updating a dependency, then specified path (minus default suffix .md) must match parsed label
                   if (dependents.length && parsed_label.slice(1) + '.md' != path) {
                     throw new Error(
                       `${cmd}: parsed label '${parsed_label}' is invalid for dependency at ${path} for dependents ${dependents.join(
