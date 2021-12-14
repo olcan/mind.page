@@ -2425,7 +2425,7 @@
 
     // compute expanded tags including prefixes
     const prevTagsExpanded = item.tagsExpanded || []
-    item.tagsExpanded = item.tags.slice()
+    item.tagsExpanded = item.tags
     item.tags.forEach(tag => {
       item.tagsExpanded = item.tagsExpanded.concat(tagPrefixes(tag))
     })
@@ -5526,6 +5526,9 @@
         let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
         // drop duplicates to avoid ambiguities/cycles
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title)
+        // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
+        const parsedVisibleTags = item(lastContext.getAttribute('item-id')).tagsVisible
+        visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title))
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected'))
         // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
         const contextLabel = (lastContext.querySelector('mark.label') as any)?.title
@@ -5536,9 +5539,7 @@
           contextBasedOnNesting &&
           visibleTags[selectedIndex]['title']?.startsWith(contextLabel + '/')
         ) {
-          const selectedTag = visibleTags[selectedIndex]['title']
-          const siblings = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/'))
-          visibleTags = siblings
+          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
           selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
         }
         if (selectedIndex >= 0) {
@@ -5547,6 +5548,7 @@
           else if (key == 'ArrowLeft' && selectedIndex > 0)
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
         }
+        // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
         return // context exists, so ArrowLeft/Right assumed handled
       }
     }
