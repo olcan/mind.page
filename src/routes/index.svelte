@@ -2710,6 +2710,7 @@
   let sessionHistory = []
   let sessionHistoryIndex = 0
   let tempIdFromSavedId = new Map<string, string>()
+  let installing = false
   let installed_dependencies = new Set<string>()
   let editorText = ''
   let editor
@@ -3167,15 +3168,21 @@
                 return
               }
 
-              // if no dependents (root command), initialize dependency set to de-duplicate indirect dependencies
+              // distinguish "root" vs dependency installation
+              // we use a global 'installing' flag, which MUST be reset on return by root
+              // any returns below should be for non-root only, or inside a try/finally block
+              const root = !installing // root (vs dependency) installation
+              installing = true // set to false in finally block of root command
+
+              // if root command, initialize dependency set to de-duplicate indirect dependencies
               // otherwise add the dependency set, or cancel if already added
-              if (dependents.length == 0) installed_dependencies = new Set()
+              if (root) installed_dependencies = new Set()
               else {
                 if (installed_dependencies.has(path)) {
                   console.log(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
                   lastEditorChangeTime = 0 // disable debounce even if editor focused
                   onEditorChange('')
-                  return 'skipped' // indicate skipped dependency
+                  return _item('#' + path) // return dependency
                 }
                 installed_dependencies.add(path)
               }
@@ -3326,19 +3333,17 @@
                         token || ''
                       } <- ${[label, ...dependents].join(' <- ')}`
                       const dep_item = await onEditorDone(command)
-                      if (dep_item != 'skipped') {
-                        if (!dep_item) {
-                          throw new Error(
-                            `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
-                          )
-                        } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-                          // name/path consistency should be enforced by _install|_update
-                          throw new Error(
-                            `${cmd}: invalid name ${dep_item.name} for ${
-                              update ? 'updated' : 'installed'
-                            } dependency ${dep} of ${label}`
-                          )
-                        }
+                      if (!dep_item) {
+                        throw new Error(
+                          `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
+                        )
+                      } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
+                        // name/path consistency should be enforced by _install|_update
+                        throw new Error(
+                          `${cmd}: invalid name ${dep_item.name} for ${
+                            update ? 'updated' : 'installed'
+                          } dependency ${dep} of ${label}`
+                        )
                       }
                     }
                   }
@@ -3417,8 +3422,8 @@
                   // start watching repo path (if not already being watched) for newly installed item
                   if (!updating) watchLocalRepo(item.attr.repo)
 
-                  // if this is root command (w/o dependents), finalize modals and trigger push if needed
-                  if (dependents.length == 0) {
+                  // if this is root command, finalize modals and trigger push if needed
+                  if (root) {
                     await _modal_close() // close/cancel all modals
                     await _modal({
                       content: `${updating ? 'Updated' : 'Installed'} ${item.name}`,
@@ -3438,11 +3443,14 @@
                 } catch (e) {
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
-                  // close/cancel all modals on error
+                  // close/cancel all modals on error (even if non-root command)
                   await _modal_close()
                 } finally {
-                  // close/cancel all modals for root command (w/o dependents) only
-                  if (dependents.length == 0) await _modal_close()
+                  // close/cancel modals and clear installing flag for root command
+                  if (root) {
+                    await _modal_close()
+                    installing = false
+                  }
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
