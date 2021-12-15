@@ -4057,16 +4057,30 @@
         alert('cannot run unnamed installed item')
         return
       }
-      const run_item_name = item.name + '/run'
+      const run_name = item.name + '/run'
       // focus on run item if not already focused
-      if (editorText.trim().toLowerCase() != run_item_name.toLowerCase()) {
+      if (editorText.trim().toLowerCase() != run_name.toLowerCase()) {
         lastEditorChangeTime = 0 // force immediate update
         forceNewStateOnEditorChange = true // force new state
-        onEditorChange(run_item_name)
+        onEditorChange(run_name)
       }
-      const run_item = _item(run_item_name, false /* do not log errors */)
-      if (!run_item) _create(item.text.replace(item.name, run_item_name), { run: true })
-      else onItemRun(run_item.index)
+      const run_item = _item(run_name, false /* do not log errors */)
+      // replace label and and hide input blocks (via _removed suffix)
+      const run_text = item.text
+        .replace(item.name, run_name)
+        .replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
+
+      if (!run_item) _create(run_text, { run: true })
+      else {
+        // if js_input modified, confirm overwrite
+        if (
+          _item(item.id).read('js_input') != run_item.read('js_input') &&
+          !confirm(`overwrite changes to js_input block in ${run_name}?`)
+        )
+          return
+        run_item.write(run_text, '' /* replace whole item */)
+        onItemRun(run_item.index)
+      }
       return
     }
 
@@ -5700,11 +5714,16 @@
       }
     }
 
-    // clear editor on unmodified escape or backspace/arrowup/arrowleft (if not handled above)
-    // if editor is already empty, then unedit the last edited item (if any)
-    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
+    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup
+    // if no edited items left, then clear editor (mindbox)
+    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp') && !modified) {
       e.preventDefault()
-      if (editorText) {
+      if (editingItems.length) {
+        // unedit the last edited item
+        const index = editingItems.pop()
+        items[index].editing = false
+        return
+      } else if (editorText) {
         hideIndex = hideIndexMinimal
         // this follows onTagClick behavior
         editorText = ''
@@ -5712,11 +5731,6 @@
         // finalizeStateOnEditorChange = true; // finalize state
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText)
-        return
-      } else if (editingItems.length) {
-        // unedit the last edited item
-        const index = editingItems.pop()
-        items[index].editing = false
         return
       }
     }
