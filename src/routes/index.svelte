@@ -92,21 +92,41 @@
 
   // creates a new item with the given text and options
   // third argument (attr) is used internally for /_install
-  function _create(text, { run = false, edit = false } = {}, attr = null) {
-    const prev_text = editorText // to be immediately restored below
-    ignoreEditorChanges = true // prevent reranking & layout
+  // default mindbox_text == undefined maintains existing mindbox text, sensible for programmatic creation
+  // use mindbox_text == '' to force clear, sensible for item creation via commands (as in handleCommandReturn)
+  // use mindbox_text == null to let onEditorDone (including any handled command) determine mindbox text
+  // use emulate_button == true to emulate "create" button behavior
+  function _create(
+    text,
+    {
+      run = false,
+      edit = false,
+      history = false,
+      command = false,
+      mindbox_text = undefined,
+      emulate_button = false,
+    } = {},
+    attr = null
+  ) {
+    if (emulate_button) {
+      history = true
+      command = true
+      mindbox_text = null // maintain text determined by onEditorDone
+    }
+    if (mindbox_text !== null) mindbox_text ??= editorText // text to be restored (or set) below
     const item = onEditorDone(
       text,
-      null, // event=null for synthetic call, disables key handling, history, etc
+      history ? {} : null, // null event disables key handling, history, etc
       false, // not cancelled
-      run === true, // run?
-      edit === true, // edit? true/false only, null (default) requires keyboard event
+      !!run, // run?
+      edit == true, // edit? (true/false only, null requires keyboard event)
       attr, // used internally for /_install
-      true // no command parsing since creating new item w/ text
+      !command // ignore command unless command truthy
     )
-    ignoreEditorChanges = false // resume tracking changes
-    lastEditorChangeTime = 0 // disable debounce even if editor focused
-    onEditorChange(prev_text)
+    if (mindbox_text !== null) {
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange(mindbox_text)
+    }
     return item
   }
 
@@ -1594,7 +1614,6 @@
   let sessionStateHistory = [{ index: 0, editorText: '' }]
   let sessionStateHistoryIndex = 0
   const editorDebounceTime = 500
-  let ignoreEditorChanges = false
   let lastEditorChangeTime = 0
   let matchingItemCount = 0
   let textLength = 0
@@ -1610,7 +1629,6 @@
   let editorChangesWithTimeKept = new Set()
 
   function onEditorChange(text: string, keep_times = false) {
-    if (ignoreEditorChanges) return
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -2672,7 +2690,7 @@
     return item
   }
 
-  function handleCommandReturn(cmd, item, obj, handleError) {
+  function handleCommandReturn(cmd, item, obj, run, edit, handleError) {
     if (typeof obj == 'string') {
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(obj)
@@ -2687,15 +2705,19 @@
     } else {
       const text = obj.text
       // since we are async, we need to call onEditorDone again with run/editing set properly
-      // obj.{edit,run} can override defaults edit=true and run=false
-      let edit = true
-      let run = false
-      if (typeof obj.edit == 'boolean') edit = obj.edit
-      if (typeof obj.run == 'boolean') run = obj.run
-      // reset focus for generated text
+      // obj.{edit,run,history,command,mindbox_text,emulate_button} can override defaults
+      // default run/edit are passed in args, default history/command are false
+      // default mindbox_text is blank, most sensible for item creation via command (vs programmatic)
+      // use mindbox_text == null to maintain text as is, or undefined to maintain existing mindbox text
+      obj.run ??= run
+      obj.edit ??= edit
+      obj.history ??= false
+      obj.command ??= false
+      obj.mindbox_text ??= ''
       let textarea = textArea(-1)
+      // reset focus for generated text
       textarea.selectionStart = textarea.selectionEnd = 0
-      let item = _create(text, { run, edit })
+      let item = _create(text, obj)
       // run programmatic initializer function if any
       try {
         if (obj.init) Promise.resolve(obj.init(item)).catch(handleError)
@@ -2741,6 +2763,7 @@
       }
       return
     }
+    // console.debug('onEditorDone', { text, e, cancelled, run, editing, attr, ignore_command })
 
     // reset history index, update entry 0 and unshift duplicate entry
     // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
@@ -3471,7 +3494,7 @@
                   })
                 )
                   .then(obj => {
-                    handleCommandReturn(cmd, cmd_item, obj, handleError)
+                    handleCommandReturn(cmd, cmd_item, obj, run, editing, handleError)
                   })
                   .catch(handleError)
               } catch (e) {
@@ -3503,7 +3526,7 @@
                 if (ret === null) continue // did not handle command
                 Promise.resolve(ret)
                   .then(obj => {
-                    handleCommandReturn(cmd, item, obj, handleError)
+                    handleCommandReturn(cmd, item, obj, run, editing, handleError)
                   })
                   .catch(handleError)
                 found_listener = true
@@ -4028,6 +4051,21 @@
   function onItemRun(index: number = -1, touch_first = true) {
     if (index < 0) index = focusedItem
     let item = items[index]
+
+    if (item.attr) {
+      if (!item.name.startsWith('#')) {
+        alert('cannot run unnamed installed item')
+        return
+      }
+      const run_name = item.name + '/run'
+      let run_item = _item(run_name, false /* do not log errors */)
+      lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
+      onEditorChange(run_name)
+      if (!run_item) _create(item.text.replace(item.name, run_name), { run: true })
+      else onItemRun(run_item.index)
+      return
+    }
+
     // maintain selection on textarea if editing
     if (item.editing) {
       let textarea = textArea(index)
