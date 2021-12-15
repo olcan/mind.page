@@ -4057,11 +4057,15 @@
         alert('cannot run unnamed installed item')
         return
       }
-      const run_name = item.name + '/run'
-      let run_item = _item(run_name, false /* do not log errors */)
-      lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
-      onEditorChange(run_name)
-      if (!run_item) _create(item.text.replace(item.name, run_name), { run: true })
+      const run_item_name = item.name + '/run'
+      // focus on run item if not already focused
+      if (editorText.trim().toLowerCase() != run_item_name.toLowerCase()) {
+        lastEditorChangeTime = 0 // force immediate update
+        forceNewStateOnEditorChange = true // force new state
+        onEditorChange(run_item_name)
+      }
+      const run_item = _item(run_item_name, false /* do not log errors */)
+      if (!run_item) _create(item.text.replace(item.name, run_item_name), { run: true })
       else onItemRun(run_item.index)
       return
     }
@@ -5612,10 +5616,24 @@
           ).filter(t => t['title']?.startsWith(targetLabel + '/'))
           child = childTags[0]
         }
+
+        if (!child) {
+          const childLabel = _labels(
+            (label, ids) =>
+              ids.length == 1 && label.startsWith(targetLabel + '/') && label.indexOf('/', targetLabel.length + 1) == -1
+          )[0]
+          if (childLabel) {
+            lastEditorChangeTime = 0 // force immediate update
+            forceNewStateOnEditorChange = true // add to history like click-based nav
+            onEditorChange(childLabel)
+            return
+          }
+        }
+
         if (child) {
           child.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
         } else {
-          // no child found for target, so search for next non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
+          // no child found for target, so search for "next" non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
           const targetIndex = item(_item(targetLabel).id).index
           nextTargetId = items.find(
             item =>
@@ -5668,13 +5686,17 @@
           document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event('click'))
         })
         return
-      } else {
-        // // attempt to click on a hide toggle
-        // const hideToggle = document.querySelector(`.toggle.hide`);
-        // if (hideToggle) {
-        //   hideToggle.dispatchEvent(new Event("click"));
-        //   return;
-        // }
+      }
+      // try to navigate up to parent label
+      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      if (targetLabel) {
+        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        if (parentLabel != targetLabel && _exists(parentLabel)) {
+          lastEditorChangeTime = 0 // force immediate update
+          forceNewStateOnEditorChange = true // add to history like click-based nav
+          onEditorChange(parentLabel)
+          return
+        }
       }
     }
 
