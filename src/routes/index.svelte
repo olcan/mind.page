@@ -2355,7 +2355,7 @@
     let item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    item.runnable = item.lctext.match(/\s*```\w+_input(?:_hidden|_removed)?(?:\s|$)/)
+    item.runnable = item.lctext.match(/\s*```(?:\\S+:)?\S+_input(?:_hidden|_removed)?(?:\s|$)/)
     item.scripted = item.lctext.match(/<script.*?>/)
     item.macroed = item.lctext.match(/<<.*?>>/) || item.lctext.match(/@\{.*?\}@/)
     // changes in mindpage can reset (but not set) previewable flag
