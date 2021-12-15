@@ -1225,7 +1225,6 @@
   let oldestTime = Infinity
   let oldestTimeString = ''
   let defaultHeaderHeight = 0
-  // TODO: try maxColumns=1 during initial render if partial-height layouts prove problematic
   let defaultItemHeight = 0 // if zero, initial layout will be single-column
   let totalItemHeight = 0
   let lastFocusedEditElement = null
@@ -5234,6 +5233,7 @@
                 if (!initTime) {
                   // alert on empty init for user known to have items, or on any errors before/during first snapshot
                   // TODO: remove this once you've debugged the issue where first snapshot is blank and items are added in subsequent snapshot(s), triggering the "welcome" dialog and many errors as items are added incrementally (and slowly) post-initialization ... if there are no relevant error/warnings and no other ways to detect a problem, then we may have to either track total number of items, or new users w/ empty accounts, or both.
+                  // NOTE: this triggers rarely now, and whenever it triggered, there were 0 errors listed, BUT in most (all?) cases there was an error in console (could not reach backend in 10s, client using offline mode for now) after closing the dialog, so if we can confirm that, that would be a way to detect a problem trigger an alert and/or reload.
                   if (first_snapshot_items == 0 && user.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2') {
                     alert(
                       `failed init w/ zero items for non-empty account; changes: ${first_snapshot_changes} (see warnings for types), errors: ${firebase_snapshot_errors}; see console for details, reload to retry`
@@ -5266,7 +5266,6 @@
                   }
 
                   // delete invalid hidden items after initialization
-                  // TODO: ensure no duplication issue after empty initialization issue is fixed
                   hiddenItemsInvalid.forEach(wrapper => {
                     console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
                     deleteHiddenItem(wrapper.id)
