@@ -3333,7 +3333,7 @@
                     return m
                   })
 
-                  // install/update dependencies based on item text
+                  // install missing dependencies based on item text
                   // all tags (not just hidden tags) are considered dependencies
                   // dependency paths MUST match the (resolved) hidden tags
                   if (label) {
@@ -3342,6 +3342,7 @@
                       parseTags(text).all.filter(t => t != label && !isSpecialTag(t))
                     )
                     for (let dep of deps) {
+                      if (_exists(dep)) continue // already installed
                       const dep_path = dep.slice(1) // path assumed same as tag
                       if (dep_path.startsWith('/'))
                         // should not happen w/ resolved tags
@@ -3351,22 +3352,19 @@
                         console.warn(`${cmd}: skipping circular dependency ${dep} for ${label}`)
                         continue
                       }
-                      const update = _exists(dep) // update if possible
-                      console.log((update ? 'updating' : 'installing') + ` dependency ${dep} for ${label} ...`)
-                      const command = `${update ? '/_update' : '/_install'} ${dep_path} ${repo} ${branch} ${owner} ${
+                      console.log(`installing dependency ${dep} for ${label} ...`)
+                      const command = `/_install ${dep_path} ${repo} ${branch} ${owner} ${
                         token || ''
                       } <- ${[label, ...dependents].join(' <- ')}`
                       const dep_item = await onEditorDone(command)
                       if (!dep_item) {
                         throw new Error(
-                          `${cmd}: failed to ${update ? 'update' : 'install'} dependency ${dep} for ${label}`
+                          `${cmd}: failed to install dependency ${dep} for ${label}`
                         )
                       } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
-                        // name/path consistency should be enforced by _install|_update
+                        // name/path consistency should be enforced by _install
                         throw new Error(
-                          `${cmd}: invalid name ${dep_item.name} for ${
-                            update ? 'updated' : 'installed'
-                          } dependency ${dep} of ${label}`
+                          `${cmd}: invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`
                         )
                       }
                     }
