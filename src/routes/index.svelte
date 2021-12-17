@@ -113,7 +113,14 @@
       command = true
       mindbox_text = null // maintain text determined by onEditorDone
     }
-    if (mindbox_text !== null) mindbox_text ??= editorText // text to be restored (or set) below
+
+    // disable scrolling during creation unless emulating create button
+    const wasScrollingDisabled = disableScrollingOnLayout
+    if (!emulate_button) disableScrollingOnLayout = true
+
+    // save mindbox text to be restored (or set) below
+    if (mindbox_text !== null) mindbox_text ??= editorText
+
     const item = onEditorDone(
       text,
       history ? {} : null, // null event disables key handling, history, etc
@@ -123,10 +130,16 @@
       attr, // used internally for /_install
       !command // ignore command unless command truthy
     )
+
+    // restore mindbox text
     if (mindbox_text !== null) {
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(mindbox_text)
     }
+
+    // restore scrolling to original state
+    disableScrollingOnLayout = wasScrollingDisabled
+
     return item
   }
 
@@ -1229,6 +1242,7 @@
   let totalItemHeight = 0
   let lastFocusedEditElement = null
   let lastTimeStringUpdateTime = 0
+  let disableScrollingOnLayout = false
   let showDotted = false
 
   function updateItemLayout() {
@@ -1367,6 +1381,7 @@
       else activeEditItem = items[focusedItem].id
     }
 
+    if (disableScrollingOnLayout) return
     const dispatchTime = Date.now()
     update_dom().then(() => {
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
@@ -4054,12 +4069,6 @@
         return
       }
       const run_name = item.name + '/run'
-      // focus on run item if not already focused
-      if (editorText.trim().toLowerCase() != run_name.toLowerCase()) {
-        lastEditorChangeTime = 0 // force immediate update
-        forceNewStateOnEditorChange = true // force new state
-        onEditorChange(run_name)
-      }
       const run_item = _item(run_name, false /* do not log errors */)
 
       // copy only input blocks, prepend label and dependency on parent
@@ -4073,8 +4082,22 @@
       // hide input blocks (via _removed suffix)
       run_text = run_text.replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
 
-      if (!run_item) _create(run_text, { run: true })
-      else {
+      // focus on run item (w/o scrolling) if not already focused
+      if (editorText.trim().toLowerCase() != run_name.toLowerCase()) {
+        const wasScrollingDisabled = disableScrollingOnLayout
+        disableScrollingOnLayout = true
+        lastEditorChangeTime = 0 // force immediate update
+        forceNewStateOnEditorChange = true // force new state
+        onEditorChange(run_name)
+        disableScrollingOnLayout = wasScrollingDisabled
+      }
+      // in case code depends on mindbox text, update it now
+      // alternative is to dispatch the running pending on dom update
+      textArea(-1).value = run_name
+
+      if (!run_item) {
+        _create(run_text, { run: true })
+      } else {
         // if js_input modified, confirm overwrite
         if (
           _item(item.id).read('js_input') != run_item.read('js_input') &&
