@@ -43,16 +43,11 @@ export function highlight(code, language) {
   language = language.replace(/(?:_removed|_hidden)$/, '')
   if (language == '_log') {
     return code
-      .split('\n')
-      .map(line =>
-        line
-          .replace(/^(ERROR:.+?)(; STACK:|$)/, '<span class="console-error">$1</span>$2')
-          .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
-          .replace(/^(INFO:.*)$/, '<span class="console-info">$1</span>')
-          .replace(/^(DEBUG:.*)$/, '<span class="console-debug">$1</span>')
-          .replace(/(; STACK:.+)$/, '<span class="console-debug">$1</span>')
-      )
-      .join('\n')
+      .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')
+      .replace(/^(WARNING:.*)$/gm, '<span class="console-warn">$1</span>')
+      .replace(/^(INFO:.*)$/gm, '<span class="console-info">$1</span>')
+      .replace(/^(DEBUG:.*)$/gm, '<span class="console-debug">$1</span>')
+      .replace(/(; STACK:.+)$/gm, '<span class="console-debug">$1</span>')
   }
   // drop any _suffix if language does not start with _ (_lang is editor-only)
   if (!language.startsWith('_')) language = language.replace(/(^\w+?)_.+$/, '$1')
