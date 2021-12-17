@@ -3353,14 +3353,13 @@
                         continue
                       }
                       console.log(`installing dependency ${dep} for ${label} ...`)
-                      const command = `/_install ${dep_path} ${repo} ${branch} ${owner} ${
-                        token || ''
-                      } <- ${[label, ...dependents].join(' <- ')}`
+                      const command = `/_install ${dep_path} ${repo} ${branch} ${owner} ${token || ''} <- ${[
+                        label,
+                        ...dependents,
+                      ].join(' <- ')}`
                       const dep_item = await onEditorDone(command)
                       if (!dep_item) {
-                        throw new Error(
-                          `${cmd}: failed to install dependency ${dep} for ${label}`
-                        )
+                        throw new Error(`${cmd}: failed to install dependency ${dep} for ${label}`)
                       } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
                         // name/path consistency should be enforced by _install
                         throw new Error(
@@ -4062,10 +4061,17 @@
         onEditorChange(run_name)
       }
       const run_item = _item(run_name, false /* do not log errors */)
-      // replace label and and hide input blocks (via _removed suffix)
-      const run_text = item.text
-        .replace(item.name, run_name)
-        .replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
+
+      // copy only input blocks, prepend label and dependency on parent
+      let run_text =
+        run_name +
+        ' ' +
+        item.label.replace(/^#/, '#_') +
+        '\n' +
+        item.text.match(/```(?:\\S+:)?\S+_input\s.*?```/gs).join('\n')
+
+      // hide input blocks (via _removed suffix)
+      run_text = run_text.replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
 
       if (!run_item) _create(run_text, { run: true })
       else {
