@@ -998,7 +998,7 @@
             // left/right margin matches span.highlight css
             // word.style.paddingLeft = word.style.paddingRight = "1px";
             // word.style.marginLeft = word.style.marginRight = "-1px";
-            const prefixMatch = tagText.lastIndexOf(m[2]) == 0
+            const prefixMatch = tagText.indexOf(m[2]) == 0 && node.parentElement.children.length == 1
             const suffixMatch = text.length == 0
 
             if (prefixMatch) {
