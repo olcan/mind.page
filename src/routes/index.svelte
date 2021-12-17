@@ -2177,9 +2177,9 @@
     if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
       if (prefix_click) {
         // assuming trying to go to a parent/ancestor
-        alert(`${tag} already selected`)
-        return
-      } else editorText = '' // assume intentional toggle
+        if (!confirm(`${tag} already selected; clear selection?`)) return
+      } else if (!confirm(`${tag} already selected; clear selection?`)) return
+      editorText = '' // assume intentional toggle (clear)
     } else {
       editorText = tag + ' ' // space in case more text is added
     }
@@ -4515,7 +4515,7 @@
       item.previewable = item.previewText != item.text
       if (item.previewable) {
         // auto-preview if non-blank non-comment lines are unchanged across all code blocks
-        // also need label & dependencies (hidden tags) to be unchanged
+        // also need label & dependencies (all tags, not just hidden) to be unchanged
         const requires_manual_preview = line => line.trim() && !line.match(/^ *\/\//)
         if (
           _.isEqual(
@@ -4523,7 +4523,7 @@
             extractBlock(item.previewText, '.*').split('\n').filter(requires_manual_preview)
           ) &&
           _.isEqual(parseLabel(item.text), parseLabel(item.previewText)) &&
-          _.isEqual(parseTags(item.text).hidden, parseTags(item.previewText).hidden)
+          _.isEqual(parseTags(item.text).all, parseTags(item.previewText).all)
         )
           await previewItem(item)
       }
