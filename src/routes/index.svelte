@@ -1842,6 +1842,10 @@
       item.target = listingItemIndex == index || idMatchTerms.length > 0
       item.target_context = !item.target && context.includes(item.uniqueLabel)
       if (item.target) targetItemCount++
+      item.target_child =
+        !item.target &&
+        item.uniqueLabel.startsWith(terms[0] + '/') &&
+        item.uniqueLabel.indexOf('/', terms[0].length + 1) == -1
 
       // calculate missing tags (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
@@ -1940,6 +1944,8 @@
         context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
         // target item (listing item or id-matching item)
         b.target - a.target ||
+        // child (via nested label) of target item
+        b.target_child - a.target_child ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // errors
@@ -4687,6 +4693,7 @@
     item.matching = false
     item.target = false
     item.target_context = false
+    item.target_child = false
     item.tagMatches = 0
     item.labelMatch = false
     item.prefixMatch = false
