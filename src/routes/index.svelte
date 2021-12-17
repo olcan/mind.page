@@ -4109,7 +4109,7 @@
         // if js_input modified, confirm overwrite
         if (
           _item(item.id).read('js_input') != run_item.read('js_input') &&
-          !confirm(`overwrite changes to js_input block in ${run_name}?`)
+          !confirm(`overwrite differences in js_input block in ${run_name}?`)
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
