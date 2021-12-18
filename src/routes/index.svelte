@@ -4108,13 +4108,15 @@
       } else {
         // if js_input modified, confirm overwrite
         if (
-          _item(item.id).read('js_input') != run_item.read('js_input') &&
-          !confirm(`overwrite differences in js_input block in ${run_name}?`)
+          hash(run_item.read('js_input')) != _item(item.id).global_store.run_hash &&
+          !confirm(`overwrite changes in js_input block in ${run_name}?`)
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
         onItemRun(run_item.index)
       }
+      // store hash of js_input to detect changes to js_input block in run item
+      _item(item.id).global_store.run_hash = hash(run_item.read('js_input'))
       return
     }
 
