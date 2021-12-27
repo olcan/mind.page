@@ -665,9 +665,9 @@
     write(text: string, type: string = '_output', options = {}) {
       text = typeof text == 'string' ? text : '' + stringify(text)
       // confirm if write is too big
-      const writeConfirmLength = 64 * 1024
+      const writeConfirmLength = 128 * 1024
       if (text.length >= writeConfirmLength) {
-        if (!confirm(`Write ${text.length} bytes (${type}) into ${this.name}?`)) return // cancel write
+        if (!confirm(`Write ${text.length} bytes (type '${type}') into ${this.name}?`)) return // cancel write
       }
       // maintain selection on textarea if editing and textarea is available (may not be for newly created item)
       if (item(this.id)?.editing) {
@@ -3844,7 +3844,7 @@
     if (jsout instanceof Promise) jsout = undefined
     // stringify output
     if (jsout !== undefined && typeof jsout != 'string') jsout = '' + stringify(jsout)
-    const outputConfirmLength = 64 * 1024
+    const outputConfirmLength = 128 * 1024
     if (jsout !== undefined && jsout.length >= outputConfirmLength)
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
     // append _output and _log and update for changes
