@@ -1863,8 +1863,7 @@
 
       // mark 'has error' on any logged errors or warnings
       // also mark if item has any failed _tests in its global store (set by #tester)
-      item.hasError =
-        item.text.match(/(?:^|\n)(?:ERROR|WARNING):/) || _.values(item.global_store?._tests).some(t => !t.ok)
+      item.hasError = !!item.text.match(/^(?:ERROR|WARNING):/m) || _.values(item.global_store?._tests).some(t => !t.ok)
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -1946,8 +1945,6 @@
         context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
         // target item (listing item or id-matching item)
         b.target - a.target ||
-        // nesting (depth of nested label) under target item
-        b.target_nesting - a.target_nesting ||
         // editing mode (except log items)
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // errors
@@ -1956,6 +1953,8 @@
         b.pushable - a.pushable ||
         // previewables
         b.previewable - a.previewable ||
+        // nesting (depth of nested label) under target item
+        b.target_nesting - a.target_nesting ||
         // position of (unique) label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
