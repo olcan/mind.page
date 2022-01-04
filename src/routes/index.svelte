@@ -4089,18 +4089,18 @@
       // hide input blocks (via _removed suffix)
       run_text = run_text.replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
 
-      // focus on run item (w/o scrolling) if not already focused
-      if (editorText.trim().toLowerCase() != run_name.toLowerCase()) {
+      // focus on run item (w/o scrolling) unless it (or a descendant) is already focused
+      if (!editorText.trim().toLowerCase().startsWith(run_name.toLowerCase())) {
         const wasScrollingDisabled = disableScrollingOnLayout
         disableScrollingOnLayout = true
         lastEditorChangeTime = 0 // force immediate update
         forceNewStateOnEditorChange = true // force new state
         onEditorChange(run_name)
         disableScrollingOnLayout = wasScrollingDisabled
+        // in case code depends on mindbox text, update it now
+        // alternative is to dispatch the running pending on dom update
+        textArea(-1).value = run_name
       }
-      // in case code depends on mindbox text, update it now
-      // alternative is to dispatch the running pending on dom update
-      textArea(-1).value = run_name
 
       if (!run_item) {
         _create(run_text, { run: true })
