@@ -1239,7 +1239,7 @@
           if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
           // ignore container elements (div, p, etc) that only contain hidden tags
           // these are sometimes used to prevent styling in markdown editors/previews/etc
-          if (_.every(elem.children, c => c.classList.contains('hidden'))) continue
+          if (elem.children.length && _.every(elem.children, c => c.classList.contains('hidden'))) continue
           height_below += elem.offsetHeight
         }
         if (height_below == 0) br.style.display = 'none'
