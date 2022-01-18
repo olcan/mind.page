@@ -3001,6 +3001,8 @@
             .get()
             .then(doc => _create(doc.data().text))
             .catch(console.error)
+          lastEditorChangeTime = 0
+          onEditorChange('')
           return
         }
         case '/_tweet': {
