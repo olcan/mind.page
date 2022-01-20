@@ -5622,7 +5622,7 @@
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title)
         // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
         const parsedVisibleTags = item(lastContext.getAttribute('item-id')).tagsVisible
-        visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title))
+        visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected'))
         // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
         const contextLabel = (lastContext.querySelector('mark.label') as any)?.title
