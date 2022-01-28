@@ -2121,7 +2121,8 @@
       })
     })
 
-    if (Date.now() - start >= 250) console.warn('onEditorChange took', Date.now() - start, 'ms')
+    const elapsed = Date.now() - start
+    if (elapsed > 250) console.warn(`onEditorChange took ${elapsed}ms`)
   }
 
   function toggleItems(index: number) {
