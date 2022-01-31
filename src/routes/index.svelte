@@ -2122,7 +2122,10 @@
     })
 
     const elapsed = Date.now() - start
-    if (elapsed > 250) console.warn(`onEditorChange took ${elapsed}ms`)
+    if (elapsed > 250) {
+      // dispatch warning to avoid writing to items if invoked synchronously, e.g. via _create
+      setTimeout(() => console.warn(`onEditorChange took ${elapsed}ms`))
+    }
   }
 
   function toggleItems(index: number) {
