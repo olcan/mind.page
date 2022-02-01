@@ -280,7 +280,7 @@
 
     // unwrap _markdown(_*) and _md(_*) blocks that are not removed/hidden
     text = text.replace(
-      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?)\n\s*```/gs,
+      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?\n)\s*```/gs,
       '$1$2'
     )
 
