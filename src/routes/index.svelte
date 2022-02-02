@@ -3857,7 +3857,13 @@
       if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
     // append _output and _log and update for changes
     if (jsout !== undefined) item.text = appendBlock(item.text, '_output', jsout)
-    _item(item.id).write_log() // auto-write log
+    // instead of write_log we can appendBlock to avoid triggering an extra save
+    // _item(item.id).write_log() // auto-write log
+    const log = _item(item.id).get_log().join('\n')
+    if (log) {
+      item.text = appendBlock(item.text, '_log', log)
+      _item(item.id).show_logs()
+    }
     // NOTE: index can change during JS eval due to _writes
     itemTextChanged(indexFromId.get(item.id), item.text)
     return item.text
