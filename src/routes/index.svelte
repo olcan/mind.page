@@ -702,6 +702,7 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // item time/text has changed
         // if (!item(this.id)?.editing) saveItem(this.id);
+        // console.debug('saving after write', this.name, { text, type, options })
         saveItem(this.id)
       })
     }
@@ -734,7 +735,9 @@
         item(this.id).log_options, // may be undefined
         options
       )
-      this.write(this.get_log(options).join('\n'), options['type'])
+      // write only if log differs from existing block in item
+      const log = this.get_log(options).join('\n')
+      if (this.read(options['type']) != log) this.write(log, options['type'])
       if (options['type'] == '_log' || options['show_logs']) this.show_logs()
     }
 
@@ -4119,7 +4122,7 @@
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
-        onItemRun(run_item.index)
+        onItemRun(run_item.index, false /* touch_first */)
       }
       // store hash of js_input to detect changes to js_input block in run item
       _item(item.id).global_store.run_hash = hash(run_item.read('js_input'))
