@@ -4086,6 +4086,12 @@
     if (index < 0) index = focusedItem
     let item = items[index]
 
+    // if item is previewable, load preview before running
+    if (item.previewable) {
+      previewItem(item).then(() => onItemRun(item.index, touch_first))
+      return
+    }
+
     if (item.attr) {
       if (!item.name.startsWith('#')) {
         alert('cannot run unnamed installed item')
