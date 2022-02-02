@@ -717,10 +717,10 @@
     }
 
     // deletes item
-    // may be subject to confirmation by user
+    // may be subject to confirmation unless confirm=false
     // returns true if deleted, false if declined/cancelled
-    delete() {
-      return deleteItem(this.index)
+    delete(confirm) {
+      return deleteItem(this.index, confirm)
     }
 
     write_log(options = {}) {
@@ -3925,10 +3925,11 @@
   const android = isAndroid()
   const ios = isIOS()
 
-  function deleteItem(index): boolean {
+  function deleteItem(index, confirm_delete = undefined): boolean {
     const item = items[index]
-    // if item has saved text (not new item) and unique label, confirm deletion
-    if (item.savedText && item.labelUnique && !confirm(`Delete ${item.name}?`)) {
+    // by default, confirm if item has saved text (not new item) & unique label
+    confirm_delete ??= item.savedText && item.labelUnique
+    if (confirm_delete && !confirm(`Delete ${item.name}?`)) {
       item.text = item.savedText // in case text was cleared to trigger deletion on onItemEditing
       return false
     }
