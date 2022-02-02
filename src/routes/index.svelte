@@ -4134,7 +4134,7 @@
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
-        onItemRun(run_item.index, false /* touch_first */)
+        onItemRun(run_item.index, touch_first)
       }
       // store hash of js_input to detect changes to js_input block in run item
       _item(item.id).global_store.run_hash = hash(run_item.read('js_input'))
