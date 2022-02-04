@@ -1952,10 +1952,10 @@
         (!b.log && b.editing) - (!a.log && a.editing) ||
         // errors
         b.hasError - a.hasError ||
-        // pushables
-        b.pushable - a.pushable ||
         // previewables
         b.previewable - a.previewable ||
+        // pushables
+        b.pushable - a.pushable ||
         // nesting (depth of nested label) under target item
         b.target_nesting - a.target_nesting ||
         // position of (unique) label in listing item (item w/ unique label = first term)
