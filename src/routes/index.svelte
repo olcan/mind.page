@@ -2288,6 +2288,14 @@
     })
   }
 
+  function onBeforeUnload(e) {
+    if (items.every(item => item.text == item.savedText)) return
+    const msg = 'Discard unsaved changes?'
+    // see https://stackoverflow.com/a/7317311
+    e.returnValue = msg // gecko + ie
+    return msg // gecko + webkit, safari, chrome, etc
+  }
+
   function resetUser() {
     user = null
     // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
@@ -6297,6 +6305,7 @@
   on:mousedown={onMouseDown}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
+  on:beforeunload={onBeforeUnload}
 />
 
 <!-- increase list item padding on android, otherwise too small -->
