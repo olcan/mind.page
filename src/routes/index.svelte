@@ -463,10 +463,10 @@
       if (_.isEmpty(_item.local_store)) localStorage.removeItem(key)
       else if (modified) localStorage.setItem(key, JSON.stringify(_item.local_store))
 
-      // if modified, invoke _on_local_store_change(id) on all listener items
+      // if modified, invoke _on_local_store_change(id) on all listener (or self) items
       if (modified) {
         items.forEach(item => {
-          if (!item.listen) return
+          if (!item.listen && item.id != this.id) return // must be listener or self
           if (!item.text.includes('_on_local_store_change')) return
           try {
             _item(item.id).eval(
@@ -530,10 +530,10 @@
         else if (modified) saveHiddenItem(name, _.cloneDeep(_item.global_store))
       }
 
-      // if modified, invoke _on_global_store_change(id, false) on all listener items
+      // if modified, invoke _on_global_store_change(id, false) on all listener (or self) items
       if (modified) {
         items.forEach(item => {
-          if (!item.listen) return
+          if (!item.listen && item.id != this.id) return // must be listener or self
           if (!item.text.includes('_on_global_store_change')) return
           try {
             _item(item.id).eval(
@@ -2528,7 +2528,6 @@
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
             if (!item.listen && item.id != id) return // must be listener or self
-            if (!item.listen && remote) return // only listeners get remote changes
             if (!item.text.includes('_on_item_change')) return
             try {
               _item(item.id).eval(
@@ -6023,10 +6022,10 @@
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);
       item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {} // sync global_store on item
 
-      // invoke _on_global_store_change(id, true) on all listener items
+      // invoke _on_global_store_change(id, true) on all listener (or self) items
       // NOTE: "deletions" of hidden item correspond to a change to empty store {}
       items.forEach(item => {
-        if (!item.listen) return
+        if (!item.listen && item.id != id) return // must be listener or self
         if (!item.text.includes('_on_global_store_change')) return
         try {
           _item(item.id).eval(
