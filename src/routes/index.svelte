@@ -467,10 +467,10 @@
       if (modified) {
         items.forEach(item => {
           if (!item.listen && item.id != this.id) return // must be listener or self
-          if (!item.text.includes('_on_local_store_change')) return
+          if (!itemDefinesFunction(item, '_on_local_store_change')) return
           try {
             _item(item.id).eval(
-              `if (typeof _on_local_store_change == 'function') _on_local_store_change('${this.id}')`,
+              `_on_local_store_change('${this.id}')`,
               {
                 trigger: 'listen',
               }
@@ -534,10 +534,10 @@
       if (modified) {
         items.forEach(item => {
           if (!item.listen && item.id != this.id) return // must be listener or self
-          if (!item.text.includes('_on_global_store_change')) return
+          if (!itemDefinesFunction(item, '_on_global_store_change')) return
           try {
             _item(item.id).eval(
-              `if (typeof _on_global_store_change == 'function') _on_global_store_change('${this.id}',false)`,
+              `_on_global_store_change('${this.id}',false)`,
               {
                 trigger: 'listen',
               }
@@ -1668,10 +1668,10 @@
       setTimeout(() => {
         items.forEach(item => {
           if (!item.listen) return
-          if (!item.text.includes('_on_change')) return
+          if (!itemDefinesFunction(item, '_on_change')) return
           try {
             _item(item.id).eval(
-              `if (typeof _on_change == 'function') _on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
+              `_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
               { trigger: 'listen' }
             )
           } catch (e) {} // already logged, just continue
@@ -2114,10 +2114,10 @@
     setTimeout(() => {
       items.forEach(item => {
         if (!item.listen) return
-        if (!item.text.includes('_on_search')) return
+        if (!itemDefinesFunction(item, '_on_search')) return
         try {
           _item(item.id).eval(
-            `if (typeof _on_search == 'function') _on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
+            `_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
             { trigger: 'listen' }
           )
         } catch (e) {} // already logged, just continue
@@ -2528,10 +2528,10 @@
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
             if (!item.listen && item.id != id) return // must be listener or self
-            if (!item.text.includes('_on_item_change')) return
+            if (!itemDefinesFunction(item, '_on_item_change')) return
             try {
               _item(item.id).eval(
-                `if (typeof _on_item_change == 'function') _on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
+                `_on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
                 {
                   trigger: item.listen ? 'listen' : 'change',
                 }
@@ -3453,17 +3453,17 @@
 
                   // invoke _on_install(item)|_on_update(item) if defined as function
                   if (!updating) {
-                    if (item.text.includes('_on_install')) {
+                    if (itemDefinesFunction(item, '_on_install')) {
                       try {
-                        _item(item.id).eval(`if (typeof _on_install == 'function') _on_install(_item('${item.id}'))`, {
+                        _item(item.id).eval(`_on_install(_item('${item.id}'))`, {
                           trigger: 'command',
                         })
                       } catch (e) {} // already logged, just continue
                     }
                   } else {
-                    if (item.text.includes('_on_update')) {
+                    if (itemDefinesFunction(item, '_on_update')) {
                       try {
-                        _item(item.id).eval(`if (typeof _on_update == 'function') _on_update(_item('${item.id}'))`, {
+                        _item(item.id).eval(`_on_update(_item('${item.id}'))`, {
                           trigger: 'command',
                         })
                       } catch (e) {} // already logged, just continue
@@ -3542,7 +3542,7 @@
               for (let item of items) {
                 if (!item.listen) continue
                 const name = cmd.substring(1)
-                if (!item.text.includes('_on_command_' + name)) continue
+                if (!itemDefinesFunction(item, '_on_command_' + name)) continue
                 found_listener = true
                 function handleError(e) {
                   const log = _item(item.id).get_log({ since: 'eval', level: 'error' })
@@ -3550,7 +3550,7 @@
                   alert(msg)
                 }
                 const ret = _item(item.id).eval(
-                  `(typeof _on_command_${name} == 'function' ? _on_command_${name}(${cmd_args}) : null)`,
+                  `_on_command_${name}(${cmd_args})`,
                   {
                     trigger: 'listen',
                     async: item.deepasync, // run async if item is async or has async deps
@@ -3665,10 +3665,10 @@
     setTimeout(() => {
       items.forEach(item => {
         if (!item.listen) return
-        if (!item.text.includes('_on_create')) return
+        if (!itemDefinesFunction(item, '_on_create')) return
         try {
           _item(item.id).eval(
-            `if (typeof _on_create == 'function') _on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
+            `_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
             {
               trigger: 'listen',
             }
@@ -4681,16 +4681,33 @@
   const consoleLogMaxSize = 10000
   const statusLogExpiration = 15000
 
+  // returns true iff item has defines specified function _without_ any dependencies 
+  // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
+  function itemDefinesFunction(item, name, type = 'js') {
+    if (!item.text.includes(name)) return false // quick check
+    try {
+      return _item(item.id).eval(`(typeof ${name} == 'function')`, {
+        include_deps: false,
+        trigger: 'itemDefinesFunction',
+        type,
+      })
+    } catch (e) {
+      return false
+    }
+  }
+
   let itemInitTime = 0
   function initItems() {
     if (itemInitTime) return // already initialized items
     itemInitTime = Date.now()
     items.forEach(item => {
       if (!item.init) return
+      // if item has js_init block, use that, otherwise use js block (without dependencies to avoid complications due to init order etc)
+      const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
+      if (!itemDefinesFunction(item, '_init', init_block_type)) return
       try {
-        _item(item.id).eval("if (typeof _init == 'function') _init()", {
-          // if item has js_init block, use that, otherwise use js block without dependencies
-          type: extractBlock(item.text, 'js_init') ? 'js_init' : 'js',
+        _item(item.id).eval("_init()", {
+          type: init_block_type,
           include_deps: false,
           trigger: 'init',
         })
@@ -5475,8 +5492,9 @@
             // evaluate _on_welcome on welcome items
             items.forEach(item => {
               if (!item.welcome) return
+              if (!itemDefinesFunction(item, '_on_welcome')) return
               try {
-                _item(item.id).eval("if (typeof _on_welcome == 'function') _on_welcome()", { trigger: 'welcome' })
+                _item(item.id).eval("_on_welcome()", { trigger: 'welcome' })
               } catch (e) {} // already logged, just continue welcome eval
             })
 
@@ -6026,10 +6044,10 @@
       // NOTE: "deletions" of hidden item correspond to a change to empty store {}
       items.forEach(item => {
         if (!item.listen && item.id != id) return // must be listener or self
-        if (!item.text.includes('_on_global_store_change')) return
+        if (!itemDefinesFunction(item, '_on_global_store_change')) return
         try {
           _item(item.id).eval(
-            `if (typeof _on_global_store_change == 'function') _on_global_store_change('${id}',true)`,
+            `_on_global_store_change('${id}',true)`,
             {
               trigger: 'listen',
             }
