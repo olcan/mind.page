@@ -469,12 +469,9 @@
           if (!item.listen && item.id != this.id) return // must be listener or self
           if (!itemDefinesFunction(item, '_on_local_store_change')) return
           try {
-            _item(item.id).eval(
-              `_on_local_store_change('${this.id}')`,
-              {
-                trigger: 'listen',
-              }
-            )
+            _item(item.id).eval(`_on_local_store_change('${this.id}')`, {
+              trigger: 'listen',
+            })
           } catch (e) {} // already logged, just continue
         })
       }
@@ -509,7 +506,7 @@
     // deletes from firebase if item or item.global_store is missing, or if object is empty
     // saving changes to global_store triggers re-render in case rendering is affected
     // redirects to save_local_store() for anonymous user
-    save_global_store() {    
+    save_global_store() {
       let __item = item(this.id)
       // retry every second until item is saved
       if (!__item.savedId) {
@@ -536,12 +533,9 @@
           if (!item.listen && item.id != this.id) return // must be listener or self
           if (!itemDefinesFunction(item, '_on_global_store_change')) return
           try {
-            _item(item.id).eval(
-              `_on_global_store_change('${this.id}',false)`,
-              {
-                trigger: 'listen',
-              }
-            )
+            _item(item.id).eval(`_on_global_store_change('${this.id}',false)`, {
+              trigger: 'listen',
+            })
           } catch (e) {} // already logged, just continue
         })
       }
@@ -1670,10 +1664,7 @@
           if (!item.listen) return
           if (!itemDefinesFunction(item, '_on_change')) return
           try {
-            _item(item.id).eval(
-              `_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
-              { trigger: 'listen' }
-            )
+            _item(item.id).eval(`_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, { trigger: 'listen' })
           } catch (e) {} // already logged, just continue
         })
       })
@@ -2116,10 +2107,7 @@
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_search')) return
         try {
-          _item(item.id).eval(
-            `_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
-            { trigger: 'listen' }
-          )
+          _item(item.id).eval(`_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, { trigger: 'listen' })
         } catch (e) {} // already logged, just continue
       })
     })
@@ -3549,14 +3537,11 @@
                   let msg = [`${item.name} _on_command_${name}(${cmd_args}) failed: `, ...log, e].join('\n')
                   alert(msg)
                 }
-                const ret = _item(item.id).eval(
-                  `_on_command_${name}(${cmd_args})`,
-                  {
-                    trigger: 'listen',
-                    async: item.deepasync, // run async if item is async or has async deps
-                    async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-                  }
-                )
+                const ret = _item(item.id).eval(`_on_command_${name}(${cmd_args})`, {
+                  trigger: 'listen',
+                  async: item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                })
                 if (ret === null) continue // did not handle command
                 Promise.resolve(ret)
                   .then(obj => {
@@ -3667,12 +3652,9 @@
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_create')) return
         try {
-          _item(item.id).eval(
-            `_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`,
-            {
-              trigger: 'listen',
-            }
-          )
+          _item(item.id).eval(`_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+            trigger: 'listen',
+          })
         } catch (e) {} // already logged, just continue
       })
     })
@@ -4524,12 +4506,17 @@
         if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
 
       // fetch embed text from local repo via server
+      // also update attr.embeds based on preview text
+      const prev_embeds = attr.embeds
+      attr.embeds = null
       let embed_text = {}
       for (let path of _.uniq(embeds)) {
         try {
           const resp = await fetch(`/file/${repo}/${path}`)
           if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
           embed_text[path] = await resp.text()
+          const sha = prev_embeds.find(e => e.path == path)?.sha // keep remote sha
+          attr.embeds = (attr.embeds ?? []).concat({ path, sha })
         } catch (e) {
           throw new Error(`failed to embed '${path}': ${e}`)
         }
@@ -4541,9 +4528,7 @@
         const path = resolve_embed_path(sfx, attr)
         // store original body in attr.embeds
         // only last body is retained for multiple embeds of same path
-        const embed = attr.embeds.find(e => e.path == path)
-        if (embed) embed.body = body
-        else attr.embeds.push({ path, body }) // sha missing for new embed in preview
+        attr.embeds.find(e => e.path == path).body = body
         return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
@@ -4681,7 +4666,7 @@
   const consoleLogMaxSize = 10000
   const statusLogExpiration = 15000
 
-  // returns true iff item has defines specified function _without_ any dependencies 
+  // returns true iff item has defines specified function _without_ any dependencies
   // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
   function itemDefinesFunction(item, name, type = 'js') {
     if (!item.text.includes(name)) return false // quick check
@@ -4706,7 +4691,7 @@
       const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
       if (!itemDefinesFunction(item, '_init', init_block_type)) return
       try {
-        _item(item.id).eval("_init()", {
+        _item(item.id).eval('_init()', {
           type: init_block_type,
           include_deps: false,
           trigger: 'init',
@@ -5494,7 +5479,7 @@
               if (!item.welcome) return
               if (!itemDefinesFunction(item, '_on_welcome')) return
               try {
-                _item(item.id).eval("_on_welcome()", { trigger: 'welcome' })
+                _item(item.id).eval('_on_welcome()', { trigger: 'welcome' })
               } catch (e) {} // already logged, just continue welcome eval
             })
 
@@ -6046,12 +6031,9 @@
         if (!item.listen && item.id != id) return // must be listener or self
         if (!itemDefinesFunction(item, '_on_global_store_change')) return
         try {
-          _item(item.id).eval(
-            `_on_global_store_change('${id}',true)`,
-            {
-              trigger: 'listen',
-            }
-          )
+          _item(item.id).eval(`_on_global_store_change('${id}',true)`, {
+            trigger: 'listen',
+          })
         } catch (e) {} // already logged, just continue
       })
 
