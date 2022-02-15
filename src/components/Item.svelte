@@ -1833,13 +1833,16 @@
   }
   :global(.item li.checkbox.checked, .item li.checkbox.checked li) {
     /* text-decoration: line-through; */
-    opacity: 0.25;
+    opacity: 0.5;
     /* display: none; */
   }
   :global(.item ul.checkbox) {
     list-style: none;
   }
   :global(.item ul.checkbox > li > span.list-item > p > input[type='checkbox']) {
+    margin-left: -15px;
+  }
+  :global(.item ul.checkbox > li > span.list-item > input[type='checkbox']) {
     margin-left: -15px;
   }
   :global(input[type='checkbox']) {
