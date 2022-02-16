@@ -6132,6 +6132,7 @@
                   src={user.photoURL}
                   alt={user.displayName || user.email}
                   title={user.displayName || user.email}
+                  referrerpolicy="no-referrer"
                   on:click|stopPropagation={() => (!signedin ? signIn() : signOut())}
                 />
               {/if}
