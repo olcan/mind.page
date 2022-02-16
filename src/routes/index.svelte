@@ -3711,11 +3711,8 @@
       item.savedTime = savedItem.time
       item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
       item.savedText = savedItem.text
-      if (item.text != item.savedText) {
-        console.warn(`discarding changes to ${item.name} while saving`)
-        item.text = item.savedText
-      }
       item.saving = false
+      item.savingText = null
       items[index] = item // trigger dom update
       if (item.saveClosure) {
         item.saveClosure(item.id)
@@ -3878,6 +3875,7 @@
       return
     }
     item.saving = true
+    item.savingText = item.text
     let itemToSave = {
       // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
       // user: user.uid, // allows us to use set() instead of update()
@@ -3975,7 +3973,7 @@
     // update time for non-log item
     if (!item.log) item.time = Date.now()
 
-    // if cancelled, restore savedText
+    // if cancelled, restore savedText (or savingText if saving)
     // we do not restore time so item remains "soft touched"
     // we also do not restore attr
     if (cancelled) {
@@ -3983,13 +3981,10 @@
       if (item.text != item.savedText && !item.saving && !confirm(`Discard changes to ${item.name}?`)) {
         item.editing = true
         return
-      } else {
-        // if item is saving, cancel w/o restoring savedText since it is subject to change shortly in onItemSaved
-        if (item.saving) return
-        // item.time = item.savedTime;
-        // item.attr = _.cloneDeep(item.savedAttr);
-        item.text = item.savedText
       }
+      // item.time = item.savedTime;
+      // item.attr = _.cloneDeep(item.savedAttr);
+      item.text = item.saving ? item.savingText : item.savedText
     }
 
     if (editing) {
