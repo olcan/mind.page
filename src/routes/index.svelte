@@ -3711,6 +3711,10 @@
       item.savedTime = savedItem.time
       item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
       item.savedText = savedItem.text
+      if (item.text != item.savedText) {
+        console.warn(`discarding changes to ${item.name} while saving`)
+        item.text = item.savedText
+      }
       item.saving = false
       items[index] = item // trigger dom update
       if (item.saveClosure) {
@@ -3975,11 +3979,13 @@
     // we do not restore time so item remains "soft touched"
     // we also do not restore attr
     if (cancelled) {
-      // prompt for save if there are changes
-      if (item.text != item.savedText && !confirm(`Discard changes to ${item.name}?`)) {
+      // confirm cancellation when there are unsaved changes and item is not already saving
+      if (item.text != item.savedText && !item.saving && !confirm(`Discard changes to ${item.name}?`)) {
         item.editing = true
         return
       } else {
+        // if item is saving, cancel w/o restoring savedText since it is subject to change shortly in onItemSaved
+        if (item.saving) return
         // item.time = item.savedTime;
         // item.attr = _.cloneDeep(item.savedAttr);
         item.text = item.savedText
