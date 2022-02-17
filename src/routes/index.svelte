@@ -4076,9 +4076,10 @@
     if (index < 0) index = focusedItem
     let item = items[index]
 
-    // if item is previewable, load preview before running
-    if (item.previewable) {
-      previewItem(item).then(() => onItemRun(item.index, touch_first))
+    // preview all previewable items before running
+    const pending_previews = items.filter(item => item.previewable).map(previewItem)
+    if (pending_previews.length) {
+      Promise.all(pending_previews).then(() => onItemRun(item.index, touch_first))
       return
     }
 
