@@ -6875,7 +6875,7 @@
     position: absolute;
     bottom: 0; /* align bottom of history w/ top of header */
     left: 0;
-    right: 220px; /* easily clears buttons on upper right of editor */
+    right: 0;
     pointer-events: none;
   }
   .history-item {
@@ -6885,6 +6885,7 @@
     font-size: 14px;
     white-space: nowrap;
     max-width: 100%;
+    box-sizing: border-box;
     overflow: hidden;
     text-overflow: ellipsis;
     border-radius: 4px;
@@ -6896,6 +6897,9 @@
   }
   .history-item.current {
     color: #777;
+  }
+  .history-item:last-child {
+    padding-right: 180px; /* clears editor buttons */
   }
 
   /* override italic comment style of sunburst */
