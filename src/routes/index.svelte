@@ -930,7 +930,7 @@
       })
     }
 
-    // invokes given (sync) function after pushing item onto stack
+    // invokes given (sync or async) function after pushing item onto stack
     // re-returns any return value, rethrows (after logging) any errors
     invoke(func) {
       evalStack.push(this.id)
