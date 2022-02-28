@@ -941,6 +941,7 @@
           out = this.attach(out).catch(e => {
             console.error(e)
             this.invalidate_elem_cache()
+            throw e
           })
         }
         if (evalStack.pop() != this.id) console.error('invalid stack')
