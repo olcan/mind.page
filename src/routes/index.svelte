@@ -939,9 +939,7 @@
         // if function returns promise, attach it and set up default rejection handler
         if (out instanceof Promise) {
           out = this.attach(out).catch(e => {
-            console.error(e)
-            this.invalidate_elem_cache()
-            throw e
+            throw e // handled & rethrown in outer catch block
           })
         }
         if (evalStack.pop() != this.id) console.error('invalid stack')
