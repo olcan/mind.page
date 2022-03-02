@@ -223,8 +223,8 @@
     }
 
   // create cache objects (subobjects are created on first entry)
-  if (!window['_elem_cache']) window['_elem_cache'] = {}
-  if (!window['_html_cache']) window['_html_cache'] = {}
+  window['_elem_cache'] ??= {}
+  window['_html_cache'] ??= {}
 
   function toHTML(
     text: string,

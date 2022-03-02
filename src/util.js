@@ -130,6 +130,7 @@ export function isBalanced(expr) {
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
+  if (!window['_elem_cache']) return
   if (!window['_elem_cache'][id]) return
   // console.warn("invalidateElemCache for ", id);
   Object.values(window['_elem_cache'][id]).forEach(elem => {
