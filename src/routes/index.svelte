@@ -2339,7 +2339,8 @@
       }
       const ids = idsFromLabel.get(tag)
       if (ids.length == 0 || ids.length > 1) {
-        missing_deps?.push(tag)
+        // record tag as missing if not special or an "alt" of a special tag
+        if (!isSpecialTag(tag) && item.tagsHidden.includes(tag)) missing_deps?.push(tag)
         return
       }
       ids.forEach(id => {
