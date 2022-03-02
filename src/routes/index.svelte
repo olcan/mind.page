@@ -5041,9 +5041,13 @@
               resetUser() // clean up first
               user = authUser
               init_log('signed in', user.email)
-              localStorage.setItem('mindpage_user', JSON.stringify(user))
+              const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
+              localStorage.setItem('mindpage_user', userInfoString)
               anonymous = readonly = false // just in case (should already be false)
               signedin = true
+              // update user info (email, name, etc) in users collection
+              const userInfo = JSON.parse(userInfoString)
+              firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
 
               // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
               //       (this is the only case where user != firebase().auth().currentUser)
@@ -5348,6 +5352,8 @@
               if (error.code == 'permission-denied') {
                 // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
                 //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
+                // NOTE: as of 3/1/2022, all users are allowed, except those in blocked_users collection
+                //       (so any emails should be investigated as a request to be unblocked)
                 document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
                 signingOut = true // no other option at this point
                 modal.show({

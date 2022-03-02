@@ -2,42 +2,52 @@ rules_version = '2';
 service cloud.firestore {
 	match /databases/{database}/documents {
 
+    // generic user-based access rules (for ANY document in ANY collection w/ user field)
 		// ANYONE can read user=anonymous items
-		// admin can read/write user=anonymous items
+		// admin user (y2swh7JY2ScO5soV7mJMHVltAOX2) can read/write user=anonymous items
 		// logged in <user> can read/write user=<user> items
-		// - logged in <user> must be in 'users' collection
+		// - logged in <user> must NOT be in blocked_users collection
 		// - for read/delete, check user in existing item
 		// - for create, check user in new item
 		// - for update, check user in new AND existing items
-
 		match /{document=**} {
 			allow read: if (resource.data.user == "anonymous") ||
-						   (request.auth.uid == resource.data.user && 
-							exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+						 	      	 (request.auth.uid == resource.data.user &&
+							           !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
 			allow delete: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
-							  resource.data.user == "anonymous") ||
-							 (request.auth.uid == resource.data.user && 
-							  exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-			allow create: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && 
-							  request.resource.data.user == "anonymous") || 
-							 (request.auth.uid == request.resource.data.user && 
-							  exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-			allow update: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && 
-							  request.resource.data.user == "anonymous" &&
-							  resource.data.user == "anonymous") || 
-							 (request.auth.uid == request.resource.data.user &&
-							  request.auth.uid == resource.data.user && 
-							  exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+							           resource.data.user == "anonymous") ||
+							             (request.auth.uid == resource.data.user &&
+							               !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+			allow create: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+							           request.resource.data.user == "anonymous") ||
+							             (request.auth.uid == request.resource.data.user &&
+							               !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+			allow update: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+							           request.resource.data.user == "anonymous" &&
+							             resource.data.user == "anonymous") ||
+							              (request.auth.uid == request.resource.data.user &&
+							                request.auth.uid == resource.data.user &&
+							                  !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
 	  }
 
 		// github_webhooks collection
-		// - only admin can write (except above rules also apply if documents have 'user' field)
-		// - logged in <user> can read
+		// only firebase-admin write
+		// logged in <user> can read, as long as NOT in blocked_users collection
+		// NOTE: also see inherited user-based access rules above
     match /github_webhooks/{item} {
 			allow write: if false;
-			allow read: if exists(/databases/$(database)/documents/users/$(request.auth.uid));
+			allow read: if !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid));
     }
-		
+
+		// users collection
+		// logged in <user> can read/write own document where document id matches uid
+		// user must NOT be in blocked_users collection
+		// NOTE: also see document=** rules above
+    match /users/{user} {
+			allow read, write: if (request.auth.uid == user &&
+												     !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+    }
+
 	}
 }
 service firebase.storage {
