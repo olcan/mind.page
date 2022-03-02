@@ -5046,7 +5046,7 @@
               anonymous = readonly = false // just in case (should already be false)
               signedin = true
               // update user info (email, name, etc) in users collection
-              const userInfo = JSON.parse(userInfoString)
+              const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
               firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
 
               // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
