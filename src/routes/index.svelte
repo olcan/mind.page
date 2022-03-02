@@ -2518,19 +2518,26 @@
 
       // warn about new _init or _welcome items
       // doing this under update_deps ensures item is new or modified (vs initialized)
-      if (item.init && !prev_init) console.warn(`new init item ${item.name} may require reload`)
-      else if (item.welcome && !prev_welcome) console.warn(`new welcome item ${item.name} may require reload`)
+      if (item.init && !prev_init) {
+        console.warn(`new init item ${item.name} may require reload`)
+        item.shouldReload = true
+      } else if (item.welcome && !prev_welcome) {
+        console.warn(`new welcome item ${item.name} may require reload`)
+        item.shouldReload = true
+      }
       const new_init_welcome_item_id = (item.init && !prev_init) || (item.welcome && !prev_welcome) ? item.id : null
 
       // if deephash has changed, invoke _on_item_change on all _listen (or self) items
       // also warn about modified (based on deephash) _init or _welcome items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
         const item = __item(id)
-        if ((item.init || item.welcome) && id != new_init_welcome_item_id && !dependency)
+        if ((item.init || item.welcome) && id != new_init_welcome_item_id && !dependency) {
           console.warn(
             `${dependency ? 'dependency-' : ''}modified ${item.init ? 'init' : 'welcome'} ` +
               `item ${item.name} may require reload`
           )
+          item.shouldReload = true
+        }
         setTimeout(() => {
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
@@ -3509,6 +3516,23 @@
                       if (_item('#pusher')) onEditorDone('/push ' + item.name)
                       else alert(`unable to push item ${item.name} due to missing (deleted?) #pusher`)
                       // item.pushable = false // clear flag even if push command failed
+                    }
+                    // ask about reloading for changes to init/welcome items ...
+                    const reload_items = items.filter(i => i.shouldReload).map(i => i.name)
+                    if (reload_items.length) {
+                      const s = reload_items.length > 1 ? 's' : ''
+                      const ns = reload_items.length > 1 ? '' : 's'
+                      const reload = await _modal({
+                        content: `MindPage recommends reloading page for ${
+                          reload_items.length
+                        } new (or updated) item${s} that contain${ns} [init](https://mindbox.io/#features/_init) or [welcome](https://mindbox.io/#features/_welcome) code: ${reload_items.join(
+                          ', '
+                        )}`,
+                        confirm: 'Reload',
+                        cancel: 'Skip',
+                        background: 'confirm',
+                      })
+                      if (reload) location.reload()
                     }
                   }
 
