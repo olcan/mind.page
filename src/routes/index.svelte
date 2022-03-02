@@ -760,7 +760,18 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
-      initItems() // initialize items if not already done, usually due to macros at first render
+      // initialize items if not already done
+      // (usually due to macros at first render)
+      initItems()
+
+      // throw error if there are missing dependencies
+      // missing dependencies should be already indicated visibly
+      // macros should be re-run as soon as missing dependencies are restored
+      const missing_deps = this.tags_hidden.filter(
+        t => t != this.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1
+      )
+      if (missing_deps.length > 0)
+        throw new Error('missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
 
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
@@ -3375,7 +3386,7 @@
                         throw new Error('invalid dependency path: ' + dep_path)
                       // skip circular dependencies
                       if (dependents.includes(dep)) {
-                        console.warn(`${cmd}: skipping circular dependency ${dep} for ${label}`)
+                        console.log(`${cmd}: skipping circular dependency ${dep} for ${label}`)
                         continue
                       }
                       console.log(`installing dependency ${dep} for ${label} ...`)

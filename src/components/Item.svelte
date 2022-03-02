@@ -264,8 +264,11 @@
         return pfx + out
       } catch (e) {
         hasMacroErrors = true
+        // display missing dependencies using special style
+        if (e.message.startsWith('missing dependencies'))
+          return pfx + `<span class="macro-missing-deps" title="${e.message}">${js}</span>`
         console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
-        return pfx + `<span class="macro-error">MACRO ERROR: ${e}</span>`
+        return pfx + `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
       }
     }
     text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro)
@@ -1237,9 +1240,12 @@
             continue
           // ignore _log blocks that are toggled via .showLogs class
           if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
-          // ignore container elements (div, p, etc) that only contain hidden tags
+          // ignore hidden tags, even if visible (e.g. when missing)
+          if (elem.classList.contains('hidden')) continue
+          // ignore container elements (div, p, etc) that only contain hidden tags or <br> tags
           // these are sometimes used to prevent styling in markdown editors/previews/etc
-          if (elem.children.length && _.every(elem.children, c => c.classList.contains('hidden'))) continue
+          if (elem.children.length && _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden')))
+            continue
           height_below += elem.offsetHeight
         }
         if (height_below == 0) br.style.display = 'none'
@@ -2257,8 +2263,20 @@
     color: black;
     background: #f55;
     border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; /* same as code */
     font-weight: 600;
-    padding: 0 4px;
+    padding: 2px 4px;
+  }
+
+  :global(.item span.macro-missing-deps) {
+    color: #f55;
+    border: 1px dashed #f55;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; /* same as code */
+    font-weight: 600;
+    border-radius: 4px;
+    padding: 2px 4px;
   }
 
   :global(.item .MathJax) {
