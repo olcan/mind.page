@@ -555,7 +555,7 @@
       if (options['include_deps']) {
         options = _.merge({}, options, { include_deps: false }) // deps are recursive already
         item.deps.forEach(id => {
-          const dep = items[indexFromId.get(id)]
+          const dep = __item(id)
           // NOTE: we allow async dependents to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
           if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
           content.push(_item(id).read(type, options))
@@ -765,11 +765,10 @@
       initItems()
 
       // throw error if there are missing dependencies
-      // missing dependencies should be already indicated visibly
-      // macros should be re-run as soon as missing dependencies are restored
-      const missing_deps = this.tags_hidden.filter(
-        t => t != this.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1
-      )
+      // _direct_ missing dependencies should be already indicated visibly
+      // macros should be re-run as soon as missing dependencies are installed/restored
+      const missing_deps = []
+      itemDeps(this.index, [], missing_deps)
       if (missing_deps.length > 0)
         throw new Error('missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
 
@@ -2324,7 +2323,7 @@
   }
 
   let idsFromLabel = new Map<string, string[]>()
-  function itemDeps(index, deps = []) {
+  function itemDeps(index, deps = [], missing_deps = undefined) {
     let item = items[index]
     if (deps.includes(item.id)) return deps
     // NOTE: dependency order matters for hashing and potentially for code import
@@ -2333,13 +2332,21 @@
     item.tagsHiddenAlt.forEach(tag => {
       // NOTE: we allow special tags as dependents if corresponding uniquely named items exist
       // if (isSpecialTag(tag)) return;
-      if (!idsFromLabel.has(tag)) return
+      if (!idsFromLabel.has(tag)) {
+        // record tag as missing if not special or an "alt" of a special tag
+        if (!isSpecialTag(tag) && item.tagsHidden.includes(tag)) missing_deps?.push(tag)
+        return
+      }
       const ids = idsFromLabel.get(tag)
-      if (ids.length > 1) return // only unique labels can have dependents
+      if (ids.length == 0 || ids.length > 1) {
+        missing_deps?.push(tag)
+        return
+      }
       ids.forEach(id => {
-        const dep = indexFromId.get(id)
-        if (dep == undefined) return // deleted
-        deps = itemDeps(dep, deps)
+        // NOTE: idsFromLabel should never return deleted items!
+        const dep_index = indexFromId.get(id)
+        if (dep_index === undefined) throw new Error(`idsFromLabel.get(${tag}) returned deleted id ${id}`)
+        deps = itemDeps(dep_index, deps, missing_deps)
       })
     })
     return root ? deps.slice(1) : deps.slice(1).concat(item.id)
@@ -2348,7 +2355,7 @@
   function itemDepsString(item) {
     return item.deps
       .map(id => {
-        const dep = items[indexFromId.get(id)]
+        const dep = __item(id)
         return dep.name + (dep.deepasync ? '(async)' : '')
       })
       .join(' ')
@@ -2357,7 +2364,7 @@
   function itemDependentsString(item) {
     return item.dependents
       .map(id => {
-        const dep = items[indexFromId.get(id)]
+        const dep = __item(id)
         const visible = item.labelUnique && dep.tagsVisible.includes(item.label)
         return dep.name + (visible ? '(visible)' : '')
       })
@@ -2439,10 +2446,10 @@
     if (item.label != prevLabel) {
       item.labelUnique = false
       if (prevLabel) {
-        const ids = idsFromLabel.get(prevLabel).filter(id => id != item.id)
-        idsFromLabel.set(prevLabel, ids)
+        const ids = _.pull(idsFromLabel.get(prevLabel), item.id)
+        // console.debug('removed id for label', prevLabel, ids)
         if (ids.length == 1) {
-          let other = items[indexFromId.get(ids[0])]
+          let other = item(ids[0])
           other.labelUnique = true
           other.name = other.labelUnique ? other.labelText : 'id:' + other.id
         } else if (ids.length == 0) {
@@ -2451,11 +2458,13 @@
         }
       }
       if (item.label) {
-        const ids = (idsFromLabel.get(item.label) || []).concat(item.id)
-        idsFromLabel.set(item.label, ids)
+        let ids = idsFromLabel.get(item.label)
+        if (!ids) idsFromLabel.set(item.label, (ids = [item.id]))
+        else ids.push(item.id)
+        // console.debug('added id for label', item.label, ids)
         item.labelUnique = ids.length == 1
         if (ids.length == 2) {
-          let other = items[indexFromId.get(ids[0])]
+          let other = item(ids[0])
           other.labelUnique = false
           other.name = other.labelUnique ? other.labelText : 'id:' + other.id
         }
@@ -2495,17 +2504,17 @@
       const prevDeps = item.deps || []
       const prevDependents = item.dependents || []
       item.deps = itemDeps(index)
-      // console.debug("updated dependencies:", item.deps);
+      // console.debug('updated dependencies:', item.label, prevLabel, item.deps, prevDeps)
 
       const prevDeepHash = item.deephash
       item.deephash = hash(
         item.deps
-          .map(id => items[indexFromId.get(id)].hash)
+          .map(id => __item(id).hash)
           .concat(item.hash)
           .join(',')
       )
       if (item.deephash != prevDeepHash && !item.log && !keep_time) item.time = Date.now()
-      item.deepasync = item.async || item.deps.some(id => items[indexFromId.get(id)].async)
+      item.deepasync = item.async || item.deps.some(id => __item(id).async)
 
       // warn about new _init or _welcome items
       // doing this under update_deps ensures item is new or modified (vs initialized)
@@ -2516,7 +2525,7 @@
       // if deephash has changed, invoke _on_item_change on all _listen (or self) items
       // also warn about modified (based on deephash) _init or _welcome items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
-        const item = items[indexFromId.get(id)]
+        const item = __item(id)
         if ((item.init || item.welcome) && id != new_init_welcome_item_id && !dependency)
           console.warn(
             `${dependency ? 'dependency-' : ''}modified ${item.init ? 'init' : 'welcome'} ` +
@@ -2560,13 +2569,13 @@
             const depitem_prevDeepHash = depitem.deephash
             depitem.deephash = hash(
               depitem.deps
-                .map(id => items[indexFromId.get(id)].hash)
+                .map(id => __item(id).hash)
                 .concat(depitem.hash)
                 .join(',')
             )
             if (depitem.deephash != depitem_prevDeepHash)
               invoke_listeners_for_changed_item(depitem.id, depitem.label, depitem.label, true /*dependency*/)
-            depitem.deepasync = depitem.async || depitem.deps.some(id => items[indexFromId.get(id)].async)
+            depitem.deepasync = depitem.async || depitem.deps.some(id => __item(id).async)
             // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
@@ -2576,22 +2585,28 @@
           }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id)
         })
-        // console.debug("updated dependents:", item.dependents);
+        // console.debug('updated dependents:', item.label, prevLabel, item.dependents, prevDependents)
       }
 
       // update deps/dependents strings
       item.depsString = itemDepsString(item)
       item.dependentsString = itemDependentsString(item)
+
+      // update dependents for dependencies and vice versa (including strings)
       _.uniq(item.deps.concat(prevDeps)).forEach(id => {
-        const dep = items[indexFromId.get(id)]
+        const dep = __item(id as string)
         if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id)) dep.dependents.push(item.id)
-        else if (!item.deps.includes(dep.id) && dep.dependents.includes(item.id))
-          dep.dependents = dep.dependents.filter(id => id != item.id)
+        else if (!item.deps.includes(dep.id) && dep.dependents.includes(item.id)) {
+          // NOTE: when removing item as a dependent from a previous dependency, we have to review all dependents of the dependecy since it may also have _indirect_ dependents through this item
+          dep.dependents = dep.dependents.filter(id => {
+            id != item.id && __item(id).deps.includes(dep.id)
+          })
+        }
         dep.dependentsString = itemDependentsString(dep)
         // console.debug("updated dependentsString:", dep.dependentsString);
       })
       _.uniq(item.dependents.concat(prevDependents)).forEach(id => {
-        const dep = items[indexFromId.get(id)]
+        const dep = __item(id as string)
         dep.depsString = itemDepsString(dep)
       })
     }
@@ -3944,28 +3959,27 @@
       item.text = item.savedText // in case text was cleared to trigger deletion on onItemEditing
       return false
     }
-    // clear query if deleted item is being navigated
-    const navigated = editorText.trim().toLowerCase() == item.name.toLowerCase()
-    if (navigated) {
-      replaceStateOnEditorChange = true // do not create new entry
-      editorText = '' // clear query (onEditorChange invoked below)
-    }
+    const { name } = item // name used below
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
     // update indices as needed by onEditorChange
     indexFromId = new Map<string, number>()
     items.forEach((item, index) => indexFromId.set(item.id, index))
+    // deletion can affect ordering (e.g. due to missingTags), so we need onEditorChange
+    // we also clear query if deleted item was being navigated
+    if (editorText.trim().toLowerCase() == name.toLowerCase()) {
+      replaceStateOnEditorChange = true // do not create new entry
+      editorText = ''
+    }
     lastEditorChangeTime = 0 // disable debounce even if editor focused
-    onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
+    onEditorChange(editorText)
     deletedItems.unshift({
       time: item.savedTime,
       attr: _.cloneDeep(item.savedAttr),
       text: item.savedText,
     }) // for /undelete
-    if (!readonly && item.savedId) {
-      firestore().collection('items').doc(item.savedId).delete().catch(console.error)
-    }
+    if (!readonly && item.savedId) firestore().collection('items').doc(item.savedId).delete().catch(console.error)
     // if deleted item was being navigated, go back to previous state
     // if (navigated && sessionStateHistoryIndex > 0) update_dom().then(() => history.back())
     return true
