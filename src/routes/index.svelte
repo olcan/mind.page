@@ -3248,14 +3248,15 @@
                   if (!token) {
                     await _modal_close() // close/cancel all modals
                     token = await _modal({
-                      content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) for installing items from GitHub. Token is optional for public repos but is strongly recommended as token-free access can be severely throttled by GitHub.`,
+                      content: `MindPage needs your [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) to install or update items from GitHub. Token is required even for public repos to avoid strict rate limits imposed on token-free access by GitHub.`,
                       confirm: 'Use Token',
-                      cancel: 'Skip',
+                      cancel: 'Cancel',
                       input: '',
                       password: false,
                     })
                     if (token) localStorage.setItem('mindpage_github_token', token)
-                    else token = null // no token, use unauthenticated client
+                    // else token = null // no token, use unauthenticated client
+                    else return // cancelled
                   }
                   // NOTE: force-closing modals is especially important since install/update can be invoked recursively for dependencies ...
                   await _modal_close() // close/cancel all modals
