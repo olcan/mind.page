@@ -2606,11 +2606,8 @@
         if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id)) dep.dependents.push(item.id)
         else if (!item.deps.includes(dep.id) && dep.dependents.includes(item.id)) {
           // NOTE: when removing item as a dependent from a previous dependency, we have to review all dependents of the dependecy since it may also have _indirect_ dependents through this item
-          const old = dep.dependents
-          dep.dependents = dep.dependents.filter(id =>
-            id != item.id && __item(id).deps.includes(dep.id)
-          )
-          console.debug('updated dependency dependents:', dep.name, dep.dependents, old)
+          dep.dependents = dep.dependents.filter(id => id != item.id && __item(id).deps.includes(dep.id))
+          // console.debug('updated dependency dependents:', dep.name, dep.dependents)
         }
         dep.dependentsString = itemDependentsString(dep)
         // console.debug("updated dependentsString:", dep.dependentsString);
