@@ -2449,7 +2449,7 @@
         const ids = _.pull(idsFromLabel.get(prevLabel), item.id)
         // console.debug('removed id for label', prevLabel, ids)
         if (ids.length == 1) {
-          let other = item(ids[0])
+          let other = __item(ids[0])
           other.labelUnique = true
           other.name = other.labelUnique ? other.labelText : 'id:' + other.id
         } else if (ids.length == 0) {
@@ -2464,7 +2464,7 @@
         // console.debug('added id for label', item.label, ids)
         item.labelUnique = ids.length == 1
         if (ids.length == 2) {
-          let other = item(ids[0])
+          let other = __item(ids[0])
           other.labelUnique = false
           other.name = other.labelUnique ? other.labelText : 'id:' + other.id
         }
