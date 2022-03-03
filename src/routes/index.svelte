@@ -1359,9 +1359,9 @@
       item.lastIndex = item.index
       item.lastColumn = item.column
 
-      // if non-dotted item is first in its column or section and missing time string, add it now
+      // if non-pinned item is first in its column or section and missing time string, add it now
       // also mark it as a "leader" for styling its index number
-      item.leader = !item.dotted && (columnLastItem[item.column] < 0 || item.column != lastItem.column)
+      item.leader = !item.pinned && (columnLastItem[item.column] < 0 || item.column != lastItem.column)
       if (item.leader && !item.timeString) {
         item.timeString = timeString
         lastTimeString = timeString // for grouping of subsequent items
