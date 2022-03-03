@@ -97,7 +97,7 @@
   // use mindbox_text == null to let onEditorDone (including any handled command) determine mindbox text
   // use emulate_button == true to emulate "create" button behavior
   function _create(
-    text,
+    text = '',
     {
       run = false,
       edit = false,
@@ -2845,7 +2845,7 @@
     // disable running if Shift is held
     if (e?.shiftKey) run = false
     // force editing if text is empty
-    if (!text.trim()) editing = true
+    // if (!text.trim()) editing = true
 
     if (!ignore_command) {
       switch (text.trim()) {
