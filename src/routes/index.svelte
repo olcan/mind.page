@@ -6404,6 +6404,7 @@
       /* padding to make it easier to crop video */
       padding: 0 10px;
       padding-top: 10px;
+      box-sizing: border-box; /* include added padding */
     }
     .webcam-background {
       position: fixed;
@@ -6429,8 +6430,8 @@
       /* background: #333; */
       width: 550px;
       height: 400px;
-      max-width: 27.5vw;
-      max-height: 20vw;
+      max-width: 34.375vw;
+      max-height: 25vw;
       position: fixed;
       bottom: 0;
       right: 0;
@@ -6446,6 +6447,7 @@
       height: 50vw;
       max-width: 68.75vw;
       max-height: 50vw;
+      right: 15.625vw;
     }
   </style>
 
