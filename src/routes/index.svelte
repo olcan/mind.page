@@ -5606,6 +5606,7 @@
 
   function onKeyDown(e: KeyboardEvent) {
     if (!e.metaKey) focus() // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
+    if (narrating) intro = false // end intro mode on keydown
     const key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
     // console.debug("window.onKeyDown:", e, key);
