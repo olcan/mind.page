@@ -1798,7 +1798,7 @@
   }
   :global(.item span.list-item) {
     display: block;
-    margin-left: -5px;
+    margin-left: -0.2em; /* relative to font size, scales better */
     color: #ddd;
   }
   /* additional space between list items */
