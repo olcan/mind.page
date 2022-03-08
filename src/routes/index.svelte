@@ -23,7 +23,7 @@
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
   let green_screen = isClient && localStorage.getItem('mindpage_green_screen') == 'true'
   if (isClient) window['_green_screen'] = green_screen
-  let intro = true // larger centered narration window
+  let intro = narrating // larger centered narration window
   let modal
 
   let evalStack = []
@@ -1620,14 +1620,12 @@
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
-    if (narrating) intro = sessionStateHistoryIndex == 0
   }
 
   function replaceState(state) {
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
-    if (narrating) intro = sessionStateHistoryIndex == 0
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -1655,8 +1653,19 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
+    // if non-empty editorText matches top history entry, then we go back to top instead of looping history
+    if (
+      editorText.trim() &&
+      sessionStateHistoryIndex > 0 &&
+      sessionStateHistory[0].editorText.trim() == editorText.trim()
+    ) {
+      scrollToTopOnPopState = true
+      history.go(-sessionStateHistoryIndex)
+      return
+    }
+
     // editor text is considered "modified" and if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
-    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
+    // const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
     // keep history entry 0 updated, reset index on changes
     // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
@@ -2095,6 +2104,7 @@
           hideIndex,
           scrollPosition: document.body.scrollTop,
           final: finalizeStateOnEditorChange,
+          intro,
         }
         // console.debug(history.state.final ? "push" : "replace", state);
         if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
@@ -2256,10 +2266,12 @@
     }
     //console.debug('onPopState', e.state, items.length + ' items')
 
+    // restore intro mode for narration
+    intro = e.state.intro
+
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
     sessionStateHistoryIndex = e.state.index
-    if (narrating) intro = sessionStateHistoryIndex == 0
 
     // restore editor text and unsaved times
     editorText = e.state.editorText || ''
@@ -5396,6 +5408,10 @@
                     console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
                     deleteHiddenItem(wrapper.id)
                   })
+
+                  // if narrating, fill .webcam-title from #webcam-title item if it exists
+                  if (narrating)
+                    document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
                 })
               }
             },
@@ -5619,6 +5635,9 @@
     if (!initialized) return
     if (modal.visible()) return // ignore keys when modal is visible
 
+    // end intro mode (while narrating) on non-modified keydown
+    if (intro && !modified) document.querySelector('.webcam-background.intro')?.dispatchEvent(new MouseEvent('click'))
+
     // disable arrow keys to prevent ambiguous behavior
     if (key.startsWith('Arrow')) e.preventDefault()
 
@@ -5727,16 +5746,19 @@
           selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
         }
         if (selectedIndex >= 0) {
-          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1)
+          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1) {
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-          else if (key == 'ArrowLeft' && selectedIndex > 0)
+            return
+          } else if (key == 'ArrowLeft' && selectedIndex > 0) {
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+            return
+          }
         }
         // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
-        return // context exists, so ArrowLeft/Right assumed handled
+        if (key == 'ArrowRight') return // assume ArrowRight handled if context exists
       }
     }
-    // let unmodified ArrowDown (or ArrowRight if not handled above because of missing context) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    // let unmodified ArrowDown (or ArrowRight if not handled above) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == 'ArrowDown' || key == 'ArrowRight') && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
@@ -5809,8 +5831,8 @@
       }
       return
     }
-    // let unmodified ArrowUp select label on last context item (i.e. move up to parent)
-    if (key == 'ArrowUp' && !modified) {
+    // let unmodified ArrowUp (or ArrowLeft if not handled above) select label on last context item (i.e. move up to parent)
+    if ((key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
       // attempt to click on a hide toggle
       const hideToggle = document.querySelector(`.toggle.hide`)
       if (hideToggle) {
@@ -6126,6 +6148,8 @@
 
   function onWebcamClick(e) {
     intro = !intro
+    // replace state except for first (always intro)
+    if (history.state.index > 0) replaceState(Object.assign(history.state, { intro }))
     e.stopPropagation()
     ;(e.target as HTMLElement).classList.toggle('intro')
   }
@@ -6452,12 +6476,31 @@
       max-height: 50vw;
       right: 15.625vw;
     }
+    .webcam-title {
+      z-index: 1001; /* just above .webcam */
+      color: white;
+      font-weight: 600;
+      font-size: 10px;
+      position: fixed;
+      bottom: 5px;
+      right: 5px;
+      padding: 5px 10px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 5px;
+      transition: all 1s ease;
+    }
+    .webcam-title.intro {
+      right: 50%;
+      font-size: 30px;
+      transform: translateX(50%);
+    }
   </style>
 
   <div class="webcam-background" class:intro on:click|self={onWebcamClick} />
   <!-- svelte-ignore a11y-media-has-caption -->
   <video id="webcam-video" class="webcam" class:intro style="visibility: hidden; z-index:-100" />
   <canvas id="webcam-canvas" class="webcam" class:intro on:click|self={onWebcamClick} />
+  <div class="webcam-title" class:intro />
 
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
