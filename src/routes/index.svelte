@@ -1620,12 +1620,14 @@
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
+    if (narrating) intro = sessionStateHistoryIndex == 0
   }
 
   function replaceState(state) {
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
+    if (narrating) intro = sessionStateHistoryIndex == 0
   }
 
   // NOTE: Invoke onEditorChange only editor text and/or item content has changed.
@@ -2257,6 +2259,7 @@
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
     sessionStateHistoryIndex = e.state.index
+    if (narrating) intro = sessionStateHistoryIndex == 0
 
     // restore editor text and unsaved times
     editorText = e.state.editorText || ''
@@ -5606,7 +5609,6 @@
 
   function onKeyDown(e: KeyboardEvent) {
     if (!e.metaKey) focus() // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
-    if (narrating) intro = false // end intro mode on keydown
     const key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
     // console.debug("window.onKeyDown:", e, key);
