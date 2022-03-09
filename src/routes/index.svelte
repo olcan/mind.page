@@ -4425,8 +4425,6 @@
       setTimeout(() => {
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
         replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }))
-        sessionStateHistory[sessionStateHistoryIndex] = history.state
-        sessionStateHistory = sessionStateHistory // trigger svelte update
         historyUpdatePending = false
       }, 250)
     }
