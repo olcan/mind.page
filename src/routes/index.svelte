@@ -1657,12 +1657,21 @@
     if (
       editorText.trim() &&
       sessionStateHistoryIndex > 0 &&
-      sessionStateHistory[0].editorText.trim() == editorText.trim()
+      editorText.trim() == sessionStateHistory[0].editorText.trim()
     ) {
       scrollToTopOnPopState = true
       history.go(-sessionStateHistoryIndex)
       return
     }
+
+    // if non-empty editorText does not match top history entry, then we end intro narration mode
+    if (
+      intro &&
+      editorText.trim() &&
+      sessionStateHistory[0].editorText.trim() &&
+      editorText.trim() != sessionStateHistory[0].editorText.trim()
+    )
+      intro = false
 
     // editor text is considered "modified" and if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
     // const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
@@ -5636,7 +5645,7 @@
     if (modal.visible()) return // ignore keys when modal is visible
 
     // end intro mode (while narrating) on non-modified keydown
-    if (intro && !modified) document.querySelector('.webcam-background.intro')?.dispatchEvent(new MouseEvent('click'))
+    // if (intro && !modified) document.querySelector('.webcam-background.intro')?.dispatchEvent(new MouseEvent('click'))
 
     // disable arrow keys to prevent ambiguous behavior
     if (key.startsWith('Arrow')) e.preventDefault()
@@ -5719,8 +5728,8 @@
       target.querySelector('.log-summary')?.dispatchEvent(new Event('click'))
       return
     }
-    // let unmodified ArrowLeft/Right select next/prev visible non-label tag in last context item
-    if ((key == 'ArrowLeft' || key == 'ArrowRight') && !modified) {
+    // let unmodified ArrowLeft/Up or ArrowRight/Down select prev/next visible non-label tag in last context item
+    if ((key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowRight' || key == 'ArrowDown') && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       const lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
@@ -5746,19 +5755,19 @@
           selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
         }
         if (selectedIndex >= 0) {
-          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1) {
+          if ((key == 'ArrowRight' || key == 'ArrowDown') && selectedIndex < visibleTags.length - 1) {
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
             return
-          } else if (key == 'ArrowLeft' && selectedIndex > 0) {
+          } else if ((key == 'ArrowLeft' || key == 'ArrowUp') && selectedIndex > 0) {
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
             return
           }
         }
         // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
-        if (key == 'ArrowRight') return // assume ArrowRight handled if context exists
+        if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
       }
     }
-    // let unmodified ArrowDown (or ArrowRight if not handled above) select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == 'ArrowDown' || key == 'ArrowRight') && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
@@ -5831,8 +5840,8 @@
       }
       return
     }
-    // let unmodified ArrowUp (or ArrowLeft if not handled above) select label on last context item (i.e. move up to parent)
-    if ((key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
+    // let unmodified or alt-modified ArrowUp/Left select label on last context item (i.e. move up to parent)
+    if ((key == 'ArrowUp' || key == 'ArrowLeft') && (!modified || e.altKey)) {
       // attempt to click on a hide toggle
       const hideToggle = document.querySelector(`.toggle.hide`)
       if (hideToggle) {
@@ -5864,9 +5873,9 @@
       }
     }
 
-    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup
+    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup/arrowleft
     // if no edited items left, then clear editor (mindbox)
-    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp') && !modified) {
+    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
       e.preventDefault()
       if (editingItems.length) {
         // unedit the last edited item
@@ -6467,6 +6476,7 @@
       /* border: 5px solid white; */
       /* border-radius: 50%; */
       /* border-bottom: 1px solid #222; */
+      border-radius: 10px;
       transition: all 1s ease;
     }
     .webcam.intro {
