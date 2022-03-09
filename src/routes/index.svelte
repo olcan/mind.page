@@ -6454,7 +6454,7 @@
       background: rgba(17, 17, 17, 0.8);
       opacity: 0;
       pointer-events: none;
-      transition: all 1s ease;
+      transition: all 0.5s ease-out;
     }
     .webcam-background.intro {
       opacity: 1;
@@ -6475,7 +6475,7 @@
       /* border-radius: 50%; */
       /* border-bottom: 1px solid #222; */
       border-radius: 10px;
-      transition: all 1s ease;
+      transition: all 0.5s ease-out;
     }
     .webcam.intro {
       width: 68.75vw;
@@ -6495,7 +6495,7 @@
       padding: 5px 10px;
       background: rgba(0, 0, 0, 0.5);
       border-radius: 5px;
-      transition: all 1s ease;
+      transition: all 0.5s ease-out;
     }
     .webcam-title.intro {
       right: 50%;
