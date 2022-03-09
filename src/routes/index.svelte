@@ -1617,12 +1617,14 @@
   }
 
   function pushState(state) {
+    if (state.index == 0) state.intro = true // force intro at 0 index
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
   }
 
   function replaceState(state) {
+    if (state.index == 0) state.intro = true // force intro at 0 index
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = history.state
     sessionStateHistory = sessionStateHistory // trigger svelte update
