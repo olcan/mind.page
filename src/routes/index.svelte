@@ -5542,8 +5542,9 @@
         //   console.debug("service workers not available");
         // }
 
+        // display signin modal on readonly accounts, unless the url was for a specific item
         let welcome = null
-        if (readonly) {
+        if (readonly && !location.hash) {
           welcome = modal.show({
             content:
               'Welcome to MindPage! This is an **anonymous demo account**. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
