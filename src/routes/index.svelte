@@ -1655,25 +1655,27 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
-    // if non-empty editorText matches top history entry, then we go back to top instead of looping history
-    if (
-      editorText.trim() &&
-      sessionStateHistoryIndex > 0 &&
-      editorText.trim() == sessionStateHistory[0].editorText.trim()
-    ) {
-      scrollToTopOnPopState = true
-      history.go(-sessionStateHistoryIndex)
-      return
-    }
+    if (narrating) {
+      // if non-empty editorText matches top history entry, then go back to top
+      if (
+        editorText.trim() &&
+        sessionStateHistoryIndex > 0 &&
+        editorText.trim() == sessionStateHistory[0].editorText.trim()
+      ) {
+        scrollToTopOnPopState = true
+        history.go(-sessionStateHistoryIndex)
+        return
+      }
 
-    // if non-empty editorText does not match top history entry, then we end intro narration mode
-    if (
-      intro &&
-      editorText.trim() &&
-      sessionStateHistory[0].editorText.trim() &&
-      editorText.trim() != sessionStateHistory[0].editorText.trim()
-    )
-      intro = false
+      // if non-empty editorText does not match top history entry, then end intro mode
+      if (
+        intro &&
+        editorText.trim() &&
+        sessionStateHistory[0].editorText.trim() &&
+        editorText.trim() != sessionStateHistory[0].editorText.trim()
+      )
+        intro = false
+    }
 
     // editor text is considered "modified" and if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
     // const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
@@ -5765,7 +5767,7 @@
           }
         }
         // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
-        if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
+        // if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
       }
     }
     // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
