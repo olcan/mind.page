@@ -4592,7 +4592,7 @@
           const resp = await fetch(`/file/${repo}/${path}`)
           if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
           embed_text[path] = await resp.text()
-          const sha = prev_embeds.find(e => e.path == path)?.sha // keep remote sha
+          const sha = prev_embeds?.find(e => e.path == path)?.sha // keep remote sha
           attr.embeds = (attr.embeds ?? []).concat({ path, sha })
         } catch (e) {
           throw new Error(`failed to embed '${path}': ${e}`)
@@ -5731,8 +5731,8 @@
       target.querySelector('.log-summary')?.dispatchEvent(new Event('click'))
       return
     }
-    // let unmodified ArrowLeft/Up or ArrowRight/Down select prev/next visible non-label tag in last context item
-    if ((key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowRight' || key == 'ArrowDown') && !modified) {
+    // let unmodified ArrowLeft/Up or ArrowRight select prev/next visible non-label tag in last context item
+    if ((key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowRight') && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       const lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
