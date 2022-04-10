@@ -124,6 +124,10 @@ const sapperServer = express().use(
   cookieParser(),
   (req, res, next) => {
     res.cookie = req.cookies['__session'] || ''
+    // enable cross-origin isolated state, see https://web.dev/coop-coep/
+    // enables advanced features (e.g. SharedArrayBuffer), self.crossOriginIsolated === true
+    // res.set('Cross-Origin-Embedder-Policy', 'require-corp')
+    // res.set('Cross-Origin-Opener-Policy', 'same-origin')
     next()
   },
   // handle POST for webhooks
