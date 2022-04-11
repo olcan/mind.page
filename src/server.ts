@@ -12,6 +12,14 @@ const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
 const chokidar = dev ? require('chokidar') : null
 const events = {} // recorded fs events for /watch/... requests
 
+// initialize firebase admin client
+import { firebaseConfig } from '../firebase-config.js'
+const { initializeApp } = require('firebase-admin/app')
+const { getFirestore } = require('firebase-admin/firestore')
+const { addDoc, collection, query, where, orderBy, getDocs } = require('firebase/firestore')
+const firebase = initializeApp(firebaseConfig)
+
+// helper to determine host directory from request
 function get_hostdir(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
   let hostname = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
@@ -135,7 +143,7 @@ const sapperServer = express().use(
   (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
-      firebaseAdmin().firestore().collection('github_webhooks').add({
+      addDoc(collection(getFirestore(firebase), 'github_webhooks'), {
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
       })
@@ -169,8 +177,6 @@ if (!('FIREBASE_CONFIG' in process.env)) {
     })
 }
 
-import { firebaseAdmin } from '../firebase.js'
-
 // server-side preload hidden from client-side code
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`
 process['server-preload'] = async (page, session) => {
@@ -185,15 +191,13 @@ process['server-preload'] = async (page, session) => {
   } else {
     // NOTE: we no longer preload for non-anonymous accounts because it slows down initial page load for larger accounts, and firebase realtime can be much more efficient due to client-side caching
     return {}
-    // user = await firebaseAdmin().auth().verifyIdToken(session.cookie).catch(console.error);
+    // user = await firebase.auth().verifyIdToken(session.cookie).catch(console.error);
     // if (!user) return { error: "invalid/expired session cookie" };
   }
-  let items = await firebaseAdmin()
-    .firestore()
-    .collection('items') // server always reads from primary collection
-    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
-    .orderBy('time', 'desc')
-    .get()
+  let items = await getDocs(
+    query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
+  )
+
   // console.debug(`retrieved ${items.docs.length} items for user '${user.uid}'`);
   return {
     // NOTE: we use _preload suffix to avoid replacing items on back/forward

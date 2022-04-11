@@ -118,11 +118,11 @@
     </script>
 
     <!-- sync libraries available at client init and render time (e.g. in afterUpdate in Item.svelte) -->
-    <!-- NOTE: including these in client.ts is possible but was SLOWER in testing, presumably due to size (~600K) and lack of caching -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <!-- NOTE: including these in client.ts is possible but was SLOWER in testing, presumably due to size (~600K) and lack of caching; now testing firebase v9 imports exposed via client -->
+    <!-- <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-storage.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script> -->
     <!-- NOTE: lodash was already getting included in index.*.js, so moved it to client.*.js and exposed from client.ts instead of loading again here -->
     <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.20/lodash.min.js"></script> -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/tex-svg.min.js"></script>

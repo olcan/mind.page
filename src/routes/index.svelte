@@ -1,6 +1,34 @@
 <script lang="ts">
+  const isClient = typeof window !== 'undefined'
+  // import firebase via client.ts (can also be via server.ts if preloading used again)
+  const firebase = globalThis.firebase
+  const {
+    getAuth,
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithPopup,
+    signInWithRedirect,
+    setPersistence,
+    browserLocalPersistence,
+  } = globalThis as any
+  const {
+    getFirestore,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    setDoc,
+    addDoc,
+    updateDoc,
+    deleteDoc,
+    query,
+    where,
+    orderBy,
+    onSnapshot,
+  } = globalThis as any
+  const { getStorage, ref, getDownloadURL, uploadBytes, uploadString } = globalThis as any
+
   import _ from 'lodash'
-  import { isClient, firebase, firestore } from '../../firebase.js'
   import { Circle2 } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
   import Editor from '../components/Editor.svelte'
@@ -1121,9 +1149,7 @@
               xhr.send()
               return
             }
-            const ref = firebase().storage().ref().child(src)
-            ref
-              .getDownloadURL()
+            getDownloadURL(ref(getStorage(firebase), src))
               .then(url => {
                 let start = Date.now()
                 let xhr = new XMLHttpRequest()
@@ -1433,9 +1459,7 @@
         }
         if (anonymous) {
           // console.debug(`uploading image ${fname} (${str.length} bytes) ...`);
-          const ref = firebase().storage().ref().child(`${user.uid}/images/${file_hash}`)
-          ref
-            .put(file) // gets mime type from file.type
+          uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), file) // mime type from file
             .then(snapshot => {
               console.debug(`uploaded image ${fname} (${str.length} bytes) in ${Date.now() - start}ms`)
               images.set(fname, url)
@@ -1451,9 +1475,7 @@
               // console.debug(
               //   `uploading encrypted image ${fname} (${cipher.length} bytes, ${str.length} original) ...`
               // );
-              const ref = firebase().storage().ref().child(`${user.uid}/images/${file_hash}`)
-              ref
-                .putString(cipher)
+              uploadString(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher)
                 .then(snapshot => {
                   console.debug(`uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms`)
                   images.set(fname, url)
@@ -1494,9 +1516,7 @@
     }
     return new Promise((resolve, reject) => {
       // image must be downloaded and decrypted if user is not anonymous
-      const ref = firebase().storage().ref().child(src)
-      ref
-        .getDownloadURL()
+      getDownloadURL(ref(getStorage(firebase), src))
         .then(url => {
           if (src.startsWith('anonymous/')) {
             img.src = url
@@ -2340,8 +2360,7 @@
 
     localStorage.removeItem('mindpage_secret') // also remove secret when signing out
     resetUser()
-    firebase()
-      .auth()
+    getAuth(firebase)
       .signOut()
       .then(() => {
         console.log('signed out')
@@ -3041,14 +3060,12 @@
           if (readonly) return
           let added = 0
           items.forEach(item => {
-            firestore()
-              .collection('history')
-              .add({
-                item: item.id,
-                user: user.uid,
-                time: item.time,
-                text: item.text,
-              })
+            addDoc(collection(getFirestore(firebase), 'history'), {
+              item: item.id,
+              user: user.uid,
+              time: item.time,
+              text: item.text,
+            })
               .then(doc => {
                 console.debug(`"added ${++added} of ${items.length} items to history`)
               })
@@ -3057,10 +3074,7 @@
           return
         }
         case '/_welcome': {
-          firestore()
-            .collection('items')
-            .doc('QbtH06q6y6GY4ONPzq8N')
-            .get()
+          getDoc(doc(collection(getFirestore(firebase), 'items'), 'QbtH06q6y6GY4ONPzq8N'))
             .then(doc => _create(doc.data().text))
             .catch(console.error)
           lastEditorChangeTime = 0
@@ -3156,11 +3170,13 @@
               onEditorChange('')
               return
             } else if (cmd == '/_example') {
-              firestore()
-                .collection('items')
-                .where('user', '==', 'anonymous')
-                .orderBy('time', 'desc')
-                .get()
+              getDocs(
+                query(
+                  collection(getFirestore(firebase), 'items'),
+                  where('user', '==', 'anonymous'),
+                  orderBy('time', 'desc')
+                )
+              )
                 .then(examples => {
                   alert(`retrieved ${examples.docs.length} example items`)
                 })
@@ -3741,7 +3757,7 @@
       .then(itemToSave => {
         ;(readonly
           ? Promise.resolve({ id: item.id, delete: Promise.resolve })
-          : firestore().collection('items').add(itemToSave)
+          : addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
         )
           .then(doc => {
             let index = indexFromId.get(item.id) // since index can change
@@ -3758,10 +3774,9 @@
 
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
-              firestore()
-                .collection('history')
-                .add({ item: doc.id, ...itemToSave })
-                .catch(console.error)
+              addDoc(collection(getFirestore(firebase), 'history'), { item: doc.id, ...itemToSave }).catch(
+                console.error
+              )
             }
           })
           .catch(console.error)
@@ -3968,20 +3983,18 @@
     }
 
     encryptItem(itemToSave).then(itemToSave => {
-      firestore()
-        .collection('items')
-        .doc(item.savedId)
-        .update(itemToSave)
+      updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
         .then(() => {
           onItemSaved(item.id, itemToSave)
         })
         .catch(console.error)
 
       // also save to history ...
-      firestore()
-        .collection('history')
-        .add({ item: item.savedId, user: user.uid, ...itemToSave })
-        .catch(console.error)
+      addDoc(collection(getFirestore(firebase), 'history'), {
+        item: item.savedId,
+        user: user.uid,
+        ...itemToSave,
+      }).catch(console.error)
     }) // encryptItem(itemToSave)
   }
 
@@ -4031,7 +4044,8 @@
       attr: _.cloneDeep(item.savedAttr),
       text: item.savedText,
     }) // for /undelete
-    if (!readonly && item.savedId) firestore().collection('items').doc(item.savedId).delete().catch(console.error)
+    if (!readonly && item.savedId) deleteDoc(doc(getFirestore(firebase), 'items', item.savedId)).catch(console.error)
+
     // if deleted item was being navigated, go back to previous state
     // if (navigated && sessionStateHistoryIndex > 0) update_dom().then(() => history.back())
     return true
@@ -4980,7 +4994,7 @@
   let signingIn = false
   function signIn() {
     // if user appears to be signed in, sign out instead
-    if (firebase().auth().currentUser) {
+    if (getAuth(firebase).currentUser) {
       if (!signedin) alert('inconsistent signin state, signing out ...')
       console.warn('attempted to sign in while already signed in, signing out ...')
       signOut()
@@ -4995,21 +5009,18 @@
     resetUser()
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
     document.cookie = '__session=signin_pending;max-age=600' // temporary setting for server post-redirect
-    let provider = new (window['firebase'] as any).auth.GoogleAuthProvider()
-    firebase().auth().useDeviceLanguage()
-    // firebase().auth().setPersistence("none")
-    // firebase().auth().setPersistence("session")
-    firebase().auth().setPersistence('local')
-    // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
-    // if (!android()) firebase().auth().signInWithRedirect(provider);
-    if (ios) firebase().auth().signInWithRedirect(provider)
-    else {
-      firebase()
-        .auth()
-        .signInWithPopup(provider)
-        .then(() => location.reload())
-        .catch(console.error)
-    }
+    let provider = new GoogleAuthProvider()
+    getAuth(firebase).useDeviceLanguage()
+    setPersistence(getAuth(firebase), browserLocalPersistence).then(() => {
+      // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
+      // if (!android()) getAuth(firebase).signInWithRedirect(provider);
+      if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      else {
+        signInWithPopup(getAuth(firebase), provider)
+          .then(() => location.reload())
+          .catch(console.error)
+      }
+    })
   }
 
   function isAdmin() {
@@ -5100,58 +5111,57 @@
       if (!readonly) {
         // if initializing items, wait for that before signing in user since errors can trigger signout
         Promise.resolve(initialization).then(() => {
-          firebase()
-            .auth()
-            .onAuthStateChanged(authUser => {
-              // console.debug("onAuthStateChanged", user, authUser);
-              if (readonly) {
-                console.warn('ignoring unexpected signin')
-                return
-              }
-              if (!authUser) {
-                if (anonymous) return // anonymous user can be signed in or out
-                console.error('failed to sign in') // can happen in chrome for localhost, and on android occasionally
-                document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-                return
-              }
-              resetUser() // clean up first
-              user = authUser
-              init_log('signed in', user.email)
-              const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
-              localStorage.setItem('mindpage_user', userInfoString)
-              anonymous = readonly = false // just in case (should already be false)
-              signedin = true
-              // update user info (email, name, etc) in users collection
-              const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
-              firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
+          onAuthStateChanged(getAuth(firebase), authUser => {
+            // console.debug("onAuthStateChanged", user, authUser);
+            if (readonly) {
+              console.warn('ignoring unexpected signin')
+              return
+            }
+            if (!authUser) {
+              if (anonymous) return // anonymous user can be signed in or out
+              console.error('failed to sign in') // can happen in chrome for localhost, and on android occasionally
+              document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
+              return
+            }
+            resetUser() // clean up first
+            user = authUser
+            init_log('signed in', user.email)
+            const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
+            localStorage.setItem('mindpage_user', userInfoString)
+            anonymous = readonly = false // just in case (should already be false)
+            signedin = true
+            // update user info (email, name, etc) in users collection
+            const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
+            // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
+            setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
 
-              // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
-              //       (this is the only case where user != firebase().auth().currentUser)
-              admin = isAdmin()
-              if (admin) {
-                useAnonymousAccount()
-              } else {
-                // set up server-side session cookie
-                // maximum max-age seems to be 7 days for Safari & we refresh daily
-                // store user's ID token as a __session cookie to send to server for preload
-                // __session is the only cookie allowed by firebase for efficient caching
-                // (see https://stackoverflow.com/a/44935288)
-                const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
-                function updateSessionCookie() {
-                  user
-                    .getIdToken(false /*force refresh*/)
-                    .then(token => {
-                      // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
-                      document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
-                    })
-                    .catch(console.error)
-                }
-                updateSessionCookie()
-                setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+            // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
+            //       (this is the only case where user != getAuth(firebase).currentUser)
+            admin = isAdmin()
+            if (admin) {
+              useAnonymousAccount()
+            } else {
+              // set up server-side session cookie
+              // maximum max-age seems to be 7 days for Safari & we refresh daily
+              // store user's ID token as a __session cookie to send to server for preload
+              // __session is the only cookie allowed by firebase for efficient caching
+              // (see https://stackoverflow.com/a/44935288)
+              const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
+              function updateSessionCookie() {
+                user
+                  .getIdToken(false /*force refresh*/)
+                  .then(token => {
+                    // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
+                    document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
+                  })
+                  .catch(console.error)
               }
+              updateSessionCookie()
+              setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+            }
 
-              initFirebaseRealtime()
-            })
+            initFirebaseRealtime()
+          })
         })
       } else if (anonymous && items_preload.length == 0) {
         initFirebaseRealtime() // synchronize anonymous items using firebase realtime
@@ -5227,224 +5237,219 @@
         // start listening for remote changes
         // (also initialize if items were not returned by server)
         let firebase_snapshot_errors = 0
-        firebase()
-          .firestore()
-          .collection('items')
-          .where('user', '==', user.uid)
-          .orderBy('time', 'desc')
-          .onSnapshot(
-            function (snapshot) {
-              if (window['_disable_sync']) {
-                console.warn('ignoring firestore snapshot due to _disable_sync')
+        onSnapshot(
+          query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc')),
+          snapshot => {
+            if (window['_disable_sync']) {
+              console.warn('ignoring firestore snapshot due to _disable_sync')
+              return
+            }
+            let first_snapshot_items = 0
+            let first_snapshot_changes = 0
+            snapshot.docChanges().forEach(function (change) {
+              const doc = change.doc
+              // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
+              if (firstSnapshot) {
+                first_snapshot_changes++
+                if (change.type != 'added') console.warn('unexpected change type: ', change.type)
+                if (!initTime) {
+                  first_snapshot_items++
+                  // NOTE: snapshot items do not have updateTime/createTime available
+                  items.push(Object.assign(doc.data(), { id: doc.id }))
+                }
                 return
               }
-              let first_snapshot_items = 0
-              let first_snapshot_changes = 0
-              snapshot.docChanges().forEach(function (change) {
-                const doc = change.doc
-                // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
-                if (firstSnapshot) {
-                  first_snapshot_changes++
-                  if (change.type != 'added') console.warn('unexpected change type: ', change.type)
-                  if (!initTime) {
-                    first_snapshot_items++
-                    // NOTE: snapshot items do not have updateTime/createTime available
-                    items.push(Object.assign(doc.data(), { id: doc.id }))
+              if (doc.metadata.hasPendingWrites) return // ignore local change
+              decryptItem(doc.data()).then(savedItem => {
+                // remote changes indicate non-focus: update sessionTime and invoke onFocus
+                sessionTime = Date.now() + 1000 /* margin for small time differences */
+                onFocus() // focused = window.hasFocus
+
+                // console.debug("detected remote change:", change.type, doc.id);
+                if (change.type === 'added') {
+                  if (savedItem.hidden) {
+                    const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                    hiddenItems.set(wrapper.id, wrapper)
+                    if (hiddenItemsByName.has(wrapper.name))
+                      console.warn('remote-added hidden item name exists locally', wrapper.name)
+                    hiddenItemsByName.set(wrapper.name, wrapper)
+                    hiddenItemChangedRemotely(wrapper.name, change.type)
+                    return
                   }
-                  return
-                }
-                if (doc.metadata.hasPendingWrites) return // ignore local change
-                decryptItem(doc.data()).then(savedItem => {
-                  // remote changes indicate non-focus: update sessionTime and invoke onFocus
-                  sessionTime = Date.now() + 1000 /* margin for small time differences */
-                  onFocus() // focused = window.hasFocus
-
-                  // console.debug("detected remote change:", change.type, doc.id);
-                  if (change.type === 'added') {
-                    if (savedItem.hidden) {
-                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                      hiddenItems.set(wrapper.id, wrapper)
-                      if (hiddenItemsByName.has(wrapper.name))
-                        console.warn('remote-added hidden item name exists locally', wrapper.name)
-                      hiddenItemsByName.set(wrapper.name, wrapper)
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
-                      return
-                    }
-                    // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                    let item = initItemState({}, 0, {
-                      ...savedItem,
-                      id: doc.id,
-                      savedId: doc.id,
-                      savedTime: savedItem.time,
-                      savedAttr: _.cloneDeep(savedItem.attr),
-                      savedText: savedItem.text,
-                    })
-                    // update mutable ux properties from item.attr
-                    item.editable = item.attr?.editable ?? true
-                    item.pushable = item.attr?.pushable ?? false
-                    items = [item, ...items]
-                    // update indices as needed by itemTextChanged
-                    items.forEach((item, index) => indexFromId.set(item.id, index))
-                    itemTextChanged(
-                      0,
-                      item.text,
-                      true /* update_deps */,
-                      false /* run_deps */,
-                      false /* keep_time */,
-                      true /* remote */
-                    )
-                    lastEditorChangeTime = 0 // disable debounce even if editor focused
-                    // hideIndex++; // show one more item (skip this for remote add)
-                    onEditorChange(editorText) // integrate new item at index 0
-                  } else if (change.type == 'removed') {
-                    if (savedItem.hidden) {
-                      const wrapper = hiddenItems.get(doc.id)
-                      if (!wrapper) {
-                        // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
-                        // console.warn("remote-deleted hidden item missing locally", doc.id);
-                        return
-                      }
-                      hiddenItems.delete(wrapper.id)
-                      hiddenItemsByName.delete(wrapper.name)
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
-                      return
-                    }
-                    // NOTE: remote remove is similar to deleteItem
-                    // NOTE: document may be under temporary id if it was added locally
-                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
-                    if (index === undefined) return // nothing to remove
-                    let item = items[index]
-                    itemTextChanged(
-                      index,
-                      '',
-                      true /* update_deps */,
-                      false /* run_deps */,
-                      false /* keep_time */,
-                      true /* remote */
-                    )
-                    items.splice(index, 1)
-                    if (index < hideIndex) hideIndex-- // back up hide index
-                    // update indices as needed by onEditorChange
-                    indexFromId = new Map<string, number>()
-                    items.forEach((item, index) => indexFromId.set(item.id, index))
-                    lastEditorChangeTime = 0 // disable debounce even if editor focused
-                    onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
-                    deletedItems.unshift({
-                      time: item.savedTime,
-                      attr: _.cloneDeep(item.savedAttr),
-                      text: item.savedText,
-                    }) // for /undelete
-                  } else if (change.type == 'modified') {
-                    if (savedItem.hidden) {
-                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                      if (!hiddenItems.has(wrapper.id))
-                        console.warn('remote-modified hidden item missing locally', wrapper.id)
-                      else if (hiddenItems.get(wrapper.id).name != wrapper.name)
-                        console.warn(
-                          'remote-modified hidden item has different name',
-                          wrapper.name,
-                          hiddenItems.get(wrapper.id).name
-                        )
-                      hiddenItems.set(wrapper.id, wrapper)
-                      hiddenItemsByName.set(wrapper.name, wrapper)
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
-                      return
-                    }
-                    // NOTE: remote modify is similar to _write without saving
-                    // NOTE: document may be under temporary id if it was added locally
-                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
-                    if (index === undefined) return // nothing to modify
-                    let item = items[index]
-                    item.time = item.savedTime = savedItem.time
-                    item.text = item.savedText = savedItem.text
-                    item.attr = savedItem.attr
-                    // update mutable ux properties from item.attr
-                    item.editable = item.attr?.editable ?? true
-                    item.pushable = item.attr?.pushable ?? false
-                    item.savedAttr = _.cloneDeep(item.attr)
-                    itemTextChanged(
-                      index,
-                      item.text,
-                      true /* update_deps */,
-                      false /* run_deps */,
-                      true /* keep_time */,
-                      true /* remote */
-                    )
-                    lastEditorChangeTime = 0 // disable debounce even if editor focused
-                    onEditorChange(editorText) // item time/text has changed
-                  }
-                })
-              }) // snapshot.docChanges().forEach
-
-              // if this is first snapshot and initialization has not started (initTime = 0), start it now
-              // either way set up callback to complete "synchronization" and set up welcome item if needed
-              if (firstSnapshot) {
-                if (!initTime) {
-                  // alert on empty init for user known to have items, or on any errors before/during first snapshot
-                  // TODO: remove this once you've debugged the issue where first snapshot is blank and items are added in subsequent snapshot(s), triggering the "welcome" dialog and many errors as items are added incrementally (and slowly) post-initialization ... if there are no relevant error/warnings and no other ways to detect a problem, then we may have to either track total number of items, or new users w/ empty accounts, or both.
-                  // NOTE: this triggers rarely now, and whenever it triggered, there were 0 errors listed, BUT in most (all?) cases there was an error in console (could not reach backend in 10s, client using offline mode for now) after closing the dialog, so if we can confirm that, that would be a way to detect a problem trigger an alert and/or reload.
-                  if (first_snapshot_items == 0 && user.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2') {
-                    alert(
-                      `failed init w/ zero items for non-empty account; changes: ${first_snapshot_changes} (see warnings for types), errors: ${firebase_snapshot_errors}; see console for details, reload to retry`
-                    )
-                  } else if (firebase_snapshot_errors > 0) {
-                    alert(`failed init w/ ${firebase_snapshot_errors} errors; see console for details, reload to retry`)
-                  } else {
-                    initTime = window['_init_time'] = Date.now()
-                    initialize()
-                  }
-                }
-                Promise.resolve(initialization).then(() => {
-                  if (!initialized) return // initialization failed, we should be signing out ...
-                  init_log(`synchronized ${items.length} items`)
-                  firstSnapshot = false
-
-                  // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
-                  if (items.length == 0) onEditorDone('/_welcome')
-
-                  // if necessary, init secret by triggering a test encryption/decryption
-                  if (!secret) {
-                    const hello_item = { user: user.uid, time: Date.now(), text: 'hello' }
-                    encryptItem(hello_item)
-                      .then(decryptItem)
-                      .then(item => {
-                        if (JSON.stringify(item) != JSON.stringify(hello_item))
-                          throw new Error('encryption test failed')
-                      })
-                      .catch(encryptionError)
-                  }
-
-                  // delete invalid hidden items after initialization
-                  hiddenItemsInvalid.forEach(wrapper => {
-                    console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
-                    deleteHiddenItem(wrapper.id)
+                  // NOTE: remote add is similar to onEditorDone without js, saving, etc
+                  let item = initItemState({}, 0, {
+                    ...savedItem,
+                    id: doc.id,
+                    savedId: doc.id,
+                    savedTime: savedItem.time,
+                    savedAttr: _.cloneDeep(savedItem.attr),
+                    savedText: savedItem.text,
                   })
+                  // update mutable ux properties from item.attr
+                  item.editable = item.attr?.editable ?? true
+                  item.pushable = item.attr?.pushable ?? false
+                  items = [item, ...items]
+                  // update indices as needed by itemTextChanged
+                  items.forEach((item, index) => indexFromId.set(item.id, index))
+                  itemTextChanged(
+                    0,
+                    item.text,
+                    true /* update_deps */,
+                    false /* run_deps */,
+                    false /* keep_time */,
+                    true /* remote */
+                  )
+                  lastEditorChangeTime = 0 // disable debounce even if editor focused
+                  // hideIndex++; // show one more item (skip this for remote add)
+                  onEditorChange(editorText) // integrate new item at index 0
+                } else if (change.type == 'removed') {
+                  if (savedItem.hidden) {
+                    const wrapper = hiddenItems.get(doc.id)
+                    if (!wrapper) {
+                      // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
+                      // console.warn("remote-deleted hidden item missing locally", doc.id);
+                      return
+                    }
+                    hiddenItems.delete(wrapper.id)
+                    hiddenItemsByName.delete(wrapper.name)
+                    hiddenItemChangedRemotely(wrapper.name, change.type)
+                    return
+                  }
+                  // NOTE: remote remove is similar to deleteItem
+                  // NOTE: document may be under temporary id if it was added locally
+                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                  if (index === undefined) return // nothing to remove
+                  let item = items[index]
+                  itemTextChanged(
+                    index,
+                    '',
+                    true /* update_deps */,
+                    false /* run_deps */,
+                    false /* keep_time */,
+                    true /* remote */
+                  )
+                  items.splice(index, 1)
+                  if (index < hideIndex) hideIndex-- // back up hide index
+                  // update indices as needed by onEditorChange
+                  indexFromId = new Map<string, number>()
+                  items.forEach((item, index) => indexFromId.set(item.id, index))
+                  lastEditorChangeTime = 0 // disable debounce even if editor focused
+                  onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
+                  deletedItems.unshift({
+                    time: item.savedTime,
+                    attr: _.cloneDeep(item.savedAttr),
+                    text: item.savedText,
+                  }) // for /undelete
+                } else if (change.type == 'modified') {
+                  if (savedItem.hidden) {
+                    const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                    if (!hiddenItems.has(wrapper.id))
+                      console.warn('remote-modified hidden item missing locally', wrapper.id)
+                    else if (hiddenItems.get(wrapper.id).name != wrapper.name)
+                      console.warn(
+                        'remote-modified hidden item has different name',
+                        wrapper.name,
+                        hiddenItems.get(wrapper.id).name
+                      )
+                    hiddenItems.set(wrapper.id, wrapper)
+                    hiddenItemsByName.set(wrapper.name, wrapper)
+                    hiddenItemChangedRemotely(wrapper.name, change.type)
+                    return
+                  }
+                  // NOTE: remote modify is similar to _write without saving
+                  // NOTE: document may be under temporary id if it was added locally
+                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                  if (index === undefined) return // nothing to modify
+                  let item = items[index]
+                  item.time = item.savedTime = savedItem.time
+                  item.text = item.savedText = savedItem.text
+                  item.attr = savedItem.attr
+                  // update mutable ux properties from item.attr
+                  item.editable = item.attr?.editable ?? true
+                  item.pushable = item.attr?.pushable ?? false
+                  item.savedAttr = _.cloneDeep(item.attr)
+                  itemTextChanged(
+                    index,
+                    item.text,
+                    true /* update_deps */,
+                    false /* run_deps */,
+                    true /* keep_time */,
+                    true /* remote */
+                  )
+                  lastEditorChangeTime = 0 // disable debounce even if editor focused
+                  onEditorChange(editorText) // item time/text has changed
+                }
+              })
+            }) // snapshot.docChanges().forEach
 
-                  // if narrating, fill .webcam-title from #webcam-title item if it exists
-                  if (narrating)
-                    document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
-                })
+            // if this is first snapshot and initialization has not started (initTime = 0), start it now
+            // either way set up callback to complete "synchronization" and set up welcome item if needed
+            if (firstSnapshot) {
+              if (!initTime) {
+                // alert on empty init for user known to have items, or on any errors before/during first snapshot
+                // TODO: remove this once you've debugged the issue where first snapshot is blank and items are added in subsequent snapshot(s), triggering the "welcome" dialog and many errors as items are added incrementally (and slowly) post-initialization ... if there are no relevant error/warnings and no other ways to detect a problem, then we may have to either track total number of items, or new users w/ empty accounts, or both.
+                // NOTE: this triggers rarely now, and whenever it triggered, there were 0 errors listed, BUT in most (all?) cases there was an error in console (could not reach backend in 10s, client using offline mode for now) after closing the dialog, so if we can confirm that, that would be a way to detect a problem trigger an alert and/or reload.
+                if (first_snapshot_items == 0 && user.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2') {
+                  alert(
+                    `failed init w/ zero items for non-empty account; changes: ${first_snapshot_changes} (see warnings for types), errors: ${firebase_snapshot_errors}; see console for details, reload to retry`
+                  )
+                } else if (firebase_snapshot_errors > 0) {
+                  alert(`failed init w/ ${firebase_snapshot_errors} errors; see console for details, reload to retry`)
+                } else {
+                  initTime = window['_init_time'] = Date.now()
+                  initialize()
+                }
               }
-            },
-            error => {
-              firebase_snapshot_errors++
-              console.error(error)
-              if (error.code == 'permission-denied') {
-                // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
-                //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
-                // NOTE: as of 3/1/2022, all users are allowed, except those in blocked_users collection
-                //       (so any emails should be investigated as a request to be unblocked)
-                document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-                signingOut = true // no other option at this point
-                modal.show({
-                  content: `Welcome ${window['_user'].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
-                  confirm: 'Sign Out',
-                  background: 'confirm',
-                  onConfirm: signOut,
+              Promise.resolve(initialization).then(() => {
+                if (!initialized) return // initialization failed, we should be signing out ...
+                init_log(`synchronized ${items.length} items`)
+                firstSnapshot = false
+
+                // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
+                if (items.length == 0) onEditorDone('/_welcome')
+
+                // if necessary, init secret by triggering a test encryption/decryption
+                if (!secret) {
+                  const hello_item = { user: user.uid, time: Date.now(), text: 'hello' }
+                  encryptItem(hello_item)
+                    .then(decryptItem)
+                    .then(item => {
+                      if (JSON.stringify(item) != JSON.stringify(hello_item)) throw new Error('encryption test failed')
+                    })
+                    .catch(encryptionError)
+                }
+
+                // delete invalid hidden items after initialization
+                hiddenItemsInvalid.forEach(wrapper => {
+                  console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
+                  deleteHiddenItem(wrapper.id)
                 })
-              }
+
+                // if narrating, fill .webcam-title from #webcam-title item if it exists
+                if (narrating)
+                  document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
+              })
             }
-          )
+          },
+          error => {
+            firebase_snapshot_errors++
+            console.error(error)
+            if (error.code == 'permission-denied') {
+              // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
+              //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
+              // NOTE: as of 3/1/2022, all users are allowed, except those in blocked_users collection
+              //       (so any emails should be investigated as a request to be unblocked)
+              document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
+              signingOut = true // no other option at this point
+              modal.show({
+                content: `Welcome ${window['_user'].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
+                confirm: 'Sign Out',
+                background: 'confirm',
+                onConfirm: signOut,
+              })
+            }
+          }
+        )
       }
 
       onMount(() => {
@@ -6025,10 +6030,7 @@
       Promise.resolve(wrapper.saving || wrapper.id).then(saved_id => {
         encryptItem(itemToSave)
           .then(itemToSave => {
-            firestore()
-              .collection('items')
-              .doc(saved_id)
-              .update(itemToSave)
+            updateDoc(doc(getFirestore(firebase), 'items', saved_id), itemToSave)
               // .then(() => {
               //   console.debug("updated hidden item", name, item);
               // })
@@ -6052,9 +6054,7 @@
       wrapper.saving = new Promise((resolve, reject) => {
         encryptItem(itemToSave)
           .then(itemToSave => {
-            firestore()
-              .collection('items')
-              .add(itemToSave)
+            addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
               .then(doc => {
                 // console.debug("created hidden item", JSON.stringify(itemToSave));
                 hiddenItems.delete(wrapper.id) // remove under temp id
@@ -6088,10 +6088,7 @@
     // console.debug("deleting hidden item", name);
     // NOTE: if item is saving, we need to wait for its persistent id before we can delete
     Promise.resolve(wrapper?.saving || id).then(saved_id => {
-      firestore()
-        .collection('items')
-        .doc(saved_id)
-        .delete()
+      deleteDoc(doc(getFirestore(firebase), 'items', saved_id))
         // .then(() => {
         //   console.debug("deleted hidden item", name);
         // })

@@ -4,11 +4,67 @@ import * as sapper from '@sapper/app'
 import _ from 'lodash'
 window['_'] = _
 
-// import firebase from 'firebase/compat/app'
-// import 'firebase/compat/auth'
-// import 'firebase/compat/storage'
-// import 'firebase/compat/firestore'
-// window['fire' + 'base'] = firebase
+// import/expose firebase on window
+import { firebaseConfig } from '../firebase-config.js'
+import { initializeApp } from 'firebase/app'
+const firebase = initializeApp(firebaseConfig)
+window['firebase'] = firebase
+
+// import/expose firebase/auth on window
+import {
+  getAuth,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  setPersistence,
+  browserLocalPersistence,
+} from 'firebase/auth'
+Object.assign(window, {
+  getAuth,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  setPersistence,
+  browserLocalPersistence,
+})
+
+// import/expose firebase/firestore on window
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+} from 'firebase/firestore'
+Object.assign(window, {
+  getFirestore,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+})
+
+// import/expose firebase/storage on window
+import { getStorage, ref, getDownloadURL, uploadBytes, uploadString } from 'firebase/storage'
+Object.assign(window, { getStorage, ref, getDownloadURL, uploadBytes, uploadString })
 
 // import/expose Octokit as window.Octokit
 import { Octokit } from '../node_modules/@octokit/rest' // ~50K
