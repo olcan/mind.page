@@ -4995,7 +4995,7 @@
     resetUser()
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
     document.cookie = '__session=signin_pending;max-age=600' // temporary setting for server post-redirect
-    let provider = new window['firebase'].auth.GoogleAuthProvider()
+    let provider = new (window['firebase'] as any).auth.GoogleAuthProvider()
     firebase().auth().useDeviceLanguage()
     // firebase().auth().setPersistence("none")
     // firebase().auth().setPersistence("session")
@@ -5758,7 +5758,7 @@
           selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
         }
         if (selectedIndex >= 0) {
-          if ((key == 'ArrowRight' || key == 'ArrowDown') && selectedIndex < visibleTags.length - 1) {
+          if (key == 'ArrowRight' /*|| key == 'ArrowDown'*/ && selectedIndex < visibleTags.length - 1) {
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
             return
           } else if ((key == 'ArrowLeft' || key == 'ArrowUp') && selectedIndex > 0) {

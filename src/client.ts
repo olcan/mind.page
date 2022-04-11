@@ -1,5 +1,15 @@
 import * as sapper from '@sapper/app'
 
+// import/expose lodash as window._
+import _ from 'lodash'
+window['_'] = _
+
+// import firebase from 'firebase/compat/app'
+// import 'firebase/compat/auth'
+// import 'firebase/compat/storage'
+// import 'firebase/compat/firestore'
+// window['fire' + 'base'] = firebase
+
 // import/expose Octokit as window.Octokit
 import { Octokit } from '../node_modules/@octokit/rest' // ~50K
 window['Octokit'] = Octokit
@@ -10,15 +20,4 @@ window['marked'] = marked
 
 // comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
 window['_client_start_time'] = Math.round(performance.now())
-sapper.start({
-  target: document.querySelector('#sapper'),
-})
-
-// disable service workers
-// if (navigator.serviceWorker) {
-//   navigator.serviceWorker.getRegistrations().then(function (registrations) {
-//     for (let registration of registrations) {
-//       registration.unregister();
-//     }
-//   });
-// }
+sapper.start({ target: document.querySelector('#sapper') })

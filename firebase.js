@@ -13,7 +13,7 @@ export const firebaseConfig = {
 export const isClient = typeof window !== 'undefined'
 
 export function firebase() {
-  let lib = isClient ? window.firebase : require('firebase')
+  const lib = isClient ? window.firebase : require('firebase')
   return lib.apps.length > 0 ? lib.apps[0] : lib.initializeApp(firebaseConfig)
 }
 
@@ -22,7 +22,7 @@ export function firestore() {
 }
 
 export function firebaseAdmin() {
-  let admin = require('firebase-admin')
+  const admin = require('firebase-admin')
   if (admin.apps.length == 0) admin.initializeApp(firebaseConfig)
   return admin
 }
