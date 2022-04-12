@@ -10,7 +10,7 @@
     signInWithRedirect,
     setPersistence,
     browserLocalPersistence,
-  } = globalThis as any
+  } = firebase?.auth ?? {}
   const {
     getFirestore,
     collection,
@@ -25,8 +25,8 @@
     where,
     orderBy,
     onSnapshot,
-  } = globalThis as any
-  const { getStorage, ref, getDownloadURL, uploadBytes, uploadString } = globalThis as any
+  } = firebase?.firestore ?? {}
+  const { getStorage, ref, getDownloadURL, uploadBytes, uploadString } = firebase?.storage ?? {}
 
   import _ from 'lodash'
   import { Circle2 } from 'svelte-loading-spinners'
@@ -3984,9 +3984,7 @@
 
     encryptItem(itemToSave).then(itemToSave => {
       updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
-        .then(() => {
-          onItemSaved(item.id, itemToSave)
-        })
+        .then(() => onItemSaved(item.id, itemToSave))
         .catch(console.error)
 
       // also save to history ...
@@ -5013,13 +5011,15 @@
     getAuth(firebase).useDeviceLanguage()
     setPersistence(getAuth(firebase), browserLocalPersistence).then(() => {
       // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
+      // NOTE: we have now switched to redirect on all platforms due to blocked popups on desktop
       // if (!android()) getAuth(firebase).signInWithRedirect(provider);
-      if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      else {
-        signInWithPopup(getAuth(firebase), provider)
-          .then(() => location.reload())
-          .catch(console.error)
-      }
+      // if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      // else {
+      //   signInWithPopup(getAuth(firebase), provider)
+      //     .then(() => location.reload())
+      //     .catch(console.error)
+      // }
     })
   }
 

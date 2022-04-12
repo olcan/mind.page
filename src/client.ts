@@ -20,7 +20,7 @@ import {
   setPersistence,
   browserLocalPersistence,
 } from 'firebase/auth'
-Object.assign(window, {
+Object.assign((firebase['auth'] = {}), {
   getAuth,
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -44,9 +44,10 @@ import {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
 } from 'firebase/firestore'
-Object.assign(window, {
+Object.assign((firebase['firestore'] = {}), {
   getFirestore,
   collection,
   doc,
@@ -59,12 +60,19 @@ Object.assign(window, {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
 })
 
 // import/expose firebase/storage on window
 import { getStorage, ref, getDownloadURL, uploadBytes, uploadString } from 'firebase/storage'
-Object.assign(window, { getStorage, ref, getDownloadURL, uploadBytes, uploadString })
+Object.assign((firebase['storage'] = {}), {
+  getStorage,
+  ref,
+  getDownloadURL,
+  uploadBytes,
+  uploadString,
+})
 
 // import/expose Octokit as window.Octokit
 import { Octokit } from '../node_modules/@octokit/rest' // ~50K
