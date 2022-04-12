@@ -106,7 +106,7 @@ const sapperServer = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
     } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
-    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/watch/')) {
+    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
       const [m, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
       if (!client_id || !req_path) {
         console.warn('invalid watch path ' + req.path)
