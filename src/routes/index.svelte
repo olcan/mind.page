@@ -2185,7 +2185,8 @@
     // "soft touch" item if not already newest and not pinned and not log
     // skip time change if alt is held
     if (!e.altKey) {
-      if (items[index].time > newestTime) console.warn('invalid item time')
+      // if (items[index].time > newestTime) console.warn('invalid item time')
+      if (items[index].time > newestTime) newestTime = items[index].time
       else if (items[index].time < newestTime && !items[index].pinned && !items[index].log)
         items[index].time = Date.now()
       // console.debug(e.pageX, e.pageY, document.documentElement.scrollLeft, document.documentElement.scrollTop);
@@ -2273,7 +2274,8 @@
     const index = indexFromId.get(id)
     if (index === undefined) return // deleted
     // "soft touch" item if not already newest and not pinned and not log
-    if (items[index].time > newestTime) console.warn('invalid item time')
+    // if (items[index].time > newestTime) console.warn('invalid item time')
+    if (items[index].time > newestTime) newestTime = items[index].time
     else if (items[index].time < newestTime && !items[index].pinned && !items[index].log) {
       items[index].time = Date.now()
       lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -4260,7 +4262,8 @@
 
   function onItemTouch(index: number, e: MouseEvent = null) {
     if (items[index].log && !confirm(`modify time for #log item?\ncreation time/ordering will be lost`)) return
-    if (items[index].time > newestTime) console.warn('invalid item time')
+    // if (items[index].time > newestTime) console.warn('invalid item time')
+    if (items[index].time > newestTime) newestTime = items[index].time
     if (e?.altKey && e?.metaKey) {
       // move item time back 1 day
       items[index].time = items[index].time - 24 * 3600 * 1000
