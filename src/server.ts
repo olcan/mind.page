@@ -15,7 +15,8 @@ const events = {} // recorded fs events for /watch/... requests
 // initialize firebase admin client
 import { firebaseConfig } from '../firebase-config.js'
 const { initializeApp } = require('firebase-admin/app')
-const { getFirestore, addDoc, collection, query, where, orderBy, getDocs } = require('firebase-admin/firestore')
+const { getFirestore } = require('firebase-admin/firestore')
+const { addDoc, collection, query, where, orderBy, getDocs } = require('firebase/firestore')
 const firebase = initializeApp(firebaseConfig)
 
 // helper to determine host directory from request
