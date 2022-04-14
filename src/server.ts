@@ -13,10 +13,19 @@ const chokidar = dev ? require('chokidar') : null
 const events = {} // recorded fs events for /watch/... requests
 
 // initialize firebase admin client
+// NOTE: we are using v8 client on server because we could not get v9 client to work properly ...
+//       using getFirestore from firebase-admin/firestore causes an 'invalid argument' error for collection
+//       using getFirestore from firebase/firestore causes an undefined object error during a getProvider call
+//       trying to import collection from firebase-admin fails (no such export)
+//       some errors (e.g. invalid argument) are logged at debug level (search for text "FirebaseError")
 import { firebaseConfig } from '../firebase-config.js'
-const { initializeApp } = require('firebase-admin/app')
-const { getFirestore, addDoc, collection, query, where, orderBy, getDocs } = require('firebase/firestore')
-const firebase = initializeApp(firebaseConfig)
+//const { initializeApp } = require('firebase-admin/app')
+//const { getFirestore } = require('firebase-admin/firestore')
+//const { addDoc, collection, query, where, orderBy, getDocs } = require('firebase/firestore')
+//const { getAuth } = require('firebase/auth')
+//const firebase = initializeApp(firebaseConfig)
+const admin = require('firebase-admin')
+const firebase = admin.initializeApp(firebaseConfig)
 
 // helper to determine host directory from request
 function get_hostdir(req) {
@@ -142,7 +151,8 @@ const sapperServer = express().use(
   (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
-      addDoc(collection(getFirestore(firebase), 'github_webhooks'), {
+      firebase.firestore().collection('github_webhooks').add({
+        // addDoc(collection(getFirestore(firebase), 'github_webhooks'), {
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
       })
@@ -190,12 +200,18 @@ process['server-preload'] = async (page, session) => {
   } else {
     // NOTE: we no longer preload for non-anonymous accounts because it slows down initial page load for larger accounts, and firebase realtime can be much more efficient due to client-side caching
     return {}
-    // user = await firebase.auth().verifyIdToken(session.cookie).catch(console.error);
+    // user = await getAuth(firebase).verifyIdToken(session.cookie).catch(console.error);
     // if (!user) return { error: "invalid/expired session cookie" };
   }
-  let items = await getDocs(
-    query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
-  )
+  let items = await firebase
+    .firestore()
+    .collection('items') // server always reads from primary collection
+    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
+    .orderBy('time', 'desc')
+    .get()
+  // let items = await getDocs(
+  //   query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
+  // )
 
   // console.debug(`retrieved ${items.docs.length} items for user '${user.uid}'`);
   return {
