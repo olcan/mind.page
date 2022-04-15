@@ -190,6 +190,7 @@ export function checkElemCache() {
 // only exceptions are undefined, non-Object/Array objects, and functions
 export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
+  if (x === null) return 'null'
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
