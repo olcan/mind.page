@@ -3,6 +3,7 @@
   import { marked } from 'marked'
   import {
     highlight,
+    blockRegExp,
     extractBlock,
     parseTags,
     renderTag,
@@ -283,7 +284,7 @@
 
     // unwrap _markdown(_*) and _md(_*) blocks that are not removed/hidden
     text = text.replace(
-      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?\n)\s*```/gs,
+      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?\n?)\s*```/gs,
       '$1$2'
     )
 
@@ -555,13 +556,10 @@
       .replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
 
     // remove *_removed blocks
-    text = text.replace(/(^|\n)```\w*_removed\n\s*(.*?)\s*\n```/gs, (m, pfx) => pfx)
+    text = text.replace(blockRegExp(/\w*_removed/), '')
 
     // hide *_hidden blocks
-    text = text.replace(
-      /(^|\n)```\w*_hidden\n\s*(.*?)\s*\n```/gs,
-      (m, pfx) => '<!--hidden-->\n' + m + '\n<!--/hidden-->'
-    )
+    text = text.replace(blockRegExp(/\w*_hidden/), (m, pfx) => '<!--hidden-->\n' + m + '\n<!--/hidden-->')
 
     // hide hidden sections
     text = text.replace(
