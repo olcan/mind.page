@@ -145,11 +145,12 @@
         const comment = hljs.COMMENT(/\\?;\{___/, /___\}/, { className: 'comment-custom', relevance: 0 })
         def.contains ??= []
         def.contains.unshift(comment)
-        // for javascript, we allow "name annotations" of the form <- alphanumeric_name
+        // for javascript, we allow "name annotations" of the form <<- alphanumeric_name
+        // note we chose <<- instead <- because it seemed more robust, e.g. having <- after comma broke highlights
         if (lang == 'javascript') {
-          // def.contains.unshift({ scope: 'comment', match: /<-\s*\w+/ })
+          // def.contains.unshift({ scope: 'comment', match: /<<-\s*\w+/ })
           def.unicodeRegex = true // support for unicode regex pattern /.../u, added in 11.3
-          def.contains.unshift({ scope: 'comment', match: /<-\s*[_\p{L}][_\p{L}\d]*/u })
+          def.contains.unshift({ scope: 'comment', match: /<<-\s*[_\p{L}][_\p{L}\d]*/u })
         }
       })
       // register aliases and configure tabs
