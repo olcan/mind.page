@@ -36,7 +36,7 @@
     <link href="https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.css" rel="stylesheet" />
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/styles/sunburst.min.css"
+      href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/styles/sunburst.min.css"
     />
 
     <!-- green screen shader (used in index.svelte) -->
@@ -131,20 +131,26 @@
     <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
 
     <!-- NOTE: load highlight library that includes common languages, see https://highlightjs.org/download/ -->
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/highlight.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/coffeescript.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/applescript.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/glsl.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/mathematica.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/latex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/coffeescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/applescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/glsl.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/mathematica.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/latex.min.js"></script>
     <script>
       // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
       // (e.g. the individual characters could be interpreted in latex)
       hljs.listLanguages().forEach(lang => {
         let def = hljs.getLanguage(lang)
-        const comment = hljs.COMMENT(/\\?;{___/, /___}/, { className: 'comment-custom', relevance: 0 })
-        if (!def.contains) def.contains = [comment]
-        else def.contains.unshift(comment)
+        const comment = hljs.COMMENT(/\\?;\{___/, /___\}/, { className: 'comment-custom', relevance: 0 })
+        def.contains ??= []
+        def.contains.unshift(comment)
+        // for javascript, we allow "name annotations" of the form <- alphanumeric_name
+        if (lang == 'javascript') {
+          // def.contains.unshift({ scope: 'comment', match: /<-\s*\w+/ })
+          def.unicodeRegex = true // support for unicode regex pattern /.../u, added in 11.3
+          def.contains.unshift({ scope: 'comment', match: /<-\s*[_\p{L}][_\p{L}\d]*/u })
+        }
       })
       // register aliases and configure tabs
       hljs.registerAliases(['webppl'], { languageName: 'javascript' })
