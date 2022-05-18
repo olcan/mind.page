@@ -5276,10 +5276,16 @@
                 if (change.type === 'added') {
                   if (savedItem.hidden) {
                     const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                    hiddenItems.set(wrapper.id, wrapper)
                     if (hiddenItemsByName.has(wrapper.name))
-                      console.warn('remote-added hidden item name exists locally', wrapper.name)
-                    hiddenItemsByName.set(wrapper.name, wrapper)
+                      console.warn(
+                        `switching to remote-added hidden item ${wrapper.id} for name ${
+                          wrapper.name
+                        }; existing hidden item ${
+                          hiddenItemsByName.get(wrapper.name).id
+                        } w/ same name should get deleted on reload`
+                      )
+                    hiddenItems.set(wrapper.id, wrapper)
+                    hiddenItemsByName.set(wrapper.name, wrapper) // points to latest-modified wrapper w/ this name
                     hiddenItemChangedRemotely(wrapper.name, change.type)
                     return
                   }
@@ -5318,7 +5324,7 @@
                       return
                     }
                     hiddenItems.delete(wrapper.id)
-                    hiddenItemsByName.delete(wrapper.name)
+                    hiddenItemsByName.delete(wrapper.name) // TODO: switch to other existing?
                     hiddenItemChangedRemotely(wrapper.name, change.type)
                     return
                   }
@@ -5354,12 +5360,20 @@
                       console.warn('remote-modified hidden item missing locally', wrapper.id)
                     else if (hiddenItems.get(wrapper.id).name != wrapper.name)
                       console.warn(
-                        'remote-modified hidden item has different name',
-                        wrapper.name,
-                        hiddenItems.get(wrapper.id).name
+                        `remote-modified hidden item has new name ${wrapper.name}; older name ${
+                          hiddenItems.get(wrapper.id).name
+                        } will still work locally until reload`
+                      )
+                    if (hiddenItemsByName.has(wrapper.name))
+                      console.warn(
+                        `switching to remote-modified hidden item ${wrapper.id} for name ${
+                          wrapper.name
+                        }; existing hidden item ${
+                          hiddenItemsByName.get(wrapper.name).id
+                        } w/ same name should get deleted on reload`
                       )
                     hiddenItems.set(wrapper.id, wrapper)
-                    hiddenItemsByName.set(wrapper.name, wrapper)
+                    hiddenItemsByName.set(wrapper.name, wrapper) // points to latest-modified wrapper w/ this name
                     hiddenItemChangedRemotely(wrapper.name, change.type)
                     return
                   }
@@ -6089,7 +6103,7 @@
     const wrapper = hiddenItems.get(id)
     if (wrapper) {
       hiddenItems.delete(wrapper.id)
-      hiddenItemsByName.delete(wrapper.name)
+      hiddenItemsByName.delete(wrapper.name) // TODO: switch to other existing?
     }
     if (readonly) return // no saving
     // console.debug("deleting hidden item", name);
@@ -6115,7 +6129,7 @@
       const id = name.replace(/^global_store_/, '')
       // warn if <id> (always saved_id for global_store) is missing locally
       // note since item is remote it can not be under temp id locally
-      // also note an item must exist before its global_store does
+      // also note an item should exist before its global_store does
       if (!_exists(id)) {
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
         return
