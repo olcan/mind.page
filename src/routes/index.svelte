@@ -788,9 +788,10 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
-      // initialize items if not already done
-      // (usually due to macros at first render)
-      initItems()
+      // initialize items if not already done (usually due to macros at first render)
+      // note should no longer be needed since initialize invokes initItems before renderRange
+      // initItems()
+      if (!itemInitTime) throw new Error('eval before initItems')
 
       // throw error if there are missing dependencies
       // _direct_ missing dependencies should be already indicated visibly
@@ -4798,9 +4799,9 @@
   let maxRenderedAtInit = 100
   let locationHrefAtInit
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
-  let hiddenItems = new Map()
-  let hiddenItemsByName = new Map()
-  let hiddenItemsInvalid = []
+  let hiddenItems
+  let hiddenItemsByName
+  let hiddenItemsInvalid
   let resolve_init // set below
   function init_log(...args) {
     console.debug(`[${Math.round(performance.now())}ms] ${args.join(' ')}`)
@@ -4874,6 +4875,9 @@
     items.forEach(item => {
       if (!item.hidden) existing_ids.add(item.id)
     })
+    hiddenItems = new Map()
+    hiddenItemsByName = new Map()
+    hiddenItemsInvalid = []
     items.forEach(item => {
       if (item.hidden) {
         const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
@@ -4941,7 +4945,7 @@
       item.dependentsString = itemDependentsString(item)
     })
 
-    initItems()
+    initItems() // invoke _init on items
 
     processed = true
     // init_log(`processed ${items.length} items`);
