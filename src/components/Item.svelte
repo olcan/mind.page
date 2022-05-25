@@ -1375,7 +1375,22 @@
   class:timed={timeString.length > 0}
 >
   {#if timeString}
-    <div class="time" class:timeOutOfOrder>{timeString}</div>
+    <div
+      class="time"
+      class:timeOutOfOrder
+      title={new Date()
+        .toLocaleString(navigator.language, {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'numeric',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: 'numeric',
+        })
+        .replace(/,/g, ' ')}
+    >
+      {timeString}
+    </div>
   {/if}
   {#if showDebugString}
     <div class="debug">{debugString}</div>
@@ -1698,6 +1713,7 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    pointer-events: all;
   }
   .time.timeOutOfOrder {
     color: #aaa;
