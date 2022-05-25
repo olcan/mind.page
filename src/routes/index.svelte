@@ -248,8 +248,8 @@
               image_url: user.photoURL,
               image: `<img src="${user.photoURL}" style="width:20px;height:20px;border-radius:50%">`,
               uid: user.uid,
+              items: items.length,
               total_text_length: textLength,
-              total_text_length_string: numberWithCommas(textLength),
               oldest_item_time: oldestTime,
               oldest_item_time_string: oldestTimeString,
             },
@@ -4726,7 +4726,6 @@
 
   import { onMount } from 'svelte'
   import {
-    numberWithCommas,
     extractBlock,
     blockRegExp,
     parseTags,
