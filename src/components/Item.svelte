@@ -1378,7 +1378,7 @@
     <div
       class="time"
       class:timeOutOfOrder
-      title={new Date()
+      title={new Date(time)
         .toLocaleString(navigator.language, {
           weekday: 'short',
           year: 'numeric',
