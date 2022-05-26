@@ -52,8 +52,6 @@
   export let aboveTheFold: boolean
   export let leader: boolean
   export let runnable: boolean
-  export let scripted: boolean
-  export let macroed: boolean
 
   export let text: string
   export let hash: string
@@ -277,16 +275,16 @@
     //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
-    text = text.replace(/```(\S+)\n(.*?)```/gs, (m, type, body) => {
+    text = text.replace(blockRegExp('.+?'), (m, pfx, type, body) => {
       if (type.includes(':')) type = _.findLast(type.split(':'), s => !s.includes('.')) ?? ''
-      return '```' + type + '\n' + body + '```'
+      return pfx + '```' + type + '\n' + body + '```'
     })
 
-    // unwrap _markdown(_*) and _md(_*) blocks that are not removed/hidden
-    text = text.replace(
-      /(^|\n)```(?:_markdown|_md)(?: *\n|_(?!.*?(?:_removed|_hidden) *\n).*?\n)(.*?\n?)\s*```/gs,
-      '$1$2'
-    )
+    // unwrap _markdown(_*) and _md(_*) blocks that are NOT removed/hidden
+    text = text.replace(blockRegExp('(?:_markdown|_md).*?'), (m, pfx, type, body) => {
+      if (type.match(/(?:_removed|_hidden) *$/)) return m
+      return pfx + body
+    })
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : ''
     matchingTerms = new Set<string>(matchingTerms.split(' ').filter(t => t))
@@ -1417,8 +1415,6 @@
     class:previewable
     class:runnable
     class:saveable
-    class:scripted
-    class:macroed
     class:timeOutOfOrder
     item-id={id}
   >
@@ -1650,11 +1646,6 @@
     padding: 0 4px;
     border: 0;
   }
-  /* .runnable .index,
-  .scripted .index,
-  .macroed .index {
-    background: #468;
-  } */
 
   .index.matching {
     background: #9f9;

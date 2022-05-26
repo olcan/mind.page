@@ -7,12 +7,11 @@ export function numberWithCommas(x) {
 
 export function blockRegExp(type_regex) {
   if (type_regex.source) type_regex = type_regex.source // get source string if passed regex
-  if (''.match(type_regex)) throw new Error('invalid block type regex')
-  return new RegExp('(^|\\n) *```(' + type_regex + ')\\n(?: *```|.*?\\n *```)', 'gs')
+  return new RegExp('((?:^|\\n) *)```(' + type_regex + ')\\n( *|.*?\\n *)```', 'ugs')
 }
 
 export function extractBlock(text, type, keep_empty_lines = false) {
-  // NOTE: this regex is mostly consistent w/ that in updateTextDivs in Editor.svelte or toHTML in Item.svelte, and in particular allows a colon-separated prefix and suffix, w/ the suffix required to contain a period; only notable difference is that the type is allowed to match the colon-separated suffix if it matches exactly
+  // NOTE: this per-line regex is mostly consistent w/ that in updateTextDivs in Editor.svelte or toHTML in Item.svelte, and in particular allows a colon-separated prefix and suffix, w/ the suffix required to contain a period; only notable difference is that the type is allowed to match the colon-separated suffix if it matches exactly
   let insideBlock = false
   let regex = RegExp('^\\s*```(?:\\S+:)?(?:' + type + ')(?:_hidden|_removed)?(?::\\S*\\.\\S*)?(?:\\s|$)')
   const lines = text

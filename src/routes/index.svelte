@@ -2447,9 +2447,7 @@
     let item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    item.runnable = item.lctext.match(/\s*```(?:\\S+:)?\S+_input(?:_hidden|_removed)?(?:\s|$)/)
-    item.scripted = item.lctext.match(/<script.*?>/)
-    item.macroed = item.lctext.match(/<<.*?>>/) || item.lctext.match(/@\{.*?\}@/)
+    item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
     if (text == item.previewText) item.previewable = false
@@ -3399,7 +3397,7 @@
 
                   // extract embed paths
                   let embeds = []
-                  for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
+                  for (let [m, sfx] of text.matchAll(/(?:^|\n) *```\S+:(\S+?)\n(.*?)\n```/gs))
                     if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
                   // fetch embed text and latest commit sha
                   let embed_text = {}
@@ -3428,13 +3426,13 @@
                     }
                   }
                   // replace embed block body with embed contents
-                  text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
+                  text = text.replace(/((?:^|\n) *)```(\S+):(\S+?)\n(.*?)\n```/gs, (m, mpfx, pfx, sfx, body) => {
                     if (sfx.includes('.')) {
                       const path = resolve_embed_path(sfx, attr)
                       // store original body in attr.embeds to allow item to be edited and pushed back
                       // note if same path is embedded multiple times, only the last body is retained
                       attr.embeds.find(e => e.path == path).body = body
-                      return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
+                      return mpfx + '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
                     }
                     return m
                   })
@@ -3923,7 +3921,7 @@
     const async = item.deepasync
     let jsin = extractBlock(item.text, 'js_input')
     // if js_input block is missing (not just empty), then we depend on _run function handling a non-js input block (otherwise item should not be marked runnable) so we output an error message if _run function is missing
-    if (!jsin && !item.lctext.match(/\s*```js_input(?:_hidden|_removed)?(?:\s|$)/)) {
+    if (!jsin && !item.lctext.match(blockRegExp('js_input(?:_hidden|_removed)? *'))) {
       jsin = `if (typeof _run != 'function') console.error('missing _run function for non-js _input block; enabling #_tag may be missing (e.g. #_typescript for ts_input)')`
     }
     // always defer to _run function if defined, even if there is js_input (for custom handling of js code), but allow skipping by returning null
@@ -4184,15 +4182,11 @@
       const run_item = _item(run_name, false /* do not log errors */)
 
       // copy only input blocks, prepend label and dependency on parent
-      let run_text =
-        run_name +
-        ' ' +
-        item.label.replace(/^#/, '#_') +
-        '\n' +
-        item.text.match(/```(?:\\S+:)?\S+_input\s.*?```/gs).join('\n')
+      const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
+      let run_text = run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' + item.text.match(input_regex).join('\n')
 
       // hide input blocks (via _removed suffix)
-      run_text = run_text.replace(/\s*```(?:\\S+:)?\S+_input(?:\s|$)/g, m => m.replace(/_input/, '_input_removed'))
+      run_text = run_text.replace(input_regex, m => m.replace(/_input/, '_input_removed'))
 
       // focus on run item (w/o scrolling) unless it (or a descendant) is already focused
       if (!editorText.trim().toLowerCase().startsWith(run_name.toLowerCase())) {
@@ -4595,7 +4589,7 @@
       // extract embed paths from updated text
       // number of embeds can change here if item text is updated
       let embeds = []
-      for (let [m, sfx, body] of text.matchAll(/```\S+:(\S+?)\n(.*?)\n```/gs))
+      for (let [m, sfx] of text.matchAll(/(?:^|\n) *```\S+:(\S+?)\n(.*?)\n```/gs))
         if (sfx.includes('.')) embeds.push(resolve_embed_path(sfx, attr))
 
       // fetch embed text from local repo via server
@@ -4616,13 +4610,13 @@
       }
 
       // replace embed block body with (updated) embed text
-      text = text.replace(/```(\S+):(\S+?)\n(.*?)\n```/gs, (m, pfx, sfx, body) => {
+      text = text.replace(/((?:^|\n) *)```(\S+):(\S+?)\n(.*?)\n```/gs, (m, mpfx, pfx, sfx, body) => {
         if (!sfx.includes('.')) return m // not path
         const path = resolve_embed_path(sfx, attr)
         // store original body in attr.embeds
         // only last body is retained for multiple embeds of same path
         attr.embeds.find(e => e.path == path).body = body
-        return '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
+        return mpfx + '```' + pfx + ':' + sfx + '\n' + embed_text[path] + '\n```'
       })
 
       // save preview text on item for previewItem()
@@ -6379,8 +6373,6 @@
                 aboveTheFold={item.aboveTheFold}
                 leader={item.leader}
                 runnable={item.runnable}
-                scripted={item.scripted}
-                macroed={item.macroed}
               />
               {#if item.nextColumn >= 0 && item.index < hideIndex}
                 <div class="section-separator">
