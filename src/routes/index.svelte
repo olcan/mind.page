@@ -4183,7 +4183,7 @@
 
       // copy only input blocks, prepend label and dependency on parent
       const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
-      let run_text = run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' + 
+      let run_text = run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' +
         item.text.match(input_regex).join('\n').trim()
 
       // hide input blocks (via _removed suffix)
