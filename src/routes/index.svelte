@@ -4183,8 +4183,8 @@
 
       // copy only input blocks, prepend label and dependency on parent
       const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
-      let run_text = run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' +
-        item.text.match(input_regex).join('\n').trim()
+      let run_text =
+        run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' + item.text.match(input_regex).join('\n').trim()
 
       // hide input blocks (via _removed suffix)
       run_text = run_text.replace(input_regex, m => m.replace(/_input/, '_input_removed'))
@@ -4664,7 +4664,8 @@
     if (
       item.pushable &&
       item.text != item.previewText &&
-      hash(item.text) != _item(item.id).local_store._preview_hash &&
+      item.local_store?._preview_hash && // may be first preview, or reset due to remote changes
+      hash(item.text) != item.local_store._preview_hash &&
       !confirm(`item ${item.name} has non-preview changes; overwrite to preview anyway?`)
     ) {
       console.warn(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
@@ -4714,7 +4715,7 @@
     _item(item.id).write(text, '' /*, { keep_time: true }*/)
     if (item.name != prev_name) console.warn(`preview renamed ${item.name} (was ${prev_name}) from ${repo}/${path}`)
     item.previewable = item.text != item.previewText // should be false now
-    // store preview text hash to be able to detect preview changes across reloads
+    // store preview text hash to be able to detect non-preview changes across reloads
     _item(item.id).local_store._preview_hash = hash(item.previewText)
     console.log(`previewed ${item.name} from ${repo}/${path}`)
   }
@@ -5390,6 +5391,8 @@
                   )
                   lastEditorChangeTime = 0 // disable debounce even if editor focused
                   onEditorChange(editorText) // item time/text has changed
+                  // reset preview hash to prevent warning when previews are synced across tabs
+                  delete item.local_store?._preview_hash
                 }
               })
             }) // snapshot.docChanges().forEach
