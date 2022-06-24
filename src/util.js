@@ -116,16 +116,18 @@ export function countUnescaped(str, substr) {
 }
 
 export function isBalanced(expr) {
-  return (
-    countUnescaped(expr, '`') % 2 == 0 &&
-    countUnescaped(expr, "'") % 2 == 0 &&
-    countUnescaped(expr, '"') % 2 == 0 &&
-    // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
-    (countUnescaped(expr, '/*') == countUnescaped(expr, '*/') || countUnescaped(expr, '/') % 2 == 0) &&
-    countUnescaped(expr, '{') == countUnescaped(expr, '}') &&
-    countUnescaped(expr, '[') == countUnescaped(expr, ']') &&
-    countUnescaped(expr, '(') == countUnescaped(expr, ')')
+  if (countUnescaped(expr, '`') % 2 || countUnescaped(expr, "'") % 2 || countUnescaped(expr, '"') % 2) return false
+  expr = expr.replace(/`.*?`|'[^\n]*?'|"[^\n]*?"/gs, '') // avoid matching inside strings
+  // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
+  if (countUnescaped(expr, '/*') != countUnescaped(expr, '*/') && countUnescaped(expr, '/') % 2) return false
+  expr = expr.replace(/\/\/[^\n]*|\/\*.*?\*\//gs, '') // avoid matching inside comments
+  if (
+    countUnescaped(expr, '{') != countUnescaped(expr, '}') ||
+    countUnescaped(expr, '[') != countUnescaped(expr, ']') ||
+    countUnescaped(expr, '(') != countUnescaped(expr, ')')
   )
+    return false
+  return true
 }
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
