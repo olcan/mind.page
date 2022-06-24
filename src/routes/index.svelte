@@ -3632,7 +3632,7 @@
                   let msg = [`${item.name} _on_command_${name}(${cmd_args}) failed: `, ...log, e].join('\n')
                   alert(msg)
                 }
-                const ret = _item(item.id).eval(`_on_command_${name}(${cmd_args})`, {
+                const ret = _item(item.id).eval(`return _on_command_${name}(${cmd_args})`, {
                   trigger: 'listen',
                   async: item.deepasync, // run async if item is async or has async deps
                   async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
