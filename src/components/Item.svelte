@@ -1267,7 +1267,11 @@
       // console.debug(`executing ${pendingScripts} scripts in item ${name} ...`);
       scripts.forEach((script, scriptIndex) => {
         // console.debug(script.parentElement);
-        if (!script.hasAttribute('_uncached') && !script.parentElement.hasAttribute('_cache_key')) {
+        if (
+          !script.hasAttribute('_uncached') &&
+          !script.hasAttribute('_cache_key') &&
+          !script.parentElement.hasAttribute('_cache_key')
+        ) {
           console.warn('script will execute at every render due to uncached parent (missing _cache_key)')
         }
         script.remove() // remove script to indicate execution
@@ -1796,14 +1800,17 @@
   /* :global(h1, h2, h3, h4, h5, h6) {
     clear: both;
   } */
-  :global(.item ul),
-  :global(.item ol) {
+  :global(.item ul, .item ol) {
     padding-left: 20px;
     color: #999;
   }
+  /* :global(.item ul > *, .item ol > *) {
+    margin-left: 20px;
+  } */
   :global(.item span.list-item) {
     display: block;
-    margin-left: -0.2em; /* relative to font size, scales better */
+    padding-left: 0.3em; /* some internal padding (in case list-item given background/border/etc), undone via margin */
+    margin-left: -0.5em; /* includes negated padding to shift outside; em scales relative to font size */
     color: #ddd;
   }
   /* additional space between list items */
