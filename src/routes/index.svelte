@@ -1854,7 +1854,9 @@
         terms.filter(t => t.match(/^regex:\S+/) && item.lctext.match(new RegExp(t.substring(6))))
       )
       // match id:* terms against id
-      const idMatchTerms = terms.filter(t => t.match(/^id:\w+/) && item.id.toLowerCase() == t.substring(3))
+      const id = 'id:' + item.id.toLowerCase()
+      const saved_id = 'id:' + (item.savedId?.toLowerCase() ?? 'unsaved')
+      const idMatchTerms = terms.filter(t => t == id || t == saved_id)
       item.matchingTerms = item.matchingTerms.concat(idMatchTerms)
       if (idMatchTerms.length > 0) idMatchItemIndices.push(index)
       item.matchingTerms = _.uniq(item.matchingTerms) // can have duplicates (e.g. regex:*, id:*, ...)
