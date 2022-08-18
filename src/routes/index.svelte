@@ -1095,6 +1095,7 @@
     }
     fatal(...args) {
       const stack = new Error().stack.split('\n').join(' <- ')
+      console.error(`${args.join(' ')} @ ${this.name}`) // can provide better stack in console, esp. in Safari
       throw new Error(`${args.join(' ')} @ ${this.name}; STACK: ${stack}`)
     }
 
