@@ -941,7 +941,8 @@
               return classList?.contains('c3') ||
                 classList?.contains('dot') ||
                 classList?.contains('math') ||
-                classList?.contains('math-display')
+                classList?.contains('math-display') ||
+                classList?.contains('macro')
                 ? // || classList?.contains("deps-and-dependents")
                   NodeFilter.FILTER_REJECT
                 : NodeFilter.FILTER_ACCEPT
