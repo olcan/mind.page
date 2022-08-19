@@ -1941,10 +1941,10 @@
   :global(.item a) {
     color: #79e;
     background: #222;
-    padding: 0 4px;
+    /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
+    padding: 0 4px 1px 4px;
     border-radius: 4px;
     text-decoration: none;
-    display: inline-block; /* aligns much better around text */
     line-height: 24px;
   }
   :global(.item mark) {
