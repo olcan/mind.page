@@ -62,8 +62,7 @@ paths.push('/')
 const sapperServer = express().use(
   paths,
   compression({ threshold: 0 }),
-  // TODO: remove 'as any' when typescript error is fixed
-  sirv('static', { dev, dotfiles: true /* in case .DS_Store is created */ }) as any,
+  sirv('static', { dev, dotfiles: true /* in case .DS_Store is created */ }),
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
@@ -161,12 +160,70 @@ const sapperServer = express().use(
       next()
     }
   },
-  // TODO: remove 'as any' when typescript error is fixed
+  // handle POST for jupyter
+  (req, res, next) => {
+    if (globalThis.hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
+      console.log('received ', req.path, req.body)
+      let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
+      if (!client_id || !session_path) {
+        console.warn('invalid jupyter path ' + req.path)
+        res.status(400).send('invalid jupyter path ' + req.path)
+        return
+      }
+      session_path = client_id + '/' + session_path // prefix client_id to session_path
+      const { KernelManager, SessionManager, ServerConnection } = require('@jupyterlab/services')
+      const serverSettings = ServerConnection.makeSettings({
+        baseUrl: 'http://localhost:8888', // required
+        wsUrl: 'ws://localhost:8888', // required
+      })
+      const kernelManager = new KernelManager({ serverSettings })
+      const sessionManager = new SessionManager({ kernelManager, serverSettings })
+      ;(async () => {
+        let sessionConnection
+        await sessionManager.requestRunning()
+        const sessionModel = (await sessionManager.findByPath(session_path)) as any
+        if (sessionModel) {
+          console.log(`Connecting to existing session ${sessionModel.path} on kernel ${sessionModel.kernel.id}`)
+          sessionConnection = await sessionManager.connectTo({ model: sessionModel })
+        } else {
+          console.log(`Starting new session ${session_path} ...`)
+          sessionConnection = await sessionManager.startNew({
+            path: session_path,
+            type: 'notebook',
+            name: session_path,
+          })
+        }
+        // send exec spec to kernel and forward response
+        const { shutdown, ...spec } = req.body
+        if (Object.keys(spec).length) {
+          const future = sessionConnection.kernel!.requestExecute(spec)
+          let output = [] // stdout/stderr
+          future.onIOPub = msg => msg.msg_type != 'stream' || output.push(msg.content)
+          const reply = await future.done
+          const result = {
+            ...reply.content,
+            session: sessionModel,
+            output,
+          }
+          res.status(200).json(result).end()
+        } else {
+          res.status(400).send('missing exec spec in body')
+        }
+        // shut down session/kernel if requested
+        if (shutdown) {
+          await sessionConnection.shutdown()
+          console.log(`Shut down session ${session_path}`)
+        }
+      })()
+    } else {
+      next()
+    }
+  },
   sapper.middleware({
     session: (req, res) => ({
       cookie: res['cookie'],
     }),
-  }) as any
+  })
 )
 
 // listen if firebase is not handling the server ...
