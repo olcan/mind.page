@@ -27,11 +27,17 @@ import { firebaseConfig } from '../firebase-config.js'
 const admin = require('firebase-admin')
 const firebase = admin.initializeApp(firebaseConfig)
 
-// helper to determine host directory from request
-function get_hostdir(req) {
+// helper to determine host name
+// also sets globalThis.hostname for easy access from other files (e.g. index.svelte)
+// rewrites 127.0.0.1 as localhost for convenience in localhost checks
+function get_hostname(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
-  let hostname = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
-  globalThis.hostname = hostname = hostname.replace(/:.+$/, '') // drop port number
+  const hostport = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
+  return (globalThis.hostname = hostport.replace(/:.+$/, '').replace('127.0.0.1', 'localhost'))
+}
+
+// helper to determine host directory
+function get_hostdir(hostname) {
   return ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
 }
 
@@ -66,7 +72,8 @@ const sapperServer = express().use(
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
-    const hostdir = get_hostdir(req)
+    const hostname = get_hostname(req)
+    const hostdir = get_hostdir(hostname)
     // serve /manifest.json from any path (to allow scoping in manifest)
     if (req.path.endsWith('/manifest.json')) {
       const scope = req.originalUrl.replace(/manifest\.json[?]?.*$/, '')
@@ -74,8 +81,8 @@ const sapperServer = express().use(
         scope: scope,
         // NOTE: start_url is not allowed to be outside scope, and if there is redirect it can force address bar for app
         start_url: scope,
-        name: globalThis.hostname + scope.slice(0, -1),
-        short_name: globalThis.hostname + scope.slice(0, -1),
+        name: hostname + scope.slice(0, -1),
+        short_name: hostname + scope.slice(0, -1),
         display: scope.includes('f')
           ? 'fullscreen'
           : scope.includes('s')
@@ -111,9 +118,9 @@ const sapperServer = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
-    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/file/')) {
+    } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
-    } else if (globalThis.hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
+    } else if (hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
       const [m, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
       if (!client_id || !req_path) {
         console.warn('invalid watch path ' + req.path)
@@ -162,7 +169,8 @@ const sapperServer = express().use(
   },
   // handle POST for jupyter
   (req, res, next) => {
-    if (globalThis.hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
+    const hostname = get_hostname(req)
+    if (hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
       console.log('received ', req.path, req.body)
       let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
       if (!client_id || !session_path) {

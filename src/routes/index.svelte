@@ -6188,8 +6188,9 @@
     ;(e.target as HTMLElement).classList.toggle('intro')
   }
 
-  // retrieve host name, in globalThis.request on server side (see server.ts)
-  const hostname = typeof location == 'undefined' ? globalThis.hostname : location.hostname
+  // retrieve host name, via globalThis.request on server side (see server.ts)
+  const hostname =
+    (typeof location == 'undefined' ? globalThis.hostname : location.hostname).replace('127.0.0.1', 'localhost')
 
   // custom directory for some static files, based on hostname
   const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
