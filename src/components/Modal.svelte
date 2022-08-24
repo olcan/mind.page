@@ -11,7 +11,7 @@
   let username = ''
   let autocomplete = ''
   let images = false
-  let canConfirm = (input: string) => input.length > 0
+  let canConfirm = (input: string) => input == null || input.length > 0 // confirm by default for non-input modal
   let onConfirm = (input = null) => {}
   let onCancel = () => {}
   let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR close if no confirm/cancel buttons
@@ -20,8 +20,7 @@
   let _visible = false
   let enabled = false
   $: enabled =
-    (input == null || canConfirm(input)) &&
-    (!images || (selected_images.length > 0 && ready_image_count == selected_images.length))
+    canConfirm(input) && (!images || (selected_images.length > 0 && ready_image_count == selected_images.length))
 
   const defaults = {
     content,
@@ -194,11 +193,13 @@
     if (!enabled) return
     const output = images ? selected_images : input != null ? input : true
     onConfirm(output)
-    // resolve and close visible modal
-    resolve_visible(output)
-    promise_visible = null
-    resolve_visible = null
-    _visible = false
+    // resolve and close visible modal (unless alredy closed in onConfirm)
+    if (_visible) {
+      resolve_visible(output)
+      promise_visible = null
+      resolve_visible = null
+      _visible = false
+    }
   }
 
   function _onCancel(e = null) {
