@@ -641,10 +641,6 @@
         const file = item.getAsFile()
         const url = URL.createObjectURL(file)
         const zoom = Math.round(1000 / window.devicePixelRatio) / 1000
-        // textarea.selectionStart = selectionStart; // fix for android (see note above)
-        // document.execCommand("insertText", false, `<img src="${url}" style="zoom:${zoom}">`);
-        // // start encrypted upload of pasted image (once done, img src will be replaced in the text)
-        // onPastedImage(url, file);
         const modal = window['_modal']('Inserting pasted image ...')
         Promise.resolve(
           onPastedImage(url, file, size => {

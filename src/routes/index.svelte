@@ -269,6 +269,9 @@
     window['_modal_visible'] = _modal_visible
     window['_delay'] = _delay
     window['_update_dom'] = update_dom
+    window['_encrypt'] = encrypt
+    window['_decrypt'] = decrypt
+    window['_encrypt_item'] = encryptItem
     window['_decrypt_item'] = decryptItem
     window['_parse_tags'] = parseTags
     window['_parse_label'] = parseLabel
@@ -1443,6 +1446,7 @@
   }
 
   let images = new Map<string, string>() // permanent fname to temporary url
+  if (isClient) window['_images'] = images
 
   function onPastedImage(url: string, file: File, size_handler = null) {
     console.debug('pasted image', url)
@@ -6189,8 +6193,10 @@
   }
 
   // retrieve host name, via globalThis.request on server side (see server.ts)
-  const hostname =
-    (typeof location == 'undefined' ? globalThis.hostname : location.hostname).replace('127.0.0.1', 'localhost')
+  const hostname = (typeof location == 'undefined' ? globalThis.hostname : location.hostname).replace(
+    '127.0.0.1',
+    'localhost'
+  )
 
   // custom directory for some static files, based on hostname
   const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
