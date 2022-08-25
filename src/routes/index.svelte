@@ -4335,7 +4335,7 @@
       backdrop.parentElement.insertBefore(clone, backdrop)
       ;(clone.firstChild as HTMLElement).innerHTML =
         _.escape(textarea.value.substring(0, textarea.selectionStart)) +
-        `<span>${textarea.value.substring(textarea.selectionStart) || ' '}</span>`
+        `<span>${_.escape(textarea.value.substring(textarea.selectionStart) || ' ')}</span>`
       const span = clone.querySelector('span')
       let elem = span as HTMLElement
       let caretTop = span.offsetTop
@@ -4348,8 +4348,14 @@
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
       // if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
-      if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200)
+      if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200) {
+        console.debug(
+          `scrolling to ${Math.max(0, caretTop - innerHeight / 4)} from ${
+            document.body.scrollTop
+          } for caretTop:${caretTop}, innerHeight:${innerHeight}`
+        )
         document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4))
+      }
     })
   }
 
