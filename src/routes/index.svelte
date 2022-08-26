@@ -1118,7 +1118,7 @@
               // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
               .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
               .replace(/(^|[^\\])`.*?`/g, '$1') as any
-          ).matchAll(/<img .*?src\s*=\s*"(.*?)".*?>/gi),
+          ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
           m => m[1]
         ).map(src =>
           src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
