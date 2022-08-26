@@ -1445,8 +1445,8 @@
     })
   }
 
-  let images = new Map<string, string>() // permanent fname to temporary url
-  if (isClient) window['_images'] = images
+  let images // permanent fname to temporary url map
+  if (isClient) images = window['_images'] = new Map<string, string>()
 
   function onPastedImage(url: string, file: File, size_handler = null) {
     console.debug('pasted image', url)
