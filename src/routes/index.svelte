@@ -1528,6 +1528,7 @@
           if (src.startsWith('anonymous/')) {
             img.src = url
             img.removeAttribute('_loading')
+            images.set(src, img.src) // add to cache
             resolve(img.src)
           } else {
             // download data
@@ -1555,6 +1556,7 @@
                     )
                     img.src = URL.createObjectURL(new Blob([array], { type: type }))
                     img.removeAttribute('_loading')
+                    images.set(src, img.src) // add to cache
                     resolve(img.src)
                   })
                   .catch(e => {
