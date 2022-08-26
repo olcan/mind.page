@@ -735,12 +735,14 @@
 
     clear(type: string) {
       if (!type) throw new Error('clear(type) requires block type')
-      item(this.id).text = clearBlock(this.text, _.escapeRegExp(type))
+      item(this.id).text = clearBlock(this.text, type)
+      this.invalidate_elem_cache(true /*force_render*/) // see comment in write()
     }
 
     remove(type: string) {
       if (!type) throw new Error('remove(type) requires block type')
-      item(this.id).text = removeBlock(this.text, _.escapeRegExp(type))
+      item(this.id).text = removeBlock(this.text, type)
+      this.invalidate_elem_cache(true /*force_render*/) // see comment in write()
     }
 
     // deletes item
