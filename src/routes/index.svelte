@@ -1098,7 +1098,9 @@
     }
     fatal(...args) {
       const stack = new Error().stack.split('\n').join(' <- ')
-      console.error(`${args.join(' ')} @ ${this.name}`) // can provide better stack in console, esp. in Safari
+      // also log error directly to console for better stack traces (esp. in Safari)
+      // disable this extra log message if we are testing for throws, indicated via window._testing_throws flag
+      if (!window['_testing_throws']) console.error(`${args.join(' ')} @ ${this.name}`)
       throw new Error(`${args.join(' ')} @ ${this.name}; STACK: ${stack}`)
     }
 
