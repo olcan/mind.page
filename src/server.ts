@@ -206,7 +206,16 @@ const sapperServer = express().use(
         if (Object.keys(spec).length) {
           const future = sessionConnection.kernel!.requestExecute(spec)
           let output = [] // stdout/stderr
-          future.onIOPub = msg => msg.msg_type != 'stream' || output.push(msg.content)
+          future.onIOPub = msg => {
+            if (msg.msg_type == 'stream') {
+              let { name, text } = msg.content
+              if (text.length > 240) text = text.slice(0, 240) + `…+${text.length - 240} chars`
+              if (name == 'stdout') console.log(text)
+              else if (name == 'stderr') console.error(text)
+              else console.warn(`message on unknown stream ${name}: ${text}`)
+              output.push(msg.content)
+            }
+          }
           const reply = await future.done
           const result = {
             ...reply.content,
