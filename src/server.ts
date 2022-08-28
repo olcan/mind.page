@@ -172,7 +172,7 @@ const sapper_server = express().use(
   // handle POST for jupyter
   (req, res, next) => {
     const hostname = get_hostname(req)
-    if (hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
+    if (/*hostname == 'localhost' && */ req.path.startsWith('/jupyter/')) {
       console.log('received ', req.path, req.body)
       let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
       if (!client_id || !session_path) {
@@ -183,8 +183,11 @@ const sapper_server = express().use(
       session_path = client_id + '/' + session_path // prefix client_id to session_path
       const { KernelManager, SessionManager, ServerConnection } = require('@jupyterlab/services')
       const serverSettings = ServerConnection.makeSettings({
-        baseUrl: 'http://localhost:8888', // required
-        wsUrl: 'ws://localhost:8888', // required
+        baseUrl: 'http://jupyter.olcan.com:8123', // required
+        wsUrl: 'ws://jupyter.olcan.com:8123', // required
+        // TODO: use token, along with ssl
+        // baseUrl: 'http://localhost:8888', // required
+        // wsUrl: 'ws://localhost:8888', // required
       })
       const kernelManager = new KernelManager({ serverSettings })
       const sessionManager = new SessionManager({ kernelManager, serverSettings })
@@ -250,13 +253,16 @@ const sapper_server = express().use(
   })
 )
 
+const on_firebase = 'FIREBASE_CONFIG' in process.env
+let sapper_https_server // started here unless on_firebase
+
 // listen if firebase is not handling the server ...
-if (!('FIREBASE_CONFIG' in process.env)) {
+if (!on_firebase) {
   // listen on standard HTTP port
   sapper_server.listen(PORT)
 
   // also listen on HTTPS port
-  const sapper_https_server = https
+  sapper_https_server = https
     .createServer(
       {
         key: fs.readFileSync('static/ssl-dev/ca.key'),
@@ -267,27 +273,27 @@ if (!('FIREBASE_CONFIG' in process.env)) {
     .listen(443, () => {
       console.log('HTTPS server listening on https://localhost:443')
     })
-
-  // also set up a secure WebSocket (WSS) server
-  const wss = new WebSocketServer({ server: sapper_https_server })
-  wss.on('connection', function connection(ws, req) {
-    // handle jupyter wss connections for output messages
-    // hostname/path checks/parsing are identical to HTTP handler above
-    const hostname = get_hostname(req)
-    req.path = req.url.replace(/^.+?:\/\/[^/]*/, '') // extract path from url (that _may_ contain scheme/host/port)
-    if (hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
-      let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
-      if (!client_id || !session_path) {
-        console.warn('ignoring wss connection w/ invalid jupyter path ' + req.path)
-        return // ignore connection
-      }
-      session_path = client_id + '/' + session_path // prefix client_id to session_path
-      jupyter_ws[session_path] = ws
-      ws.on('close', () => delete jupyter_ws[session_path])
-    }
-  })
-  wss.on('close', function close() {})
 }
+
+// set up a secure WebSocket (WSS) server for jupyter relay
+const wss = new WebSocketServer({ server: sapper_https_server ?? sapper_server })
+wss.on('connection', function connection(ws, req) {
+  // handle jupyter wss connections for output messages
+  // hostname/path checks/parsing are identical to HTTP handler above
+  const hostname = get_hostname(req)
+  req.path = req.url.replace(/^.+?:\/\/[^/]*/, '') // extract path from url (that _may_ contain scheme/host/port)
+  if (hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
+    let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
+    if (!client_id || !session_path) {
+      console.warn('ignoring wss connection w/ invalid jupyter path ' + req.path)
+      return // ignore connection
+    }
+    session_path = client_id + '/' + session_path // prefix client_id to session_path
+    jupyter_ws[session_path] = ws
+    ws.on('close', () => delete jupyter_ws[session_path])
+  }
+})
+wss.on('close', function close() {})
 
 // server-side preload hidden from client-side code
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`
