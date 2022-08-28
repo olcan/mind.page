@@ -30,7 +30,8 @@
     "firebase-admin": "11.0.1",
     "firebase-auth": "^0.1.2",
     "firebase-functions": "^3.22.0",
-    "npm": "^8.16.0"
+    "npm": "^8.16.0",
+    "ws": "^8.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.18.10",

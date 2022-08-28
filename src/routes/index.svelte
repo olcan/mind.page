@@ -729,20 +729,18 @@
         onEditorChange(editorText) // item time/text has changed
         // if (!item(this.id)?.editing) saveItem(this.id);
         // console.debug('saving after write', this.name, { text, type, options })
-        saveItem(this.id)
+        if (!options['skip_save']) saveItem(this.id)
       })
     }
 
-    clear(type: string) {
+    clear(type: string, options) {
       if (!type) throw new Error('clear(type) requires block type')
-      item(this.id).text = clearBlock(this.text, type)
-      this.invalidate_elem_cache(true /*force_render*/) // see comment in write()
+      this.write(clearBlock(this.text, type), '', options)
     }
 
-    remove(type: string) {
+    remove(type: string, options) {
       if (!type) throw new Error('remove(type) requires block type')
-      item(this.id).text = removeBlock(this.text, type)
-      this.invalidate_elem_cache(true /*force_render*/) // see comment in write()
+      this.write(removeBlock(this.text, type), '', options)
     }
 
     // deletes item
@@ -765,7 +763,7 @@
       )
       // write only if log differs from existing block in item
       const log = this.get_log(options).join('\n')
-      if (this.read(options['type']) != log) this.write(log, options['type'])
+      if (this.read(options['type']) != log) this.write(log, options['type'], options)
       if (options['type'] == '_log' || options['show_logs']) this.show_logs()
     }
 
