@@ -275,7 +275,7 @@
     //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
-    text = text.replace(blockRegExp('.+?'), (m, pfx, type, body) => {
+    text = text.replace(blockRegExp('\\S+?'), (m, pfx, type, body) => {
       if (type.includes(':')) type = _.findLast(type.split(':'), s => !s.includes('.')) ?? ''
       return pfx + '```' + type + '\n' + body + '```'
     })
