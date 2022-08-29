@@ -4,7 +4,6 @@ import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 import https from 'https'
-import { WebSocketServer } from 'ws'
 import fs from 'fs'
 
 const { PORT, NODE_ENV } = process.env
@@ -12,7 +11,6 @@ const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
 
 const chokidar = dev ? require('chokidar') : null
 const events = {} // recorded fs events for /watch/... requests
-const jupyter_ws = {} // jupyter websocket connections for live output
 
 // initialize firebase admin client
 // NOTE: we are using v8 client on server because we could not get v9 client to work properly ...
@@ -169,83 +167,6 @@ const sapper_server = express().use(
       next()
     }
   },
-  // handle POST for jupyter
-  (req, res, next) => {
-    const hostname = get_hostname(req)
-    if (/*hostname == 'localhost' && */ req.path.startsWith('/jupyter/')) {
-      console.log('received ', req.path, req.body)
-      let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
-      if (!client_id || !session_path) {
-        console.warn('invalid jupyter path ' + req.path)
-        res.status(400).send('invalid jupyter path ' + req.path)
-        return
-      }
-      session_path = client_id + '/' + session_path // prefix client_id to session_path
-      const { KernelManager, SessionManager, ServerConnection } = require('@jupyterlab/services')
-      const serverSettings = ServerConnection.makeSettings({
-        baseUrl: 'http://jupyter.olcan.com:8123', // required
-        wsUrl: 'ws://jupyter.olcan.com:8123', // required
-        // TODO: use token, along with ssl
-        // baseUrl: 'http://localhost:8888', // required
-        // wsUrl: 'ws://localhost:8888', // required
-      })
-      const kernelManager = new KernelManager({ serverSettings })
-      const sessionManager = new SessionManager({ kernelManager, serverSettings })
-      ;(async () => {
-        let sessionConnection
-        await sessionManager.requestRunning()
-        const sessionModel = (await sessionManager.findByPath(session_path)) as any
-        if (sessionModel) {
-          console.log(`Connecting to existing session ${sessionModel.path} on kernel ${sessionModel.kernel.id}`)
-          sessionConnection = await sessionManager.connectTo({ model: sessionModel })
-        } else {
-          console.log(`Starting new session ${session_path} ...`)
-          sessionConnection = await sessionManager.startNew({
-            path: session_path,
-            type: 'notebook',
-            name: session_path,
-          })
-        }
-        // send exec spec to kernel and forward response
-        const { shutdown, ...spec } = req.body
-        if (Object.keys(spec).length) {
-          const future = sessionConnection.kernel!.requestExecute(spec)
-          let output = [] // stdout/stderr
-          future.onIOPub = msg => {
-            if (msg.msg_type == 'stream') {
-              let { name, text } = msg.content
-              if (text.length > 240) text = text.slice(0, 240) + `…+${text.length - 240} chars`
-              if (name == 'stdout') console.log(text)
-              else if (name == 'stderr') console.error(text)
-              else console.warn(`message on unknown stream ${name}: ${text}`)
-              output.push(msg.content)
-              // if websocket connection exists, we send output live instead of buffering
-              if (jupyter_ws[session_path]) {
-                jupyter_ws[session_path].send(JSON.stringify(output))
-                output = [] // reset buffer
-              }
-            }
-          }
-          const reply = await future.done
-          const result = {
-            ...reply.content,
-            session: sessionModel,
-            output,
-          }
-          res.status(200).json(result).end()
-        } else {
-          res.status(400).send('missing exec spec in body')
-        }
-        // shut down session/kernel if requested
-        if (shutdown) {
-          await sessionConnection.shutdown()
-          console.log(`Shut down session ${session_path}`)
-        }
-      })()
-    } else {
-      next()
-    }
-  },
   sapper.middleware({
     session: (req, res) => ({
       cookie: res['cookie'],
@@ -259,7 +180,9 @@ let sapper_https_server // started here unless on_firebase
 // listen if firebase is not handling the server ...
 if (!on_firebase) {
   // listen on standard HTTP port
-  sapper_server.listen(PORT)
+  sapper_server.listen(PORT, () => {
+    console.log('HTTP server listening on http://localhost:' + PORT)
+  })
 
   // also listen on HTTPS port
   sapper_https_server = https
@@ -274,26 +197,6 @@ if (!on_firebase) {
       console.log('HTTPS server listening on https://localhost:443')
     })
 }
-
-// set up a secure WebSocket (WSS) server for jupyter relay
-const wss = new WebSocketServer({ server: sapper_https_server ?? sapper_server })
-wss.on('connection', function connection(ws, req) {
-  // handle jupyter wss connections for output messages
-  // hostname/path checks/parsing are identical to HTTP handler above
-  const hostname = get_hostname(req)
-  req.path = req.url.replace(/^.+?:\/\/[^/]*/, '') // extract path from url (that _may_ contain scheme/host/port)
-  if (hostname == 'localhost' && req.path.startsWith('/jupyter/')) {
-    let [client_id, session_path] = req.path.match(/^\/jupyter\/(\d+?)\/(.+)$/)?.slice(1) ?? []
-    if (!client_id || !session_path) {
-      console.warn('ignoring wss connection w/ invalid jupyter path ' + req.path)
-      return // ignore connection
-    }
-    session_path = client_id + '/' + session_path // prefix client_id to session_path
-    jupyter_ws[session_path] = ws
-    ws.on('close', () => delete jupyter_ws[session_path])
-  }
-})
-wss.on('close', function close() {})
 
 // server-side preload hidden from client-side code
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`

@@ -24,15 +24,13 @@
   },
   "main": "lib/firebase/functions.js",
   "dependencies": {
-    "@jupyterlab/services": "^6.4.5",
     "compression": "^1.7.4",
     "express": "4.18.1",
     "firebase": "^9.9.2",
     "firebase-admin": "11.0.1",
     "firebase-auth": "^0.1.2",
     "firebase-functions": "^3.22.0",
-    "npm": "^8.16.0",
-    "ws": "^8.8.1"
+    "npm": "^8.16.0"
   },
   "devDependencies": {
     "@babel/core": "^7.18.10",
@@ -42,6 +40,7 @@
     "@babel/runtime": "^7.18.9",
     "@firebase/app": "^0.7.30",
     "@firebase/storage": "^0.9.9",
+    "@jupyterlab/services": "^6.4.5",
     "@octokit/rest": "^19.0.3",
     "@rollup/plugin-babel": "^5.3.1",
     "@rollup/plugin-commonjs": "^22.0.2",
