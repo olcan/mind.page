@@ -135,7 +135,10 @@
       // (e.g. the individual characters could be interpreted in latex)
       hljs.listLanguages().forEach(lang => {
         let def = hljs.getLanguage(lang)
-        const comment = hljs.COMMENT(/\\?;\{___/, /___\}/, { className: 'comment-custom', relevance: 0 })
+        const comment = hljs.COMMENT(/__mindpage_comment_open__/, /__mindpage_comment_close__/, {
+          className: 'comment-custom',
+          relevance: 0,
+        })
         def.contains ??= []
         def.contains.unshift(comment)
         // for javascript, we allow "name annotations" of the form <<- alphanumeric_name
