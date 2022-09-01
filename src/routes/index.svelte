@@ -5806,7 +5806,7 @@
         }
         // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
         // if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
-      } else if (editorText.trim().match(/^#[^#\s]+$/)) {
+      } else if (key != 'ArrowRight' && editorText.trim().match(/^#[^#\s]+$/)) {
         // try to navigate up to parent label even if there is no context
         // (e.g. when parent has multiple children with same label)
         const targetLabel = editorText.trim()
