@@ -5806,12 +5806,23 @@
         }
         // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
         // if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
+      } else if (editorText.trim().match(/^#[^#\s]+$/)) {
+        // try to navigate up to parent label even if there is no context
+        // (e.g. when parent has multiple children with same label)
+        const targetLabel = editorText.trim()
+        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        if (parentLabel != targetLabel && _exists(parentLabel)) {
+          lastEditorChangeTime = 0 // force immediate update
+          forceNewStateOnEditorChange = true // add to history like click-based nav
+          onEditorChange(parentLabel)
+          return
+        }
       }
     }
     // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if ((key == 'ArrowDown' || key == 'ArrowRight') && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
-      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      const targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
       let nextTargetId
       if (targetLabel) {
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context
@@ -5854,8 +5865,8 @@
               item.index > targetIndex && !item.pinned && item.labelUnique && !editorChangesWithTimeKept.has(item.label)
           )?.id
         }
-      } else {
-        // select first non-pinned item w/ unique label if clickable
+      } else if (!editorText.startsWith('#')) {
+        // if not already navigating, select first non-pinned item w/ unique label if clickable
         nextTargetId = items.find(item => !item.pinned && item.labelUnique)?.id
       }
       if (nextTargetId) {
@@ -5902,7 +5913,7 @@
         return
       }
       // try to navigate up to parent label
-      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      const targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
       if (targetLabel) {
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
         if (parentLabel != targetLabel && _exists(parentLabel)) {
