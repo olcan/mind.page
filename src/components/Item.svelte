@@ -517,7 +517,8 @@
               if (
                 lctag == label &&
                 label.includes('/') &&
-                labelUnique &&
+                // note we now allow shortening of non-uniquely labeled children
+                // labelUnique &&
                 (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag))
               )
                 reltag = '#…' + tag.substring(tag.lastIndexOf('/'))
