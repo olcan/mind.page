@@ -1100,7 +1100,8 @@
       const stack = new Error().stack.split('\n').join(' <- ')
       // also log error directly to console for better stack traces (esp. in Safari)
       // disable this extra log message if we are testing for throws, indicated via window._testing_throws flag
-      if (!window['_testing_throws']) console.error(`${args.join(' ')} @ ${this.name}`)
+      // also use _error to log only the browser console and not to mindpage console or items
+      if (!window['_testing_throws']) console['_error'](`${args.join(' ')} @ ${this.name}`)
       throw new Error(`${args.join(' ')} @ ${this.name}; STACK: ${stack}`)
     }
 
@@ -1438,7 +1439,7 @@
             return (div as HTMLElement).offsetTop
           })
         )
-        // console.log("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
+        // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
         if (itemTop - 100 < document.body.scrollTop)
           document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
@@ -2378,7 +2379,7 @@
     getAuth(firebase)
       .signOut()
       .then(() => {
-        console.log('signed out')
+        console.debug('signed out')
         location.reload()
       })
       .catch(console.error)
@@ -3224,7 +3225,7 @@
                     alert(`${cmd}: contents of file ${file} does not match item ${name}`)
                     return
                   }
-                  console.log(`watching file ${file} for item ${name} ...`)
+                  console.debug(`watching file ${file} for item ${name} ...`)
                   item.dispatch_task(
                     `${cmd} ${file}`,
                     async () => {
@@ -3235,7 +3236,7 @@
                       }
                       const text = await resp.text()
                       if (text != item.text) {
-                        console.log(`detected changes to ${file} for item ${name}`)
+                        console.debug(`detected changes to ${file} for item ${name}`)
                         item.write(text, '')
                       }
                     },
@@ -3316,7 +3317,7 @@
               if (root) installed_dependencies = new Set()
               else {
                 if (installed_dependencies.has(path)) {
-                  console.log(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
+                  console.debug(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
                   lastEditorChangeTime = 0 // disable debounce even if editor focused
                   onEditorChange('')
                   // note item label is dependency path minus default .md suffix
@@ -3465,10 +3466,10 @@
                         throw new Error('invalid dependency path: ' + dep_path)
                       // skip circular dependencies
                       if (dependents.includes(dep)) {
-                        console.log(`${cmd}: skipping circular dependency ${dep} for ${label}`)
+                        console.debug(`${cmd}: skipping circular dependency ${dep} for ${label}`)
                         continue
                       }
-                      console.log(`installing dependency ${dep} for ${label} ...`)
+                      console.debug(`installing dependency ${dep} for ${label} ...`)
                       const command = `/_install ${dep_path} ${repo} ${branch} ${owner} ${token || ''} <- ${[
                         label,
                         ...dependents,
@@ -3552,7 +3553,7 @@
                   item.editable = false
 
                   // log completion and return item to indicate successful install/update
-                  console.log(
+                  console.debug(
                     (updating ? 'updated' : 'installed') + ` ${path} (${item.name}) in ${Date.now() - start}ms`
                   )
 
@@ -4549,18 +4550,18 @@
     if (hostname != 'localhost') return // can not watch outside localhost
     if (watching.has(repo)) return // already watching repo
     // fetch initial previews from local repo
-    console.log(`fetching previews from local repo ${repo} ...`)
+    console.debug(`fetching previews from local repo ${repo} ...`)
     const start = Date.now()
     for (const item of items) {
       if (!item.attr) continue // item not installed
       if (item.attr.repo != repo) continue // item not from modified local repo
       await fetchPreview(item)
     }
-    console.log(`fetched previews from local repo ${repo} in ${Date.now() - start}ms`)
+    console.debug(`fetched previews from local repo ${repo} in ${Date.now() - start}ms`)
     // start watching
     watching.add(repo)
     _watchLocalRepo(repo)
-    console.log(`watching local repo ${repo} ...`)
+    console.debug(`watching local repo ${repo} ...`)
   }
   async function _watchLocalRepo(repo) {
     try {
@@ -4573,7 +4574,7 @@
       const events = await resp.json()
       const changed_paths = _.uniq(events.filter(e => e.event == 'change').map(e => e.path.replace(/^\//, '')))
       for (const changed_path of changed_paths) {
-        console.log(`detected change in local repo path ${changed_path}`)
+        console.debug(`detected change in local repo path ${changed_path}`)
         for (const item of items) {
           if (!item.attr) continue // item not installed
           if (item.attr.repo != repo) continue // item not from modified local repo
@@ -4661,7 +4662,7 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText)
       }
-      console.log(`fetched preview for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
+      console.debug(`fetched preview for ${item.name} from ${repo}/${path} in ${Date.now() - start}ms`)
     } catch (e) {
       const msg = `failed to fetch preview for ${item.name} from ${repo}/${path}: ${e}`
       console.error(msg)
@@ -4714,7 +4715,7 @@
             console.warn(`invalid (ambiguous) preview dependency ${dep} for ${label}`)
           continue
         }
-        console.log(`installing preview dependency ${dep} for ${label} ...`)
+        console.debug(`installing preview dependency ${dep} for ${label} ...`)
         const dep_path = dep.slice(1) // path assumed same as tag
         const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
         const dep_item = await onEditorDone(command)
@@ -4724,7 +4725,7 @@
           // name/path consistency should be enforced by _install for dependency
           throw new Error(`invalid name ${dep_item.name} for installed dependency ${dep} of ${label}`)
         }
-        console.log(`installed preview dependency ${dep} for ${label}`)
+        console.debug(`installed preview dependency ${dep} for ${label}`)
       }
     }
 
@@ -4735,7 +4736,7 @@
     item.previewable = item.text != item.previewText // should be false now
     // store preview text hash to be able to detect non-preview changes across reloads
     _item(item.id).local_store._preview_hash = hash(item.previewText)
-    console.log(`previewed ${item.name} from ${repo}/${path}`)
+    console.debug(`previewed ${item.name} from ${repo}/${path}`)
   }
 
   import { onMount } from 'svelte'
@@ -6566,10 +6567,10 @@
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
       if (navigator.mediaDevices.enumerateDevices) {
-        console.log(`initializing webcam, config: '${localStorage.getItem('mindpage_narrating')}'; available devices:`)
+        console.debug(`initializing webcam, config: '${localStorage.getItem('mindpage_narrating')}'; available devices:`)
         navigator.mediaDevices.enumerateDevices().then(devices => {
           devices.forEach(device => {
-            if (device.kind == 'videoinput') console.log(device.deviceId, device.label)
+            if (device.kind == 'videoinput') console.debug(device.deviceId, device.label)
           })
         })
       }
