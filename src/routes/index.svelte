@@ -709,16 +709,26 @@
           })
         }
       }
-      // if writing *_log, clear any existing *_log blocks
-      // (and skip write if block is empty)
+
       let __item = item(this.id) // writeable item
       if (type.endsWith('_log')) {
+        // if writing a *_log block, remove any existing *_log blocks, and only write if non-empty
+        // note this forces all logs to be consolidated at bottom, allowing collapsing (currently for _log only)
         __item.text = removeBlock(this.text, '\\w*?_log') // remove existing *_log
         if (text) __item.text = appendBlock(this.text, type, text) // if empty, skip
+      } else if (type.trim()) {
+        // if writing a non-log block and a non-empty _log block exists, move it to bottom
+        __item.text = appendBlock(this.text, type, text)
+        const _log = extractBlock(this.text, '_log')
+        if (_log) {
+          __item.text = removeBlock(this.text, '_log')
+          __item.text = appendBlock(this.text, '_log', _log)
+        }
       } else {
-        if (type.trim() == '') __item.text = text
-        else __item.text = appendBlock(this.text, type, text)
+        // replace whole item
+        __item.text = text
       }
+
       if (!__item.log && !options['keep_time']) __item.time = Date.now()
       // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
       this.invalidate_elem_cache(true /*force_render*/)
@@ -6567,7 +6577,9 @@
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
       if (navigator.mediaDevices.enumerateDevices) {
-        console.debug(`initializing webcam, config: '${localStorage.getItem('mindpage_narrating')}'; available devices:`)
+        console.debug(
+          `initializing webcam, config: '${localStorage.getItem('mindpage_narrating')}'; available devices:`
+        )
         navigator.mediaDevices.enumerateDevices().then(devices => {
           devices.forEach(device => {
             if (device.kind == 'videoinput') console.debug(device.deviceId, device.label)
