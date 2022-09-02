@@ -1809,35 +1809,41 @@
       listingItemIndex = indexFromId.get(idsFromLabel.get(terms[0])[0])
       let item = items[listingItemIndex]
       context = [item.label].concat(item.labelPrefixes) // lower index means lower in ranking
-      // expand context to include "context" items that visibly tag the top item in context
-      // (also add their label to context terms so they are highlighted as context as well)
-      while (true) {
-        const lastContextLength = context.length
-        items.forEach(ctxitem => {
-          if (ctxitem.id == item.id) return
-          if (
-            ctxitem.context &&
-            ctxitem.labelUnique &&
-            !context.includes(ctxitem.label) &&
-            _.intersection(ctxitem.tagsVisible, context).length > 0
-          ) {
-            context.push(ctxitem.label)
-            // NOTE: "context of context" should be at the end (top), so we do difference + concat
-            if (ctxitem.labelPrefixes.length > 0)
-              context = _.difference(context, ctxitem.labelPrefixes).concat(ctxitem.labelPrefixes)
-          }
-        })
-        if (context.length == lastContextLength) break
-      }
-      termsContext = _.uniq(termsContext.concat(context))
-
       listing = item.tagsVisible
         .filter(t => t != item.label)
         .slice()
         .reverse()
         .concat(item.label)
       // console.debug(listing);
+    } else if (terms[0] != '#log' && idsFromLabel.get(terms[0])?.length > 0) {
+      // for label-matching items, do not treat as listing, but do expand label prefixes as context
+      let label = terms[0]
+      context = [terms[0]]
+      let pos
+      while ((pos = label.lastIndexOf('/')) >= 0) context.push((label = label.slice(0, pos)))
     }
+
+    // expand context to include "context" items that visibly tag the top item in context
+    // (also add their label to context terms so they are highlighted as context as well)
+    while (true) {
+      const lastContextLength = context.length
+      items.forEach(ctxitem => {
+        if (ctxitem.index == listingItemIndex) return
+        if (
+          ctxitem.context &&
+          ctxitem.labelUnique &&
+          !context.includes(ctxitem.label) &&
+          _.intersection(ctxitem.tagsVisible, context).length > 0
+        ) {
+          context.push(ctxitem.label)
+          // NOTE: "context of context" should be at the end (top), so we do difference + concat
+          if (ctxitem.labelPrefixes.length > 0)
+            context = _.difference(context, ctxitem.labelPrefixes).concat(ctxitem.labelPrefixes)
+        }
+      })
+      if (context.length == lastContextLength) break
+    }
+    termsContext = _.uniq(termsContext.concat(context))
 
     items.forEach((item, index) => {
       textLength += item.text.length
@@ -1909,8 +1915,8 @@
       item.matching = item.matchingTerms.length > 0
       if (item.matching) matchingItemCount++
 
-      // listing item and id-matching items are considered "target" items
-      item.target = listingItemIndex == index || idMatchTerms.length > 0
+      // listing item, label-matching items, and id-matching items, are considered "target" items
+      item.target = listingItemIndex == index || item.label == terms[0] || idMatchTerms.length > 0
       item.target_context = !item.target && context.includes(item.uniqueLabel)
       if (item.target) targetItemCount++
       item.target_nesting = item.target ? 0 : -Infinity
@@ -2147,6 +2153,14 @@
       })
     }
     // console.debug(toggles);
+
+    // unhighlight targets if there are multiple
+    // note multiple targets still affect context (for label-matching items), ranking, and toggle points
+    if (targetItemCount > 1) {
+      items.forEach(item => {
+        if (item.target) item.target = false
+      })
+    }
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -5780,12 +5794,23 @@
       target.querySelector('.log-summary')?.dispatchEvent(new Event('click'))
       return
     }
-    // let unmodified ArrowLeft/Up or ArrowRight select prev/next visible non-label tag in last context item
-    if ((key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowRight') && !modified) {
+    // let unmodified ArrowLeft/Right select prev/next visible non-label tag in last context item
+    if ((key == 'ArrowLeft' || key == 'ArrowRight') && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
-      const lastContext = Array.from(document.querySelectorAll('.container.target_context'))
+      let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
         .sort((a, b) => item(b.getAttribute('item-id')).time - item(a.getAttribute('item-id')).time)[0]
+
+      // if no context/target but query is a tag, then take it as target and its parent as context
+      // note this allows keyboard navigation to children w/ non-unique labels
+      if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
+        const targetLabel = editorText.trim()
+        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        if (parentLabel != targetLabel && _exists(parentLabel)) {
+          lastContext = _item(parentLabel).elem?.querySelector('.container')
+          if (!lastContext?.querySelector('mark.selected')) lastContext = null
+        }
+      }
       if (lastContext) {
         let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
         // drop duplicates to avoid ambiguities/cycles
@@ -5807,36 +5832,23 @@
           selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
         }
         if (selectedIndex >= 0) {
-          if (key == 'ArrowRight' /*|| key == 'ArrowDown'*/ && selectedIndex < visibleTags.length - 1) {
+          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1) {
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
             return
-          } else if ((key == 'ArrowLeft' || key == 'ArrowUp') && selectedIndex > 0) {
+          } else if (key == 'ArrowLeft' && selectedIndex > 0) {
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
             return
           }
         }
-        // NOTE: if we let ArrowLeft/ArrowRight cascade w/ existing context (regardless of its visible tags), the behavior can get confusing because there is an ambiguity of which level the arrow keys apply to; forcing an ArrowDown to switch levels provides more predictable behavior, and is also more intuitive if the visible tags are placed visually below the label line (otherwise user may expect right arrow to behave like a down arrow)
-        // if (key == 'ArrowRight' || key == 'ArrowDown') return // assume ArrowRight/Down handled if context exists
-      } else if (key != 'ArrowRight' && editorText.trim().match(/^#[^#\s]+$/)) {
-        // try to navigate up to parent label even if there is no context
-        // (e.g. when parent has multiple children with same label)
-        const targetLabel = editorText.trim()
-        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
-        if (parentLabel != targetLabel && _exists(parentLabel)) {
-          lastEditorChangeTime = 0 // force immediate update
-          forceNewStateOnEditorChange = true // add to history like click-based nav
-          onEditorChange(parentLabel)
-          return
-        }
       }
     }
     // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
-    if ((key == 'ArrowDown' || key == 'ArrowRight') && !modified) {
+    if (key == 'ArrowDown' && !modified) {
       // target labels are unique by definition, so no ambiguity in _item(label)
       const targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
       let nextTargetId
       if (targetLabel) {
-        // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context
+        // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context; note however target may not be treated as context if there are multiple nested children with the same label
         let child
         if (item(_item(targetLabel).id).context) {
           // allow arbitrary child tag
@@ -5853,7 +5865,11 @@
           child = childTags[0]
         }
 
-        if (!child) {
+        if (child) {
+          child.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+          return
+        } else {
+          // if no child found on target, search for items w/ nested names
           const childLabel = _labels(
             (label, ids) =>
               ids.length == 1 && label.startsWith(targetLabel + '/') && label.indexOf('/', targetLabel.length + 1) == -1
@@ -5862,14 +5878,18 @@
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
             onEditorChange(childLabel)
+            // note since we are using onEditorChange, we need to allow dom update, find item div, and scroll if needed
+            update_dom().then(() => {
+              const child = document.querySelector('#super-container-' + _item(childLabel).id)
+              const itemTop = (child as HTMLElement).offsetTop
+              // if item is too far up or down, bring it to ~upper-middle, snapping up to header
+              if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
+                document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+            })
             return
           }
-        }
 
-        if (child) {
-          child.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-        } else {
-          // no child found for target, so search for "next" non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
+          // if still no child found, search for "next" non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
           const targetIndex = item(_item(targetLabel).id).index
           nextTargetId = items.find(
             item =>
@@ -5882,10 +5902,11 @@
       }
       if (nextTargetId) {
         let nextTarget = document.querySelector(`#super-container-${nextTargetId} mark.label`)
-        // if next target is not found, click on next show toggle and try again after dispatch
-        // if target is still not found, then we will have at least toggled new items into view
+
         if (nextTarget) nextTarget.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
         else {
+          // if next target is not found, click on next show toggle and try again after dispatch
+          // if target is still not found, then we will have at least toggled new items into view
           const showToggle = document.querySelector(`.toggle.show`)
           if (showToggle) {
             // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
@@ -5894,27 +5915,33 @@
               document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
             showToggle.dispatchEvent(new Event('click'))
           }
+          // note this seems to get confusing, so disabled for now
           // update_dom().then(() => {
           //   document
           //     .querySelector(`#super-container-${nextTargetId} mark.label`)
-          //     ?.dispatchEvent(new MouseEvent("mousedown", { altKey: true }));
-          // });
+          //     ?.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+          // })
         }
+      } else {
+        // attempt to click on a show toggle
+        document.querySelector(`.toggle.show`)?.dispatchEvent(new Event('click'))
       }
       return
     }
-    // let unmodified or alt-modified ArrowUp/Left select label on last context item (i.e. move up to parent)
-    if ((key == 'ArrowUp' || key == 'ArrowLeft') && (!modified || e.altKey)) {
-      // attempt to click on a hide toggle
-      const hideToggle = document.querySelector(`.toggle.hide`)
-      if (hideToggle) {
-        hideToggle.dispatchEvent(new Event('click'))
-        return
-      }
+    // let unmodified or alt-modified ArrowUp select label on last context item (i.e. move up to parent)
+    if (key == 'ArrowUp' && (!modified || e.altKey)) {
       // see comments above about lastContext
-      const lastContext = Array.from(document.querySelectorAll('.container.target_context'))
+      let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
         .sort((a, b) => item(b.getAttribute('item-id')).time - item(a.getAttribute('item-id')).time)[0]
+      if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
+        const targetLabel = editorText.trim()
+        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        if (parentLabel != targetLabel && _exists(parentLabel)) {
+          lastContext = _item(parentLabel).elem?.querySelector('.container')
+          // if (!lastContext?.querySelector('mark.selected')) lastContext = null
+        }
+      }
       if (lastContext) {
         lastContext.querySelector('mark.label')?.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
         // also click on any hide toggle (which must be below new target)
@@ -5923,22 +5950,17 @@
         })
         return
       }
-      // try to navigate up to parent label
-      const targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
-      if (targetLabel) {
-        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
-        if (parentLabel != targetLabel && _exists(parentLabel)) {
-          lastEditorChangeTime = 0 // force immediate update
-          forceNewStateOnEditorChange = true // add to history like click-based nav
-          onEditorChange(parentLabel)
-          return
-        }
+      // attempt to click on a hide toggle
+      const hideToggle = document.querySelector(`.toggle.hide`)
+      if (hideToggle) {
+        hideToggle.dispatchEvent(new Event('click'))
+        return
       }
     }
 
-    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup/arrowleft
+    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup
     // if no edited items left, then clear editor (mindbox)
-    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp' || key == 'ArrowLeft') && !modified) {
+    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp') && !modified) {
       e.preventDefault()
       if (editingItems.length) {
         // unedit the last edited item
