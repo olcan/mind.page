@@ -1815,11 +1815,10 @@
         .reverse()
         .concat(item.label)
       // console.debug(listing);
-    } else if (terms[0] != '#log' && idsFromLabel.get(terms[0])?.length > 0) {
-      // for label-matching items, do not treat as listing, but do expand label prefixes as context
-      let label = terms[0]
-      context = [terms[0]]
-      let pos
+    } else if (context.length == 0 && terms[0] != '#log' && idsFromLabel.get(terms[0])?.length > 1) {
+      // for first-tag-matching item, expand label prefixes into (otherwise empty) context
+      let label, pos
+      context.push((label = terms[0]))
       while ((pos = label.lastIndexOf('/')) >= 0) context.push((label = label.slice(0, pos)))
     }
 
@@ -1847,9 +1846,13 @@
 
     items.forEach((item, index) => {
       textLength += item.text.length
+      item.listing = index == listingItemIndex // note index != item.index at this point
 
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(item.tagsVisibleExpanded, terms).length
+
+      // match first term tag against visible tags (w/o prefixes)
+      item.firstTagMatch = item.tagsVisible.includes(terms[0])
 
       // match query terms against item label
       item.labelMatch = terms.includes(item.label)
@@ -1890,22 +1893,21 @@
       // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
       // skip secondary terms (for ranking and highlighting) for listing item
       // because it just feels like a distraction in that particular case
-      item.matchingTermsSecondary =
-        item.index == listingItemIndex
-          ? []
-          : _.uniq(
-              _.concat(
-                termsContext.filter(
-                  t =>
-                    item.tagsExpanded.includes(t) ||
-                    item.depsString.toLowerCase().includes(t) ||
-                    item.dependentsString.toLowerCase().includes(t)
-                ),
-                terms.filter(
-                  t => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
-                )
+      item.matchingTermsSecondary = item.listing
+        ? []
+        : _.uniq(
+            _.concat(
+              termsContext.filter(
+                t =>
+                  item.tagsExpanded.includes(t) ||
+                  item.depsString.toLowerCase().includes(t) ||
+                  item.dependentsString.toLowerCase().includes(t)
+              ),
+              terms.filter(
+                t => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
               )
             )
+          )
       // do not duplicate primary matching terms in secondary
       item.matchingTermsSecondary = _.difference(item.matchingTermsSecondary, item.matchingTerms)
 
@@ -1915,8 +1917,8 @@
       item.matching = item.matchingTerms.length > 0
       if (item.matching) matchingItemCount++
 
-      // listing item, label-matching items, and id-matching items, are considered "target" items
-      item.target = listingItemIndex == index || item.label == terms[0] || idMatchTerms.length > 0
+      // listing item and id-matching item are considered "target" items
+      item.target = item.listing || idMatchTerms.length > 0
       item.target_context = !item.target && context.includes(item.uniqueLabel)
       if (item.target) targetItemCount++
       item.target_nesting = item.target ? 0 : -Infinity
@@ -1961,24 +1963,31 @@
       })
     }
 
-    // insert dummy item with time=now to determine (below) index after which items are ranked purely by time
+    // insert dummy item to determine "tail" of items that can be hidden behind a toggle by default
+    // tail is defined as any items ranked below dummy item, where id == null and time == now
+    // tail includes items ranked purely by time and any other criteria below item.dummy (see below)
+    // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
     items.push({
+      id: null, // indicates dummy
       dotted: false,
       dotTerm: '',
       pinned: false,
       pinTerm: '',
       pinnedMatch: false,
       pinnedMatchTerm: '',
+      log: false,
       uniqueLabel: '',
+      target: false,
       editing: false,
+      hasError: false,
+      previewable: false,
+      firstTagMatch: false,
       tagMatches: 0,
       prefixMatch: false,
       matchingTerms: [],
       matchingTermsSecondary: [],
       missingTags: [],
-      hasError: false,
       time: now + 1000 /* dominate any offsets used above */,
-      id: null,
     })
 
     // returns position of minimum non-negative number, or -1 if none found
@@ -2035,6 +2044,8 @@
         // position of (unique) label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
+        // first term tag match
+        b.firstTagMatch - a.firstTagMatch ||
         // # of matching (visible) tags from query
         b.tagMatches - a.tagMatches ||
         // label match (OR tag matches to prevent non-unique labels dominating tags)
@@ -2046,6 +2057,8 @@
         b.prefixMatch - a.prefixMatch ||
         // # of matching words/tags from query
         b.matchingTerms.length - a.matchingTerms.length ||
+        // dummy item, below which is considered "tail" (see above)
+        Number(b.id === null) - Number(a.id === null) ||
         // # of matching secondary words from query
         b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
         // missing tag prefixes
@@ -2058,7 +2071,7 @@
     // note for editing items, log items which are edited "in place" and can be quite far down
     const needs_prominence = item => item.target || item.editing || item.hasError || item.pushable || item.previewable
 
-    // determine "tail" index after which items are ordered purely by time
+    // determine "tail" index (see above for definition)
     let tailIndex = items.findIndex(item => item.id === null)
     items.splice(tailIndex, 1)
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
@@ -2114,11 +2127,16 @@
       toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end
 
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
-    // NOTE: there is a difference between soft and hard touched items: soft touched items can be hidden again by going back (arguably makes sense since they were created by soft interactions such as navigation and will go away on reload), but hard touched items can not, so they are "sticky" in that sense.
-    hideIndexForSession = Math.max(hideIndexFromRanking, _.findLastIndex(items, item => item.time > sessionTime) + 1)
+    // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
+    // when items are ordered by a query (vs just time), we only consider up to first item untouched in this session
+    // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
+    hideIndexForSession = Math.max(
+      hideIndexFromRanking,
+      _.findIndex(items, item => item.time < sessionTime)
+    )
     // auto-show session items if no position-based toggles, otherwise use minimal
     hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
-    // hideIndex = hideIndexMinimal;
+    // hideIndex = hideIndexMinimal
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal;
 
@@ -2153,14 +2171,6 @@
       })
     }
     // console.debug(toggles);
-
-    // unhighlight targets if there are multiple
-    // note multiple targets still affect context (for label-matching items), ranking, and toggle points
-    if (targetItemCount > 1) {
-      items.forEach(item => {
-        if (item.target) item.target = false
-      })
-    }
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -4856,10 +4866,12 @@
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
+    item.listing = false
     item.target = false
     item.target_context = false
     item.target_nesting = -Infinity
     item.tagMatches = 0
+    item.firstTagMatch = false
     item.labelMatch = false
     item.prefixMatch = false
     item.pinnedMatch = false
@@ -5896,8 +5908,8 @@
               item.index > targetIndex && !item.pinned && item.labelUnique && !editorChangesWithTimeKept.has(item.label)
           )?.id
         }
-      } else if (!editorText.startsWith('#')) {
-        // if not already navigating, select first non-pinned item w/ unique label if clickable
+      } else if (!editorText.startsWith('#') || !items.find(item => item.firstTagMatch)) {
+        // if not already navigating w/ an exact tag match, select first non-pinned item w/ unique label if clickable
         nextTargetId = items.find(item => !item.pinned && item.labelUnique)?.id
       }
       if (nextTargetId) {
