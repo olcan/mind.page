@@ -5714,7 +5714,7 @@
     if (!e.metaKey) focus() // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
     const key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
-    // console.debug("window.onKeyDown:", e, key);
+    // console.debug("window.onKeyDown:", e, key)
 
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
 
@@ -5818,7 +5818,7 @@
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
-        if (parentLabel != targetLabel && _exists(parentLabel)) {
+        if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')
           if (!lastContext?.querySelector('mark.selected')) lastContext = null
         }
@@ -5856,8 +5856,8 @@
     }
     // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if (key == 'ArrowDown' && !modified) {
-      // target labels are unique by definition, so no ambiguity in _item(label)
-      const targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      if (!_exists(targetLabel, false /* allow_multiple */)) targetLabel = null // avoid id-matching targets
       let nextTargetId
       if (targetLabel) {
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context; note however target may not be treated as context if there are multiple nested children with the same label
@@ -5949,7 +5949,7 @@
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
-        if (parentLabel != targetLabel && _exists(parentLabel)) {
+        if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')
           // if (!lastContext?.querySelector('mark.selected')) lastContext = null
         }
@@ -6008,7 +6008,7 @@
       (key == 'KeyS' && (e.metaKey || e.ctrlKey)) ||
       (key == 'Slash' && (e.metaKey || e.ctrlKey)) ||
       (key == 'KeyI' && e.metaKey && e.shiftKey) ||
-      (key == 'ArrowUp' && e.metaKey) ||
+      key == 'ArrowUp' /*&& e.metaKey*/ ||
       (key == 'ArrowDown' && e.metaKey) ||
       key == 'Backspace' ||
       key == 'Tab' ||
@@ -6303,6 +6303,7 @@
                   createOnAnyModifiers={true}
                   clearOnShiftBackspace={true}
                   allowCommandCtrlBracket={true}
+                  propagateArrowUpDownAtEdges={true}
                   {onEditorKeyDown}
                   onEdited={onEditorChange}
                   onFocused={onEditorFocused}

@@ -9,6 +9,7 @@
   export let createOnAnyModifiers = false
   export let clearOnShiftBackspace = false
   export let allowCommandCtrlBracket = false
+  export let propagateArrowUpDownAtEdges = false
   // we standardize initial position as 0; can be value.length (e.g. on android)
   // 0 works better for longer items since top of item provides much better context
   export let selectionStart = 0
@@ -303,7 +304,7 @@
     unlockCaret()
     let key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
-    // console.debug("Editor.onKeyDown:", e, key);
+    // console.debug('Editor.onKeyDown:', e, key)
 
     // generic workaround for Shift-Enter not working on android keyboards: Space-then-Return-within-250ms w/o modifiers deletes the space and behaves like Shift+Enter
     if (
@@ -331,8 +332,19 @@
     lastKeyDownTime = Date.now()
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
+    // only keys we propagate are unmodified ArrowUp/Down at start/end of editor
+    const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return
-    else e.stopPropagation()
+    else if (propagateArrowUpDownAtEdges && key == 'ArrowUp' && !modified && textarea.selectionEnd == 0) return
+    else if (
+      propagateArrowUpDownAtEdges &&
+      key == 'ArrowDown' &&
+      !modified &&
+      textarea.selectionStart == textarea.value.length
+    ) {
+      textarea.blur() // also remove focus to avoid confusion e.g. if there is a scroll down
+      return
+    } else e.stopPropagation()
 
     // reset create closure (see setup below)
     createClosure = createClosureModifierKeys = null
