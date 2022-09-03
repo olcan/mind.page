@@ -2128,17 +2128,18 @@
 
     // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
     // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
-    // when items are ordered by a query (vs just time), we only consider up to first item untouched in this session
+    // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
     // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
     hideIndexForSession = Math.max(
       hideIndexFromRanking,
-      _.findIndex(items, item => item.time < sessionTime)
+      _.findIndex(items, item => !item.pinned && item.time < sessionTime)
     )
     // auto-show session items if no position-based toggles, otherwise use minimal
-    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
+    // hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
+    hideIndex = hideIndexForSession
     // hideIndex = hideIndexMinimal
     // if ranking while unfocused, retreat to minimal index
-    // if (!focused) hideIndex = hideIndexMinimal;
+    // if (!focused) hideIndex = hideIndexMinimal
 
     if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
       toggles.push({
