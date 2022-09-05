@@ -2123,6 +2123,7 @@
 
     // calculate "minimal" hide index used when window is defocused or items edited
     // minimal index is either the first time-ranked item, or the first position-based hidden item
+    // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
     hideIndexMinimal =
       toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end
 
@@ -2131,12 +2132,13 @@
     // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
     // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
     hideIndexForSession = Math.max(
-      hideIndexFromRanking,
-      _.findIndex(items, item => !item.pinned && item.time < sessionTime)
+      hideIndexFromRanking, // in case findIndex returns -1
+      _.findIndex(items, item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
     )
+
     // auto-show session items if no position-based toggles, otherwise use minimal
-    // hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
-    hideIndex = hideIndexForSession
+    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
+    // hideIndex = hideIndexForSession
     // hideIndex = hideIndexMinimal
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal
