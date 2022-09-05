@@ -3683,7 +3683,14 @@
               for (let item of items) {
                 if (!item.listen) continue
                 const name = cmd.substring(1)
-                if (!itemDefinesFunction(item, '_on_command_' + name)) continue
+                if (
+                  !itemDefinesFunction(item, '_on_command_' + name, {
+                    // async options matching item.eval below (see comments below)
+                    async: item.deepasync,
+                    async_simple: true,
+                  })
+                )
+                  continue
                 found_listener = true
                 function handleError(e) {
                   const log = _item(item.id).get_log({ since: 'eval', level: 'error' })
@@ -4820,13 +4827,13 @@
 
   // returns true iff item has defines specified function _without_ any dependencies
   // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
-  function itemDefinesFunction(item, name, type = 'js') {
+  function itemDefinesFunction(item, name, options = {}) {
     if (!item.text.includes(name)) return false // quick check
     try {
       return _item(item.id).eval(`(typeof ${name} == 'function')`, {
         include_deps: false,
         trigger: 'itemDefinesFunction',
-        type,
+        ...options,
       })
     } catch (e) {
       return false
@@ -4841,7 +4848,7 @@
       if (!item.init) return
       // if item has js_init block, use that, otherwise use js block (without dependencies to avoid complications due to init order etc)
       const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
-      if (!itemDefinesFunction(item, '_init', init_block_type)) return
+      if (!itemDefinesFunction(item, '_init', {type:init_block_type})) return
       try {
         _item(item.id).eval('_init()', {
           type: init_block_type,
