@@ -1388,15 +1388,23 @@
       // mark item as aboveTheFold if it is pinned or item is visible on first screen
       // if item heights are not available, then we use item index in column and assume top 5 are above fold
       item.aboveTheFold =
-        item.pinned ||
-        (totalItemHeight > 0 ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5)
+        item.pinned || (item.height ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5)
+      // if (item.aboveTheFold)
+      //   console.debug(
+      //     'aboveTheFold',
+      //     index,
+      //     item.height,
+      //     columnHeights[item.column],
+      //     outerHeight,
+      //     columnItemCount[item.column]
+      //   )
       // // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveTheFold
       // item.prominence = item.pinned
       //   ? 0
       //   : totalItemHeight > 0
       //   ? columnHeights[item.column] / outerHeight
       //   : columnItemCount[item.column] / 5;
-      // columnItemCount[item.column]++;
+      columnItemCount[item.column]++
 
       // mark item as "mover" if it changes index and/or column
       item.mover = item.index != item.lastIndex || item.column != item.lastColumn
@@ -2173,7 +2181,7 @@
         end: items.length,
       })
     }
-    // console.debug(toggles);
+    // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
