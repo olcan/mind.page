@@ -1504,6 +1504,7 @@
     {#if running}
       <div class="loading">
         <Circle2 size="40" unit="px" />
+        <div class="message" />
       </div>
     {:else if saving}
       <div class="loading">
@@ -1779,6 +1780,7 @@
 
   .loading {
     display: flex;
+    flex-direction: column;
     visibility: hidden;
     position: absolute;
     z-index: 1;
@@ -1798,6 +1800,37 @@
   .running .loading,
   .saving .loading {
     visibility: visible;
+  }
+  /* remove .message div when empty */
+  .loading .message:empty {
+    display: none;
+  }
+  /* style progress bars for consistency across platforms */
+  /* see https://stackoverflow.com/a/32186894 */
+  /* background */
+  :global(.container .loading progress) {
+    background-color: #171717;
+    border-radius: 4px;
+    width: 100px;
+    height: 10px;
+  }
+  :global(.container .loading progress::-webkit-progress-bar) {
+    width: 50%;
+    background-color: #171717;
+    border-radius: 4px;
+  }
+  /* value/foreground */
+  :global(.container .loading progress::-webkit-progress-value) {
+    background-color: #4af;
+    border-radius: 4px;
+  }
+  :global(.container .loading progress::-moz-progress-bar) {
+    background-color: #4af;
+    border-radius: 4px;
+  }
+  :global(.container .loading progress) {
+    color: #4af;
+    border-radius: 4px;
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
