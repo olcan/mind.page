@@ -1,5 +1,6 @@
 import sirv from 'sirv'
 import express from 'express'
+import { createProxyMiddleware } from 'http-proxy-middleware'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
@@ -69,6 +70,7 @@ const sapper_server = express().use(
   paths,
   compression({ threshold: 0 }),
   sirv('static', { dev, dotfiles: true /* in case .DS_Store is created */ }),
+
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
@@ -143,6 +145,29 @@ const sapper_server = express().use(
       next()
     }
   },
+
+  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware/tree/v2.0.4#readme
+  // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
+  // redirects are followed instead of exposed to server for robust CORS bypass
+  // websockets can also be proxied
+  createProxyMiddleware(path => /^\/proxy\/https?:\/\/.+$/.test(path), {
+    changeOrigin: true,
+    pathRewrite: (path, req) => {
+      path = path.replace(/^\/proxy\/https?:\/\/[^/?#]+/, '')
+      if (!path.startsWith('/')) path = '/' + path
+      // console.debug('proxy path', path)
+      return path
+    },
+    router: req => {
+      const backend = req.url.match(/^\/proxy\/(https?:\/\/[^/?#]+)/)?.pop()
+      // console.debug('proxying to', backend)
+      return backend
+    },
+    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
+    ws: true, // proxy websockets also
+  }),
+
+  // parse cookies
   cookieParser(),
   (req, res, next) => {
     res.cookie = req.cookies['__session'] || ''
@@ -152,6 +177,7 @@ const sapper_server = express().use(
     // res.set('Cross-Origin-Opener-Policy', 'same-origin')
     next()
   },
+
   // handle POST for webhooks
   express.json(),
   (req, res, next) => {
@@ -167,6 +193,8 @@ const sapper_server = express().use(
       next()
     }
   },
+
+  // populate session w/ cookie, see https://sapper.svelte.dev/docs#Seeding_session_data
   sapper.middleware({
     session: (req, res) => ({
       cookie: res['cookie'],
