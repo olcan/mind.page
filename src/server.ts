@@ -141,6 +141,27 @@ const sapper_server = express().use(
       }
       res.json(events[key])
       events[key] = []
+    } else if (hostname == 'localhost' && req.path.startsWith('/client/sapper-dev-client')) {
+      // modify sapper-dev-client.*.js file (see comments below on changes)
+      const abspath = process.env['PWD'] + '/__sapper__/dev' + req.path
+      // res.sendFile(abspath)
+      fs.readFile(abspath, 'utf8', (err, data) => {
+        if (err) {
+          console.error(err)
+          res.status(400).send('could not find ' + abspath + ';' + err)
+        } else {
+          res.contentType('text/javascript') // Or some other more appropriate value
+          // use /proxy for HTTP to avoid mixed content errors
+          // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
+          data = data.replace('http:', '/proxy/http:')
+          // force reload on re-connect; otherwise server restarts are NOT detected via proxy
+          data = data.replace(
+            `console.log(\`[SAPPER] dev client connected\`);`,
+            `if (window._dev_client_connected) { location.reload() } else { console.log(\`[SAPPER] dev client connected\`) }; window._dev_client_connected = true`
+          )
+          res.send(data)
+        }
+      })
     } else {
       next()
     }
