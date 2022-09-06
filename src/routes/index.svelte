@@ -2077,7 +2077,14 @@
 
     // certain items need prominence to be considered in hide index and toggle point computations
     // note for editing items, log items which are edited "in place" and can be quite far down
-    const needs_prominence = item => item.target || item.editing || item.hasError || item.pushable || item.previewable
+    const needs_prominence = item =>
+      item.target ||
+      item.editing ||
+      item.hasError ||
+      item.missingTags.length ||
+      item.running ||
+      item.pushable ||
+      item.previewable
 
     // determine "tail" index (see above for definition)
     let tailIndex = items.findIndex(item => item.id === null)
