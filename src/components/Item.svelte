@@ -1815,7 +1815,6 @@
     height: 10px;
   }
   :global(.container .loading progress::-webkit-progress-bar) {
-    width: 50%;
     background-color: #171717;
     border-radius: 4px;
   }
