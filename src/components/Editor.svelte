@@ -497,12 +497,12 @@
       return
     }
 
-    if (key == 'ArrowUp' && e.metaKey) {
+    if (key == 'ArrowUp' && e.metaKey && textarea.selectionEnd == 0) {
       e.preventDefault()
       onPrev()
       return
     }
-    if (key == 'ArrowDown' && e.metaKey) {
+    if (key == 'ArrowDown' && e.metaKey && textarea.selectionStart == textarea.value.length) {
       e.preventDefault()
       onNext()
       return
