@@ -1852,6 +1852,9 @@
     }
     termsContext = _.uniq(termsContext.concat(context))
 
+    // parse regex terms
+    const regexTerms = terms.filter(t => t.match(/^regex:\S+/)).map(t => new RegExp(t.substring(6)))
+
     items.forEach((item, index) => {
       textLength += item.text.length
       item.listing = index == listingItemIndex // note index != item.index at this point
@@ -1887,9 +1890,8 @@
       item.matchingTerms = item.matchingTerms.concat(terms.filter(t => item.lctext.includes(t)))
 
       // match regex:* terms as regex
-      item.matchingTerms = item.matchingTerms.concat(
-        terms.filter(t => t.match(/^regex:\S+/) && item.lctext.match(new RegExp(t.substring(6))))
-      )
+      item.matchingTerms = item.matchingTerms.concat(regexTerms.filter(t => item.lctext.match(t)))
+
       // match id:* terms against id
       const id = 'id:' + item.id.toLowerCase()
       const saved_id = 'id:' + (item.savedId?.toLowerCase() ?? 'unsaved')
@@ -1976,7 +1978,6 @@
     // tail includes items ranked purely by time and any other criteria below item.dummy (see below)
     // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
     items.push({
-      id: null, // indicates dummy
       dotted: false,
       dotTerm: '',
       pinned: false,
@@ -1989,10 +1990,14 @@
       editing: false,
       hasError: false,
       previewable: false,
+      pushable: false,
+      target_nesting: -Infinity,
       firstTagMatch: false,
       tagMatches: 0,
+      labelMatch: false,
       prefixMatch: false,
       matchingTerms: [],
+      id: null, // indicates dummy
       matchingTermsSecondary: [],
       missingTags: [],
       time: now + 1000 /* dominate any offsets used above */,
