@@ -2315,6 +2315,7 @@
     finalizeStateOnEditorChange = true // finalize state
     tick().then(() => editor.setSelection(editorText.length, editorText.length))
     lastEditorChangeTime = 0 // disable debounce even if editor focused
+    // maintain item times if altKey is held, e.g. with arrow-based navigation considered somehwat less "intentional"
     onEditorChange(editorText, e.altKey /* keep_times */)
 
     if (narrating) return
@@ -5912,7 +5913,7 @@
           if (childLabel) {
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
-            onEditorChange(childLabel)
+            onEditorChange(childLabel, true /* keep_times */) // keep_times for consistency w/ mousedown w/ altKey:true
             // note since we are using onEditorChange, we need to allow dom update, find item div, and scroll if needed
             update_dom().then(() => {
               const child = document.querySelector('#super-container-' + _item(childLabel).id)
@@ -5924,47 +5925,45 @@
             return
           }
 
-          // if still no child found, search for "next" non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent tag clicks that do not modify item times (due to altKey:true attribute on the mouse event, see above)
-          const targetIndex = item(_item(targetLabel).id).index
-          nextTargetId = items.find(
-            item =>
-              item.index > targetIndex && !item.pinned && item.labelUnique && !editorChangesWithTimeKept.has(item.label)
-          )?.id
+          // if still no child found, search for "next" non-pinned item w/ unique label; "next" means that the label is not in editorChangesWithTimeKept, which contains all recent arrow-based (or alt-held) navigation that is considered less intentional and should not modify item times
+          // const targetIndex = item(_item(targetLabel).id).index
+          // nextTargetId = items.find(
+          //   item =>
+          //     item.index > targetIndex && !item.pinned && item.labelUnique && !editorChangesWithTimeKept.has(item.label)
+          // )?.id
         }
-      } else if (!editorText.startsWith('#') || !items.find(item => item.firstTagMatch)) {
-        // if not already navigating w/ an exact tag match, select first non-pinned item w/ unique label if clickable
+      } else if (!editorText.trim()) {
+        // if there is no active query, select first non-pinned item w/ unique label (if visible on page)
         nextTargetId = items.find(item => !item.pinned && item.labelUnique)?.id
       }
       if (nextTargetId) {
         let nextTarget = document.querySelector(`#super-container-${nextTargetId} mark.label`)
-
-        if (nextTarget) nextTarget.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-        else {
-          // if next target is not found, click on next show toggle and try again after dispatch
-          // if target is still not found, then we will have at least toggled new items into view
-          const showToggle = document.querySelector(`.toggle.show`)
-          if (showToggle) {
-            // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
-            const toggleTop = (showToggle as HTMLElement).offsetTop
-            if (toggleTop > document.body.scrollTop + innerHeight - 200)
-              document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
-            showToggle.dispatchEvent(new Event('click'))
-          }
-          // note this seems to get confusing, so disabled for now
-          // update_dom().then(() => {
-          //   document
-          //     .querySelector(`#super-container-${nextTargetId} mark.label`)
-          //     ?.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-          // })
+        if (nextTarget) {
+          nextTarget.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+          return
         }
-      } else {
-        // attempt to click on a show toggle
-        document.querySelector(`.toggle.show`)?.dispatchEvent(new Event('click'))
       }
-      return
+      // attempt to click on a show toggle & scroll down if needed
+      const showToggle = document.querySelector(`.toggle.show`)
+      if (showToggle) {
+        // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
+        // alternatively, we could toggle only if already visible, to avoid forcing a scroll too far down page
+        const toggleTop = (showToggle as HTMLElement).offsetTop
+        if (toggleTop < document.body.scrollTop + innerHeight) showToggle.dispatchEvent(new Event('click'))
+        // if (toggleTop > document.body.scrollTop + innerHeight - 200)
+        //   document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
+        // showToggle.dispatchEvent(new Event('click'))
+        return
+      }
     }
     // let unmodified or alt-modified ArrowUp select label on last context item (i.e. move up to parent)
     if (key == 'ArrowUp' && (!modified || e.altKey)) {
+      // first attempt to click on top-most hide toggle, if any
+      const hideToggle = document.querySelector(`.toggle.hide`)
+      if (hideToggle) {
+        hideToggle.dispatchEvent(new Event('click'))
+        return
+      }
       // see comments above about lastContext
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
@@ -5983,12 +5982,6 @@
         update_dom().then(() => {
           document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event('click'))
         })
-        return
-      }
-      // attempt to click on a hide toggle
-      const hideToggle = document.querySelector(`.toggle.hide`)
-      if (hideToggle) {
-        hideToggle.dispatchEvent(new Event('click'))
         return
       }
     }
