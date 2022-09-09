@@ -2804,33 +2804,6 @@
     return secret
   }
 
-  // based on https://stackoverflow.com/a/20604561
-  function uint8ArrayToString(array: Uint8Array): string {
-    const len = array.length
-    const inc = 65535 // max args, see https://stackoverflow.com/a/22747272
-    let str = ''
-    for (let i = 0; i < len; i += inc) str += String.fromCharCode.apply(null, array.subarray(i, Math.min(len, i + inc)))
-    return str
-  }
-
-  function stringToUint8Array(str: string): Uint8Array {
-    const len = str.length
-    const array = new Uint8Array(len)
-    for (let i = 0; i < len; i++) {
-      const code = str.charCodeAt(i)
-      if (code > 255) throw new Error('unsupported code point in string->uint8 conversion')
-      array[i] = code
-    }
-    return array
-  }
-
-  function concatUint8Arrays(arr1: Uint8Array, arr2: Uint8Array): Uint8Array {
-    const array = new Uint8Array(arr1.length + arr2.length)
-    array.set(arr1)
-    array.set(arr2, arr1.length)
-    return array
-  }
-
   // function stringToUint16Array(str) {
   //   const array = new Uint16Array(str.length)
   //   const len = str.length
@@ -4880,6 +4853,9 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
+    uint8ArrayToString,
+    stringToUint8Array,
+    concatUint8Arrays,
     stringify,
     encode,
     encode_utf8,

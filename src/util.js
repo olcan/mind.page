@@ -187,12 +187,52 @@ export function checkElemCache() {
   })
 }
 
+// convert Uint8Array -> string using code points <= 255 (a.k.a. a "binary string")
+// based on https://stackoverflow.com/a/20604561
+export function uint8ArrayToString(array) {
+  if (array.constructor.name != 'Uint8Array') throw new Error('invalid argument, expected Uint8Array')
+  const len = array.length
+  const inc = 65535 // max args, see https://stackoverflow.com/a/22747272
+  let str = ''
+  for (let i = 0; i < len; i += inc) str += String.fromCharCode.apply(null, array.subarray(i, Math.min(len, i + inc)))
+  return str
+}
+
+// convert string -> Uint8Array, ensuring code points <= 255
+export function stringToUint8Array(str) {
+  if (typeof str != 'string') throw new Error('invalid argument, expected string')
+  const len = str.length
+  const array = new Uint8Array(len)
+  for (let i = 0; i < len; i++) {
+    const code = str.charCodeAt(i)
+    if (code > 255) throw new Error(`unsupported code point ${code}>255 in string->Uint8Array conversion`)
+    array[i] = code
+  }
+  return array
+}
+
+// concatenate pair of Uint8Arrays
+export function concatUint8Arrays(arr1, arr2) {
+  if (arr1.constructor.name != 'Uint8Array' || arr2.constructor.name != 'Uint8Array')
+    throw new Error('invalid arguments, expected pair of Uint8Arrays')
+  const array = new Uint8Array(arr1.length + arr2.length)
+  array.set(arr1)
+  array.set(arr2, arr1.length)
+  return array
+}
+
 // converts x to a string
 // mainly uses JSON.stringify
-// only exceptions are undefined, non-Object/Array objects, and functions
+// only exceptions are:
+//  - undefined & null, returned as strings 'undefined' or 'null'
+//  - ArrayBuffer & views that define `.buffer`, such as TypedArray or DataView, handled via uint8ArrayToString
+//  - other non-Object non-Array objects, handled recursively via _.entries
+//  - functions, handled using toString + any enumarable properties/values
 export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
   if (x === null) return 'null'
+  if (x.constructor.name == 'ArrayBuffer') return uint8ArrayToString(new Uint8Array(x))
+  if (x.buffer?.constructor.name == 'ArrayBuffer') return uint8ArrayToString(new Uint8Array(x.buffer))
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
@@ -298,11 +338,13 @@ export function decode_base64(base64) {
 // generic hasher that handles non-strings
 // hash of undefined is undefined, but null is hashed (as object)
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
-// default stringifier is toString for functions, JSON.stringify otherwise
+// default stringifier is stringify for ArrayBuffer+views, toString for functions, JSON.stringify otherwise
 export function hash(x, hasher, stringifier) {
   if (typeof x == 'undefined') return undefined
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
+    else if (x.constructor.name == 'ArrayBuffer') x = stringify(x)
+    else if (x.buffer?.constructor.name == 'ArrayBuffer') x = stringify(x)
     else if (typeof x == 'function') x = x.toString()
     else x = JSON.stringify(x)
   }
@@ -651,7 +693,7 @@ import murmur3 from '../node_modules/murmurhash3js-revisited' // ~6K
 // also accepts utf8 arrays (Uint8Array)
 export function hash_32_murmur3(x) {
   if (typeof x == 'string') x = encode_utf8_array(x)
-  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be Uint8Array')
   return murmur3.x86.hash32(x)
 }
 
@@ -660,7 +702,7 @@ export function hash_32_murmur3(x) {
 // also accepts utf8 arrays (Uint8Array)
 export function hash_128_murmur3_x86(x) {
   if (typeof x == 'string') x = encode_utf8_array(x)
-  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be Uint8Array')
   return murmur3.x86.hash128(x)
 }
 
@@ -669,7 +711,7 @@ export function hash_128_murmur3_x86(x) {
 // also accepts utf8 arrays (Uint8Array)
 export function hash_128_murmur3_x64(x) {
   if (typeof x == 'string') x = encode_utf8_array(x)
-  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be Uint8Array')
   return murmur3.x64.hash128(x)
 }
 
@@ -679,6 +721,6 @@ import sha1 from '../node_modules/js-sha1' // ~16K
 // also accepts utf8 arrays (Uint8Array)
 export function hash_160_sha1(x) {
   if (typeof x == 'string') x = encode_utf8_array(x)
-  if (x.constructor.name != 'Uint8Array') throw new Error('x must be string of Uint8Array')
+  if (x.constructor.name != 'Uint8Array') throw new Error('x must be Uint8Array')
   return sha1.hex(x)
 }
