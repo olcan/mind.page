@@ -52,10 +52,16 @@ service cloud.firestore {
 }
 service firebase.storage {
   match /b/{bucket}/o {
+		// <owner>/images/...
+		// ANYONE can read if owner=anonymous
+		// admin user can read/write owner=anonymous files
+		// logged in <user> can read/write owner=<user> files
 		match /{owner}/images/{hash} {
       allow read: if owner == "anonymous" || request.auth.uid == owner;
 			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
     }
+		// <owner>/uploads/...
+		// same rules as images above
 		match /{owner}/uploads/{path=**} {
       allow read: if owner == "anonymous" || request.auth.uid == owner;
 			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
