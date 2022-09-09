@@ -244,7 +244,14 @@ export function stringify(x) {
 
 function _stringify_object(x) {
   // _.entries uses .entries() for maps
-  return `[${typeof x} ${x.constructor.name}] {` + _.entries(x).map(([k, v]) => `${k}:${stringify(v)}`) + '}'
+  return (
+    (x.constructor.name != 'Object' ? `[${typeof x} ${x.constructor.name}] ` : '') +
+    '{ ' +
+    _.entries(x)
+      .map(([k, v]) => `${k}:${str(v)}`)
+      .join(' ') +
+    ' }'
+  )
 }
 
 function _unindent(fstr) {
@@ -339,14 +346,17 @@ export function decode_base64(base64) {
 // generic hasher that handles non-strings
 // hash of undefined is undefined, but null is hashed (as object)
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
-// default stringifier is stringify for ArrayBuffer+views, toString for functions, JSON.stringify otherwise
+// default stringifier is stringify (above) for ArrayBuffer(+views) & functions, JSON.stringify otherwise
 export function hash(x, hasher, stringifier) {
   if (typeof x == 'undefined') return undefined
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
-    else if (x.constructor.name == 'ArrayBuffer') x = stringify(x)
-    else if (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer') x = stringify(x)
-    else if (typeof x == 'function') x = x.toString()
+    else if (
+      x.constructor.name == 'ArrayBuffer' ||
+      (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer') ||
+      typeof x == 'function'
+    )
+      x = stringify(x)
     else x = JSON.stringify(x)
   }
   if (hasher) return hasher(x)
