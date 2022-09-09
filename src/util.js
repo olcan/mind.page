@@ -232,7 +232,8 @@ export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
   if (x === null) return 'null'
   if (x.constructor.name == 'ArrayBuffer') return uint8ArrayToString(new Uint8Array(x))
-  if (x.buffer?.constructor.name == 'ArrayBuffer') return uint8ArrayToString(new Uint8Array(x.buffer))
+  if (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer')
+    return uint8ArrayToString(new Uint8Array(x.buffer))
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
@@ -344,7 +345,7 @@ export function hash(x, hasher, stringifier) {
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
     else if (x.constructor.name == 'ArrayBuffer') x = stringify(x)
-    else if (x.buffer?.constructor.name == 'ArrayBuffer') x = stringify(x)
+    else if (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer') x = stringify(x)
     else if (typeof x == 'function') x = x.toString()
     else x = JSON.stringify(x)
   }
