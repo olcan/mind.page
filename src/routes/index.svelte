@@ -271,6 +271,8 @@
     window['_update_dom'] = update_dom
     window['_encrypt'] = encrypt
     window['_decrypt'] = decrypt
+    window['_encrypt_bytes'] = encrypt_bytes
+    window['_decrypt_bytes'] = decrypt_bytes
     window['_encrypt_item'] = encryptItem
     window['_decrypt_item'] = decryptItem
     window['_parse_tags'] = parseTags
@@ -1182,20 +1184,15 @@
                   }
                   start = Date.now()
                   const reader = new FileReader()
-                  reader.readAsBinaryString(blob)
+                  reader.readAsArrayBuffer(blob)
                   reader.onload = e => {
-                    const cipher = e.target.result as string
-                    decrypt(cipher)
-                      .then(str => {
-                        const type = str.substring(0, str.indexOf(';'))
-                        str = str.substring(str.indexOf(';') + 1)
+                    const cipher = new Uint8Array(e.target.result as ArrayBuffer)
+                    decrypt_bytes(cipher)
+                      .then((array: Uint8Array) => {
+                        const type = uint8ArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                        array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
                         console.debug(
-                          `decrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
-                        )
-                        const array = new Uint8Array(
-                          [].map.call(str, function (x) {
-                            return x.charCodeAt(0)
-                          })
+                          `decrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms`
                         )
                         const blob = new Blob([array], { type: type })
                         resolve(output == 'blob' ? blob : URL.createObjectURL(blob))
@@ -1470,15 +1467,16 @@
   if (isClient) images = window['_images'] = new Map<string, string>()
 
   function onPastedImage(url: string, file: File, size_handler = null) {
-    console.debug('pasted image', url)
+    // note inserted images also trigger this function via Modal.svelte
+    // console.debug('pasted image', url)
     const start = Date.now()
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
-      reader.readAsBinaryString(file)
+      reader.readAsArrayBuffer(file) // returns code points <= 255
       reader.onload = e => {
-        let str = e.target.result as string
-        if (size_handler) size_handler(str.length)
-        const file_hash = hash(str)
+        const bytes = new Uint8Array(e.target.result as ArrayBuffer)
+        if (size_handler) size_handler(bytes.length)
+        const file_hash = hash(bytes)
         const fname = `${user.uid}/images/${file_hash}` // short fname is just hash
         if (readonly) images.set(fname, url) // skip upload
         if (images.has(fname)) {
@@ -1486,10 +1484,10 @@
           return
         }
         if (anonymous) {
-          // console.debug(`uploading image ${fname} (${str.length} bytes) ...`);
+          console.debug(`uploading image ${fname} (${bytes.length} bytes) ...`)
           uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), file) // mime type from file
             .then(snapshot => {
-              console.debug(`uploaded image ${fname} (${str.length} bytes) in ${Date.now() - start}ms`)
+              console.debug(`uploaded image ${fname} (${bytes.length} bytes) in ${Date.now() - start}ms`)
               images.set(fname, url)
               resolve(file_hash)
             })
@@ -1498,14 +1496,17 @@
               reject(e)
             })
         } else {
-          encrypt(file.type + ';' + str)
+          const encrypt_start = Date.now()
+          encrypt_bytes(concatUint8Arrays(stringToUint8Array(file.type + ';'), bytes))
             .then(cipher => {
-              // console.debug(
-              //   `uploading encrypted image ${fname} (${cipher.length} bytes, ${str.length} original) ...`
-              // );
-              uploadString(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher)
+              const encrypt_time = Date.now() - encrypt_start
+              console.debug(`uploading encrypted image ${fname} (${cipher.length} bytes, ${bytes.length} original) ...`)
+              uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher)
                 .then(snapshot => {
-                  console.debug(`uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms`)
+                  console.debug(
+                    `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms ` +
+                      `(encryption took ${encrypt_time}ms)`
+                  )
                   images.set(fname, url)
                   resolve(file_hash)
                 })
@@ -1560,20 +1561,17 @@
             xhr.onload = event => {
               const blob = xhr.response
               const reader = new FileReader()
-              reader.readAsBinaryString(blob)
+              reader.readAsArrayBuffer(blob) // returns code points <= 255
               reader.onload = e => {
-                const cipher = e.target.result as string
-                decrypt(cipher)
-                  .then(str => {
-                    const type = str.substring(0, str.indexOf(';'))
-                    str = str.substring(str.indexOf(';') + 1)
+                const cipher = new Uint8Array(e.target.result as ArrayBuffer)
+                const decrypt_start = Date.now()
+                decrypt_bytes(cipher)
+                  .then((array: Uint8Array) => {
+                    const type = uint8ArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                    array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
                     console.debug(
-                      `downloaded encrypted image ${src} (${type}, ${str.length} bytes) in ${Date.now() - start}ms`
-                    )
-                    const array = new Uint8Array(
-                      [].map.call(str, function (x) {
-                        return x.charCodeAt(0)
-                      })
+                      `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
+                        `(decryption took ${Date.now() - decrypt_start}ms)`
                     )
                     img.src = URL.createObjectURL(new Blob([array], { type: type }))
                     img.removeAttribute('_loading')
@@ -2806,8 +2804,46 @@
     return secret
   }
 
+  // based on https://stackoverflow.com/a/20604561
+  function uint8ArrayToString(array: Uint8Array): string {
+    const len = array.length
+    const inc = 65535 // max args, see https://stackoverflow.com/a/22747272
+    let str = ''
+    for (let i = 0; i < len; i += inc) str += String.fromCharCode.apply(null, array.subarray(i, Math.min(len, i + inc)))
+    return str
+  }
+
+  function stringToUint8Array(str: string): Uint8Array {
+    const len = str.length
+    const array = new Uint8Array(len)
+    for (let i = 0; i < len; i++) {
+      const code = str.charCodeAt(i)
+      if (code > 255) throw new Error('unsupported code point in string->uint8 conversion')
+      array[i] = code
+    }
+    return array
+  }
+
+  function concatUint8Arrays(arr1: Uint8Array, arr2: Uint8Array): Uint8Array {
+    const array = new Uint8Array(arr1.length + arr2.length)
+    array.set(arr1)
+    array.set(arr2, arr1.length)
+    return array
+  }
+
+  // function stringToUint16Array(str) {
+  //   const array = new Uint16Array(str.length)
+  //   const len = str.length
+  //   for (let i = 0; i < len; i++) array[i] = str.charCodeAt(i)
+  //   return array
+  // }
+
+  // encrypt text w/ utf8 encoding for given string and base64-encoding for encrypted cipher
   // based on https://gist.github.com/chrisveness/43bcda93af9f646d083fad678071b90a
-  async function encrypt(text: string) {
+  // ideal for firestore database since cipher is easy to view, copy, etc
+  // overhead for text is ~20% cpu time (utf8) and ~30% storage (base64)
+  // overhead for binary can be ~60% cpu time (utf8 for ~50% larger buffers) and ~2x storage (utf8+base64)
+  async function encrypt(text: string): Promise<string> {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
     secret = await Promise.resolve(secret) // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
@@ -2815,18 +2851,33 @@
     const iv = crypto.getRandomValues(new Uint8Array(12)) // get 96-bit random iv
     const alg = { name: 'AES-GCM', iv: iv } // configure AES-GCM
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['encrypt']) // generate key
-    const text_utf8 = new TextEncoder().encode(text) // utf8-encode text
-    const cipher_buffer = await crypto.subtle.encrypt(alg, key, text_utf8) // encrypt text using key
-    const cipher_array = Array.from(new Uint8Array(cipher_buffer)) // convert cipher to byte array
-    const cipher_string = cipher_array.map(byte => String.fromCharCode(byte)).join('') // convert cipher to string
-    const cipher_base64 = btoa(cipher_string) // base64-encode cipher
+    const cipher_buffer = await crypto.subtle.encrypt(alg, key, new TextEncoder().encode(text)) // encrypt using key
     const iv_hex = Array.from(iv)
       .map(b => ('00' + b.toString(16)).slice(-2))
-      .join('') // convert iv to hex string
-    return iv_hex + cipher_base64 // return iv + cipher
+      .join('') // convert iv to hex string (of length 24)
+    return iv_hex + btoa(uint8ArrayToString(new Uint8Array(cipher_buffer)))
   }
 
-  async function decrypt(cipher: string) {
+  // encrypt arbitrary bytes (uint8)
+  // ideal for firebase storage of large binary data such as images
+  async function encrypt_bytes(bytes: Uint8Array): Promise<Uint8Array> {
+    if (!secret) secret = getSecretPhrase(true /* new_phrase */)
+    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
+    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
+    const iv = crypto.getRandomValues(new Uint8Array(12)) // get 96-bit random iv
+    const alg = { name: 'AES-GCM', iv: iv } // configure AES-GCM
+    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['encrypt']) // generate key
+    const cipher_buffer = await crypto.subtle.encrypt(alg, key, bytes) // encrypt text using key
+    const iv_hex = Array.from(iv)
+      .map(b => ('00' + b.toString(16)).slice(-2))
+      .join('') // convert iv to hex string (of length 24)
+    return concatUint8Arrays(stringToUint8Array('~' + iv_hex), new Uint8Array(cipher_buffer))
+  }
+
+  async function decrypt(cipher: string): Promise<string> {
+    // if (cipher[0] == '~') return uint8ArrayToString(await decrypt_bytes(stringToUint8Array(cipher)))
+    if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
@@ -2837,12 +2888,33 @@
       .map(byte => parseInt(byte, 16)) // get iv from cipher
     const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
-    const cipher_string = atob(cipher.slice(24)) // base64-decode cipher
-    const cipher_array = new Uint8Array(cipher_string.match(/[\s\S]/g).map(ch => ch.charCodeAt(0))) // convert cipher to byte array
+    const cipher_array = stringToUint8Array(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
     const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
-    const text = new TextDecoder().decode(text_buffer) // utf8-decode text
-    return text
+    return new TextDecoder().decode(text_buffer) // utf8-decode text
   }
+
+  async function decrypt_bytes(cipher: Uint8Array): Promise<Uint8Array> {
+    if (!secret) secret = getSecretPhrase()
+    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
+    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
+    // detect uint8 ("bytes") mode based on ~ prefix
+    const encrypted_bytes = cipher[0] == '~'.charCodeAt(0)
+    const offset = encrypted_bytes ? 1 : 0 // uint8 encoding has offset 1 for '~' prefix
+    const iv = uint8ArrayToString(cipher.subarray(offset, 24 + offset))
+      .match(/.{2}/g)
+      .map(byte => parseInt(byte, 16)) // get iv from cipher
+    const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
+    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
+    const cipher_array = encrypted_bytes
+      ? cipher.subarray(24 + offset)
+      : stringToUint8Array(atob(uint8ArrayToString(cipher.subarray(24 + offset))))
+    const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
+    if (encrypted_bytes) return new Uint8Array(text_buffer) // return raw uint8 array
+    // backwards compatibility mode: convert utf8-decoded text to uint8 array (code points <= 255 only)
+    return stringToUint8Array(new TextDecoder().decode(text_buffer))
+  }
+
   async function encryptItem(item) {
     if (anonymous) return item // do not encrypt for anonymous user
     if (item.cipher) return item // already encrypted
@@ -2854,6 +2926,7 @@
     item.attr = null // null until decryption
     return item
   }
+
   async function decryptItem(item) {
     if (item.text) return item // already decrypted
     if (!item.cipher) return item // nothing to decrypt
