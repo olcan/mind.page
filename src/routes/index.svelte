@@ -284,10 +284,13 @@
     window['_encode'] = encode
     window['_encode_utf8'] = encode_utf8
     window['_encode_utf8_array'] = encode_utf8_array
+    window['_encode_byte_array'] = encode_byte_array
+    window['_concat_byte_arrays'] = concatByteArrays
     window['_encode_base64'] = encode_base64
     window['_decode'] = decode
     window['_decode_utf8'] = decode_utf8
     window['_decode_utf8_array'] = decode_utf8_array
+    window['_decode_byte_array'] = decode_byte_array
     window['_decode_base64'] = decode_base64
     window['_hash'] = hash
     window['_hash_32_djb2'] = hash_32_djb2
@@ -1189,7 +1192,7 @@
                     const cipher = new Uint8Array(e.target.result as ArrayBuffer)
                     decrypt_bytes(cipher)
                       .then((array: Uint8Array) => {
-                        const type = uint8ArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                        const type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
                         array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
                         console.debug(
                           `decrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms`
@@ -1497,7 +1500,7 @@
             })
         } else {
           const encrypt_start = Date.now()
-          encrypt_bytes(concatUint8Arrays(stringToUint8Array(file.type + ';'), bytes))
+          encrypt_bytes(concatByteArrays(stringToByteArray(file.type + ';'), bytes))
             .then(cipher => {
               const encrypt_time = Date.now() - encrypt_start
               console.debug(`uploading encrypted image ${fname} (${cipher.length} bytes, ${bytes.length} original) ...`)
@@ -1567,7 +1570,7 @@
                 const decrypt_start = Date.now()
                 decrypt_bytes(cipher)
                   .then((array: Uint8Array) => {
-                    const type = uint8ArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                    const type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
                     array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
                     console.debug(
                       `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
@@ -2828,7 +2831,7 @@
     const iv_hex = Array.from(iv)
       .map(b => ('00' + b.toString(16)).slice(-2))
       .join('') // convert iv to hex string (of length 24)
-    return iv_hex + btoa(uint8ArrayToString(new Uint8Array(cipher_buffer)))
+    return iv_hex + btoa(byteArrayToString(new Uint8Array(cipher_buffer)))
   }
 
   // encrypt arbitrary bytes (uint8)
@@ -2845,11 +2848,11 @@
     const iv_hex = Array.from(iv)
       .map(b => ('00' + b.toString(16)).slice(-2))
       .join('') // convert iv to hex string (of length 24)
-    return concatUint8Arrays(stringToUint8Array('~' + iv_hex), new Uint8Array(cipher_buffer))
+    return concatByteArrays(stringToByteArray('~' + iv_hex), new Uint8Array(cipher_buffer))
   }
 
   async function decrypt(cipher: string): Promise<string> {
-    // if (cipher[0] == '~') return uint8ArrayToString(await decrypt_bytes(stringToUint8Array(cipher)))
+    // if (cipher[0] == '~') return byteArrayToString(await decrypt_bytes(stringToByteArray(cipher)))
     if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
@@ -2861,7 +2864,7 @@
       .map(byte => parseInt(byte, 16)) // get iv from cipher
     const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
-    const cipher_array = stringToUint8Array(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
+    const cipher_array = stringToByteArray(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
     const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
     return new TextDecoder().decode(text_buffer) // utf8-decode text
   }
@@ -2874,18 +2877,18 @@
     // detect uint8 ("bytes") mode based on ~ prefix
     const encrypted_bytes = cipher[0] == '~'.charCodeAt(0)
     const offset = encrypted_bytes ? 1 : 0 // uint8 encoding has offset 1 for '~' prefix
-    const iv = uint8ArrayToString(cipher.subarray(offset, 24 + offset))
+    const iv = byteArrayToString(cipher.subarray(offset, 24 + offset))
       .match(/.{2}/g)
       .map(byte => parseInt(byte, 16)) // get iv from cipher
     const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
     const cipher_array = encrypted_bytes
       ? cipher.subarray(24 + offset)
-      : stringToUint8Array(atob(uint8ArrayToString(cipher.subarray(24 + offset))))
+      : stringToByteArray(atob(byteArrayToString(cipher.subarray(24 + offset))))
     const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
     if (encrypted_bytes) return new Uint8Array(text_buffer) // return raw uint8 array
     // backwards compatibility mode: convert utf8-decoded text to uint8 array (code points <= 255 only)
-    return stringToUint8Array(new TextDecoder().decode(text_buffer))
+    return stringToByteArray(new TextDecoder().decode(text_buffer))
   }
 
   async function encryptItem(item) {
@@ -4853,17 +4856,19 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
-    uint8ArrayToString,
-    stringToUint8Array,
-    concatUint8Arrays,
+    byteArrayToString,
+    stringToByteArray,
+    concatByteArrays,
     stringify,
     encode,
     encode_utf8,
     encode_utf8_array,
+    encode_byte_array,
     encode_base64,
     decode,
     decode_utf8,
     decode_utf8_array,
+    decode_byte_array,
     decode_base64,
     hash,
     hash_32_djb2,

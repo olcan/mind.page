@@ -189,7 +189,7 @@ export function checkElemCache() {
 
 // convert Uint8Array -> string using code points <= 255 (a.k.a. a "binary string")
 // based on https://stackoverflow.com/a/20604561
-export function uint8ArrayToString(array) {
+export function byteArrayToString(array) {
   if (array.constructor.name != 'Uint8Array') throw new Error('invalid argument, expected Uint8Array')
   const len = array.length
   const inc = 65535 // max args, see https://stackoverflow.com/a/22747272
@@ -199,7 +199,8 @@ export function uint8ArrayToString(array) {
 }
 
 // convert string -> Uint8Array, ensuring code points <= 255
-export function stringToUint8Array(str) {
+// note this is much faster than Uint8Array.from despite checking each code point
+export function stringToByteArray(str) {
   if (typeof str != 'string') throw new Error('invalid argument, expected string')
   const len = str.length
   const array = new Uint8Array(len)
@@ -212,7 +213,7 @@ export function stringToUint8Array(str) {
 }
 
 // concatenate pair of Uint8Arrays
-export function concatUint8Arrays(arr1, arr2) {
+export function concatByteArrays(arr1, arr2) {
   if (arr1.constructor.name != 'Uint8Array' || arr2.constructor.name != 'Uint8Array')
     throw new Error('invalid arguments, expected pair of Uint8Arrays')
   const array = new Uint8Array(arr1.length + arr2.length)
@@ -225,15 +226,15 @@ export function concatUint8Arrays(arr1, arr2) {
 // mainly uses JSON.stringify
 // only exceptions are:
 //  - undefined & null, returned as strings 'undefined' or 'null'
-//  - ArrayBuffer & views that define `.buffer`, such as TypedArray or DataView, handled via uint8ArrayToString
+//  - ArrayBuffer & views that define `.buffer`, such as TypedArray or DataView, handled via byteArrayToString
 //  - other non-Object non-Array objects, handled recursively via _.entries
 //  - functions, handled using toString + any enumarable properties/values
 export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
   if (x === null) return 'null'
-  if (x.constructor.name == 'ArrayBuffer') return uint8ArrayToString(new Uint8Array(x))
+  if (x.constructor.name == 'ArrayBuffer') return byteArrayToString(new Uint8Array(x))
   if (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer')
-    return uint8ArrayToString(new Uint8Array(x.buffer))
+    return byteArrayToString(new Uint8Array(x.buffer))
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
@@ -276,6 +277,10 @@ export function encode(str, encoding = 'base64') {
     case 'utf-8-array':
       return encode_utf8_array(str)
 
+    case 'byte_array':
+    case 'byte-array':
+      return encode_byte_array(str)
+
     case 'base64':
     case 'base-64':
     case 'b64':
@@ -298,6 +303,10 @@ export function decode(encoded, encoding = 'base64') {
     case 'utf-8_array':
     case 'utf-8-array':
       return decode_utf8_array(encoded)
+
+    case 'byte_array':
+    case 'byte-array':
+      return decode_byte_array(encoded)
 
     case 'base64':
     case 'base-64':
@@ -331,6 +340,16 @@ export function encode_utf8_array(str) {
 const utf8_decoder = new TextDecoder('utf-8')
 export function decode_utf8_array(utf8) {
   return utf8_decoder.decode(utf8) // Uint8Array -> string (utf16)
+}
+
+// utf16 -> byte array (Uint8Array), for code points <= 255 only
+export function encode_byte_array(str) {
+  return stringToByteArray(str)
+}
+
+// byte array (Uint8Array) -> utf16 for code points <= 255 only
+export function decode_byte_array(array) {
+  return byteArrayToString(array)
 }
 
 // utf16 -> base64(ascii)
