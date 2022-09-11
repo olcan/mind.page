@@ -813,10 +813,10 @@
     // always report container height for potential changes
     setTimeout(() => onResized(id, container, 'afterUpdate'), 0)
 
-    // itemdiv can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
-    if (!itemdiv) {
+    // itemdiv or its parent can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
+    if (!itemdiv?.parentElement) {
       Object.values(window['_elem_cache'][id] || {}).forEach(adoptCachedElem)
-      return // itemdiv is null if editing
+      return
     }
 
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
@@ -828,7 +828,7 @@
 
     // insert right-floating div same size as .item-menu, which will also serve as first element of itemdiv
     // NOTE: this is a workaround for a null-parent exception if .item-menu is placed inside .item by Svelte
-    if (!editing && itemdiv.firstElementChild?.id != 'menu-' + id) {
+    if (itemdiv.firstElementChild?.id != 'menu-' + id) {
       let menu = itemdiv.parentElement.querySelector('.item-menu')
       let div = document.createElement('div')
       div.style.width = menu.clientWidth + 'px'
