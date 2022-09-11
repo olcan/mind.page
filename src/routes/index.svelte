@@ -1179,7 +1179,7 @@
                 let xhr = new XMLHttpRequest()
                 xhr.responseType = 'blob'
                 xhr.onload = event => {
-                  const blob = xhr.response
+                  let blob = xhr.response
                   console.debug(`downloaded image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`)
                   if (src.startsWith('anonymous/')) {
                     resolve(output == 'blob' ? blob : URL.createObjectURL(blob))
@@ -1192,12 +1192,16 @@
                     const cipher = new Uint8Array(e.target.result as ArrayBuffer)
                     decrypt_bytes(cipher)
                       .then((array: Uint8Array) => {
-                        const type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
-                        array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+                        let type = blob.type
+                        if (type == 'application/octet-stream') {
+                          // image type is prefixed (older images only)
+                          type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                          array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+                        }
+                        blob = new Blob([array], { type }) // decrypted blob
                         console.debug(
                           `decrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms`
                         )
-                        const blob = new Blob([array], { type: type })
                         resolve(output == 'blob' ? blob : URL.createObjectURL(blob))
                       })
                       .catch(e => {
@@ -1500,11 +1504,13 @@
             })
         } else {
           const encrypt_start = Date.now()
-          encrypt_bytes(concatByteArrays(stringToByteArray(file.type + ';'), bytes))
+          encrypt_bytes(bytes)
             .then(cipher => {
               const encrypt_time = Date.now() - encrypt_start
               console.debug(`uploading encrypted image ${fname} (${cipher.length} bytes, ${bytes.length} original) ...`)
-              uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher)
+              uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher, {
+                contentType: file.type,
+              })
                 .then(snapshot => {
                   console.debug(
                     `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms ` +
@@ -1562,7 +1568,7 @@
             let xhr = new XMLHttpRequest()
             xhr.responseType = 'blob'
             xhr.onload = event => {
-              const blob = xhr.response
+              let blob = xhr.response
               const reader = new FileReader()
               reader.readAsArrayBuffer(blob) // returns code points <= 255
               reader.onload = e => {
@@ -1570,13 +1576,18 @@
                 const decrypt_start = Date.now()
                 decrypt_bytes(cipher)
                   .then((array: Uint8Array) => {
-                    const type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
-                    array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+                    let type = blob.type
+                    if (type == 'application/octet-stream') {
+                      // image type is prefixed (older images only)
+                      type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                      array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+                    }
+                    blob = new Blob([array], { type }) // decrypted blob
                     console.debug(
                       `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
                         `(decryption took ${Date.now() - decrypt_start}ms)`
                     )
-                    img.src = URL.createObjectURL(new Blob([array], { type: type }))
+                    img.src = URL.createObjectURL(blob)
                     img.removeAttribute('_loading')
                     images.set(src, img.src) // add to cache
                     resolve(img.src)
