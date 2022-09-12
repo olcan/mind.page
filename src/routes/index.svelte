@@ -1463,7 +1463,7 @@
         )
         // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop - 100 < document.body.scrollTop)
+        if (itemTop < document.body.scrollTop)
           document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
         topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
       }
@@ -2261,6 +2261,13 @@
     replaceState(Object.assign(history.state, { hideIndex }))
   }
 
+  function scrollToTarget() {
+    const target = document.querySelector(`.super-container.target`) as HTMLElement
+    // if target is too far up or down, bring it to ~upper-middle, snapping up to header
+    if (target.offsetTop < document.body.scrollTop || target.offsetTop > document.body.scrollTop + innerHeight - 200)
+      document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+  }
+
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
     focus() // ensure window focus on tag click (mousedown)
     const index = indexFromId.get(id)
@@ -2331,27 +2338,8 @@
     onEditorChange(editorText, e.altKey /* keep_times */)
 
     if (narrating) return
-    // scroll up (or down) to target item if needed
-    if (items.findIndex(item => item.target) >= 0) {
-      update_dom().then(() => {
-        let topTargets = new Array(columnCount).fill(items.length)
-        items.forEach((item, index) => {
-          if (item.target && index < topTargets[item.column]) topTargets[item.column] = index
-        })
-        const itemTop = _.min(
-          topTargets.map(index => {
-            if (index == items.length) return Infinity // nothing in this column
-            const div = document.querySelector('#super-container-' + items[index].id)
-            if (!div) return Infinity // item hidden, have to ignore
-            return (div as HTMLElement).offsetTop
-          })
-        )
-        if (itemTop == Infinity) return // nothing to scroll to
-        // if item is too far up or down, bring it to ~upper-middle, snapping up to header
-        if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
-          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
-      })
-    }
+    // scroll to target item if needed
+    if (items.some(item => item.target)) update_dom().then(scrollToTarget)
   }
 
   function onLinkClick(id: string, href: string, e: MouseEvent) {
@@ -4271,7 +4259,7 @@
           const div = document.querySelector('#super-container-' + item.id)
           if (!div) return // item deleted or hidden
           const itemTop = (div as HTMLElement).offsetTop
-          if (itemTop - 100 < document.body.scrollTop)
+          if (itemTop < document.body.scrollTop)
             document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
         })
       }
@@ -4470,8 +4458,8 @@
 
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
-      // if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
-      if (caretTop - 100 < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200) {
+      // if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
+      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200) {
         console.debug(
           `scrolling to ${Math.max(0, caretTop - innerHeight / 4)} from ${
             document.body.scrollTop
@@ -5764,14 +5752,8 @@
               } else {
                 alert(`url fragment ${tag} does not match any items`)
               }
-              // if tag matches a unique item, scroll down to that item if needed
-              if (unique) {
-                update_dom().then(() => {
-                  const target = document.querySelector(`.super-container.target`) as HTMLElement
-                  if (target)
-                    document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
-                })
-              }
+              // if tag matches a unique item, scroll to that item if needed
+              if (unique) update_dom().then(scrollToTarget)
             }
           })
 
@@ -5840,7 +5822,7 @@
       const index = parseInt(key.match(/\d+/)?.shift()) - 1
       if (index == -1) {
         const target = document.querySelector(`.super-container.target`) as HTMLElement
-        if (target) document.body.scrollTo(0, target.offsetTop - innerHeight / 4)
+        if (target) document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
         else document.body.scrollTo(0, headerdiv.offsetTop) // just scroll to top
         return
       }
@@ -5943,10 +5925,10 @@
         }
       }
     }
-    // let unmodified ArrowDown/Right select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
+    // let unmodified ArrowDown select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if (key == 'ArrowDown' && !modified) {
       let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
-      if (!_exists(targetLabel, false /* allow_multiple */)) targetLabel = null // avoid id-matching targets
+      if (!_exists(targetLabel, false /* allow_multiple */)) targetLabel = null // avoid id-matching or multiple targets
       let nextTargetId
       if (targetLabel) {
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context; note however target may not be treated as context if there are multiple nested children with the same label
@@ -5979,14 +5961,8 @@
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
             onEditorChange(childLabel, true /* keep_times */) // keep_times for consistency w/ mousedown w/ altKey:true
-            // note since we are using onEditorChange, we need to allow dom update, find item div, and scroll if needed
-            update_dom().then(() => {
-              const child = document.querySelector('#super-container-' + _item(childLabel).id)
-              const itemTop = (child as HTMLElement).offsetTop
-              // if item is too far up or down, bring it to ~upper-middle, snapping up to header
-              if (itemTop - 100 < document.body.scrollTop || itemTop > document.body.scrollTop + innerHeight - 200)
-                document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
-            })
+            // note since we are using onEditorChange, we need to handle scrolling as needed
+            update_dom().then(scrollToTarget)
             return
           }
 
