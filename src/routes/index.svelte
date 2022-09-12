@@ -1261,10 +1261,12 @@
     // we need to use innerHeight since it is also used to calculate scroll positions
     // innerHeight can change frequently, which is ok as long as updateVerticalPadding is invoked carefully
     const viewHeight = innerHeight
-    if (itemsdiv && viewHeight != lastViewHeight) {
+    const viewHeightDelta = viewHeight - lastViewHeight
+    if (itemsdiv && viewHeightDelta) {
       const prevScrollTop = document.body.scrollTop
       const prevPadding = itemsdiv.querySelector('.column-padding').offsetHeight
       padding = 0.7 * viewHeight
+      // console.debug(`updating vertical padding to ${padding} for viewHeight ${viewHeight}, was ${lastViewHeight}`)
       // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
       itemsdiv.querySelectorAll('.column-padding').forEach((div: HTMLElement) => (div.style.height = padding + 'px'))
       // adjust bottom padding and then scroll position to prevent jumping
@@ -1272,6 +1274,7 @@
       document.body.scrollTo(0, prevScrollTop + padding - prevPadding)
       lastViewHeight = viewHeight
     }
+    return viewHeightDelta
   }
 
   function getDocumentWidth() {
@@ -3845,8 +3848,7 @@
         textarea.selectionEnd = selectionEnd
 
         // scroll to caret position ...
-        // NOTE: it turns out this may have been unnecessary and causing over-scrolling on iphone, see comment in restoreItemEditor
-        // restoreItemEditor(item.id);
+        // restoreItemEditor(item.id)
 
         // NOTE: on the iPad, there is an odd bug where a tap-to-click (but not a full click) on the trackpad on create button can cause a semi-focused state where activeElement has changed but the element does not show caret or accept input except some keys such as tab, AND selection reverts to 0/0 after ~100ms (as if something is momentarily clearing the textarea, perhaps due to some external keyboard logic), and we could not figure out any reason (it is not the editor's onMount or other places where selection is set) or other workaround (e.g. using other events to trigger onCreate), except to check for reversion to 0/0 after 100ms and fix if any
         if (selectionStart > 0 || selectionEnd > 0) {
@@ -4430,12 +4432,10 @@
       if (!textarea) return
       textarea.focus()
 
-      // NOTE: this prevents some consistent overscrolling on iphone (e.g. for new items created below other items, e.g. #todo items), but downside is that there may be no scrolling ipad/iphone for deep log line edits; a more recent fix was to disable restoreItemEditor call for new item creation because it may not be necessary (see onEditorDone)
-      // if (ios || android) return; // ios and android have built-in focus scrolling that works better
-
       // update vertical padding in case it is out of date
       // could help w/ caret position calculation below, but unconfirmed empirically
-      updateVerticalPadding()
+      // note on iOS we are forced to ADD this delta for accurate scrolling
+      const viewHeightDelta = updateVerticalPadding()
 
       // calculate caret position
       // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
@@ -4458,14 +4458,13 @@
 
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
-      // if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight / 4)
       if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200) {
-        console.debug(
-          `scrolling to ${Math.max(0, caretTop - innerHeight / 4)} from ${
-            document.body.scrollTop
-          } for caretTop:${caretTop}, innerHeight:${innerHeight}`
-        )
-        document.body.scrollTo(0, Math.max(0, caretTop - innerHeight / 4))
+        const scroll_to = Math.max(0, caretTop - innerHeight / 4) + (ios ? viewHeightDelta : 0)
+        // console.debug(
+        //   `scrolling to ${scroll_to} from ${document.body.scrollTop} for ` +
+        //     `caretTop:${caretTop}, innerHeight:${innerHeight}, viewHeightDelta:${viewHeightDelta}`
+        // )
+        document.body.scrollTo(0, scroll_to)
       }
     })
   }
