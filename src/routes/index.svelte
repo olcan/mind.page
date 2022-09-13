@@ -280,6 +280,7 @@
     window['_resolve_tags'] = resolveTags
     window['_special_tag'] = isSpecialTag
     window['_stringify'] = stringify
+    window['_byte_stringify'] = byte_stringify
     // encoding/decoding/hashing functions
     window['_encode'] = encode
     window['_encode_utf8'] = encode_utf8
@@ -2850,11 +2851,11 @@
     const iv_hex = Array.from(iv)
       .map(b => ('00' + b.toString(16)).slice(-2))
       .join('') // convert iv to hex string (of length 24)
-    return concatByteArrays(stringToByteArray('~' + iv_hex), new Uint8Array(cipher_buffer))
+    return concatByteArrays(byteStringToArray('~' + iv_hex), new Uint8Array(cipher_buffer))
   }
 
   async function decrypt(cipher: string): Promise<string> {
-    // if (cipher[0] == '~') return byteArrayToString(await decrypt_bytes(stringToByteArray(cipher)))
+    // if (cipher[0] == '~') return byteArrayToString(await decrypt_bytes(byteStringToArray(cipher)))
     if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
@@ -2866,7 +2867,7 @@
       .map(byte => parseInt(byte, 16)) // get iv from cipher
     const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
-    const cipher_array = stringToByteArray(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
+    const cipher_array = byteStringToArray(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
     const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
     return new TextDecoder().decode(text_buffer) // utf8-decode text
   }
@@ -2886,11 +2887,11 @@
     const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
     const cipher_array = encrypted_bytes
       ? cipher.subarray(24 + offset)
-      : stringToByteArray(atob(byteArrayToString(cipher.subarray(24 + offset))))
+      : byteStringToArray(atob(byteArrayToString(cipher.subarray(24 + offset))))
     const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
     if (encrypted_bytes) return new Uint8Array(text_buffer) // return raw uint8 array
     // backwards compatibility mode: convert utf8-decoded text to uint8 array (code points <= 255 only)
-    return stringToByteArray(new TextDecoder().decode(text_buffer))
+    return byteStringToArray(new TextDecoder().decode(text_buffer))
   }
 
   async function encryptItem(item) {
@@ -4855,9 +4856,10 @@
     invalidateElemCache,
     checkElemCache,
     byteArrayToString,
-    stringToByteArray,
+    byteStringToArray,
     concatByteArrays,
     stringify,
+    byte_stringify,
     encode,
     encode_utf8,
     encode_utf8_array,

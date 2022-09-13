@@ -187,7 +187,7 @@ export function checkElemCache() {
   })
 }
 
-// convert Uint8Array -> string using code points <= 255 (a.k.a. a "binary string")
+// convert byte array (Uint8Array) -> byte string of code points <=255 (a.k.a. a "binary string")
 // based on https://stackoverflow.com/a/20604561
 export function byteArrayToString(array) {
   if (array.constructor.name != 'Uint8Array') throw new Error('invalid argument, expected Uint8Array')
@@ -198,9 +198,9 @@ export function byteArrayToString(array) {
   return str
 }
 
-// convert string -> Uint8Array, ensuring code points <= 255
+// convert byte string -> byte array (Uint8Array), ensuring code points <= 255
 // note this is much faster than Uint8Array.from despite checking each code point
-export function stringToByteArray(str) {
+export function byteStringToArray(str) {
   if (typeof str != 'string') throw new Error('invalid argument, expected string')
   const len = str.length
   const array = new Uint8Array(len)
@@ -226,8 +226,7 @@ export function concatByteArrays(arr1, arr2) {
 // mainly uses JSON.stringify
 // only exceptions are:
 //  - undefined & null, returned as strings 'undefined' or 'null'
-//  - ArrayBuffer & views that define `.buffer`, such as TypedArray or DataView, handled via byteArrayToString
-//  - other non-Object non-Array objects, handled recursively via _.entries
+//  - non-Object non-Array objects, handled recursively via _.entries
 //  - functions, handled using toString + any enumarable properties/values
 export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
@@ -241,6 +240,16 @@ export function stringify(x) {
   const json = JSON.stringify(x)
   if (json) return json
   return `[${typeof x} ${x.constructor.name} ${x}]` // ultimate fallback
+}
+
+// converts ArrayBuffer & views to byte string (code points <=255) via byteArrayToString
+export function byte_stringify(x) {
+  if (x.constructor.name == 'ArrayBuffer') return byteArrayToString(new Uint8Array(x))
+  if (ArrayBuffer.isView(x)) {
+    if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
+    return byteArrayToString(new Uint8Array(x.buffer))
+  }
+  throw new Error('invalid argument, expected ArrayBuffer or view, e.g. TypeArray or DataView')
 }
 
 function _stringify_object(x) {
@@ -342,12 +351,12 @@ export function decode_utf8_array(utf8) {
   return utf8_decoder.decode(utf8) // Uint8Array -> string (utf16)
 }
 
-// utf16 -> byte array (Uint8Array), for code points <= 255 only
+// utf16 -> byte array (Uint8Array), for code points <=255 only
 export function encode_byte_array(str) {
-  return stringToByteArray(str)
+  return byteStringToArray(str)
 }
 
-// byte array (Uint8Array) -> utf16 for code points <= 255 only
+// byte array (Uint8Array) -> utf16 using only code points <=255
 export function decode_byte_array(array) {
   return byteArrayToString(array)
 }
