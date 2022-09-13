@@ -6034,8 +6034,8 @@
       e.preventDefault()
       if (editingItems.length) {
         // unedit the last edited item
-        const index = editingItems.pop()
-        items[index].editing = false
+        const index = _.last(editingItems)
+        onItemEditing(index, (items[index].editing = false), true /* cancelled */, false /* run */, e)
         return
       } else if (editorText) {
         hideIndex = hideIndexMinimal
