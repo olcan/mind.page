@@ -1103,6 +1103,19 @@
       renderMath(math)
     })
 
+    // linkify urls in code comments
+    const link_urls = text =>
+      text.replace(/(^|\s|\()(https?:\/\/[^\s)<]*)/g, (m, pfx, href) => {
+        const href_escaped = href.replace(/'/g, "\\'")
+        return (
+          `${pfx}<a href="${href}" target="_blank" ` +
+          `onclick="_handleLinkClick('${id}','${href_escaped}',event)">${href}</a>`
+        )
+      })
+    itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
+      comments.innerHTML = link_urls(comments.innerHTML)
+    })
+
     // add click handler to links w/ custom onclick that does not trigger _handleLinkClick
     itemdiv.querySelectorAll('a').forEach(a => {
       if (!a.getAttribute('onclick')) return
@@ -2147,9 +2160,10 @@
     font-size: 80%;
     line-height: 160%;
   }
-  /* simplify links in log messages, e.g. linkified urls in stack traces */
-  :global(.item ._log a) {
-    color: #57a;
+  /* simplify linkified urls in log messages (e.g. in stack traces) and code comments */
+  :global(.item ._log a),
+  :global(.item .hljs-comment a) {
+    color: #468;
     background: transparent;
     padding: 0;
     line-height: 100%;
