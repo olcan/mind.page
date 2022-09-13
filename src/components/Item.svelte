@@ -382,11 +382,12 @@
         url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com')
         url = url.replace('?dl=0', '')
         try {
-          let obj = new URL(url)
+          const obj = new URL(url)
+          const label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
-            return `${pfx}<img title="${obj.host}" src="${url}">${sfx}`
+            return `${pfx}<img title="${label}" src="${url}">${sfx}`
           }
-          return `${pfx}[${obj.host}](${url})${sfx}`
+          return `${pfx}[${label}](${url})${sfx}`
         } catch (_) {
           return pfx + url + sfx
         }
