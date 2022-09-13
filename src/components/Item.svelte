@@ -1993,7 +1993,8 @@
     color: #79e;
     background: #222;
     /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
-    padding: 0 4px 1px 4px;
+    /* but 0 bottom padding is consistent w/ .item mark, so we go w/ that for now ... */
+    padding: 0 4px 0 4px;
     border-radius: 4px;
     text-decoration: none;
     line-height: 24px;
@@ -2004,6 +2005,8 @@
     font-weight: 600;
     padding: 0 4px;
     margin: 0;
+    border-radius: 4px;
+    cursor: pointer;
   }
 
   /* .menu styling: paragraphs become flex boxes */
