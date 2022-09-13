@@ -41,8 +41,10 @@ export function highlight(code, language) {
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
   language = language.replace(/(?:_removed|_hidden)$/, '')
+  const link_urls = text =>
+    text.replace(/(^|\s|\(|@)(https?:\/\/[^\s)</]*\/?[^\s)<:]*)/g, '$1<a href="$2" target="_blank">$2</a>')
   if (language == '_log') {
-    return code
+    return link_urls(_.escape(code))
       .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')
       .replace(/^(WARNING:.*)$/gm, '<span class="console-warn">$1</span>')
       .replace(/^(INFO:.*)$/gm, '<span class="console-info">$1</span>')

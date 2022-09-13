@@ -2147,6 +2147,12 @@
     font-size: 80%;
     line-height: 160%;
   }
+  /* simplify links in log messages, e.g. linkified urls in stack traces */
+  :global(.item ._log a) {
+    color: #57a;
+    background: transparent;
+    padding: 0;
+  }
   :global(.container.showLogs .item ._log),
   :global(.container.showLogs .item .log-triangle) {
     display: block;

@@ -963,30 +963,27 @@
     }
 
     // starts an async evaluation in context of this item
-    // item is NOT on stack unless added explicitly (see below)
+    // item may not be on stack unless added explicitly (see below)
     // log messages are NOT associated with item while it is off the stack
     // _this is still defined in lexical context as if item is top of stack
     // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
     start(async_func) {
       item(this.id).running = true
-      return new Promise((resolve, reject) => {
-        update_dom().then(() =>
-          Promise.resolve(async_func())
-            .then(output => {
-              if (output !== undefined) this.write(output)
-              this.write_log_any() // customized via _this.log_options
-              item(this.id).running = false
-              resolve(output)
-            })
-            .catch(e => {
-              console.error(e)
-              this.invalidate_elem_cache()
-              this.write_log_any() // customized via _this.log_options
-              item(this.id).running = false
-              reject(e)
-            })
-        )
-      })
+      return update_dom().then(() =>
+        this.resolve(async_func())
+          .then(output => {
+            if (output !== undefined) this.write(output)
+            return output
+          })
+          .catch(e => {
+            console.error(e)
+            this.invalidate_elem_cache()
+          })
+          .finally(() => {
+            this.write_log_any() // customized via _this.log_options
+            item(this.id).running = false
+          })
+      )
     }
 
     // invokes given (sync or async) function after pushing item onto stack
@@ -1113,8 +1110,8 @@
       this.invoke(() => console.error(...args))
     }
     fatal(...args) {
-      const stack = new Error().stack.split('\n').join(' <- ')
-      // also log error directly to console for better stack traces (esp. in Safari)
+      const stack = new Error().stack.split('\n').join(' <- ').replace(/\s+/g, ' ') // normalize whitespace
+      // also log error directly to console for better stack traces (esp. in Safari, Chrome handles traces better)
       // disable this extra log message if we are testing for throws, indicated via window._testing_throws flag
       // also use _error to log only the browser console and not to mindpage console or items
       if (!window['_testing_throws']) console['_error'](`${args.join(' ')} @ ${this.name}`)
@@ -4627,8 +4624,10 @@
         ? `${e.message} (line:${e.lineno}, col:${e.colno})`
         : e.line
         ? `${e.message} (line:${e.line}, col:${e.column})`
-        : e.stack // all we seem to have is a trace, so let's dump that ...
-        ? `${e.message}; STACK: ${e.stack.split(/\n\s*/g).join(', ')}`
+        : // if we have a stack trace instead of line/column, we attach it to message unless it already has '; STACK:…'
+        e.stack && !e.message.match(/; STACK:/)
+        ? // NOTE: slice(1) skips the error message itself, which seems to be included in the stack
+          `${e.message}; STACK: ${e.stack.split(/\n\s*/g).slice(1).join(' <- ').replace(/\s+/g, ' ')}`
         : e.message
       : undefined
   }
