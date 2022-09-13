@@ -2152,6 +2152,7 @@
     color: #57a;
     background: transparent;
     padding: 0;
+    line-height: 100%;
   }
   :global(.container.showLogs .item ._log),
   :global(.container.showLogs .item .log-triangle) {
