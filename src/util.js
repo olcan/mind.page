@@ -231,9 +231,8 @@ export function concatByteArrays(arr1, arr2) {
 export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
   if (x === null) return 'null'
-  if (x.constructor.name == 'ArrayBuffer') return byteArrayToString(new Uint8Array(x))
-  if (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer')
-    return byteArrayToString(new Uint8Array(x.buffer))
+  if (x.constructor.name == 'ArrayBuffer' || ArrayBuffer.isView(x))
+    throw new Error('stringify does not support ArrayBuffer or views (e.g. Uint8Array), use byte_stringify instead')
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
@@ -249,7 +248,7 @@ export function byte_stringify(x) {
     if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
     return byteArrayToString(new Uint8Array(x.buffer))
   }
-  throw new Error('invalid argument, expected ArrayBuffer or view, e.g. TypeArray or DataView')
+  throw new Error('invalid argument, expected ArrayBuffer or view (e.g. Uint8Array)')
 }
 
 function _stringify_object(x) {
@@ -374,17 +373,16 @@ export function decode_base64(base64) {
 // generic hasher that handles non-strings
 // hash of undefined is undefined, but null is hashed (as object)
 // default hasher is hash_64_fnv1a, returns 64-bit hex string
-// default stringifier is stringify (above) for ArrayBuffer(+views) & functions, JSON.stringify otherwise
+// default stringifier is:
+//  - byte_stringify (above) for ArrayBuffer & views
+//  - stringify (also above) for functions
+//  - JSON.stringify for everything else
 export function hash(x, hasher, stringifier) {
   if (typeof x == 'undefined') return undefined
   if (typeof x != 'string') {
     if (stringifier) x = stringifier(x)
-    else if (
-      x.constructor.name == 'ArrayBuffer' ||
-      (ArrayBuffer.isView(x) && x.buffer?.constructor.name == 'ArrayBuffer') ||
-      typeof x == 'function'
-    )
-      x = stringify(x)
+    else if (typeof x == 'function') x = stringify(x)
+    else if (x.constructor.name == 'ArrayBuffer' || ArrayBuffer.isView(x)) x = byte_stringify(x)
     else x = JSON.stringify(x)
   }
   if (hasher) return hasher(x)
