@@ -251,6 +251,11 @@
       '<span class="highlight $3">$1</span>$2'
     )
     highlights.innerHTML = html
+    // linkify urls in comments
+    const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<]+)/g, '$1<a>$2</a>')
+    highlights.querySelectorAll('.hljs-comment').forEach(comments => {
+      comments.innerHTML = link_urls(comments.innerHTML)
+    })
     textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
   }
 
@@ -933,7 +938,7 @@
     display: none;
   }
 
-  :global(mark) {
+  :global(.editor > .backdrop mark) {
     /* color: transparent; */
     background: #999;
     font-weight: 600; /* 500 looks light for Menlo w/ white background */
@@ -942,29 +947,32 @@
     margin: 0 -2px;
     cursor: pointer;
   }
-  :global(.block) {
+  :global(.editor > .backdrop a) {
+    color: #468;
+  }
+  :global(.editor > .backdrop .block) {
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
     padding: 1px;
     margin: -1px;
   }
-  :global(.block-delimiter) {
+  :global(.editor > .backdrop .block-delimiter) {
     color: #666;
   }
-  :global(.editor .code, .editor .math) {
+  :global(.editor > .backdrop .code, .editor .math) {
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 0; /* no overhang since delimited anyway */
     margin: -2px 0;
     border-radius: 4px;
   }
-  :global(.editor .macro) {
+  :global(.editor > .backdrop .macro) {
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
   }
-  :global(.editor .macro .macro-delimiter) {
+  :global(.editor > .backdrop .macro .macro-delimiter) {
     color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
   }
-  :global(.editor .title) {
+  :global(.editor > .backdrop .title) {
     padding: 2px 4px;
     margin: -2px -4px;
     background: rgba(255, 255, 255, 0.1);
@@ -972,28 +980,24 @@
     border-radius: 4px;
     font-weight: 700;
   }
-  :global(.section) {
+  :global(.editor > .backdrop .section) {
     border: 1px dashed #444;
     margin: -1px -5px;
     padding: 0 4px;
   }
-  :global(.section-delimiter) {
+  :global(.editor > .backdrop .section-delimiter) {
     color: #666;
   }
-  :global(span.highlight.matched) {
+  :global(.editor > .backdrop span.highlight.matched) {
     color: black;
     background: #9f9;
     border-radius: 4px;
   }
-  :global(span.highlight.unmatched) {
+  :global(.editor > .backdrop span.highlight.unmatched) {
     color: black;
     background: #f99;
     border-radius: 4px;
   }
-  /* styling for hjls-custom-comment use for highlighting matching parens */
-  /* :global(.hljs-comment-custom) {
-    display: none;
-  } */
 
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
