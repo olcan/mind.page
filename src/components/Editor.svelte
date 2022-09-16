@@ -261,8 +261,8 @@
 
   export function setSelection(start: number, end: number) {
     const wasFocused = document.activeElement.isSameNode(textarea)
-    textarea.selectionStart = start
-    textarea.selectionEnd = end
+    textarea.selectionStart = Math.max(start, 0)
+    textarea.selectionEnd = Math.min(end, textarea.value.length)
     // on Safari, setting the selection can auto-focus so we have to blur
     if (!wasFocused) textarea.blur()
   }
@@ -786,6 +786,12 @@
   onMount(() => {
     document.addEventListener('selectionchange', onSelectionChange)
     // console.debug("onMount selection", selectionStart, selectionEnd);
+    // check for data-selection attribute on container, consume if it exists
+    const selectionAttrib = editor.closest('.container')?.getAttribute('data-selection')
+    if (selectionAttrib) {
+      ;[selectionStart, selectionEnd] = selectionAttrib.split(',').map(Number)
+      editor.closest('.container').removeAttribute('data-selection') // consume attrib
+    }
     setSelection(selectionStart, selectionEnd)
   })
   onDestroy(() => document.removeEventListener('selectionchange', onSelectionChange))
