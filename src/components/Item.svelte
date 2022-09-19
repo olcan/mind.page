@@ -283,7 +283,11 @@
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
     text = text.replace(blockRegExp('(?:_markdown|_md).*?'), (m, pfx, type, body) => {
       if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
-      body = body.replace(/\n$/, '') // remove trailing newline in body to take the one from block suffix (```\n)
+      // remove trailing newline in body to take the one from block suffix (```\n)
+      // this allows block delimiter lines (```) to be completely dropped during unwrapping
+      // we make an exception for tables/blockquotes to force closing/breaking (as is more intuitive) across blocks
+      // note this does NOT cause extra spacing since spacer lines are excepted in preserve-line-breaks logic below
+      if (!body.match(/(?:^|\n)\s*[|>][^\n]*\n$/)) body = body.replace(/\n$/, '')
       return pfx + body
     })
 
@@ -434,10 +438,12 @@
         // (we miss indented blocks that start with bullets [-*+] for now since it requires prior-line context)
         // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
         // (we also exclude /^\s*>/ to break inside blockquotes for now)
+        // (we also ignore spacer lines after tables or blockquotes, as required for closing/splitting)
         // (also note since we process lines, \s does not match \n)
         if (
           !insideBlock &&
-          (str.match(/\\$/) || !str.match(/^\s*```|^     *[^-*+ ]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/))
+          (str.match(/\\$/) || !str.match(/^\s*```|^     *[^-*+ ]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/)) &&
+          (str.match(/\S/) || !lastLine.match(/^\s*>|^\s*\|/))
         )
           str = str + '<br>\n'
 
@@ -543,7 +549,7 @@
         // replace URLs (except in lines that look like a reference-style link)
         if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str)
 
-        // break table with extra <br>\n to prevent leading pipe ambiguity (now required) and line-eating
+        // close table with extra \n to prevent leading pipe ambiguity (now required) and line-eating
         if (!insideBlock && lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = '\n' + str
 
         // close blockquotes with an extra \n before next line
