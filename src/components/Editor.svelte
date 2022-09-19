@@ -3,7 +3,6 @@
   export let text = ''
   export let focused = false
   export let editable = true
-  export let lockCaret = false
   export let showButtons = false
   export let cancelOnDelete = false
   export let createOnAnyModifiers = false
@@ -306,7 +305,6 @@
 
   function onKeyDown(e: any) {
     onEditorKeyDown(e)
-    unlockCaret()
     let key = e.code || e.key // for android compatibility
     if (!key) return // can be empty for pencil input on ios
     // console.debug('Editor.onKeyDown:', e, key)
@@ -643,11 +641,6 @@
     }
   }
 
-  let caretUnlockTime = 0
-  function unlockCaret() {
-    caretUnlockTime = Date.now()
-  }
-
   function onPaste(e: ClipboardEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -696,6 +689,7 @@
   let lastInputInsertText
   let lastInputInsertTextTime = 0
   function onInput(e = null) {
+    onSelectionChange() // workaround for missing selectionchange events; see comment in onSelectionChange
     if (e?.inputType == 'insertText' || e?.inputType == 'insertCompositionText') {
       // to help disambiguate some "Unidentified" keys (e.g. "Space") for some android keyboards, in particular gboard which is said to do this to allow content-dependent "compositions", but this seems non-standard and requires further research
       // NOTE: this is a limited experiment and not extended to many other problematic keys, e.g. Enter, which seem to be content-sensitive (e.g. key is Enter after a space, but Unidentified otherwise)
@@ -748,22 +742,14 @@
 
   const highlightDebounceTime = 0
   let highlightPending = false
-  function onSelectionChange(e) {
+  function onSelectionChange() {
+    // NOTE: onSelectionChange can get invoked repeatedly for multiple textareas on the page (e.g. mindbox editor and item editors) even though the focus is on a specific textarea and the selection is not really changing for other textareas. We can easily filter such spurious calls by filtering by document.activeElement and textarea.selectionStart/End. Another more important problem is that onSelectionChange may fail to get invoked in certain situations in a browser and content dependent way: e.g. tail newline insertions can fail in Safari, and newlines preceding tail spaces on nonempty lines can fail in Chrome). This latter issue we can work around by invoking onSelectionChange from onInput, which is of course harmless if selection has not changed.
     if (!document.activeElement.isSameNode(textarea)) return
     if (selectionStart == textarea.selectionStart && selectionEnd == textarea.selectionEnd) return
-    // reject caret movement without relevant events "unlocking" caret within 250ms
-    // main goal is to prevent caret movement onhappens on trackpad clicks on ipad
-    // we make exception for selection changes which can be triggered programmatically
-    // programmatic caret movement requires a related event to be dispatched first, and care must be taken on ipad such that this does not coincide with a trackpad click
-    if (lockCaret && textarea.selectionStart == textarea.selectionEnd && Date.now() - caretUnlockTime > 250) {
-      // console.debug("REJECTED onSelectionChange due to caret lock", textarea.selectionStart, textarea.selectionEnd);
-      textarea.selectionStart = selectionStart
-      textarea.selectionEnd = selectionEnd
-      return
-    }
+    // console.debug('onSelectionChange', textarea.selectionStart, textarea.selectionEnd)
+
     selectionStart = textarea.selectionStart
     selectionEnd = textarea.selectionEnd
-    // console.debug("onSelectionChange", selectionStart, selectionEnd);
     if (textarea.selectionStart != textarea.selectionEnd) return
     if (highlightPending) return
     highlightPending = true
@@ -808,8 +794,6 @@
     on:input={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
-    on:mousedown={unlockCaret}
-    on:touchstart={unlockCaret}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
