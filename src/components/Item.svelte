@@ -282,7 +282,8 @@
 
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
     text = text.replace(blockRegExp('(?:_markdown|_md).*?'), (m, pfx, type, body) => {
-      if (type.match(/(?:_removed|_hidden) *$/) || !body.trim()) return m
+      if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
+      body = body.replace(/\n$/, '') // remove trailing newline in body to take the one from block suffix (```\n)
       return pfx + body
     })
 
@@ -1261,7 +1262,11 @@
           if (elem.classList.contains('hidden')) continue
           // ignore container elements (div, p, etc) that only contain hidden tags or <br> tags
           // these are sometimes used to prevent styling in markdown editors/previews/etc
-          if (elem.children.length && _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden')))
+          if (
+            elem.children.length &&
+            !elem.innerText &&
+            _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
+          )
             continue
           height_below += elem.offsetHeight
         }
