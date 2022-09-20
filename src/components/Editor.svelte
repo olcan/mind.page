@@ -717,6 +717,8 @@
             return '\n' + enterIndentation + trimmed_sfx
           })
           textarea.selectionStart = enterStart
+          // NOTE: using execCommand maintains continuity of undo stack, even though it does create an extra undo step (with selection) that may be undesirable, mainly because we are handling Enter on key-up to maintain caret responsiveness on key-down; this seems relatively minor as long as continuity of undo is maintained
+          // textarea.value = textarea.value.slice(0, enterStart) + newlines + textarea.value.slice(textarea.selectionEnd)
           document.execCommand('insertText', false, newlines)
           textarea.selectionStart = textarea.selectionEnd = textarea.selectionStart - offset
           onInput()
