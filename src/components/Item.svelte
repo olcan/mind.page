@@ -1111,17 +1111,22 @@
       renderMath(math)
     })
 
-    // linkify urls in code comments
+    // linkify urls & tags in code comments (tag regex from util.js)
     const link_urls = text =>
       text.replace(/(^|\s|\()(https?:\/\/[^\s)<]+)/g, (m, pfx, href) => {
         const href_escaped = href.replace(/'/g, "\\'")
         return (
-          `${pfx}<a href="${href}" target="_blank" ` +
+          `${pfx}<a href="${href}" target="_blank" title="${href}" ` +
           `onclick="_handleLinkClick('${id}','${href_escaped}',event)">${href}</a>`
         )
       })
+    const link_tags = text =>
+      text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
+        const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
+        return `${pfx}<a href="#" title="${tag_resolved}" onmousedown="_handleTagClick('${id}','${tag_resolved}','${tag_resolved}',event)">${tag}</a>`
+      })
     itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
-      comments.innerHTML = link_urls(comments.innerHTML)
+      comments.innerHTML = link_tags(link_urls(comments.innerHTML))
     })
 
     // add click handler to links w/ custom onclick that does not trigger _handleLinkClick
@@ -1429,7 +1434,6 @@
   {#if showDebugString}
     <div class="debug">{debugString}</div>
   {/if}
-  <!-- we put item id in "item-id" attribute of .container because svelte allows custom attribute names w/ dashes -->
   <div
     bind:this={container}
     on:mousedown={onMouseDown}
@@ -1452,7 +1456,7 @@
     class:runnable
     class:saveable
     class:timeOutOfOrder
-    item-id={id}
+    data-item-id={id}
   >
     {#if editing}
       <div class="edit-menu">

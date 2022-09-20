@@ -278,6 +278,7 @@
     window['_parse_tags'] = parseTags
     window['_parse_label'] = parseLabel
     window['_resolve_tags'] = resolveTags
+    window['_resolve_tag'] = resolveTag
     window['_special_tag'] = isSpecialTag
     window['_stringify'] = stringify
     window['_byte_stringify'] = byte_stringify
@@ -2501,16 +2502,23 @@
       .join(' ')
   }
 
+  function resolveTag(label, tag) {
+    let resolved = tag
+    if (tag == label) resolved = tag
+    else if (tag.startsWith('#///') && label.match(/\/[^\/]*?\/[^\/]*$/))
+      resolved = label.replace(/\/[^\/]*?\/[^\/]*$/, '') + tag.substring(3)
+    else if (tag.startsWith('#///') && label.match(/^#[^\/]*?\/[^\/]*$/)) resolved = '#' + tag.substring(4)
+    else if (tag.startsWith('#//') && label.match(/\/[^\/]*$/))
+      resolved = label.replace(/\/[^\/]*$/, '') + tag.substring(2)
+    else if (tag.startsWith('#//') && label.match(/^#[^\/]*$/)) resolved = '#' + tag.substring(3)
+    else if (tag.startsWith('#/')) resolved = label + tag.substring(1)
+
+    if (resolved.startsWith('#/')) return // return undefined on failure to resolve tag relative to label
+    return resolved
+  }
+
   function resolveTags(label, tags) {
-    return tags
-      .map(tag => {
-        if (tag == label) return tag
-        else if (tag.startsWith('#///')) return label.replace(/\/[^\/]*?\/[^\/]*$/, '') + tag.substring(3)
-        else if (tag.startsWith('#//')) return label.replace(/\/[^\/]*$/, '') + tag.substring(2)
-        else if (tag.startsWith('#/')) return label + tag.substring(1)
-        else return tag
-      })
-      .filter(t => !t.startsWith('#/')) // "resolved" tags can not start with #/ by convention
+    return tags.map(tag => resolveTag(label, tag)).filter(t => t) // drop unresolved tags
   }
 
   let tagCounts = new Map<string, number>()
@@ -5854,7 +5862,7 @@
     if (key == 'Enter' && !modified) {
       e.preventDefault() // prevent entry into item editor
       // edit click requires mousedown first (see onClick in Item.svelte)
-      if (target && target.getAttribute('item-id') != lastEditItem) {
+      if (target && target.getAttribute('data-item-id') != lastEditItem) {
         target.dispatchEvent(new Event('mousedown'))
         target.dispatchEvent(new Event('click'))
       } else if (lastEditItem && indexFromId.get(lastEditItem) < hideIndex) {
@@ -5889,7 +5897,7 @@
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
-        .sort((a, b) => item(b.getAttribute('item-id')).time - item(a.getAttribute('item-id')).time)[0]
+        .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
 
       // if no context/target but query is a tag, then take it as target and its parent as context
       // note this allows keyboard navigation to children w/ non-unique labels
@@ -5906,13 +5914,13 @@
         // drop duplicates to avoid ambiguities/cycles
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title)
         // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
-        const parsedVisibleTags = item(lastContext.getAttribute('item-id')).tagsVisible
+        const parsedVisibleTags = item(lastContext.getAttribute('data-item-id')).tagsVisible
         visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected'))
         // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
         const contextLabel = (lastContext.querySelector('mark.label') as any)?.title
-        // context labels can be non-unique, so we have to use item(lastContext.getAttribute("item-id"))
-        const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('item-id')).context
+        // context labels can be non-unique, so we have to use item(lastContext.getAttribute("data-item-id"))
+        const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
         if (
           selectedIndex >= 0 &&
           contextBasedOnNesting &&
@@ -6015,7 +6023,7 @@
       // see comments above about lastContext
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
         .filter(e => e.querySelector('mark.selected'))
-        .sort((a, b) => item(b.getAttribute('item-id')).time - item(a.getAttribute('item-id')).time)[0]
+        .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
@@ -6361,7 +6369,6 @@
                   bind:this={editor}
                   bind:text={editorText}
                   bind:focused={editorFocused}
-                  lockCaret={false}
                   showButtons={true}
                   cancelOnDelete={true}
                   createOnAnyModifiers={true}

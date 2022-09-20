@@ -250,10 +250,11 @@
       '<span class="highlight $3">$1</span>$2'
     )
     highlights.innerHTML = html
-    // linkify urls in comments
+    // linkify urls & tags in comments (tag regex from util.js)
     const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<]+)/g, '$1<a>$2</a>')
+    const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
-      comments.innerHTML = link_urls(comments.innerHTML)
+      comments.innerHTML = link_tags(link_urls(comments.innerHTML))
     })
     textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
   }
