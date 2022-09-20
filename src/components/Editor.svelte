@@ -41,6 +41,40 @@
   let highlights: HTMLDivElement
   let textarea: HTMLTextAreaElement
 
+  // set of languages w/ particular comment begin syntax
+  const languages_by_comment_begin = begins => {
+    begins = [begins].flat().map(String)
+    return new Set(
+      window['hljs']
+        .listLanguages()
+        .map(
+          lang => (
+            (lang = window['hljs'].getLanguage(lang)),
+            lang.contains.find(c => c.scope == 'comment' && begins.includes(String(c.begin)))
+              ? [...lang.name.split(/[\s,]+/), ...(lang.aliases ?? [])]
+              : []
+          )
+        )
+        .flat()
+        .map(s => s.toLowerCase())
+    )
+  }
+
+  // languages that support // comments (e.g. javascript)
+  const double_slash_comment_languages = languages_by_comment_begin('//')
+  // languages that support # comments (e.g. python)
+  const hash_comment_languages = languages_by_comment_begin('#')
+  // aliases for markdown, to be treated as (embedded) html for comment syntax
+  const markdown_aliases = new Set(['markdown', ...window['hljs'].getLanguage('markdown').aliases])
+  // languages that support html-like <!-- comments -->
+  const html_comment_languages = new Set([...languages_by_comment_begin('/\x3C!--/'), ...markdown_aliases])
+  // languages that support mathematica-like (* comments *)
+  const mathematica_comment_languages = languages_by_comment_begin(/\(\*/)
+  // languages that support % comments (e.g. tex)
+  const percent_comment_languages = languages_by_comment_begin('%')
+  // languages that support -- comments (e.g. sql)
+  const double_dash_comment_languages = languages_by_comment_begin(['--', /--/])
+
   // NOTE: Highlighting functions are only applied outside of blocks, and only in the order defined here. Ordering matters and conflicts (esp. of misinterpreted delimiters) must be avoided carefully. Tags are matched using a specialized regex that only matches a pre-determined set returned by parseTags that excludes blocks, tags, math, etc. Also we generally can not highlight across lines due to line-by-line parsing of markdown.
   function highlightTags(text, tags) {
     if (tags.length == 0) return text
@@ -405,17 +439,68 @@
 
       // NOTE: execCommand maintains undo/redo history
       let selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd)
-      document.execCommand(
-        'insertText',
-        false,
-        key == 'Slash'
-          ? selectedText.match(/^\s*\/\//) // match(/(^|\n)\s*\/\//)
+      let caretOffset // custom caret offset for two-sided delimiter insertions (e.g. html comments)
+      if (key == 'Slash') {
+        // attempt to determine language type, default being html/markdown w/ <-- comment --> syntax
+        let language
+        const block_start = textarea.value.lastIndexOf('```', textarea.selectionStart)
+        const block_end = textarea.value.indexOf('```', textarea.selectionEnd)
+        if (block_start >= 0 && block_end >= 0) {
+          const block_prefix = textarea.value.substring(0, block_start)
+          const block_type = textarea.value
+            .substring(block_start + 3)
+            .match(/^\S+/)
+            ?.pop()
+          const block_suffix = textarea.value.substring(block_end + 3)
+          if (block_prefix.match(/(?:^|\n) *$/) && block_type && block_suffix.match(/^ *\n/)) language = block_type
+        }
+        language ??= 'markdown' // assume markdown as default language
+        language = language.match(/^_?(\S+?)(?:_|$)/)?.pop() ?? language // trim prefix/suffix
+        language = language.toLowerCase() // language is case-insensitive
+
+        if (double_slash_comment_languages.has(language)) {
+          selectedText = selectedText.match(/^\s*\/\//)
             ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, '$1')
             : selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1// $2')
-          : key == 'Tab' && e.shiftKey
-          ? selectedText.replace(/(^|\n)  /g, '$1')
-          : selectedText.replace(/(^|\n)/g, '$1  ')
-      )
+        } else if (hash_comment_languages.has(language)) {
+          selectedText = selectedText.match(/^\s*#/)
+            ? selectedText.replace(/((?:^|\n)\s*)#\s*/g, '$1')
+            : selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1# $2')
+        } else if (html_comment_languages.has(language)) {
+          // NOTE: technically multi-line html comments are allowed, but are not highlighted by highlightjs (causing confusion in editor), and would also require special-casing in preserve-line-breaks logic, so we comment individual lines for now for simplicity ...
+          // if (selectedText.match(/^\s*<!--/) && selectedText.match(/-->\s*$/))
+          //   selectedText = selectedText.replace(/^(\s*)<!--\s*/g, '$1').replace(/\s*-->(\s*)$/g, '$1')
+          // else if (!selectedText.match(/^\s*<!--/) && !selectedText.match(/-->\s*$/))
+          //   selectedText = selectedText.replace(/^(\s*)(.*)$/gs, '$1<!-- $2').replace(/^(.*)(\s*)$/gs, '$1 -->$2')
+          if (selectedText.match(/^\s*<!--/))
+            selectedText = selectedText.replace(/((?:^|\n)\s*)<!--\s*(.*?)\s*-->/g, '$1$2')
+          else {
+            const prev_length = selectedText.length
+            selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1<!-- $2 -->')
+            caretOffset = ((selectedText.length - prev_length) * 5) / 9 // 5 of 9 chars are left delimiters
+          }
+        } else if (mathematica_comment_languages.has(language)) {
+          if (selectedText.match(/^\s*\(\*/))
+            selectedText = selectedText.replace(/((?:^|\n)\s*)\(\*\s*(.*?)\s*\*\)/g, '$1$2')
+          else {
+            const prev_length = selectedText.length
+            selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1(* $2 *)')
+            caretOffset = ((selectedText.length - prev_length) * 3) / 6 // 3 of 6 chars are left delimiters
+          }
+        } else if (percent_comment_languages.has(language)) {
+          selectedText = selectedText.match(/^\s*%/)
+            ? selectedText.replace(/((?:^|\n)\s*)%\s*/g, '$1')
+            : selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1% $2')
+        } else if (double_dash_comment_languages.has(language)) {
+          selectedText = selectedText.match(/^\s*--/)
+            ? selectedText.replace(/((?:^|\n)\s*)--\s*/g, '$1')
+            : selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1-- $2')
+        } else {
+          alert(`unknown comment syntax for language '${language}'`)
+        }
+      } else if (key == 'Tab' && e.shiftKey) selectedText = selectedText.replace(/(^|\n)  /g, '$1')
+      else selectedText = selectedText.replace(/(^|\n)/g, '$1  ')
+      document.execCommand('insertText', false, selectedText)
 
       if (oldStart < oldEnd) {
         // restore expanded selection
@@ -425,7 +510,7 @@
         // move forward
         textarea.selectionStart = textarea.selectionEnd = Math.max(
           lineStart,
-          oldEnd + (textarea.value.length - oldLength)
+          oldStart + (caretOffset ?? textarea.value.length - oldLength)
         )
       }
       onInput()
