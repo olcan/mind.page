@@ -424,7 +424,7 @@
       // return document.getElementById("item-" + this.id);
       return document.getElementById('super-container-' + this.id)
     }
-    // log options for write_log and write_log_any, reset in eval()
+    // log options for write_log, reset in eval()
     get log_options(): object {
       const _item = item(this.id)
       if (!_item.log_options) _item.log_options = {}
@@ -780,7 +780,7 @@
           since: 'run',
           level: 'info',
           type: '_log',
-          source: 'self',
+          source: 'self?',
         },
         item(this.id).log_options, // may be undefined
         options
@@ -789,10 +789,6 @@
       const log = this.get_log(options).join('\n')
       if (this.read(options['type']) != log) this.write(log, options['type'], options)
       if (options['type'] == '_log' || options['show_logs']) this.show_logs()
-    }
-
-    write_log_any(options = {}) {
-      return this.write_log(Object.assign({ source: 'any' }, item(this.id).log_options, options))
     }
 
     show_logs(autohide_after: number = 15000) {
@@ -988,7 +984,7 @@
             this.invalidate_elem_cache()
           })
           .finally(() => {
-            this.write_log_any() // customized via _this.log_options
+            this.write_log() // customized via _this.log_options
             item(this.id).running = false
           })
       )
