@@ -1077,6 +1077,10 @@
     border-radius: 4px;
   }
 
+  :global(.editor > .backdrop .hljs-comment a) {
+    color: #666; /* since not clickable in editor */
+  }
+
   /* adapt to smaller windows/devices */
   @media only screen and (max-width: 600px) {
     .backdrop,
