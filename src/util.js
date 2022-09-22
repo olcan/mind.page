@@ -42,7 +42,10 @@ export function highlight(code, language) {
   //if (language=="") return hljs.highlightAuto(code).value;
   language = language.replace(/(?:_removed|_hidden)$/, '')
   const link_urls = text =>
-    text.replace(/(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*)/g, '$1<a href="$2" title="$2" target="_blank">$2</a>')
+    text.replace(
+      /(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/g,
+      '$1<a href="$2" title="$2" target="_blank">$2</a>'
+    )
   if (language == '_log') {
     return link_urls(_.escape(code))
       .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')

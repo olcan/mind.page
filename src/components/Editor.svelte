@@ -285,7 +285,7 @@
     )
     highlights.innerHTML = html
     // linkify urls & tags in comments (tag regex from util.js)
-    const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<]+)/g, '$1<a>$2</a>')
+    const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, '$1<a>$2</a>')
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))

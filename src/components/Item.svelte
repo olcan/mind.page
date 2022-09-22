@@ -1113,7 +1113,7 @@
 
     // linkify urls & tags in code comments (tag regex from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()(https?:\/\/[^\s)<]+)/g, (m, pfx, href) => {
+      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, href) => {
         const href_escaped = href.replace(/'/g, "\\'")
         return (
           `${pfx}<a href="${href}" target="_blank" title="${href}" ` +
