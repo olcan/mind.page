@@ -258,6 +258,7 @@
     Object.defineProperty(window, '_this', { get: () => _item(evalStack[evalStack.length - 1]) })
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
     window['_item'] = _item
+    window['__item'] = item // for debugging only
     window['_items'] = _items
     window['_exists'] = _exists
     window['_create'] = _create
@@ -1948,11 +1949,25 @@
       item.target = item.listing || idMatchTerms.length > 0
       item.target_context = !item.target && context.includes(item.uniqueLabel)
       if (item.target) targetItemCount++
+
+      // compute nesting level (-depth) of item name under target name
       item.target_nesting = item.target ? 0 : -Infinity
       if (!item.target && item.uniqueLabel.startsWith(terms[0] + '/')) {
         item.target_nesting = -1
         for (let i = terms[0].length + 1; i < item.uniqueLabel.length; ++i)
           if (item.uniqueLabel[i] == '/') item.target_nesting--
+      }
+
+      // compute minimum nesting level (max -depth) of item name under _prefixes_ of target name
+      item.target_prefix_nesting = -Infinity
+      if (!item.target && listingItemIndex >= 0) {
+        const target_item = items[listingItemIndex]
+        for (const prefix of target_item.labelPrefixes) {
+          if (!item.uniqueLabel.startsWith(prefix + '/')) continue
+          let nesting = -1
+          for (let i = prefix.length + 1; i < item.uniqueLabel.length; ++i) if (item.uniqueLabel[i] == '/') nesting--
+          item.target_prefix_nesting = Math.max(nesting, item.target_prefix_nesting)
+        }
       }
 
       // calculate missing tags (excluding certain special tags from consideration)
@@ -2009,6 +2024,7 @@
       previewable: false,
       pushable: false,
       target_nesting: -Infinity,
+      target_prefix_nesting: -Infinity,
       firstTagMatch: false,
       tagMatches: 0,
       labelMatch: false,
@@ -2071,6 +2087,8 @@
         b.pushable - a.pushable ||
         // nesting (depth of nested label) under target item
         b.target_nesting - a.target_nesting ||
+        // minimum nesting (depth of nested label) under prefixes of target item
+        b.target_prefix_nesting - a.target_prefix_nesting ||
         // position of (unique) label in listing item (item w/ unique label = first term)
         // (listing is reversed so larger index is better and missing=-1)
         listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
@@ -4958,6 +4976,7 @@
     item.target = false
     item.target_context = false
     item.target_nesting = -Infinity
+    item.target_prefix_nesting = -Infinity
     item.tagMatches = 0
     item.firstTagMatch = false
     item.labelMatch = false
