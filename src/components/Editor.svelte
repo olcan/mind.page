@@ -831,6 +831,29 @@
     e.preventDefault()
   }
 
+  // backdrop click handler that allows us to dynamically hide/show textarea while editor is not focused (see textarea.focused style below), avoiding double-matching text for find-in-page (Cmd+F) in Chrome (and likely other browsers but not Safari as of last testing)
+  function onBackdropClick(e) {
+    e.stopPropagation()
+    e.preventDefault()
+    // determine text offset of clicked point in backdrop to move caret in textarea before focusing it
+    const range = document.caretRangeFromPoint(e.clientX, e.clientY)
+    range.startContainer
+    const walker = document.createTreeWalker(backdrop, NodeFilter.SHOW_TEXT)
+    let node
+    let offset = 0
+    while ((node = walker.nextNode())) {
+      // console.debug(node.length, node)
+      if (node.isSameNode(range.startContainer)) {
+        offset += range.startOffset
+        break
+      }
+      offset += node.length
+    }
+    editor.classList.add('focused') // may be necessary for focus if unfocused textarea is hidden
+    textarea.selectionStart = textarea.selectionEnd = offset
+    textarea.focus()
+  }
+
   import { afterUpdate, onMount, onDestroy } from 'svelte'
   afterUpdate(() => {
     if (!textarea) return // can happen occasionally during destruction at end of editing
@@ -880,8 +903,8 @@
   onDestroy(() => document.removeEventListener('selectionchange', onSelectionChange))
 </script>
 
-<div bind:this={editor} class="editor">
-  <div class="backdrop" class:focused bind:this={backdrop}>
+<div bind:this={editor} class="editor" class:focused>
+  <div class="backdrop" class:focused bind:this={backdrop} on:click={onBackdropClick}>
     <div bind:this={highlights}>{placeholder}</div>
   </div>
   <textarea
@@ -942,10 +965,12 @@
     box-sizing: border-box;
     white-space: pre-wrap;
     word-wrap: break-word;
+    opacity: 0.75;
   }
-  .backdrop.focused {
+  .editor.focused > .backdrop {
     background: #171717;
     border: 1px solid #444;
+    opacity: 1;
   }
   textarea {
     background: transparent;
@@ -960,7 +985,12 @@
     box-sizing: border-box;
     display: block; /* removed additional space below, see https://stackoverflow.com/a/7144960 */
     resize: none;
+    visibility: hidden; /* see onBackdropClick for comments */
   }
+  .editor.focused > textarea {
+    visibility: visible; /* see onBackdropClick for comments */
+  }
+
   /* NOTE: transparent selection text in textarea allows backdrop highlights to show through but then selection background is on top of the text, which does not look great, and moving the backdrop to the front does not work because the caret and selection lives in the textarea */
   /* :global(textarea::selection) {
     color: transparent;
@@ -1087,12 +1117,12 @@
   :global(.editor > .backdrop .section-delimiter) {
     color: #666;
   }
-  :global(.editor > .backdrop span.highlight.matched) {
+  :global(.editor.focused > .backdrop span.highlight.matched) {
     color: black;
     background: #9f9;
     border-radius: 4px;
   }
-  :global(.editor > .backdrop span.highlight.unmatched) {
+  :global(.editor.focused > .backdrop span.highlight.unmatched) {
     color: black;
     background: #f99;
     border-radius: 4px;
