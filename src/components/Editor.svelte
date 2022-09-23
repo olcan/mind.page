@@ -133,6 +133,15 @@
     return text.replace(/^(\s{0,3}#{1,6}\s+)(.+)$/, (_, pfx, title) => pfx + `<span class="title">${title}</span>`)
   }
 
+  function highlightLinks(text) {
+    return text
+      .replace(/\[.*?[^\\]\]\(.*?[^\\]\)/g, link => `<span class="link">${link}</span>`)
+      .replace(
+        /(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g,
+        (m, pfx, href) => pfx + `<span class="link">${href}</span>`
+      )
+  }
+
   function findMatchingOpenParenthesis(text, pos) {
     let close = text[pos]
     let open
@@ -256,11 +265,11 @@
         code += line + '\n'
       } else {
         if (line.match(/^     *[^-*+ ]/)) html += _.escape(line) + '\n'
-        else html += highlightTitles(highlightOther(highlightTags(_.escape(line), tags))) + '\n'
+        else html += highlightLinks(highlightTitles(highlightOther(highlightTags(_.escape(line), tags)))) + '\n'
       }
     })
     // append unclosed block as regular markdown
-    if (insideBlock) html += highlightTitles(highlightOther(highlightTags(_.escape(code), tags)))
+    if (insideBlock) html += highlightLinks(highlightTitles(highlightOther(highlightTags(_.escape(code), tags))))
 
     // wrap hidden/removed sections
     html = html.replace(
@@ -1050,13 +1059,25 @@
   :global(.editor > .backdrop .macro .macro-delimiter) {
     color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
   }
-  :global(.editor > .backdrop .title) {
+  :global(.editor > .backdrop span.title) {
     padding: 2px 4px;
     margin: -2px -4px;
     background: rgba(255, 255, 255, 0.1);
     /* background: rgba(0, 0, 0, 0.9); */
     border-radius: 4px;
     font-weight: 700;
+  }
+  :global(.editor > .backdrop span.link) {
+    padding: 0 4px;
+    margin: 0 -4px;
+    /* background: #222; */
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    color: #57b;
+  }
+  :global(.editor > .backdrop span.link > span.link) {
+    color: #888;
+    background: transparent;
   }
   :global(.editor > .backdrop .section) {
     border: 1px dashed #444;

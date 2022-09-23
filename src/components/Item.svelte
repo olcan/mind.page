@@ -2010,7 +2010,7 @@
     background: #222;
     /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
     /* but 0 bottom padding is consistent w/ .item mark, so we go w/ that for now ... */
-    padding: 0 4px 0 4px;
+    padding: 0 4px;
     border-radius: 4px;
     text-decoration: none;
     line-height: 24px;
