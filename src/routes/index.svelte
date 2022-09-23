@@ -6346,10 +6346,10 @@
   }
 
   // retrieve host name, via globalThis.request on server side (see server.ts)
-  const hostname = (typeof location == 'undefined' ? globalThis.hostname : location.hostname).replace(
-    '127.0.0.1',
-    'localhost'
-  )
+  const hostname =
+    typeof location == 'undefined'
+      ? globalThis.hostname
+      : location.hostname.replace('127.0.0.1', 'localhost').replace('local.dev', 'localhost')
 
   // custom directory for some static files, based on hostname
   const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
