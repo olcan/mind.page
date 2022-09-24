@@ -5658,7 +5658,7 @@
                 .map(id => items[indexFromId.get(id)].name)
                 .filter((n, j, nJ) => n != nJ[j - 1]) // remove consecutive duplicates
                 .join(' ')
-              if (prefix) prefix = '[' + prefix + '] '
+              if (prefix) prefix = '[' + prefix + ']'
               if (!replay) {
                 if (prefix) console['_' + verb](prefix, ...args)
                 else console['_' + verb](...args)
@@ -5673,7 +5673,7 @@
               let text = ''
               if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0])
               else text = args.join(' ') + '\n'
-              elem.textContent = prefix + text
+              elem.textContent = prefix + ' ' + text
               elem.setAttribute('_time', Date.now().toString())
               elem.setAttribute('_level', log_levels.indexOf(verb).toString())
               consolediv.appendChild(elem)
