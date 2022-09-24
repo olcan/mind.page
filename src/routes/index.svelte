@@ -626,7 +626,7 @@
       if (type == 'js' && !options['keep_comment_lines'])
         text = text.replace(/(^|\n)(?:\s*\/\/.*?(?:\n|$))+/g, '$1').trim() // trim for last \n
 
-      if (options['replace_ids']) text = text.replace(/(^|[^\\])\$id/g, '$1' + item.id)
+      if (options['replace_ids']) text = text.replace(/\$id/g, skipEscaped(item.id))
       if (!options['exclude_async'] || !item.deepasync) content.push(text)
       // console.debug(content);
       return content.filter(s => s).join('\n')
@@ -925,7 +925,7 @@
 
       // evaluate inline @{eval_macros}@
       let macroIndex = 0
-      const replaceMacro = (m, pfx, js) => {
+      const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
         try {
           let out = this.eval(js, {
@@ -935,20 +935,20 @@
           // If output is an item, read(*_macro) by default, where * is the prefix type
           // (using _macro suffix allow item to be a dependency without importing same code as prefix)
           if (out instanceof _Item) out = out.read_deep((options['type'] || 'js') + '_macro')
-          return pfx + out
+          return out
         } catch (e) {
           console.error(`eval_macro error in item ${this.label || 'id:' + this.id}: ${e}`)
           throw e
         }
       }
-      // evaljs = evaljs.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro);
-      evaljs = evaljs.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro)
+      // evaljs = evaljs.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro));
+      evaljs = evaljs.replace(/@\{(.*?)\}@/g, skipEscaped(replaceMacro))
 
       // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
-      evaljs = evaljs.replace(/(^|[^\\])\$id/g, '$1' + this.id)
-      evaljs = evaljs.replace(/(^|[^\\])\$hash/g, '$1' + this.hash)
-      evaljs = evaljs.replace(/(^|[^\\])\$deephash/g, '$1' + this.deephash)
-      if (options['cid']) evaljs = evaljs.replace(/(^|[^\\])\$cid/g, '$1' + options['cid'])
+      evaljs = evaljs.replace(/\$id/g, skipEscaped(this.id))
+      evaljs = evaljs.replace(/\$hash/g, skipEscaped(this.hash))
+      evaljs = evaljs.replace(/\$deephash/g, skipEscaped(this.deephash))
+      if (options['cid']) evaljs = evaljs.replace(/\$cid/g, skipEscaped(options['cid']))
 
       // store eval text under item.debug_store[trigger] for debugging, including a reverse stack string
       let stack = evalStack
@@ -1152,7 +1152,7 @@
               .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
               // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
               .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-              .replace(/(^|[^\\])`.*?`/g, '$1') as any
+              .replace(/`.*?`/g, skipEscaped('')) as any
           ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
           m => m[1]
         ).map(src =>
@@ -4900,6 +4900,7 @@
     isBalanced,
     invalidateElemCache,
     checkElemCache,
+    skipEscaped,
     byteArrayToString,
     byteStringToArray,
     concatByteArrays,

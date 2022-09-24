@@ -12,6 +12,7 @@
     invalidateElemCache,
     adoptCachedElem,
     countUnescaped,
+    skipEscaped,
     hash as _hash,
   } from '../util.js'
 
@@ -251,7 +252,7 @@
     let cacheIndex = 0 // counter to distinguish positions of identical cached elements
     let hasMacroErrors = false
     let macroIndex = 0
-    const replaceMacro = (m, pfx, js) => {
+    const replaceMacro = (m, js) => {
       if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
       try {
         let out = window['_item'](id).eval(js, {
@@ -260,19 +261,19 @@
         })
         // NOTE: replacing $id/etc in macro output would deviate from treatment as typed-in content
         // console.debug("macro output: ", out);
-        return pfx + out
+        return out
       } catch (e) {
         hasMacroErrors = true
         // display missing dependencies using special style
         if (e.message.startsWith('missing dependencies'))
-          return pfx + `<span class="macro-missing-deps" title="${e.message}">${js}</span>`
+          return `<span class="macro-missing-deps" title="${e.message}">${js}</span>`
         console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
-        return pfx + `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
+        return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
       }
     }
-    text = text.replace(/(^|[^\\])<<(.*?)>>/g, replaceMacro)
+    text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
     // reserve @{...} syntax for "eval macros", see _Item.eval() in index.svelte
-    //text = text.replace(/(^|[^\\])@\{(.*?)\}@/g, replaceMacro);
+    //text = text.replace(/@\{(.*?)\}@/g, skipEscaped(replaceMacro));
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
     text = text.replace(blockRegExp('\\S+?'), (m, pfx, type, body) => {
@@ -457,10 +458,13 @@
         if (!insideBlock && (depline || !str.match(/^\s*```|^     *[^-*+ ]/))) {
           // wrap math inside span.math (unless text matches search terms)
           if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has('$')))
-            str = str.replace(/(^|[^\\])([$]?[$]`.+?`[$][$]?)/g, (m, pfx, math) =>
-              (math.startsWith('$`') && math.endsWith('`$')) || (math.startsWith('$$`') && math.endsWith('`$$'))
-                ? pfx + wrapMath(math)
-                : m
+            str = str.replace(
+              /([$]?[$]`.+?`[$][$]?)/g,
+              skipEscaped((m, math) =>
+                (math.startsWith('$`') && math.endsWith('`$')) || (math.startsWith('$$`') && math.endsWith('`$$'))
+                  ? wrapMath(math)
+                  : m
+              )
             )
           // style vertical separator bar (│)
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
@@ -576,7 +580,10 @@
 
     // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles
     // (#$id could also be used inside _html blocks but will break css highlighting)
-    text = text.replace(/(?:^|[^\\])<[s]tyle>.*?#item\W.*?<\/style>/gs, m => m.replace(/#item(?=\W)/g, `#item-${id}`))
+    text = text.replace(
+      /<[s]tyle>.*?#item\W.*?<\/style>/gs,
+      skipEscaped(m => m.replace(/#item(?=\W)/g, `#item-${id}`))
+    )
 
     // convert markdown to html
     let renderer = new marked.Renderer()
@@ -615,10 +622,10 @@
         if (language.match(/^_html(_|$)/)) {
           return (
             code
-              .replace(/(^|[^\\])\$id/g, '$1' + id)
-              .replace(/(^|[^\\])\$hash/g, '$1' + hash)
-              .replace(/(^|[^\\])\$deephash/g, '$1' + deephash)
-              .replace(/(^|[^\\])\$cid/g, '$1' + `${id}-${deephash}-${++cacheIndex}`) + '<!--/_html-->'
+              .replace(/\$id/g, skipEscaped(id))
+              .replace(/\$hash/g, skipEscaped(hash))
+              .replace(/\$deephash/g, skipEscaped(deephash))
+              .replace(/\$cid/g, skipEscaped(`${id}-${deephash}-${++cacheIndex}`)) + '<!--/_html-->'
           )
         }
         return highlight(code, language)

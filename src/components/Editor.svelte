@@ -25,14 +25,14 @@
 
   import _ from 'lodash'
   // import he from "he";
-  import { highlight, parseTags, numberWithCommas } from '../util.js'
+  import { highlight, parseTags, numberWithCommas, skipEscaped } from '../util.js'
 
   const placeholder = ' '
   let spellcheck = false
   // enable spellcheck iff item contains no blocks (```), macros(<<>>),or #_nospell OR contains #_spell
   $: spellcheck =
     (!text.match(/(?:^|\n)\s*```\S*(?:$|\n)/) /* no blocks */ &&
-      !text.match(/(^|[^\\])<<.*?>>/) /* no macros */ &&
+      !text.match(/(?:^|[^\\])<<.*?>>/) /* no macros */ &&
       !text.match(/(?:^|\s|\()#_nospell\b/)) ||
     !!text.match(/(?:^|\s|\()#_spell\b/)
 
@@ -94,15 +94,14 @@
     return (
       text
         .replace(
-          /(^|[^\\])([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*)(`[$][$]?|&gt;&gt;|\}@|--&gt;|(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
-          (m, pfx, begin, content, end) => {
+          /([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*)(`[$][$]?|&gt;&gt;|\}@|--&gt;|(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
+          skipEscaped((m, begin, content, end) => {
             // undo any tag highlighting inside highlighted sections
             content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
             if ((begin == '$`' && end == '`$') || (begin == '$$`' && end == '`$$'))
-              return pfx + `<span class="math">` + highlight(_.unescape(begin + content + end), 'latex') + `</span>`
+              return `<span class="math">` + highlight(_.unescape(begin + content + end), 'latex') + `</span>`
             else if ((begin == '&lt;&lt;' && end == '&gt;&gt;') || (begin == '@{' && end == '}@'))
               return (
-                pfx +
                 `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
                 highlight(_.unescape(content), 'js') +
                 `<span class="macro-delimiter">${end}</span></span>`
@@ -112,21 +111,27 @@
               (begin == '&lt;' && end.match(/^(?:[/\w]|&#39;|&quot;)&gt;$/)) ||
               (begin == '&lt;!--' && end == '--&gt;' && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
             )
-              return pfx + highlight(_.unescape(begin + content + end), 'html')
+              return highlight(_.unescape(begin + content + end), 'html')
             else return m
-          }
+          })
         )
         // NOTE: symmetric delimiters (e.g. `code`) are handled separately w/ _lazy_ matching (.*?) of content
-        .replace(/(^|[^\\])(``)(.*?)(``)/g, (m, pfx, begin, content, end) => {
-          // undo any tag highlighting inside highlighted sections
-          content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
-          return pfx + `<span class="code">${begin + content + end}</span>`
-        })
-        .replace(/(^|[^\\])(`)(.*?)(`)/g, (m, pfx, begin, content, end) => {
-          // undo any tag highlighting inside highlighted sections
-          content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
-          return pfx + `<span class="code">${begin + content + end}</span>`
-        })
+        .replace(
+          /(``)(.*?)(``)/g,
+          skipEscaped((m, begin, content, end) => {
+            // undo any tag highlighting inside highlighted sections
+            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            return `<span class="code">${begin + content + end}</span>`
+          })
+        )
+        .replace(
+          /(`)(.*?)(`)/g,
+          skipEscaped((m, begin, content, end) => {
+            // undo any tag highlighting inside highlighted sections
+            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            return `<span class="code">${begin + content + end}</span>`
+          })
+        )
     )
   }
   function highlightTitles(text) {

@@ -62,6 +62,21 @@ export function highlight(code, language) {
   return window.hljs.highlight(code, { language }).value
 }
 
+// string replacement helper to skip escaped matches w/o negative lookbehind (?<!\\)
+// these allow _consecutive_ matches unlike prefix replacement (^|[^\\])... -> $1...
+export function skipEscaped(f) {
+  return function (...args) {
+    // see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace#specifying_a_function_as_the_replacement
+    const named_groups = typeof args[args.length - 1] == 'object' ? args.pop() : undefined
+    const string = args.pop()
+    const offset = args.pop()
+    const [match, ...groups] = args
+    if (string[offset - 1] == '\\') return match // escaped case, skip replacement
+    if (typeof f == 'function') return f(match, ...groups, offset, string, named_groups)
+    return f // return f as is
+  }
+}
+
 export function parseTags(text) {
   const tags = _.uniq(
     Array.from(
@@ -69,14 +84,14 @@ export function parseTags(text) {
         .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
         // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
         .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-        .replace(/(^|[^\\])`.*?`/g, '$1') // remove inline code spans
-        .replace(/(^|[^\\])\$?\$`.+?`\$\$?/g, '$1') // remove math
-        .replace(/(^|[^\\])<script.*?>.*?<\/script>/gs, '$1') // remove scripts (can be multi-line)
-        .replace(/(^|[^\\])<style>.*?<\/style>/gs, '$1') // remove styles (can be multi-line)
-        .replace(/(^|[^\\])<\/?\w.*?>/g, '$1') // remove html tags
-        .replace(/(^|[^\\])<!--.*?-->/g, '$1') // remove html comment tags
-        .replace(/(^|[^\\])<<.*?>>/g, '$1') // remove macros
-        .replace(/(^|[^\\])@\{.*?\}@/g, '$1') // remove macros
+        .replace(/`.*?`/g, skipEscaped('')) // remove inline code spans
+        .replace(/\$?\$`.+?`\$\$?/g, skipEscaped('')) // remove math
+        .replace(/<script.*?>.*?<\/script>/gs, skipEscaped('')) // remove scripts (can be multi-line)
+        .replace(/<style>.*?<\/style>/gs, skipEscaped('')) // remove styles (can be multi-line)
+        .replace(/<\/?\w(?:"[^"]*"|[^>"])*>/g, skipEscaped('')) // remove html tags
+        .replace(/<!--.*?-->/g, skipEscaped('')) // remove html comment tags
+        .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
+        .replace(/@\{.*?\}@/g, skipEscaped('')) // remove macros
         //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
         .matchAll(/(?:^|\s|\()(#[^#\s<>&\?!,.;:"'`(){}\[\]]+)/g),
       m => m[1]
