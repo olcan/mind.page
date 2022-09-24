@@ -1302,7 +1302,7 @@
       let pendingScripts = scripts.length
       let scriptErrors = []
       // console.debug(`executing ${pendingScripts} scripts in item ${name} ...`);
-      scripts.forEach((script, scriptIndex) => {
+      scripts.forEach(async (script, scriptIndex) => {
         // console.debug(script.parentElement);
         if (
           !script.hasAttribute('_uncached') &&
@@ -1316,14 +1316,19 @@
         if (script.hasAttribute('src')) {
           console.error('script src not supported yet')
         } else {
+          const item = window['_item'](id)
           try {
-            // NOTE: we wrap scripts inside function to provide additional scoping
-            window['_item'](id).eval(script.innerHTML.trim(), {
-              // ["(() => {", script.innerHTML, "})()"].join("\n"), {
+            const js = script.innerHTML.replace(/<br>\n/g, '\n').trim() // trim any <br>\n inserted in markdown scope
+            await item.eval(js, {
               trigger: 'script_' + scriptIndex,
               // if _exclude_async, then code from local item is excluded if deepasync
               // (note code from deepasync deps are already excluded for sync eval)
               exclude_async: script.hasAttribute('_exclude_async'),
+              async: script.hasAttribute('_async'),
+              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+              // NOTE: writing/logging to item from an (uncached) script tag can trigger a dangerous
+              // write->render->write loop regardless of whether the script is _async or not
+              read_only: true, // make lexical _this read-only to block simple unintentional writes
             })
           } catch (e) {
             console.error(`<script> error in item ${label || 'id:' + id}: ${e}`)

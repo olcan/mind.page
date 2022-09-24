@@ -78,7 +78,7 @@
   // returns item with name (unique label)
   // returns null if missing, or if multiple items match label
   // logs errors to console.error unless log_errors=false
-  function _item(name: string, log_errors = true): any {
+  function _item(name: string, log_errors = true, read_only = undefined, default_read_only_id = undefined): any {
     if (!name) return null
     let item
     if (name.startsWith('#')) {
@@ -101,7 +101,8 @@
       }
       item = items[index]
     }
-    return Object.freeze(new _Item(item.id)) // defined below
+    read_only ??= item.id == default_read_only_id
+    return Object.freeze(new _Item(item.id, read_only)) // defined below
   }
 
   // same as _item, but for existence checks, and allows multiple matches
@@ -319,8 +320,10 @@
 
   class _Item {
     id: string
-    constructor(id) {
+    read_only: boolean
+    constructor(id, read_only = false) {
       this.id = id
+      this.read_only = read_only
       // define _own_ _enumerable_ properties (e.g. for JSON.stringify)
       // https://stackoverflow.com/a/57179513
       for (const property of ['name']) {
@@ -425,17 +428,16 @@
       // return document.getElementById("item-" + this.id);
       return document.getElementById('super-container-' + this.id)
     }
-    // log options for write_log, reset in eval()
+    // default log options for write_log, reset in each eval w/ 'run' trigger
     get log_options(): object {
       const _item = item(this.id)
-      if (!_item.log_options) _item.log_options = {}
-      return _item.log_options
+      return (_item.log_options ??= {})
     }
+
     // general-purpose key-value store with session/item lifetime
     get store(): object {
       let _item = item(this.id)
-      if (!_item.store) _item.store = {}
-      return _item.store
+      return (_item.store ??= {})
     }
 
     // general-purpose cache object, cleared automatically if deephash has changed
@@ -647,7 +649,7 @@
 
     // accessor for console log associated with item
     // levels are listed below, default level ("info") excludes debug messages
-    // since can be "run" (default), "eval", or any epoch time (same as Date.now)
+    // since can be "eval" (default), "run", or any epoch time (same as Date.now)
     // source can be "self" (default), specific item name (label or id), or "any"
     // if source is suffixed with '?', then lines w/ empty stack are included
     get_log(options = {}) {
@@ -697,6 +699,10 @@
     }
 
     write(text: string, type: string = '_output', options = {}) {
+      if (this.read_only) {
+        console.warn(`ignoring write (${text.length} bytes, type '${type}') to item ${this.name} in read_only mode`)
+        return
+      }
       text = typeof text == 'string' ? text : '' + stringify(text)
       // confirm if write is too big
       const writeConfirmLength = 256 * 1024
@@ -775,10 +781,10 @@
       return deleteItem(this.index, confirm)
     }
 
-    write_log(options = {}) {
+    write_log(options) {
       options = _.merge(
         {
-          since: 'run',
+          since: 'eval',
           level: 'info',
           type: '_log',
           source: 'self?',
@@ -905,9 +911,16 @@
         }
 
         if (options['trigger']) evaljs = [`const __trigger = '${options['trigger']}';`, evaljs].join('\n')
-        evaljs = ["'use strict';undefined;", `const _id = '${this.id}';`, 'const _this = _item(_id);', evaljs].join(
-          '\n'
-        )
+        evaljs = [
+          "'use strict';undefined;",
+          `const _id = '${this.id}';`,
+          // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
+          !options['read_only'] ? [] : ['const _item = (n,le,ro) => window._item(n,le,ro,_id);'],
+          'const _this = _item(_id);',
+          evaljs,
+        ]
+          .flat()
+          .join('\n')
       }
 
       // evaluate inline @{eval_macros}@
@@ -972,7 +985,8 @@
     // log messages are NOT associated with item while it is off the stack
     // _this is still defined in lexical context as if item is top of stack
     // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
-    start(async_func) {
+    start(async_func, log_options) {
+      log_options = _.merge({ since: Date.now() }, log_options) // set default 'since' for write_log below
       item(this.id).running = true
       return update_dom().then(() =>
         this.resolve(async_func())
@@ -985,7 +999,7 @@
             this.invalidate_elem_cache()
           })
           .finally(() => {
-            this.write_log() // customized via _this.log_options
+            this.write_log(log_options) // can also be customized via _this.log_options
             item(this.id).running = false
           })
       )
@@ -3745,8 +3759,9 @@
                 }
               })())
             } else if (_exists('#commands' + cmd)) {
+              const start = Date.now()
               function handleError(e) {
-                const log = _item('#commands' + cmd).get_log({ since: 'eval', level: 'error' })
+                const log = _item('#commands' + cmd).get_log({ since: start, level: 'error' })
                 let msg = [`#commands${cmd} run(${cmd_args}) failed:`, ...log, e].join('\n')
                 alert(msg)
               }
@@ -3776,8 +3791,9 @@
                 const name = cmd.substring(1)
                 if (!itemDefinesFunction(item, '_on_command_' + name)) continue
                 found_listener = true
+                const start = Date.now()
                 function handleError(e) {
-                  const log = _item(item.id).get_log({ since: 'eval', level: 'error' })
+                  const log = _item(item.id).get_log({ since: start, level: 'error' })
                   let msg = [`${item.name} _on_command_${name}(${cmd_args}) failed: `, ...log, e].join('\n')
                   alert(msg)
                 }
@@ -4077,6 +4093,7 @@
     jsin = jsin.trim()
     // if (!jsin) return item.text // input missing or empty, ignore
     let jsout
+    const start = Date.now()
     try {
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/ })
     } catch (e) {} // already logged, just continue
@@ -4091,7 +4108,7 @@
     if (jsout !== undefined) item.text = appendBlock(item.text, '_output', jsout)
     // instead of write_log we can appendBlock to avoid triggering an extra save
     // _item(item.id).write_log() // auto-write log
-    const log = _item(item.id).get_log().join('\n')
+    const log = _item(item.id).get_log({ since: start }).join('\n')
     if (log) {
       item.text = appendBlock(item.text, '_log', log)
       _item(item.id).show_logs()
