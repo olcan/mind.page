@@ -77,6 +77,46 @@ export function skipEscaped(f) {
   }
 }
 
+// regex alternation string of "exclusions" (e.g. ex1|ex2|...) to be used as prefix <exclusions>|<tag_regex>
+// filter out exclusions by using capture groups and checking if first group (e.g. pfx) is undefined
+// this particular set of exclusions should be consistent w/ parseTags below
+// assumes flags gs for multiple & multi-line matching (use [^\n]* instead of .* to simulate single-line matching)
+// exclusions can NOT contain capture groups since it is useless and prohibits simple filtering via undefined captures
+export const tagRegexExclusions = [
+  '(?:^|\\n) *```.*?\\n *```', // multi-line block
+  '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
+  '`[^\\n]*?`', // inline code spans
+  '\\$?\\$`[^\\n]+?`\\$\\$?', // math
+  '<script.*?>.*?</script>', // scripts
+  '<style>.*?</style>', // styles
+  '</?\\w(?:"[^"]*"|[^>"])*?>', // html tags
+  '<!--.*?-->', // html comment tags
+  '<<[^\\n]*?>>', // macros
+  '@{[^\\n]*?}@', // eval macros
+].join('|')
+
+export const tagRegexExclusionsEscaped = [
+  '(?:^|\\n) *```.*?\\n *```', // multi-line block
+  '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
+  '`[^\\n]*?`', // inline code spans
+  '\\$?\\$`[^\\n]+?`\\$\\$?', // math
+  '&lt;script.*?&gt;.*?&lt;/script&gt;', // scripts
+  '&lt;style&gt;.*?&lt;/style&gt;', // styles
+  '&lt;/?\\w(?:&quot;(?:(?!&quot;).)*&quot;|(?!&gt;|&quot;).)*?&gt;', // html tags (escaped)
+  '&lt;!--.*?--&gt;', // html comment tags
+  '&lt;&lt;[^\\n]*?&gt;&gt;', // macros
+  '@{[^\\n]*?}@', // eval macros
+].join('|')
+
+export function replaceTags(text, tagRegex, replacer, escaped) {
+  if (tagRegex.source) tagRegex = tagRegex.source // get string representation
+  tagRegex = (escaped ? tagRegexExclusionsEscaped : tagRegexExclusions) + '|()' + tagRegex // include empty capture group for filtering exclusions
+  return text.replace(new RegExp(tagRegex, 'gs'), function (m, pfx, ...args) {
+    if (pfx === undefined) return m // skip exclusions
+    return replacer(m, ...args) // apply replacer
+  })
+}
+
 export function parseTags(text) {
   const tags = _.uniq(
     Array.from(
@@ -88,8 +128,8 @@ export function parseTags(text) {
         .replace(/\$?\$`.+?`\$\$?/g, skipEscaped('')) // remove math
         .replace(/<script.*?>.*?<\/script>/gs, skipEscaped('')) // remove scripts (can be multi-line)
         .replace(/<style>.*?<\/style>/gs, skipEscaped('')) // remove styles (can be multi-line)
-        .replace(/<\/?\w(?:"[^"]*"|[^>"])*>/g, skipEscaped('')) // remove html tags
-        .replace(/<!--.*?-->/g, skipEscaped('')) // remove html comment tags
+        .replace(/<\/?\w(?:"[^"]*"|[^>"])*>/gs, skipEscaped('')) // remove html tags (can be multi-line)
+        .replace(/<!--.*?-->/gs, skipEscaped('')) // remove html comment tags (can be multi-line)
         .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
         .replace(/@\{.*?\}@/g, skipEscaped('')) // remove macros
         //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),

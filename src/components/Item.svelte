@@ -5,6 +5,7 @@
     highlight,
     blockRegExp,
     extractBlock,
+    replaceTags,
     parseTags,
     renderTag,
     isBalanced,
@@ -365,11 +366,7 @@
     const tags = parseTags(text).raw
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length)
     // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
-    const tagRegex = new RegExp(
-      // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
-      `(^|\\s)(${regexTags.join('|')})`,
-      'g'
-    )
+    const tagRegex = `(^|\\s)(${regexTags.join('|')})`
     const isMenu = tags.includes('#_menu')
 
     // replace naked URLs with markdown links (or images) named after host name
@@ -470,7 +467,7 @@
           str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
-            str = str.replace(tagRegex, (m, pfx, tag, offset, orig_str) => {
+            str = replaceTags(str, tagRegex, (m, pfx, tag, offset, orig_str) => {
               // skip tag if inside code block `...#tag...`
               if (
                 countUnescaped(orig_str.slice(offset).match(/^.*/)[0], '`') % 2 ||

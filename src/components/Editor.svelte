@@ -25,7 +25,7 @@
 
   import _ from 'lodash'
   // import he from "he";
-  import { highlight, parseTags, numberWithCommas, skipEscaped } from '../util.js'
+  import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped } from '../util.js'
 
   const placeholder = ' '
   let spellcheck = false
@@ -79,13 +79,9 @@
   function highlightTags(text, tags) {
     if (tags.length == 0) return text
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length)
-    const regex = new RegExp(
-      // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
-      `(^|\\s|\\()(${regexTags.join('|')})`,
-      'g'
-    )
+    const tagRegex = `(^|\\s|\\()(${regexTags.join('|')})`
     // NOTE: this replacement IGNORES the careful exclusions performed by parseTags (see util.js) other than blocks (e.g. will highlight tags inside html tags that also occur outside of html tags). We fix this below by undoing the replacement in highlightOther.
-    return text.replace(regex, '$1<mark>$2</mark>')
+    return replaceTags(text, tagRegex, (m, pfx, tag) => pfx + `<mark>${tag}</mark>`, true /* use escaped exclusions */)
   }
   function highlightOther(text) {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
@@ -94,7 +90,7 @@
     return (
       text
         .replace(
-          /([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*)(`[$][$]?|&gt;&gt;|\}@|--&gt;|(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;|&lt;)|$))/g,
+          /([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*?)((?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)|--&gt;|\}@|&gt;&gt;|`[$][$]?)/g,
           skipEscaped((m, begin, content, end) => {
             // undo any tag highlighting inside highlighted sections
             content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')

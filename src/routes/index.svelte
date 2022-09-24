@@ -6,7 +6,6 @@
     getAuth,
     onAuthStateChanged,
     GoogleAuthProvider,
-    signInWithPopup,
     signInWithRedirect,
     setPersistence,
     browserLocalPersistence,
@@ -279,6 +278,7 @@
     window['_decrypt_item'] = decryptItem
     window['_parse_tags'] = parseTags
     window['_parse_label'] = parseLabel
+    window['_replace_tags'] = replaceTags
     window['_resolve_tags'] = resolveTags
     window['_resolve_tag'] = resolveTag
     window['_special_tag'] = isSpecialTag
@@ -4896,6 +4896,7 @@
     blockRegExp,
     parseTags,
     parseLabel,
+    replaceTags,
     renderTag,
     isBalanced,
     invalidateElemCache,
