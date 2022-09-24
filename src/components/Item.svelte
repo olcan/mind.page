@@ -363,7 +363,7 @@
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length)
-    // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is for to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
+    // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
     const tagRegex = new RegExp(
       // `(^|[\\s<>&,.;:"'\`(){}\\[\\]])(${regexTags.join("|")})`,
       `(^|\\s)(${regexTags.join('|')})`,
