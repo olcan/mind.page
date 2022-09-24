@@ -5766,7 +5766,11 @@
               if (!item.welcome) return
               if (!itemDefinesFunction(item, '_on_welcome')) return
               try {
-                _item(item.id).eval('_on_welcome()', { trigger: 'welcome' })
+                _item(item.id).eval('_on_welcome()', {
+                  trigger: 'welcome',
+                  async: item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                })
               } catch (e) {} // already logged, just continue welcome eval
             })
 
