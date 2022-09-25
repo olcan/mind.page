@@ -101,7 +101,7 @@ export const tagRegexExclusionsEscaped = [
   '`[^\\n]*?`', // inline code spans
   '\\$?\\$`[^\\n]+?`\\$\\$?', // math
   '&lt;script.*?&gt;.*?&lt;/script&gt;', // scripts
-  '&lt;style&gt;.*?&lt;/style&gt;', // styles
+  '&lt;style.*?&gt;.*?&lt;/style&gt;', // styles
   '&lt;/?\\w(?:&quot;(?:(?!&quot;).)*&quot;|(?!&gt;|&quot;).)*?&gt;', // html tags (escaped)
   '&lt;!--.*?--&gt;', // html comment tags
   '&lt;&lt;[^\\n]*?&gt;&gt;', // macros
@@ -134,7 +134,7 @@ export function parseTags(text) {
         .replace(/`.*?`/g, skipEscaped('')) // remove inline code spans
         .replace(/\$?\$`.+?`\$\$?/g, skipEscaped('')) // remove math
         .replace(/<script.*?>.*?<\/script>/gs, skipEscaped('')) // remove scripts (can be multi-line)
-        .replace(/<style>.*?<\/style>/gs, skipEscaped('')) // remove styles (can be multi-line)
+        .replace(/<style.*?>.*?<\/style>/gs, skipEscaped('')) // remove styles (can be multi-line)
         .replace(/<\/?\w(?:"[^"]*"|[^>"])*>/gs, skipEscaped('')) // remove html tags (can be multi-line)
         .replace(/<!--.*?-->/gs, skipEscaped('')) // remove html comment tags (can be multi-line)
         .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
