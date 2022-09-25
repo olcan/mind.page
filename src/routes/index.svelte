@@ -1056,6 +1056,7 @@
     }
 
     // dispatch = setTimeout on attached function
+    // note function is invoked even if item is deleted before timeout
     dispatch(func, delay_ms = 0) {
       return setTimeout(this.attach(func), delay_ms)
     }
@@ -1064,6 +1065,7 @@
     // if repeat_ms>0, repeats function as long as item is not deleted
     // cancels any previously dispatched task under given name
     // cancels task if function returns null or throws error
+    // cancels task (w/o invoking function) if item is deleted
     // function can be async or return promise
     dispatch_task(name, func, delay_ms = 0, repeat_ms = 0) {
       const task = () => {
@@ -1244,12 +1246,19 @@
     // invalidates element cache for item
     // often invoked from error handling code
     // otherwise can force_render to ensure re-render even if deephash/html are unchanged
-    invalidate_elem_cache(force_render = false) {
-      invalidateElemCache(this.id)
-      if (force_render) {
-        item(this.id).version++
-        items = items // trigger svelte render
-      }
+    // delayed by default to prevent accidental render<->trigger loops that could crash browser
+    invalidate_elem_cache(force_render = false, delay=1000) {
+      this.dispatch_task(
+        'invalidate_elem_cache',
+        () => {
+          invalidateElemCache(this.id)
+          if (force_render) {
+            item(this.id).version++
+            items = items // trigger svelte render
+          }
+        },
+        delay
+      )
     }
   }
 
