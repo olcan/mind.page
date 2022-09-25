@@ -6,6 +6,7 @@
     blockRegExp,
     extractBlock,
     replaceTags,
+    tagRegexExclusions,
     parseTags,
     renderTag,
     isBalanced,
@@ -368,12 +369,13 @@
     const isMenu = tags.includes('#_menu')
 
     // replace naked URLs with markdown links (or images) named after host name
+    // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
+    const urlRegex = new RegExp(tagRegexExclusions + '|' + /(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])/.source, 'g')
     const replaceURLs = text =>
-      text.replace(/(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, url) => {
-        // try to maintain markdown links, html attributes, other url strings, etc
-        // NOTE: markdown parser may still convert naked URLs to links
-        // TODO: replace this with more robust matching w/ exclusions, like replaceTags
-        if (pfx.match(/\]\(|[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
+      text.replace(urlRegex, (m, pfx, url, offset, orig_str) => {
+        if (!pfx) return m // skip exclusion
+        // disallow matching prefix ](\s+ to avoid matching urls inside markdown links
+        if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
         let sfx = ''
         if (url[url.length - 1].match(/[\.,;:]/)) {
           // move certain last characters out of the url
