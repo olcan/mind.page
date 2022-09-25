@@ -43,7 +43,7 @@ export function highlight(code, language) {
   language = language.replace(/(?:_removed|_hidden)$/, '')
   const link_urls = text =>
     text.replace(
-      /(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])(?=\)|\s|$)/g,
+      /(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/g,
       '$1<a href="$2" title="$2" target="_blank">$2</a>'
     )
   if (language == '_log') {
@@ -132,8 +132,8 @@ export function parseTags(text) {
         .replace(/<!--.*?-->/gs, skipEscaped('')) // remove html comment tags (can be multi-line)
         .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
         .replace(/@\{.*?\}@/g, skipEscaped('')) // remove macros
-        //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)(?=\)|\s|$)/g),
-        .matchAll(/(?:^|\s|\()(#[^#\s<>&\?!,.;:"'`(){}\[\]]+)(?=\)|\s|$)/g),
+        //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
+        .matchAll(/(?:^|\s|\()(#[^#\s<>&\?!,.;:"'`(){}\[\]]+)/g),
       m => m[1]
     )
   )
