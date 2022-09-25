@@ -108,9 +108,16 @@ export const tagRegexExclusionsEscaped = [
   '@{[^\\n]*?}@', // eval macros
 ].join('|')
 
+export const tagRegexDelimiter = /(?=[\s<>&\?!,.;:"'`(){}\[\]]|$)/.source // inverse of tag pattern in parseTags below
+export const tagRegexDelimiterEscaped = /(?=[\s\?!,.;:`(){}\[\]]|&lt;|&gt;|&amp;|&quot;|&#39;|$)/.source
+
 export function replaceTags(text, tagRegex, replacer, escaped) {
   if (tagRegex.source) tagRegex = tagRegex.source // get string representation
-  tagRegex = (escaped ? tagRegexExclusionsEscaped : tagRegexExclusions) + '|()' + tagRegex // include empty capture group for filtering exclusions
+  tagRegex =
+    (escaped ? tagRegexExclusionsEscaped : tagRegexExclusions) +
+    '|()' + // used to filter out exclusions in wrapper function below
+    tagRegex +
+    (escaped ? tagRegexDelimiterEscaped : tagRegexDelimiter)
   return text.replace(new RegExp(tagRegex, 'gs'), function (m, pfx, ...args) {
     if (pfx === undefined) return m // skip exclusions
     return replacer(m, ...args) // apply replacer
@@ -132,7 +139,12 @@ export function parseTags(text) {
         .replace(/<!--.*?-->/gs, skipEscaped('')) // remove html comment tags (can be multi-line)
         .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
         .replace(/@\{.*?\}@/g, skipEscaped('')) // remove macros
-        //.matchAll(/(?:^|[\s<>&,.;:"'`(){}\[\]])(#[^#\s<>&,.;:"'`(){}\[\]]+)/g),
+        // NOTE: we intentially allow most characters, well outside of say [\p{L}\d/_-]
+        //       some examples of characters found useful in tags are: ⇧⏎²…
+        //       also greek letters like θμσ…, but those are covered under unicode \p{L}
+        //       we do not match a trailing delimiter because it would be redundant as inverse of allowed chars
+        //       tag patterns matching _specific_ tags should use the inverse as trailing delimiter for consistency
+        //       this is done automatically in replaceTags above, but other functions can use tagRegexDelimiter
         .matchAll(/(?:^|\s|\()(#[^#\s<>&\?!,.;:"'`(){}\[\]]+)/g),
       m => m[1]
     )
