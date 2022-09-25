@@ -356,30 +356,32 @@
     if (!key) return // can be empty for pencil input on ios
     // console.debug('Editor.onKeyDown:', e, key)
 
-    // generic workaround for Shift-Enter not working on android keyboards: Space-then-Return-within-250ms w/o modifiers deletes the space and behaves like Shift+Enter
-    if (
-      key == 'Enter' &&
-      ((lastKeyDown == 'Space' && Date.now() - lastKeyDownTime < 250) ||
-        (lastKeyDown == 'Unidentified' &&
-          lastInputInsertText?.endsWith(' ') &&
-          Date.now() - lastInputInsertTextTime < 250)) &&
-      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
-      textarea.selectionStart == textarea.selectionEnd &&
-      textarea.value[textarea.selectionStart - 1] == ' '
-    ) {
-      // Object.defineProperty(e, "shiftKey", { value: true });
-      const caretPos = textarea.selectionStart // to restore after deletion
-      textarea.value = textarea.value.slice(0, caretPos - 1) + textarea.value.slice(caretPos)
-      textarea.selectionStart = textarea.selectionEnd = caretPos - 1
-      e.preventDefault()
-      e.stopPropagation()
-      onDone((text = textarea.value), e)
-      return
+    if (navigator.userAgent.toLowerCase().includes('android')) {
+      // generic workaround for Shift-Enter not working on android keyboards: Space-then-Return-within-250ms w/o modifiers deletes the space and behaves like Shift+Enter
+      if (
+        key == 'Enter' &&
+        ((lastKeyDown == 'Space' && Date.now() - lastKeyDownTime < 250) ||
+          (lastKeyDown == 'Unidentified' &&
+            lastInputInsertText?.endsWith(' ') &&
+            Date.now() - lastInputInsertTextTime < 250)) &&
+        !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
+        textarea.selectionStart == textarea.selectionEnd &&
+        textarea.value[textarea.selectionStart - 1] == ' '
+      ) {
+        // Object.defineProperty(e, "shiftKey", { value: true });
+        const caretPos = textarea.selectionStart // to restore after deletion
+        textarea.value = textarea.value.slice(0, caretPos - 1) + textarea.value.slice(caretPos)
+        textarea.selectionStart = textarea.selectionEnd = caretPos - 1
+        e.preventDefault()
+        e.stopPropagation()
+        onDone((text = textarea.value), e)
+        return
+      }
+      // workaround for "Windows" key on Hacker's Keyboard on android
+      if (lastKeyDown == 'Meta') Object.defineProperty(e, 'metaKey', { value: true })
+      lastKeyDown = key
+      lastKeyDownTime = Date.now()
     }
-    // workaround for "Windows" key on Hacker's Keyboard on android
-    if (lastKeyDown == 'Meta') Object.defineProperty(e, 'metaKey', { value: true })
-    lastKeyDown = key
-    lastKeyDownTime = Date.now()
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
     // only keys we propagate are unmodified ArrowUp/Down at start/end of editor
