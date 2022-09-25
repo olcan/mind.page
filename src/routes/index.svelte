@@ -1690,7 +1690,7 @@
 
   function urlForState(state) {
     if (!initialized) return undefined // maintain url if initializing
-    const text = state.editorText.trim()
+    const text = state.editorText?.trim() || ''
     const base = location.href.replace(/#.*$/, '')
     if (text.match(/^#\S+$/) && _exists(text))
       return base + '#' + encodeURIComponent(text.slice(1)).replace(/%2F/g, '/')
@@ -6463,13 +6463,13 @@
             <div class="history">
               <div class="history-container">
                 {#each sessionStateHistory as state, index}
-                  {#if index < sessionStateHistory.length - 1 && state.editorText.trim()}
+                  {#if index < sessionStateHistory.length - 1 && state.editorText?.trim()}
                     <div
                       class="history-item"
                       class:current={index == sessionStateHistoryIndex}
                       on:mousedown={e => onHistoryItemMouseDown(e, index)}
                     >
-                      {state.editorText.trim() || '(clear)'}
+                      {state.editorText?.trim() || '(clear)'}
                     </div>
                   {/if}
                 {/each}
