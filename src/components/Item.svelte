@@ -12,7 +12,6 @@
     numberWithCommas,
     invalidateElemCache,
     adoptCachedElem,
-    countUnescaped,
     skipEscaped,
     hash as _hash,
   } from '../util.js'
@@ -468,6 +467,8 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = replaceTags(str, tagRegex, (m, pfx, tag, offset, orig_str) => {
+              // disallow matching prefix ](\s+ to avoid matching tag links (unlike in editor where we want them)
+              if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
               // drop hidden tag prefix
               const hidden = tag.startsWith('#_')
               tag = tag.replace(/^#_/, '#')
