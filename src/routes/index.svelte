@@ -1246,7 +1246,7 @@
     // invalidates element cache for item
     // often invoked from error handling code
     // otherwise can force_render to ensure re-render even if deephash/html are unchanged
-    // delayed by default to prevent accidental render<->trigger loops that could crash browser
+    // delayed to prevent accidental tight render<->trigger loops that could crash browser
     invalidate_elem_cache(force_render = false, delay=1000) {
       this.dispatch_task(
         'invalidate_elem_cache',
