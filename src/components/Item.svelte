@@ -1110,7 +1110,7 @@
 
     // linkify urls & tags in code comments (tag regex from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])(?=\)|\s|$)/g, (m, pfx, href) => {
+      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, href) => {
         const href_escaped = href.replace(/'/g, "\\'")
         return (
           `${pfx}<a href="${href}" target="_blank" title="${href}" ` +
@@ -1118,7 +1118,7 @@
         )
       })
     const link_tags = text =>
-      text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)(?=\)|\s|$)/g, (m, pfx, tag) => {
+      text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
         return `${pfx}<a href="#" title="${tag_resolved}" onmousedown="_handleTagClick('${id}','${tag_resolved}','${tag_resolved}',event)">${tag}</a>`
       })
