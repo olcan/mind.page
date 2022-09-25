@@ -365,15 +365,15 @@
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length)
-    // NOTE: this regex (unlike that in Editor or util.js) does not allow preceding '(' because the purpose of that is to match the href in tag links, which is only visible in the editor, and we want to be generally restrictive when matching tags
-    const tagRegex = `(^|\\s)(${regexTags.join('|')})`
+    const tagRegex = `(^|\\s|\\(|\>)(${regexTags.join('|')})(?=\\)|\\s|<br>|$)` // note <br> can be inserted below
     const isMenu = tags.includes('#_menu')
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = text =>
-      text.replace(/(^|.?.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+      text.replace(/(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])(?=\)|\s|$)/g, (m, pfx, url) => {
         // try to maintain markdown links, html attributes, other url strings, etc
         // NOTE: markdown parser may still convert naked URLs to links
+        // TODO: replace this with more robust matching w/ exclusions, like replaceTags
         if (pfx.match(/\]\(|[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
         let sfx = ''
         if (url[url.length - 1].match(/[\.,;:]/)) {
@@ -468,13 +468,6 @@
           // wrap #tags inside clickable <mark></mark>
           if (tags.length)
             str = replaceTags(str, tagRegex, (m, pfx, tag, offset, orig_str) => {
-              // skip tag if inside code block `...#tag...`
-              if (
-                countUnescaped(orig_str.slice(offset).match(/^.*/)[0], '`') % 2 ||
-                countUnescaped(orig_str.slice(0, offset).match(/.*$/)[0], '`') % 2
-              )
-                return m
-
               // drop hidden tag prefix
               const hidden = tag.startsWith('#_')
               tag = tag.replace(/^#_/, '#')
@@ -1117,7 +1110,7 @@
 
     // linkify urls & tags in code comments (tag regex from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, href) => {
+      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])(?=\)|\s|$)/g, (m, pfx, href) => {
         const href_escaped = href.replace(/'/g, "\\'")
         return (
           `${pfx}<a href="${href}" target="_blank" title="${href}" ` +
@@ -1125,7 +1118,7 @@
         )
       })
     const link_tags = text =>
-      text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
+      text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)(?=\)|\s|$)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
         return `${pfx}<a href="#" title="${tag_resolved}" onmousedown="_handleTagClick('${id}','${tag_resolved}','${tag_resolved}',event)">${tag}</a>`
       })
