@@ -2300,6 +2300,7 @@
 
   function scrollToTarget() {
     const target = document.querySelector(`.super-container.target`) as HTMLElement
+    if (!target) return // target missing, can happen even under unique match (e.g. for #log items)
     // if target is too far up or down, bring it to ~upper-middle, snapping up to header
     if (target.offsetTop < document.body.scrollTop || target.offsetTop > document.body.scrollTop + innerHeight - 200)
       document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
