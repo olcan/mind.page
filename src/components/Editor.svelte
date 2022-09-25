@@ -70,6 +70,8 @@
   const html_comment_languages = new Set([...languages_by_comment_begin('/\x3C!--/'), ...markdown_aliases])
   // languages that support mathematica-like (* comments *)
   const mathematica_comment_languages = languages_by_comment_begin(/\(\*/)
+  // languages that support c-like /* comments */
+  const c_comment_languages = languages_by_comment_begin('/\\*')
   // languages that support % comments (e.g. tex)
   const percent_comment_languages = languages_by_comment_begin('%')
   // languages that support -- comments (e.g. sql)
@@ -468,6 +470,17 @@
         language = language.match(/^_?(\S+?)(?:_|$)/)?.pop() ?? language // trim prefix/suffix
         language = language.toLowerCase() // language is case-insensitive
 
+        // for html, detect if we are inside a script or style block, and modify language accordingly
+        if (language == 'html') {
+          let last_tag
+          textarea.value.substring(0, textarea.selectionStart).replace(
+            /<\/?\w(?:"[^"]*"|[^>"])*?>/gs,
+            skipEscaped(m => (last_tag = m))
+          )
+          if (last_tag.match(/<script.*?>/s)) language = 'javascript'
+          else if (last_tag.match(/<[s]tyle.*?>/s)) language = 'css'
+        }
+
         if (double_slash_comment_languages.has(language)) {
           selectedText = selectedText.match(/^\s*\/\//)
             ? selectedText.replace(/((?:^|\n)\s*)\/\/\s*/g, '$1')
@@ -495,6 +508,14 @@
           else {
             const prev_length = selectedText.length
             selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1(* $2 *)')
+            caretOffset = ((selectedText.length - prev_length) * 3) / 6 // 3 of 6 chars are left delimiters
+          }
+        } else if (c_comment_languages.has(language)) {
+          if (selectedText.match(/^\s*\/\*/))
+            selectedText = selectedText.replace(/((?:^|\n)\s*)\/\*\s*(.*?)\s*\*\//g, '$1$2')
+          else {
+            const prev_length = selectedText.length
+            selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1/* $2 */')
             caretOffset = ((selectedText.length - prev_length) * 3) / 6 // 3 of 6 chars are left delimiters
           }
         } else if (percent_comment_languages.has(language)) {
