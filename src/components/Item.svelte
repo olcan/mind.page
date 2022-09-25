@@ -365,12 +365,12 @@
     // parse tags and construct regex for matching
     const tags = parseTags(text).raw
     const regexTags = tags.map(_.escapeRegExp).sort((a, b) => b.length - a.length)
-    const tagRegex = `(^|\\s|\\(|\>)(${regexTags.join('|')})(?=\\)|\\s|<br>|$)` // note <br> can be inserted below
+    const tagRegex = `(^|\\s|\\()(${regexTags.join('|')})`
     const isMenu = tags.includes('#_menu')
 
     // replace naked URLs with markdown links (or images) named after host name
     const replaceURLs = text =>
-      text.replace(/(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])(?=\)|\s|$)/g, (m, pfx, url) => {
+      text.replace(/(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, url) => {
         // try to maintain markdown links, html attributes, other url strings, etc
         // NOTE: markdown parser may still convert naked URLs to links
         // TODO: replace this with more robust matching w/ exclusions, like replaceTags
