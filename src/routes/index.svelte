@@ -751,7 +751,7 @@
       // console.debug('saving after write', this.name, { text, type, options })
       if (!options['skip_save']) saveItem(this.id)
       items = items // trigger svelte render to reflect saving state
-      tick().then(()=>{
+      tick().then(() => {
         // update all other item state (including dependents)
         // note this can be slow on items with many dependents, e.g. #util/core
         itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
@@ -2383,7 +2383,7 @@
       if (prefix_click) {
         // assuming trying to go to a parent/ancestor
         if (!confirm(`${tag} already selected; clear selection?`)) return
-      } else if (!confirm(`${tag} already selected; clear selection?`)) return
+      } // else if (!confirm(`${tag} already selected; clear selection?`)) return
       editorText = '' // assume intentional toggle (clear)
     } else {
       editorText = tag + ' ' // space in case more text is added
