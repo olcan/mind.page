@@ -36,8 +36,7 @@ function get_hostname(req) {
   const hostport = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
   return (globalThis.hostname = hostport
     .replace(/:.+$/, '')
-    .replace('127.0.0.1', 'localhost')
-    .replace('local.dev', 'localhost'))
+    .replace(/^(?:127\.0\.0\.1|local\.dev|192\.168\.86\.10\d)$/, 'localhost'))
 }
 
 // helper to determine host directory

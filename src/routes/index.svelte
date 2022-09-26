@@ -270,6 +270,7 @@
     window['_modal_visible'] = _modal_visible
     window['_delay'] = _delay
     window['_update_dom'] = update_dom
+    window['_scroll_to'] = scrollTo
     window['_encrypt'] = encrypt
     window['_decrypt'] = decrypt
     window['_encrypt_bytes'] = encrypt_bytes
@@ -749,18 +750,20 @@
       // if (!item(this.id)?.editing) saveItem(this.id);
       // console.debug('saving after write', this.name, { text, type, options })
       if (!options['skip_save']) saveItem(this.id)
+      items = items // trigger svelte render to reflect saving state
+      tick().then(()=>{
+        // update all other item state (including dependents)
+        // note this can be slow on items with many dependents, e.g. #util/core
+        itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
 
-      // update all other item state (including dependents)
-      // note this can be slow on items with many dependents, e.g. #util/core
-      itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
+        // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
+        this.invalidate_elem_cache(true /*force_render*/)
 
-      // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
-      this.invalidate_elem_cache(true /*force_render*/)
-
-      // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
-      setTimeout(() => {
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(editorText) // item time/text has changed
+        // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
+        setTimeout(() => {
+          lastEditorChangeTime = 0 // disable debounce even if editor focused
+          onEditorChange(editorText) // item time/text has changed
+        })
       })
     }
 
@@ -1247,7 +1250,7 @@
     // often invoked from error handling code
     // otherwise can force_render to ensure re-render even if deephash/html are unchanged
     // delayed to prevent accidental tight render<->trigger loops that could crash browser
-    invalidate_elem_cache(force_render = false, delay=1000) {
+    invalidate_elem_cache(force_render = false, delay = 1000) {
       this.dispatch_task(
         'invalidate_elem_cache',
         () => {
@@ -1278,29 +1281,38 @@
         (document.querySelector('.column:not(.hidden)') as HTMLElement).offsetWidth + 'px'
   }
 
+  function scrollTo(y) {
+    // updating vertical padding turns out to cause inconsistent scrolling ...
+    // (likely due to conflicts w/ other changes, e.g. focus, that are avoided in checkLayout)
+    // updateVerticalPadding(true /*skip_scroll*/) // since we are scrolling anyway
+    // NOTE: we have to add (innerHeight - document.body.offsetHeight) on ios
+    //       this difference seems to be zero on other devices (including android)
+    //       seems ios does NOT adjust document.body.offsetHeight for virtual keyboard
+    //       and this causes scrolling to be off by exactly keyboard height when it is visible
+    document.body.scrollTo(0, y + (innerHeight - document.body.offsetHeight))
+  }
+
   let padding = 0
   let lastViewHeight = 0
-  function updateVerticalPadding() {
+  function updateVerticalPadding(skip_scroll = false) {
+    if (!itemsdiv) return
     // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
     // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
     // as a nice side effect this ensures header stays in view (precisely) on ios
     // we need to use innerHeight since it is also used to calculate scroll positions
     // innerHeight can change frequently, which is ok as long as updateVerticalPadding is invoked carefully
     const viewHeight = innerHeight
-    const viewHeightDelta = viewHeight - lastViewHeight
-    if (itemsdiv && viewHeightDelta) {
-      const prevScrollTop = document.body.scrollTop
-      const prevPadding = itemsdiv.querySelector('.column-padding').offsetHeight
-      padding = 0.7 * viewHeight
-      // console.debug(`updating vertical padding to ${padding} for viewHeight ${viewHeight}, was ${lastViewHeight}`)
-      // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
-      itemsdiv.querySelectorAll('.column-padding').forEach((div: HTMLElement) => (div.style.height = padding + 'px'))
-      // adjust bottom padding and then scroll position to prevent jumping
-      itemsdiv.style.paddingBottom = padding + 'px'
-      document.body.scrollTo(0, prevScrollTop + padding - prevPadding)
-      lastViewHeight = viewHeight
-    }
-    return viewHeightDelta
+    if (viewHeight == lastViewHeight) return
+    const prevScrollTop = document.body.scrollTop
+    const prevPadding = itemsdiv.querySelector('.column-padding').offsetHeight
+    padding = 0.7 * viewHeight
+    // console.debug(`updating vertical padding to ${padding} for viewHeight ${viewHeight}, was ${lastViewHeight}`)
+    // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
+    itemsdiv.querySelectorAll('.column-padding').forEach((div: HTMLElement) => (div.style.height = padding + 'px'))
+    // adjust bottom padding and then scroll position to prevent jumping
+    itemsdiv.style.paddingBottom = padding + 'px'
+    lastViewHeight = viewHeight
+    if (!skip_scroll) scrollTo(prevScrollTop + padding - prevPadding)
   }
 
   function getDocumentWidth() {
@@ -1359,7 +1371,7 @@
     // as soon as header is available, add top margin and scroll down to header
     // also store header offset for all other scrollTo calculations
     if (headerdiv && !headerScrolled) {
-      document.body.scrollTo(0, headerdiv.offsetTop)
+      scrollTo(headerdiv.offsetTop)
       headerScrolled = true
     }
 
@@ -1492,8 +1504,7 @@
         )
         // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop < document.body.scrollTop)
-          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+        if (itemTop < document.body.scrollTop) scrollTo(Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
         topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
       }
     })
@@ -2312,7 +2323,7 @@
     if (!target) return // target missing, can happen even under unique match (e.g. for #log items)
     // if target is too far up or down, bring it to ~upper-middle, snapping up to header
     if (target.offsetTop < document.body.scrollTop || target.offsetTop > document.body.scrollTop + innerHeight - 200)
-      document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+      scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -2445,11 +2456,11 @@
     // if (narrating) return;
     update_dom().then(() => {
       if (scrollToTopOnPopState) {
-        document.body.scrollTo(0, headerdiv.offsetTop)
+        scrollTo(headerdiv.offsetTop)
         scrollToTopOnPopState = false
       } else {
         // scroll to last recorded scroll position at this state
-        document.body.scrollTo(0, e.state.scrollPosition || 0)
+        scrollTo(e.state.scrollPosition || 0)
       }
     })
   }
@@ -4315,8 +4326,7 @@
           const div = document.querySelector('#super-container-' + item.id)
           if (!div) return // item deleted or hidden
           const itemTop = (div as HTMLElement).offsetTop
-          if (itemTop < document.body.scrollTop)
-            document.body.scrollTo(0, Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+          if (itemTop < document.body.scrollTop) scrollTo(Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
         })
       }
     }
@@ -4486,11 +4496,6 @@
       if (!textarea) return
       textarea.focus()
 
-      // update vertical padding in case it is out of date
-      // could help w/ caret position calculation below, but unconfirmed empirically
-      // note on iOS we are forced to ADD this delta for accurate scrolling
-      const viewHeightDelta = updateVerticalPadding()
-
       // calculate caret position
       // NOTE: following logic was originally used to detect caret on first/last line, see https://github.com/olcan/mind.page/blob/94653c1863d116662a85bc0abd8ea1cec042d2c4/src/components/Editor.svelte#L294
       const backdrop = textarea.closest('.editor')?.querySelector('.backdrop')
@@ -4512,14 +4517,8 @@
 
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
-      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200) {
-        const scroll_to = Math.max(0, caretTop - innerHeight / 4) + (ios ? viewHeightDelta : 0)
-        // console.debug(
-        //   `scrolling to ${scroll_to} from ${document.body.scrollTop} for ` +
-        //     `caretTop:${caretTop}, innerHeight:${innerHeight}, viewHeightDelta:${viewHeightDelta}`
-        // )
-        document.body.scrollTo(0, scroll_to)
-      }
+      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200)
+        scrollTo(Math.max(0, caretTop - innerHeight / 4))
     })
   }
 
@@ -4891,10 +4890,11 @@
     }
 
     item.pushable = true // mark pushable until pushed
+    item.previewable = false // update before write
     const prev_name = item.name
     _item(item.id).write(text, '' /*, { keep_time: true }*/)
     if (item.name != prev_name) console.warn(`preview renamed ${item.name} (was ${prev_name}) from ${repo}/${path}`)
-    item.previewable = item.text != item.previewText // should be false now
+    item.previewable = item.text != item.previewText // should remain false
     // store preview text hash to be able to detect non-preview changes across reloads
     _item(item.id).local_store._preview_hash = hash(item.previewText)
     console.debug(`previewed ${item.name} from ${repo}/${path}`)
@@ -5828,7 +5828,7 @@
 
   function onColumnPaddingMouseDown(e) {
     e.preventDefault() // prevent click & focus shift
-    document.body.scrollTo(0, headerdiv.offsetTop)
+    scrollTo(headerdiv.offsetTop)
   }
 
   function onHistoryItemMouseDown(e, index) {
@@ -5836,7 +5836,7 @@
     e.stopPropagation()
     // if index is current state, history.go would reload so we just scroll to top
     if (index == sessionStateHistoryIndex) {
-      document.body.scrollTo(0, headerdiv.offsetTop)
+      scrollTo(headerdiv.offsetTop)
       return
     } else {
       scrollToTopOnPopState = true
@@ -5873,7 +5873,7 @@
         // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop
         if (toggleTop > document.body.scrollTop + innerHeight - 200)
-          document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
+          scrollTo(Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
         toggle.dispatchEvent(new Event('click'))
       }
       return
@@ -5885,8 +5885,8 @@
       const index = parseInt(key.match(/\d+/)?.shift()) - 1
       if (index == -1) {
         const target = document.querySelector(`.super-container.target`) as HTMLElement
-        if (target) document.body.scrollTo(0, Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
-        else document.body.scrollTo(0, headerdiv.offsetTop) // just scroll to top
+        if (target) scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+        else scrollTo(headerdiv.offsetTop) // just scroll to top
         return
       }
       const item = items[index]
@@ -6055,7 +6055,7 @@
         const toggleTop = (showToggle as HTMLElement).offsetTop
         if (toggleTop < document.body.scrollTop + innerHeight) showToggle.dispatchEvent(new Event('click'))
         // if (toggleTop > document.body.scrollTop + innerHeight - 200)
-        //   document.body.scrollTo(0, Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
+        //   scrollTo(Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
         // showToggle.dispatchEvent(new Event('click'))
         return
       }
@@ -6137,7 +6137,7 @@
       e.preventDefault()
       hideIndex = hideIndexMinimal
       // scroll up to header if necessary
-      if (document.body.scrollTop > headerdiv.offsetTop) document.body.scrollTo(0, headerdiv.offsetTop)
+      if (document.body.scrollTop > headerdiv.offsetTop) scrollTo(headerdiv.offsetTop)
       tick().then(() => textArea(-1).focus())
 
       // create/run new item on create/save shortcuts
@@ -6382,7 +6382,7 @@
   const hostname =
     typeof location == 'undefined'
       ? globalThis.hostname
-      : location.hostname.replace('127.0.0.1', 'localhost').replace('local.dev', 'localhost')
+      : location.hostname.replace(/^(?:127\.0\.0\.1|local\.dev|192\.168\.86\.10\d)$/, 'localhost')
 
   // custom directory for some static files, based on hostname
   const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
