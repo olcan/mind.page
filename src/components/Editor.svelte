@@ -466,7 +466,8 @@
             .match(/^\S+/)
             ?.pop()
           const block_suffix = textarea.value.substring(block_end + 3)
-          if (block_prefix.match(/(?:^|\n) *$/) && block_type && block_suffix.match(/^ *\n/)) language = block_type
+          if (block_prefix.match(/(?:^|\n) *$/) && block_type && block_suffix.match(/^ *(?:\n|$)/))
+            language = block_type
         }
         language ??= 'markdown' // assume markdown as default language
         language = language.match(/^_?(\S+?)(?:_|$)/)?.pop() ?? language // trim prefix/suffix
