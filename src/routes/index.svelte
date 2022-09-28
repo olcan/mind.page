@@ -4205,10 +4205,8 @@
     const item = items[index]
     // by default, confirm if item has saved text (not new item) & unique label
     confirm_delete ??= item.savedText && item.labelUnique
-    if (confirm_delete && !confirm(`Delete ${item.name}?`)) {
-      item.text = item.savedText // in case text was cleared to trigger deletion on onItemEditing
+    if (confirm_delete && !confirm(`Delete ${item.name}?`))
       return false
-    }
     const { name } = item // name used below
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
@@ -4263,6 +4261,17 @@
       item.text = item.saving ? item.savingText : item.savedText
     }
 
+    // check for deletion triggered by editor, which can be cancelled via confirmation
+    // we only confirm if item is not already emptied out, which triggers deletion automatically
+    if (item.text.trim() && e['_delete']) {
+      if (confirm(`Delete ${item.uniqueLabel || 'item'}?`)) {
+        item.text = '' // will trigger unconfirmed deletion below
+      } else {
+        item.editing = true
+        return
+      }
+    }
+
     if (editing) {
       // started editing
       editingItems.push(index)
@@ -4289,8 +4298,8 @@
         item.focused = false
       }
       if (item.text.trim().length == 0) {
-        // delete
-        deleteItem(index)
+        // delete empty item w/o confirmation
+        deleteItem(index, false /* confirm_delete */)
       } else {
         itemTextChanged(index, item.text)
         // clear _output and execute javascript unless cancelled
