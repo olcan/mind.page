@@ -76,6 +76,7 @@ const sapper_server = express().use(
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
+    // console.debug('handling path', req.path)
     const hostname = get_hostname(req)
     const hostdir = get_hostdir(hostname)
     // serve /manifest.json from any path (to allow scoping in manifest)

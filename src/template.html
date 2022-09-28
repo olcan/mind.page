@@ -89,7 +89,7 @@
   </head>
 
   <body>
-    <!-- NOTE: this element includes default-rendered content before client javascript is executed below -->
+    <!-- index.svelte is rendered here -->
     <div id="sapper">%sapper.html%</div>
     <div id="cache-div" style="position: fixed; left: -100000px; width: 750px"></div>
     <script>
@@ -155,6 +155,10 @@
       hljs.configure({ tabReplace: '  ' })
     </script>
 
+    <!-- client.js (and index.js imported into it) is loaded (as "module" w/ import/export support) here -->
     %sapper.scripts%
+    <script>
+      window.s = undefined /* clean up leaked global, see node_modules/sapper/runtime/server.mjs */
+    </script>
   </body>
 </html>
