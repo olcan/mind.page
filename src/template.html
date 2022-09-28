@@ -156,9 +156,13 @@
     </script>
 
     <!-- client.js (and index.js imported into it) is loaded (as "module" w/ import/export support) here -->
+    <!-- we use a simple wrapper to prevent leak of global 'var s' (see node_modules/sapper/runtime/server.mjs) -->
+    <script>
+      window.s = undefined
+    </script>
     %sapper.scripts%
     <script>
-      window.s = undefined /* clean up leaked global, see node_modules/sapper/runtime/server.mjs */
+      delete window.s
     </script>
   </body>
 </html>
