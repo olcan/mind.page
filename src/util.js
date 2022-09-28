@@ -329,7 +329,7 @@ function _stringify_object(x) {
     (x.constructor.name != 'Object' ? `[${typeof x} ${x.constructor.name}] ` : '') +
     '{ ' +
     _.entries(x)
-      .map(([k, v]) => `${k}:${str(v)}`)
+      .map(([k, v]) => `${k}:${stringify(v)}`)
       .join(' ') +
     ' }'
   )
