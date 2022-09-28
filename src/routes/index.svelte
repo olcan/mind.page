@@ -1175,9 +1175,9 @@
           // prefix {uid}/images/ automatically for hex src
           if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
           return new Promise((resolve, reject) => {
-            if (images.has(src)) {
+            if (images[src]) {
               // already available locally, convert to blob
-              const url = images.get(src)
+              const url = images[src]
               if (output == 'url') {
                 resolve(url)
                 return
@@ -1511,7 +1511,7 @@
   }
 
   let images // permanent fname to temporary url map
-  if (isClient) images = window['_images'] = new Map<string, string>()
+  if (isClient) images = window['_images'] = {}
 
   function onPastedImage(url: string, file: File, size_handler = null) {
     // note inserted images also trigger this function via Modal.svelte
@@ -1525,8 +1525,8 @@
         if (size_handler) size_handler(bytes.length)
         const file_hash = hash(bytes)
         const fname = `${user.uid}/images/${file_hash}` // short fname is just hash
-        if (readonly) images.set(fname, url) // skip upload
-        if (images.has(fname)) {
+        if (readonly) images[fname] = url // skip upload
+        if (images[fname]) {
           resolve(file_hash)
           return
         }
@@ -1535,7 +1535,7 @@
           uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), file) // mime type from file
             .then(snapshot => {
               console.debug(`uploaded image ${fname} (${bytes.length} bytes) in ${Date.now() - start}ms`)
-              images.set(fname, url)
+              images[fname] = url
               resolve(file_hash)
             })
             .catch(e => {
@@ -1556,7 +1556,7 @@
                     `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms ` +
                       `(encryption took ${encrypt_time}ms)`
                   )
-                  images.set(fname, url)
+                  images[fname] = url
                   resolve(file_hash)
                 })
                 .catch(e => {
@@ -1577,7 +1577,7 @@
     // prefix {uid}/images/ automatically for hex src
     if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
     if (!src.startsWith(user.uid + '/images/') && !src.startsWith('anonymous/images/')) return src // external image
-    if (images.has(src)) return images.get(src) // image ready
+    if (images[src]) return images[src] // image ready
     return '/loading.gif' // image must be loaded
   }
 
@@ -1587,8 +1587,8 @@
     let src = img.getAttribute('_src')
     // prefix {uid}/images/ automatically for hex src
     if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
-    if (images.has(src)) {
-      if (img.src != images.get(src)) img.src = images.get(src)
+    if (images[src]) {
+      if (img.src != images[src]) img.src = images[src]
       img.removeAttribute('_loading')
       return Promise.resolve()
     }
@@ -1599,7 +1599,7 @@
           if (src.startsWith('anonymous/')) {
             img.src = url
             img.removeAttribute('_loading')
-            images.set(src, img.src) // add to cache
+            images[src] = img.src // add to cache
             resolve(img.src)
           } else {
             // download data
@@ -1629,7 +1629,7 @@
                     )
                     img.src = URL.createObjectURL(blob)
                     img.removeAttribute('_loading')
-                    images.set(src, img.src) // add to cache
+                    images[src] = img.src // add to cache
                     resolve(img.src)
                   })
                   .catch(e => {
