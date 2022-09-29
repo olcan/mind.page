@@ -492,7 +492,7 @@
     // saves item.local_store to localStorage
     // removes from localStorage if item or item.local_store is missing, or if object is empty
     // saving changes to local_store triggers re-render in case rendering is affected
-    save_local_store({ invalidate_elem_cache = true, force_render = true } = {}) {
+    save_local_store({ invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
       let __item = item(this.id)
       // retry every second until item is saved
       if (!__item.savedId) {
@@ -501,7 +501,7 @@
       }
       const key = 'mindpage_item_store_' + __item.savedId
       const modified = !_.isEqual(__item.local_store, JSON.parse(localStorage.getItem(key)) || {})
-      if (modified && invalidate_elem_cache) this.invalidate_elem_cache(force_render)
+      if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
       if (_.isEmpty(__item.local_store)) localStorage.removeItem(key)
       else if (modified) localStorage.setItem(key, JSON.stringify(__item.local_store))
 
@@ -548,7 +548,7 @@
     // deletes from firebase if item or item.global_store is missing, or if object is empty
     // saving changes to global_store triggers re-render in case rendering is affected
     // redirects to save_local_store() for anonymous user
-    save_global_store({ invalidate_elem_cache = true, force_render = true } = {}) {
+    save_global_store({ invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
       let __item = item(this.id)
       // retry every second until item is saved
       if (!__item.savedId) {
@@ -559,13 +559,13 @@
       if (anonymous) {
         // emulate global store using local store
         modified = !_.isEqual(__item.global_store, this.local_store['_anonymous_global_store'] || {})
-        if (modified && invalidate_elem_cache) this.invalidate_elem_cache(force_render)
+        if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
         if (_.isEmpty(__item.global_store)) delete this.local_store['_anonymous_global_store']
         else if (modified) this.local_store['_anonymous_global_store'] = _.cloneDeep(__item.global_store)
       } else {
         const name = 'global_store_' + __item.savedId
         modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
-        if (modified && invalidate_elem_cache) this.invalidate_elem_cache(force_render)
+        if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
         if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
         else if (modified) saveHiddenItem(name, _.cloneDeep(__item.global_store))
       }
@@ -757,7 +757,7 @@
         itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
 
         // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
-        this.invalidate_elem_cache(true /*force_render*/)
+        this.invalidate_elem_cache({ force_render: true })
 
         // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
         setTimeout(() => {
@@ -1250,7 +1250,7 @@
     // often invoked from error handling code
     // otherwise can force_render to ensure re-render even if deephash/html are unchanged
     // delayed to prevent accidental tight render<->trigger loops that could crash browser
-    invalidate_elem_cache(force_render = false, delay = 1000) {
+    invalidate_elem_cache({ force_render = false, render_delay = 1000 } = {}) {
       this.dispatch_task(
         'invalidate_elem_cache',
         () => {
@@ -1260,7 +1260,7 @@
             items = items // trigger svelte render
           }
         },
-        delay
+        render_delay
       )
     }
   }
@@ -4205,8 +4205,7 @@
     const item = items[index]
     // by default, confirm if item has saved text (not new item) & unique label
     confirm_delete ??= item.savedText && item.labelUnique
-    if (confirm_delete && !confirm(`Delete ${item.name}?`))
-      return false
+    if (confirm_delete && !confirm(`Delete ${item.name}?`)) return false
     const { name } = item // name used below
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
@@ -6353,7 +6352,7 @@
       })
 
       // invalidate element cache and force re-render
-      _item(id).invalidate_elem_cache(true /*force_render*/)
+      _item(id).invalidate_elem_cache({ force_render: true })
       return
     }
   }
