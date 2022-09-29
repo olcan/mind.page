@@ -1282,14 +1282,11 @@
   }
 
   function scrollTo(y) {
-    // updating vertical padding turns out to cause inconsistent scrolling ...
-    // (likely due to conflicts w/ other changes, e.g. focus, that are avoided in checkLayout)
-    // updateVerticalPadding(true /*skip_scroll*/) // since we are scrolling anyway
-    // NOTE: we have to add (innerHeight - document.body.offsetHeight) on ios
-    //       this difference seems to be zero on other devices (including android)
-    //       seems ios does NOT adjust document.body.offsetHeight for virtual keyboard
-    //       and this causes scrolling to be off by exactly keyboard height when it is visible
-    document.body.scrollTo(0, y + (innerHeight - document.body.offsetHeight))
+    // NOTE: we have to add (innerHeight * visualViewport.scale - document.body.offsetHeight) on ios
+    //       likely related to inconsistency of innerHeight vs visualViewport.height on ios
+    //       otherwise causes scrolling to be off by up to virtual keyboard height
+    //       this delta seems to be zero on other devices (including android)
+    document.body.scrollTo(0, y + innerHeight * visualViewport.scale - document.body.offsetHeight)
   }
 
   let padding = 0
@@ -1299,10 +1296,11 @@
     // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
     // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
     // as a nice side effect this ensures header stays in view (precisely) on ios
-    // we need to use innerHeight since it is also used to calculate scroll positions
-    // innerHeight can change frequently, which is ok as long as updateVerticalPadding is invoked carefully
-    const viewHeight = innerHeight
+    // we use visualViewport.height since it is also used for scrolling
+    // note viewport height can change frequently, e.g. for virtual keyboards
+    const viewHeight = visualViewport.height * visualViewport.scale
     if (viewHeight == lastViewHeight) return
+    // console.debug(`updating vertical padding for new height ${viewHeight} != ${lastViewHeight}`)
     const prevScrollTop = document.body.scrollTop
     const prevPadding = itemsdiv.querySelector('.column-padding').offsetHeight
     padding = 0.7 * viewHeight
@@ -1504,7 +1502,8 @@
         )
         // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop < document.body.scrollTop) scrollTo(Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+        if (itemTop < document.body.scrollTop)
+          scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
         topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
       }
     })
@@ -2322,8 +2321,11 @@
     const target = document.querySelector(`.super-container.target`) as HTMLElement
     if (!target) return // target missing, can happen even under unique match (e.g. for #log items)
     // if target is too far up or down, bring it to ~upper-middle, snapping up to header
-    if (target.offsetTop < document.body.scrollTop || target.offsetTop > document.body.scrollTop + innerHeight - 200)
-      scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+    if (
+      target.offsetTop < document.body.scrollTop ||
+      target.offsetTop > document.body.scrollTop + visualViewport.height - 200
+    )
+      scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4))
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -4334,7 +4336,8 @@
           const div = document.querySelector('#super-container-' + item.id)
           if (!div) return // item deleted or hidden
           const itemTop = (div as HTMLElement).offsetTop
-          if (itemTop < document.body.scrollTop) scrollTo(Math.max(headerdiv.offsetTop, itemTop - innerHeight / 4))
+          if (itemTop < document.body.scrollTop)
+            scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
         })
       }
     }
@@ -4525,8 +4528,8 @@
 
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
-      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + innerHeight - 200)
-        scrollTo(Math.max(0, caretTop - innerHeight / 4))
+      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + visualViewport.height - 200)
+        scrollTo(Math.max(0, caretTop - visualViewport.height / 4))
     })
   }
 
@@ -5382,10 +5385,14 @@
         if (Date.now() - lastScrollTime < 250) return // avoid layout during scroll
         if (Date.now() - lastResizeTime < 250) return // avoid layout during resizing
 
-        // update vertical padding, but only if we are consistently unfocused (to avoid shifting during/after focus)
+        const isSameNode = (e1, e2) => e1 == e2 || (e1 && e2 && e1.isSameNode(e2))
+
+        // update vertical padding, but only if we are consistently _unfocused_ (to avoid shifting during/after focus)
+        // we also skip if page is being zoomed (scale != 1) to keep zooming as smooth as possible
         if (
-          (!document.activeElement || document.activeElement.isSameNode(document.body)) &&
-          document.activeElement == lastFocusElem
+          (!document.activeElement || isSameNode(document.activeElement, document.body)) &&
+          isSameNode(document.activeElement, lastFocusElem) &&
+          visualViewport.scale == 1
         )
           updateVerticalPadding()
 
@@ -5394,7 +5401,7 @@
           documentWidth != lastDocumentWidth ||
           // ignore height change if active element also changed
           // (to avoid responding to temporary virtual keyboards)
-          (outerHeight != lastWindowHeight && document.activeElement.isSameNode(lastFocusElem))
+          (outerHeight != lastWindowHeight && isSameNode(document.activeElement, lastFocusElem))
         ) {
           updateItemLayout()
           // resize of all elements w/ _resize attribute (and property)
@@ -5880,8 +5887,8 @@
       if (toggle) {
         // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop
-        if (toggleTop > document.body.scrollTop + innerHeight - 200)
-          scrollTo(Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
+        if (toggleTop > document.body.scrollTop + visualViewport.height - 200)
+          scrollTo(Math.max(headerdiv.offsetTop, toggleTop - visualViewport.height / 4))
         toggle.dispatchEvent(new Event('click'))
       }
       return
@@ -5893,7 +5900,7 @@
       const index = parseInt(key.match(/\d+/)?.shift()) - 1
       if (index == -1) {
         const target = document.querySelector(`.super-container.target`) as HTMLElement
-        if (target) scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - innerHeight / 4))
+        if (target) scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4))
         else scrollTo(headerdiv.offsetTop) // just scroll to top
         return
       }
@@ -6061,9 +6068,9 @@
         // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         // alternatively, we could toggle only if already visible, to avoid forcing a scroll too far down page
         const toggleTop = (showToggle as HTMLElement).offsetTop
-        if (toggleTop < document.body.scrollTop + innerHeight) showToggle.dispatchEvent(new Event('click'))
-        // if (toggleTop > document.body.scrollTop + innerHeight - 200)
-        //   scrollTo(Math.max(headerdiv.offsetTop, toggleTop - innerHeight / 4))
+        if (toggleTop < document.body.scrollTop + visualViewport.height) showToggle.dispatchEvent(new Event('click'))
+        // if (toggleTop > document.body.scrollTop + visualViewport.height - 200)
+        //   scrollTo(Math.max(headerdiv.offsetTop, toggleTop - visualViewport.height / 4))
         // showToggle.dispatchEvent(new Event('click'))
         return
       }
