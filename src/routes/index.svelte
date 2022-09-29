@@ -1487,7 +1487,7 @@
     const dispatchTime = Date.now()
     update_dom().then(() => {
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
-      if (activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
+      if (focusedEditElement && activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
         focusedEditElement.focus()
         if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
         lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
