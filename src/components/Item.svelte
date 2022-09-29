@@ -610,7 +610,7 @@
     marked.setOptions({
       renderer: renderer,
       highlight: (code, language) => {
-        // leave _html(_*) block as is to be "unwrapped" (and unescaped) below
+        // leave _html(_*) block as is to be "unwrapped" below
         // except add a closing comment to allow html itself to contain </code></pre>
         if (language.match(/^_html(_|$)/)) {
           return (
@@ -647,7 +647,7 @@
     // unwrap _html(_*) blocks, except for empty ones (so they remain visible via code:empty styling)
     text = text.replace(/<pre><code class="_html_?.*?">(.*?<!--\/_html-->)<\/code><\/pre>/gs, (m, _html) => {
       if (_html.trim() == '<!--/_html-->') return m.replace(/<\!--\/_html-->$/, '')
-      return _.unescape(_html.replace(/<\!--\/_html-->$/, ''))
+      return _html.replace(/<\!--\/_html-->$/, '')
     })
 
     // replace non-empty _math blocks
