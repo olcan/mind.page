@@ -6376,6 +6376,17 @@
     if (!consolediv) return // can happen during login process
     let msg = errorMessage(e)
     console.error(msg)
+    // if spinner is active (condition mirrors svelte {#if ...} block below), show error using alert
+    if (!user || !initialized || !headerScrolled || signingIn || signingOut) alert(msg)
+  }
+  // wrap fetch to throw exceptions on HTTP errors, since they (unlike XMLHTTPRequest) do not throw exceptions or even log to console using console.error (since they also do not show up in mindpage console)
+  if (isClient) {
+    const _fetch = window.fetch
+    window.fetch = async function (...args) {
+      const resp = await _fetch(...args)
+      if (!resp.ok) throw new Error(`fetch failed: ${resp.status} (${resp.statusText})`)
+      return resp
+    }
   }
 
   function onWebcamClick(e) {
