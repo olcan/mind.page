@@ -138,7 +138,7 @@
 
   function highlightLinks(text) {
     return text
-      .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\]\)/g, link => `<span class="link">${link}</span>`)
+      .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
         /(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g,
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
