@@ -7167,7 +7167,7 @@
     background: transparent;
     border: 0;
     border-top: 2px solid #444;
-    height: 1px; /* disappears if both height and border are 0 */
+    height: 0; /* disappears if both height and border are 0 */
     width: 25%;
     margin: 0 15px;
   }

@@ -2154,8 +2154,9 @@
     background: transparent;
     border: 0;
     border-top: 1px dashed #333;
-    height: 1px; /* disappears if both height and border are 0 */
-    margin: 10px 0;
+    height: 0; /* disappears if both height and border are 0 */
+    margin-top: 10px;
+    margin-bottom: 9px; /* 1px less to center top border */
     clear: both; /* clear floats on both sides by default */
   }
   :global(.item img) {
