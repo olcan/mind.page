@@ -981,7 +981,7 @@
     box-sizing: border-box;
     white-space: pre-wrap;
     word-wrap: break-word;
-    opacity: 0.75;
+    opacity: 0.9;
   }
   .editor.focused > .backdrop {
     background: #171717;
