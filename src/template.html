@@ -131,16 +131,10 @@
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/mathematica.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.0/build/languages/latex.min.js"></script>
     <script>
-      // interpret \\?;{___...___} as custom comment for all languages, preventing other interpretations
-      // (e.g. the individual characters could be interpreted in latex)
+      // customize highlighting for specific languages
       hljs.listLanguages().forEach(lang => {
         let def = hljs.getLanguage(lang)
-        const comment = hljs.COMMENT(/__mindpage_comment_open__/, /__mindpage_comment_close__/, {
-          className: 'comment-custom',
-          relevance: 0,
-        })
         def.contains ??= []
-        def.contains.unshift(comment)
         // for javascript, we allow "name annotations" of the form <<- alphanumeric_name
         // note we chose <<- instead <- because it seemed more robust, e.g. having <- after comma broke highlights
         if (lang == 'javascript') {

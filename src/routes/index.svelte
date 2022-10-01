@@ -6866,10 +6866,12 @@
     font-weight: 400;
     /* Safari renders heavier fonts under default subpixel-antialiasing */
     -webkit-font-smoothing: antialiased;
-    /* disable ligatures which can be confusing and _may_ cause line wrapping issues */
-    /* font-variant-ligatures: none; */
     /* disable tap highlights on ios and android */
     -webkit-tap-highlight-color: transparent;
+  }
+  /* disable ligatures which can be confusing (especially in regexes and other places where the characters should remain separate) and can cause shifting and color bleeding for editor highlights and may also cause line wrapping issues (note this directive does not work if only applied to html/body)*/
+  :global(*) {
+    font-variant-ligatures: none;
   }
   :global(b, strong) {
     font-weight: 700;

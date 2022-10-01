@@ -145,98 +145,69 @@
       )
   }
 
-  function findMatchingOpenParenthesis(text, pos) {
-    let close = text[pos]
-    let open
-    switch (close) {
+  function getMatchingDelimiter(char) {
+    switch (char) {
+      case '(':
+        return ')'
       case ')':
-        open = '('
-        break
+        return '('
+      case '[':
+        return ']'
       case ']':
-        open = '['
-        break
+        return '['
+      case '{':
+        return '}'
       case '}':
-        open = '{'
-        break
+        return '{'
+      default:
+        throw new Error(`unknown delimiter: ${char}`)
     }
+  }
+
+  function findMatchingOpenDelimiter(text, pos) {
+    let close = text[pos]
+    let open = getMatchingDelimiter(close)
     let closed = 1
     while (closed > 0 && pos >= 0) {
       pos--
+      if (text[pos - 1] == '\\') continue // skip escaped character
       if (text[pos] == open) closed--
       else if (text[pos] == close) closed++
     }
     return pos
   }
 
-  function findMatchingCloseParenthesis(text, pos) {
+  function findMatchingCloseDelimiter(text, pos) {
     let open = text[pos]
-    let close
-    switch (open) {
-      case '(':
-        close = ')'
-        break
-      case '[':
-        close = ']'
-        break
-      case '{':
-        close = '}'
-        break
-    }
+    let close = getMatchingDelimiter(open)
     let opened = 1
     while (opened > 0 && pos < text.length) {
       pos++
+      if (text[pos - 1] == '\\') continue // skip escaped character
       if (text[pos] == close) opened--
       else if (text[pos] == open) opened++
     }
     return pos
   }
 
-  function highlightOpen(text, pos, type) {
-    return (
-      text.substring(0, pos) +
-      `${text[pos]}__mindpage_comment_open__highlight_open_${type}__mindpage_comment_close__` +
-      text.substring(pos + 1)
-    )
-  }
-  function highlightClose(text, pos, type) {
-    return (
-      text.substring(0, pos) +
-      `__mindpage_comment_open__highlight_close_${type}__mindpage_comment_close__${text[pos]}` +
-      text.substring(pos + 1)
-    )
-  }
-
   function updateTextDivs() {
     let text = textarea.value || placeholder
 
-    // pre-highlight matching parentheses using special syntax processed below
-    // NOTE: We take care not to break other highlighting with this syntax, but it can be difficult to avoid completely across all languages depending on how they interpret the special syntax. Although we can force "comment" interpration (see util.js) comments can still affect interpretation of surrounding code.
-    if (
-      textarea.selectionStart == textarea.selectionEnd &&
-      textarea.selectionStart > 0 &&
-      textarea.selectionStart < text.length &&
-      ')]}'.includes(text[textarea.selectionStart])
-    ) {
-      let matchpos = findMatchingOpenParenthesis(text, textarea.selectionStart)
-      if (matchpos >= 0) {
-        text = highlightClose(text, textarea.selectionStart, 'matched')
-        text = highlightOpen(text, matchpos, 'matched')
-      } else {
-        text = highlightClose(text, textarea.selectionStart, 'unmatched')
-      }
-    } else if (
-      textarea.selectionStart == textarea.selectionEnd &&
-      textarea.selectionStart > 0 &&
-      textarea.selectionStart < text.length &&
-      '([{'.includes(text[textarea.selectionStart - 1])
-    ) {
-      let matchpos = findMatchingCloseParenthesis(text, textarea.selectionStart - 1)
-      if (matchpos < text.length) {
-        text = highlightClose(text, matchpos, 'matched')
-        text = highlightOpen(text, textarea.selectionStart - 1, 'matched')
-      } else {
-        text = highlightOpen(text, textarea.selectionStart - 1, 'unmatched')
-      }
+    // determine matche/unmatched delimiter highlights based on caret position
+    // these are highlighted at the end using highlightPositions (see below)
+    // we handle the most common delimiters used for extended blocks of code that would not be highlighted otherwise
+    // we intentionally exclude <> (used for tags, comparisons, etc) and string quotes (already highlighted)
+    // also watch out for ligatures (e.g. << or >> or [||]) that will change color _together_
+    const matched_positions = []
+    const unmatched_positions = []
+    if (textarea.selectionStart == textarea.selectionEnd && ')]}'.includes(text[textarea.selectionStart])) {
+      let matchpos = findMatchingOpenDelimiter(text, textarea.selectionStart)
+      if (matchpos >= 0) matched_positions.push(matchpos, textarea.selectionStart)
+      else unmatched_positions.push(textarea.selectionStart)
+    } else if (textarea.selectionStart == textarea.selectionEnd && '([{'.includes(text[textarea.selectionStart - 1])) {
+      let matchpos = findMatchingCloseDelimiter(text, textarea.selectionStart - 1)
+      if (matchpos < text.length) matched_positions.push(textarea.selectionStart - 1, matchpos)
+      else unmatched_positions.push(textarea.selectionStart - 1)
     }
 
     let insideBlock = false
@@ -283,26 +254,41 @@
       /(^|\n\s*?)(&lt;!--\s*?removed\s*?--&gt;.+?&lt;!--\s*?\/removed\s*?--&gt;\s*?\n)/gs,
       '$1<div class="section removed">$2</div>'
     )
+
     // indicate section delimiters
     html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>')
-    // convert open/close parentheses highlight syntax into spans
-    // NOTE: we need to allow the parentheses to be wrapped (in other spans) by highlight.js
-    html = html.replace(
-      /__mindpage_comment_open__highlight_close_(\w+?)__mindpage_comment_close__(.*?)([)}\]])/g,
-      '$2<span class="highlight $1">$3</span>'
-    )
-    html = html.replace(
-      /([({\[])([^({\[]*?)__mindpage_comment_open__highlight_open_(\w+?)__mindpage_comment_close__/g,
-      '<span class="highlight $3">$1</span>$2'
-    )
+
     highlights.innerHTML = html
+
     // linkify urls & tags in comments (tag regex from util.js)
     const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, '$1<a>$2</a>')
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))
     })
+
+    highlightPositions(matched_positions, 'matched')
+    highlightPositions(unmatched_positions, 'unmatched')
+
     textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
+  }
+
+  function highlightPositions(pos, type) {
+    const walker = document.createTreeWalker(highlights, NodeFilter.SHOW_TEXT)
+    let node
+    let offset = 0
+    while (pos.length && (node = walker.nextNode())) {
+      while (pos[0] >= offset && pos[0] < offset + node.length) {
+        const range = document.createRange()
+        range.setStart(node, pos[0] - offset)
+        range.setEnd(node, pos[0] - offset + 1)
+        const span = document.createElement('span')
+        span.className = 'highlight ' + type
+        range.surroundContents(span)
+        pos.shift()
+      }
+      offset += node.length
+    }
   }
 
   export function setSelection(start: number, end: number) {
@@ -1150,11 +1136,15 @@
   :global(.editor.focused > .backdrop span.highlight.matched) {
     color: black;
     background: #9f9;
+    /* border: 1px solid #9f9; */
+    box-sizing: border-box;
     border-radius: 4px;
   }
   :global(.editor.focused > .backdrop span.highlight.unmatched) {
     color: black;
     background: #f99;
+    /* border: 1px solid #f99; */
+    box-sizing: border-box;
     border-radius: 4px;
   }
 
