@@ -2616,7 +2616,10 @@
     // if item stats with visible #tag, it is taken as a "label" for the item
     // (we allow some html tags/macros to precede the label tag for styling purposes)
     const prevLabel = item.label
-    item.header = item.lctext.replace(/^<.*>\s+#/, '#').match(/^.*?(?:\n|$)/)[0]
+    item.header = item.lctext
+      .replace(/^<.*>\s+#/, '#')
+      .match(/^[^\n]*/)
+      .pop()
     item.label = item.header.startsWith(item.tagsVisible[0]) ? item.tagsVisible[0] : ''
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, '#').slice(0, item.label.length) : ''
     if (item.labelUnique == undefined) item.labelUnique = false
