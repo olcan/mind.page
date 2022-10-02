@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "webhooks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user", "order": "ASCENDING" },
+        { "fieldPath": "time", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "history",
       "queryScope": "COLLECTION",
       "fields": [
