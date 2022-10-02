@@ -30,22 +30,32 @@ service cloud.firestore {
 							                  !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
 	  }
 
+		// webhooks collection
+		// only firebase-admin write
+		// logged in <user> can read user=<user> items, as long as NOT in blocked_users collection
+    match /webhooks/{item} {
+			allow write: if false;
+			// read rule inherited from document=** above
+			// see other inherited document=** rules above
+    }
+
 		// github_webhooks collection
 		// only firebase-admin write
-		// logged in <user> can read, as long as NOT in blocked_users collection
-		// NOTE: also see inherited user-based access rules above
+		// logged in <user> can read ANY item, as long as NOT in blocked_users collection
+		// note documents in this collection are not considered shared across ALL users
     match /github_webhooks/{item} {
 			allow write: if false;
 			allow read: if !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid));
+			// see other inherited document=** rules above
     }
 
 		// users collection
 		// logged in <user> can read/write own document where document id matches uid
 		// user must NOT be in blocked_users collection
-		// NOTE: also see document=** rules above
     match /users/{user} {
 			allow read, write: if (request.auth.uid == user &&
 												     !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+			// see other inherited document=** rules above
     }
 
 	}
