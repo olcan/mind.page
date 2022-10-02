@@ -6394,7 +6394,13 @@
     const _fetch = window.fetch
     window.fetch = async function (...args) {
       const resp = await _fetch(...args)
-      if (!resp.ok) throw new Error(`fetch failed: ${resp.status} (${resp.statusText})`)
+      if (!resp.ok) {
+        let body = '(no body)'
+        try {
+          body = await resp.text()
+        } catch {}
+        throw new Error(`fetch failed: ${resp.status} (${resp.statusText}); ` + body)
+      }
       return resp
     }
   }
