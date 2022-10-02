@@ -205,10 +205,29 @@ const sapper_server = express().use(
   // handle POST for webhooks
   express.json(),
   (req, res, next) => {
+    if (req.path == '/webhooks') {
+      console.log(`received /webhooks for user '${req.query.user}'`, req.body)
+      if (!req.query.user) {
+        res.status(400).send('webhook missing user parameter')
+        return
+      }
+      firebase.firestore().collection('webhooks').add({
+        time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
+        user: req.query.user,
+        body: req.body,
+      })
+      res.status(200).end()
+    } else {
+      next()
+    }
+  },
+
+  // handle POST for github_webhooks
+  express.json(),
+  (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
       firebase.firestore().collection('github_webhooks').add({
-        // addDoc(collection(getFirestore(firebase), 'github_webhooks'), {
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
       })
