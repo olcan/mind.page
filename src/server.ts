@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
+import crypto from 'crypto'
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -207,6 +208,15 @@ const sapper_server = express().use(
   (req, res, next) => {
     if (req.path == '/webhooks') {
       console.log(`received /webhooks for user '${req.query.user}'`, req.body)
+      if (req.query.crc_token && req.query.crc_key) {
+        // handle twitter webhook challenge
+        // see https://developer.twitter.com/en/docs/twitter-api/enterprise/account-activity-api/guides/securing-webhooks
+        res.json({
+          response_token:
+            'sha256=' + crypto.createHmac('sha256', req.query.crc_key).update(req.query.crc_token).digest('base64'),
+        })
+        return
+      }
       if (!req.query.user) {
         res.status(400).send('webhook missing user parameter')
         return
