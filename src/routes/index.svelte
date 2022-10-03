@@ -1068,12 +1068,13 @@
     }
 
     // dispatches function as a named task that can be cancelled or repeated
-    // if repeat_ms>0, repeats function as long as item is not deleted
+    // if repeat_ms>=0, repeats function as long as item is not deleted
     // cancels any previously dispatched task under given name
     // cancels task if function returns null or throws error
     // cancels task (w/o invoking function) if item is deleted
+    // modifies repeat_ms (once) if function returns number>=0
     // function can be async or return promise
-    dispatch_task(name, func, delay_ms = 0, repeat_ms = 0) {
+    dispatch_task(name, func, delay_ms = 0, repeat_ms = -1) {
       const task = () => {
         if (!_exists(this.id)) return // item deleted
         const _item = item(this.id)
@@ -1085,7 +1086,8 @@
                 delete _item.tasks[name]
                 return
               }
-              if (repeat_ms > 0) this.dispatch(task, repeat_ms) // dispatch repeat
+              if (out >= 0) this.dispatch(task, out) // dispatch repeat
+              else if (repeat_ms >= 0) this.dispatch(task, repeat_ms) // dispatch repeat
             })
             .catch(e => {
               console.error(`stopping task '${name}' due to error: ${e}`)
