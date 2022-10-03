@@ -304,7 +304,7 @@ export function stringify(x) {
   if (x === undefined) return 'undefined' // can not be parsed back
   if (x === null) return 'null'
   if (x.constructor.name == 'ArrayBuffer' || ArrayBuffer.isView(x))
-    throw new Error('stringify does not support ArrayBuffer or views (e.g. Uint8Array), use byte_stringify instead')
+    return _stringify_object(x) + ` (${x.byteLength} bytes)`
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
@@ -324,15 +324,18 @@ export function byte_stringify(x) {
 }
 
 function _stringify_object(x) {
-  // _.entries uses .entries() for maps
-  return (
-    (x.constructor.name != 'Object' ? `[${typeof x} ${x.constructor.name}] ` : '') +
-    '{ ' +
+  return [
+    x.constructor.name != 'Object' ? `[${typeof x} ${x.constructor.name}]` : '',
+    '{',
+    // _.entries uses .entries() for maps
     _.entries(x)
       .map(([k, v]) => `${k}:${stringify(v)}`)
-      .join(' ') +
-    ' }'
-  )
+      .join(' '),
+    '}',
+  ]
+    .join(' ')
+    .replace('{  }', '')
+    .trim()
 }
 
 function _unindent(fstr) {
