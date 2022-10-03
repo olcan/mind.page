@@ -225,11 +225,15 @@ const sapper_server = express().use(
         res.status(400).send('webhook missing user parameter')
         return
       }
-      firebase.firestore().collection('webhooks').add({
-        time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
-        user: req.query.user,
-        body: req.body,
-      })
+      firebase
+        .firestore()
+        .collection('webhooks')
+        .add({
+          time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
+          user: req.query.user,
+          source: req.query.source ?? null,
+          body: req.body,
+        })
       res.status(200).end()
     } else {
       next()
