@@ -5476,7 +5476,7 @@
               decryptItem(doc.data()).then(savedItem => {
                 // remote changes indicate non-focus: update sessionTime and invoke onFocus
                 sessionTime = Date.now() + 1000 /* margin for small time differences */
-                onFocus() // focused = window.hasFocus
+                onFocus() // focused = document.hasFocus()
 
                 // console.debug("detected remote change:", change.type, doc.id);
                 if (change.type === 'added') {
