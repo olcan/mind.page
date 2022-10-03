@@ -72,7 +72,11 @@ paths.push('/')
 const sapper_server = express().use(
   paths,
   compression({ threshold: 0 }),
-  sirv('static', { dev, dotfiles: true /* in case .DS_Store is created */ }),
+  sirv('static', {
+    dev,
+    // maxAge: 365 * 24 * 3600, // cache for up to 1y (disabled in dev mode)
+    dotfiles: true, // allow requests for .DS_Store to avoid 404 preventing "app" treatment on Android
+  }),
 
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
