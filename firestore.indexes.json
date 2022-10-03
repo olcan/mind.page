@@ -17,19 +17,28 @@
       ]
     },
     {
-      "collectionGroup": "webhooks",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "user", "order": "ASCENDING" },
-        { "fieldPath": "time", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "history",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "user", "order": "ASCENDING" },
         { "fieldPath": "item", "order": "ASCENDING" },
+        { "fieldPath": "time", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "webhooks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "time", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "webhooks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user", "order": "ASCENDING" },
         { "fieldPath": "time", "order": "DESCENDING" }
       ]
     }
