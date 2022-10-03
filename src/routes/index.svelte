@@ -391,8 +391,19 @@
     get dependents(): Array<string> {
       return item(this.id).dependents
     }
+    get saving(): boolean {
+      return item(this.id).saving
+    }
+    get saving_global_store(): boolean {
+      const _item = item(this.id)
+      if (!_item.savedId) return false // can not save global store until item itself has been saved
+      return !!hiddenItemsByName.get('global_store_' + _item.savedId)?.saving
+    }
     get saved_id(): number {
       return item(this.id).savedId
+    }
+    get editing(): boolean {
+      return item(this.id).editing
     }
     get editable(): boolean {
       return item(this.id).editable
