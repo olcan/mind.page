@@ -5224,6 +5224,7 @@
         user: user.uid,
         init_time: initTime,
         update_time: Date.now(),
+        focus_time: focus_time, // as of update_time; note focus_time tracks interactions beyond focused=true
         user_agent: navigator.userAgent,
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
@@ -6240,7 +6241,7 @@
     if (ios || android) return // focus handled in focus/checkFocus below
     const was_focused = focused
     focused = document.hasFocus()
-    if (focused) focus_time = Date.now() // note this is updated even if already focused!
+    if (focused) focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
     if (focused && !was_focused) onFocused() // handle change to focused=true
     // retreat to minimal hide index when window is defocused
     // if (was_focused && !focused) hideIndex = hideIndexMinimal;
@@ -6264,7 +6265,7 @@
 
   let lastBlurredElem
   function focus() {
-    focus_time = Date.now() // note this is updated even if already focused!
+    focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
     if (!ios && !android) {
       onFocus() // focus based on document.hasFocus()
       return
