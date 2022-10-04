@@ -5007,6 +5007,7 @@
   }
 
   let initTime = 0 // set where initialize is invoked
+  let instanceId // set after signin (depends on user id)
   let processed = false
   let initialized = false
   let maxRenderedAtInit = 100
@@ -5214,6 +5215,27 @@
     })
   }
 
+  let updateInstance_task
+  function updateInstance() {
+    const task = () => {
+      if (updateInstance_task != task) return // task cancelled or replaced
+      if (!instanceId) return setTimeout(task, 1000) // instance id not set yet, try again in 1s
+      const instanceInfo = {
+        user: user.uid,
+        init_time: initTime,
+        update_time: Date.now(),
+        user_agent: navigator.userAgent,
+      }
+      setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
+        .catch(console.error)
+        .finally(() => {
+          setTimeout(task, 1000 * 60) // update again in ~60 (+setDoc time)
+        })
+    }
+    updateInstance_task = task // cancels & replaces any previous task
+    setTimeout(task) // initial dispatch
+  }
+
   let signingIn = false
   function signIn() {
     // if user appears to be signed in, sign out instead
@@ -5355,6 +5377,7 @@
             localStorage.setItem('mindpage_user', userInfoString)
             anonymous = readonly = false // just in case (should already be false)
             signedin = true
+
             // update user info (email, name, etc) in users collection
             const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
             // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
@@ -5644,6 +5667,10 @@
                 if (!initialized) return // initialization failed, we should be signing out ...
                 init_log(`synchronized ${items.length} items`)
                 firstSnapshot = false
+
+                // update instance info (user, init time, etc) in instances collection
+                instanceId ??= user.uid + '-' + initTime
+                updateInstance()
 
                 // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
                 if (items.length == 0) onEditorDone('/_welcome')
@@ -6191,13 +6218,32 @@
     if (window['_on_key']) window['_on_key'](key, e)
   }
 
+  function onFocused() {
+    // invoke _on_focus() on all listener items
+    items.forEach(item => {
+      if (!item.listen) return // must be listener
+      if (!itemDefinesFunction(item, '_on_focus')) return
+      try {
+        _item(item.id).eval(`_on_focus()`, {
+          trigger: 'listen',
+        })
+      } catch (e) {} // already logged, just continue
+    })
+
+    // update instance immediately (vs wait up to 60s) on focus
+    // allows background instances to react to focus events across all instances
+    updateInstance()
+  }
+
   function onFocus() {
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
     if (ios || android) return // focus handled in focus/checkFocus below
+    const was_focused = focused
     focused = document.hasFocus()
-    if (focused) focus_time = Date.now()
+    if (focused) focus_time = Date.now() // note this is updated even if already focused!
+    if (focused && !was_focused) onFocused() // handle change to focused=true
     // retreat to minimal hide index when window is defocused
-    // if (!focused) hideIndex = hideIndexMinimal;
+    // if (was_focused && !focused) hideIndex = hideIndexMinimal;
   }
 
   // global focus index is the one stored in local storage, or in focus hidden item as fallback
@@ -6218,7 +6264,7 @@
 
   let lastBlurredElem
   function focus() {
-    focus_time = Date.now()
+    focus_time = Date.now() // note this is updated even if already focused!
     if (!ios && !android) {
       onFocus() // focus based on document.hasFocus()
       return
@@ -6229,6 +6275,7 @@
     focusIndex = Math.max(getGlobalFocusIndex() + 1, Date.now())
     setGlobalFocusIndex(focusIndex)
     focused = true
+    onFocused() // handle change to focused=true
     // see comment below; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
     lastBlurredElem?.focus()
     lastBlurredElem = null
