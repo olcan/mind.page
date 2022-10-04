@@ -526,11 +526,11 @@
         items.forEach(item => {
           if (!item.listen && item.id != this.id) return // must be listener or self
           if (!itemDefinesFunction(item, '_on_local_store_change')) return
-          try {
-            _item(item.id).eval(`_on_local_store_change('${this.id}')`, {
-              trigger: 'listen',
-            })
-          } catch (e) {} // already logged, just continue
+          Promise.resolve(_item(item.id).eval(`_on_local_store_change('${this.id}')`, {
+            trigger: item.listen ? 'listen' : 'change',
+            async: item.deepasync, // run async if item is async or has async deps
+            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          })).catch(e=>{}) // already logged
         })
       }
     }
@@ -591,11 +591,11 @@
         items.forEach(item => {
           if (!item.listen && item.id != this.id) return // must be listener or self
           if (!itemDefinesFunction(item, '_on_global_store_change')) return
-          try {
-            _item(item.id).eval(`_on_global_store_change('${this.id}',false)`, {
-              trigger: 'listen',
-            })
-          } catch (e) {} // already logged, just continue
+          Promise.resolve(_item(item.id).eval(`_on_global_store_change('${this.id}',false)`, {
+            trigger: item.listen ? 'listen' : 'change',
+            async: item.deepasync, // run async if item is async or has async deps
+            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          })).catch(e=>{}) // already logged
         })
       }
     }
@@ -907,7 +907,7 @@
             options['type'] || 'js',
             // NOTE: by default, async deps are excluded unless async:true in options
             //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
-            //       notable exceptions are async 'run' and async 'command' evals
+            //       notable exceptions are async runs, commands, listeners, etc
             Object.assign(
               { replace_ids: true, exclude_async_deps: !options['async'], exclude_tests_and_benchmarks: true },
               options
@@ -1815,9 +1815,11 @@
         items.forEach(item => {
           if (!item.listen) return
           if (!itemDefinesFunction(item, '_on_change')) return
-          try {
-            _item(item.id).eval(`_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, { trigger: 'listen' })
-          } catch (e) {} // already logged, just continue
+          Promise.resolve(_item(item.id).eval(`_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+            trigger: 'listen',
+            async: item.deepasync, // run async if item is async or has async deps
+            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          })).catch(e=>{}) // already logged
         })
       })
     }
@@ -2317,9 +2319,11 @@
       items.forEach(item => {
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_search')) return
-        try {
-          _item(item.id).eval(`_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, { trigger: 'listen' })
-        } catch (e) {} // already logged, just continue
+        Promise.resolve(_item(item.id).eval(`_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+          trigger: 'listen',
+          async: item.deepasync, // run async if item is async or has async deps
+          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+        })).catch(e=>{}) // already logged
       })
     })
 
@@ -2751,14 +2755,11 @@
           items.forEach(item => {
             if (!item.listen && item.id != id) return // must be listener or self
             if (!itemDefinesFunction(item, '_on_item_change')) return
-            try {
-              _item(item.id).eval(
-                `_on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`,
-                {
-                  trigger: item.listen ? 'listen' : 'change',
-                }
-              )
-            } catch (e) {} // already logged, just continue
+            Promise.resolve(_item(item.id).eval(`_on_item_change('${id}','${label}','${prev_label}',${deleted},${remote},${dependency})`, {
+              trigger: item.listen ? 'listen' : 'change',
+              async: item.deepasync, // run async if item is async or has async deps
+              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+            })).catch(e=>{}) // already logged
           })
         })
       }
@@ -3727,19 +3728,19 @@
                   // invoke _on_install(item)|_on_update(item) if defined as function
                   if (!updating) {
                     if (itemDefinesFunction(item, '_on_install')) {
-                      try {
-                        _item(item.id).eval(`_on_install(_item('${item.id}'))`, {
-                          trigger: 'command',
-                        })
-                      } catch (e) {} // already logged, just continue
+                      Promise.resolve(_item(item.id).eval(`_on_install(_item('${item.id}'))`, {
+                        trigger: 'install',
+                        async: item.deepasync, // run async if item is async or has async deps
+                        async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                      })).catch(e=>{}) // already logged
                     }
                   } else {
                     if (itemDefinesFunction(item, '_on_update')) {
-                      try {
-                        _item(item.id).eval(`_on_update(_item('${item.id}'))`, {
-                          trigger: 'command',
-                        })
-                      } catch (e) {} // already logged, just continue
+                      Promise.resolve(_item(item.id).eval(`_on_update(_item('${item.id}'))`, {
+                        trigger: 'update',
+                        async: item.deepasync, // run async if item is async or has async deps
+                        async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                      })).catch(e=>{}) // already logged
                     }
                   }
 
@@ -3846,14 +3847,14 @@
                   async: item.deepasync, // run async if item is async or has async deps
                   async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                 })
-                if (ret === null) continue // did not handle command
+                if (ret === null) continue // did not handle command (synchronously)
                 Promise.resolve(ret)
                   .then(obj => {
                     handleCommandReturn(cmd, item, obj, run, editing, handleError)
                   })
                   .catch(handleError)
                 found_listener = true
-                break // stop on first listener handling command
+                break // stop on first listener handling command (synchronously)
               }
               if (!found_listener) alert(`unknown command ${cmd} ${args}`)
               return
@@ -3954,11 +3955,11 @@
       items.forEach(item => {
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_create')) return
-        try {
-          _item(item.id).eval(`_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
-            trigger: 'listen',
-          })
-        } catch (e) {} // already logged, just continue
+        Promise.resolve(_item(item.id).eval(`_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+          trigger: 'listen',
+          async: item.deepasync, // run async if item is async or has async deps
+          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+        })).catch(e=>{}) // already logged
       })
     })
 
@@ -5859,13 +5860,11 @@
             items.forEach(item => {
               if (!item.welcome) return
               if (!itemDefinesFunction(item, '_on_welcome')) return
-              try {
-                _item(item.id).eval('_on_welcome()', {
-                  trigger: 'welcome',
-                  async: item.deepasync, // run async if item is async or has async deps
-                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-                })
-              } catch (e) {} // already logged, just continue welcome eval
+              Promise.resolve(_item(item.id).eval('_on_welcome()', {
+                trigger: 'welcome',
+                async: item.deepasync, // run async if item is async or has async deps
+                async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+              })).catch(e=>{}) // already logged
             })
 
             // on localhost, start watching local repo paths for installed items
@@ -6244,11 +6243,11 @@
     items.forEach(item => {
       if (!item.listen) return // must be listener
       if (!itemDefinesFunction(item, '_on_focus')) return
-      try {
-        _item(item.id).eval(`_on_focus()`, {
-          trigger: 'listen',
-        })
-      } catch (e) {} // already logged, just continue
+      Promise.resolve(_item(item.id).eval(`_on_focus()`, {
+        trigger: 'listen',
+        async: item.deepasync, // run async if item is async or has async deps
+        async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+      })).catch(e=>{}) // already logged
     })
 
     // update instance immediately (vs wait up to 60s) on focus
@@ -6438,11 +6437,11 @@
       items.forEach(item => {
         if (!item.listen && item.id != id) return // must be listener or self
         if (!itemDefinesFunction(item, '_on_global_store_change')) return
-        try {
-          _item(item.id).eval(`_on_global_store_change('${id}',true)`, {
-            trigger: 'listen',
-          })
-        } catch (e) {} // already logged, just continue
+        Promise.resolve(_item(item.id).eval(`_on_global_store_change('${id}',true)`, {
+          trigger: item.listen ? 'listen' : 'change',
+          async: item.deepasync, // run async if item is async or has async deps
+          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+        })).catch(e=>{}) // already logged
       })
 
       // invalidate element cache and force re-render
