@@ -49,6 +49,15 @@
         { "fieldPath": "user", "order": "ASCENDING" },
         { "fieldPath": "update_time", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "instances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user", "order": "ASCENDING" },
+        { "fieldPath": "update_time", "order": "DESCENDING" },
+        { "fieldPath": "focus_time", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
