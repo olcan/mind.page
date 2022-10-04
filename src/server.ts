@@ -178,17 +178,21 @@ const sapper_server = express().use(
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware/tree/v2.0.4#readme
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
   // redirects are followed instead of exposed to server for robust CORS bypass
+  // note // in https?:// can be rewritted to / by browser or intemediaries
   // websockets can also be proxied
-  createProxyMiddleware(path => /^\/proxy\/https?:\/\/.+$/.test(path), {
+  createProxyMiddleware(path => /^\/proxy\/https?:\/\/?.+$/.test(path), {
     changeOrigin: true,
     pathRewrite: (path, req) => {
-      path = path.replace(/^\/proxy\/https?:\/\/[^/?#]+/, '')
+      path = path.replace(/^\/proxy\/https?:\/\/?[^/?#]+/, '')
       if (!path.startsWith('/')) path = '/' + path
       // console.debug('proxy path', path)
       return path
     },
     router: req => {
-      const backend = req.url.match(/^\/proxy\/(https?:\/\/[^/?#]+)/)?.pop()
+      const backend = req.url
+        .match(/^\/proxy\/(https?:\/\/?[^/?#]+)/)
+        .pop()
+        .replace(/(https?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
       // console.debug('proxying to', backend)
       return backend
     },
