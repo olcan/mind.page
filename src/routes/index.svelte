@@ -260,6 +260,8 @@
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
     Object.defineProperty(window, '_focused', { get: () => focused })
     Object.defineProperty(window, '_focus_time', { get: () => focus_time })
+    Object.defineProperty(window, '_instances', { get: () => instances })
+    Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
     window['__item'] = item // for debugging only
     window['_items'] = _items
@@ -5008,6 +5010,8 @@
 
   let initTime = 0 // set where initialize is invoked
   let instanceId // set after signin (depends on user id)
+  let instances = [] // list of live instances, most recently focused first
+  let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
   let initialized = false
   let maxRenderedAtInit = 100
@@ -5716,6 +5720,22 @@
                 onConfirm: signOut,
               })
             }
+          }
+        )
+
+        // also listen for instances and maintain window._instances && window._primary
+        onSnapshot(
+          query(
+            collection(getFirestore(firebase), 'instances'),
+            where('user', '==', user.uid), // instances for user only
+            where('update_time', '>', Date.now() - 2 * 60 * 1000), // live only (as of init)
+            orderBy('update_time', 'desc') // required by index
+          ),
+          snapshot => {
+            instances = Array.from(snapshot.docs, (doc: any) => doc.data())
+            instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
+            instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
+            primary = instances[0]?.init_time == initTime
           }
         )
       }
