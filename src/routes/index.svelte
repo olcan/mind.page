@@ -1906,11 +1906,8 @@
       context = [item.label].concat(item.labelPrefixes) // lower index means lower in ranking
     }
 
-    // restrict context to unique labels, since only unique labels are matched against context below
-    context = context.filter(label => idsFromLabel.get(label)?.length == 1)
-
-    // expand context to include "context" items that visibly tag the top item in context
-    // (also add their label to context terms so they are highlighted as context as well)
+    // expand context to include "context" items that visibly tag other items in context
+    // (also add their label+prefixes to context terms so they are highlighted as context as well)
     while (true) {
       const lastContextLength = context.length
       items.forEach(ctxitem => {
@@ -1929,6 +1926,9 @@
       })
       if (context.length == lastContextLength) break
     }
+
+    // restrict context to unique labels, since only unique labels are matched against context below
+    context = context.filter(label => idsFromLabel.get(label)?.length == 1)
 
     // expand term context (tag prefixes) to include listing and first-tag-matching item context
     termsContext = _.uniq(termsContext.concat(context))
@@ -1965,7 +1965,9 @@
       // item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
 
       // compute contextLabel as closest ancestor label from context
-      item.contextLabel = !item.label ? '' : context.find(cl => cl.length < item.label.length && item.label.startsWith(cl)) || ''
+      item.contextLabel = !item.label
+        ? ''
+        : context.find(cl => cl.length < item.label.length && item.label.startsWith(cl)) || ''
 
       // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
       item.matchingTerms = terms.filter(t => t[0] == '#' && item.tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
