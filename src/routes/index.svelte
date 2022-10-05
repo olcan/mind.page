@@ -1930,7 +1930,7 @@
     // restrict context to unique labels, since only unique labels are matched against context below
     context = context.filter(label => idsFromLabel.get(label)?.length == 1)
 
-    // expand term context (tag prefixes) to include listing and first-tag-matching item context
+    // expand term context (tag prefixes) to include item context computed above
     termsContext = _.uniq(termsContext.concat(context))
 
     // parse regex terms
