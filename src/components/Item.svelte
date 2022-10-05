@@ -40,6 +40,7 @@
   export let label: string
   export let labelText: string
   export let labelUnique: boolean
+  export let contextLabel: string
   export let missingTags: any
   export let matchingTerms: any
   export let matchingTermsSecondary: any
@@ -232,6 +233,7 @@
     id: string,
     deephash: string,
     labelUnique: boolean,
+    contextLabel: string,
     // NOTE: passing in arrays has proven problematic (e.g. infinite render loops)
     missingTags: any, // space-separated string converted to Set
     matchingTerms: any, // space-separated string converted to Set
@@ -518,15 +520,10 @@
               )
                 reltag = '#' + tag.substring(grandParentLabel.length)
 
-              // shorten selected labels
-              if (
-                lctag == label &&
-                label.includes('/') &&
-                // note we now allow shortening of non-uniquely labeled children
-                // labelUnique &&
-                (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag))
-              )
-                reltag = '#…' + tag.substring(tag.lastIndexOf('/'))
+              // shorten selected label to its context label (i.e. closest existing ancestor name)
+              if (lctag == label && contextLabel && (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag)))
+                reltag = '#…' + tag.substring(contextLabel.length)
+
               // shorten prefix-matching labels
               if (
                 lctag == label &&
@@ -1526,6 +1523,7 @@
           id,
           deephash,
           labelUnique,
+          contextLabel,
           missingTags,
           matchingTerms,
           matchingTermsSecondary,
