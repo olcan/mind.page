@@ -44,7 +44,7 @@ export function highlight(code, language) {
   const link_urls = text =>
     text.replace(
       /(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/g,
-      '$1<a href="$2" title="$2" target="_blank">$2</a>'
+      (m, pfx, href) => `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${href}</a>`
     )
   if (language == '_log') {
     return link_urls(_.escape(code))

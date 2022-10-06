@@ -191,6 +191,8 @@
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {}
   if (!window['_handleTagClick'])
     window['_handleTagClick'] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
+      tag = _.unescape(tag)
+      reltag = _.unescape(reltag)
       e.stopPropagation()
       e.preventDefault() // disables handler for onmousedown, prevents change of focus, text selection, etc
       onTagClick(id, tag, reltag, e)
@@ -199,6 +201,7 @@
   export let onLinkClick = (id: string, href: string, e: MouseEvent) => {}
   if (!window['_handleLinkClick'])
     window['_handleLinkClick'] = (id: string, href: string, e: MouseEvent) => {
+      href = _.unescape(href)
       e.stopPropagation()
       onLinkClick(id, href, e)
     }
@@ -269,7 +272,7 @@
         hasMacroErrors = true
         // display missing dependencies using special style
         if (e.message.startsWith('missing dependencies'))
-          return `<span class="macro-missing-deps" title="${e.message}">${js}</span>`
+          return `<span class="macro-missing-deps" title="${_.escape(e.message)}">${js}</span>`
         console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
         return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
       }
@@ -327,10 +330,13 @@
         .map(dep => {
           const spanclass = dep.match(/\((.*?)\)$/)?.pop() || ''
           dep = dep.replace(/\(.*?\)$/, '')
+          const depjs = `javascript:MindBox.toggle('${dep}')`
           return `<span class="${spanclass}"> ${
             dep.startsWith('#')
               ? dep
-              : `<mark onclick="MindBox.toggle('${dep}');_handleLinkClick('${id}','javascript:MindBox.toggle(\\'${dep}\\')',event)" title="${dep}">${dep}</mark>`
+              : `<mark onclick="MindBox.toggle('${dep}');_handleLinkClick('${id}','${_.escape(
+                  depjs
+                )}',event)" title="${_.escape(dep)}">${dep}</mark>`
           } </span>`
         })
         .join(' ')
@@ -391,7 +397,7 @@
           const obj = new URL(url)
           const label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
-            return `${pfx}<img title="${label}" src="${url}">${sfx}`
+            return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
           return `${pfx}[${label}](${url})${sfx}`
         } catch (_) {
@@ -534,8 +540,10 @@
               )
                 reltag = '#…' + tag.substring(firstTerm.length)
               return (
-                `${pfx}<mark${classNames} title="${tag}" onmousedown=` +
-                `"_handleTagClick('${id}','${tag}','${reltag}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
+                `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
+                `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
+                  reltag
+                )}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
                 `${renderTag(reltag)}</mark>`
               )
             })
@@ -578,12 +586,12 @@
     // convert markdown to html
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
-      const href_escaped = href.replace(/'/g, "\\'") // escape single-quotes for argument to _handleLinkClick
-      const text_escaped = text.replace(/'/g, "\\'") // escape single-quotes for argument to _handleLinkClick
       if (href.startsWith('##')) {
         // fragment link
         const fragment = href.substring(1)
-        return `<a href="${fragment}" title="${href}" onclick="_handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`
+        return `<a href="${_.escape(fragment)}" title="${_.escape(href)}" onclick="_handleLinkClick('${id}','${_.escape(
+          href
+        )}',event)">${text}</a>`
       } else if (href.startsWith('#')) {
         // tag link
         let tag = href
@@ -595,13 +603,17 @@
         let classNames = 'link'
         if (missingTags.has(lctag)) classNames += ' missing'
         classNames = classNames.trim()
-        return `<mark class="${classNames}" title="${tag}" onmousedown="_handleTagClick('${id}','${tag}','${text_escaped}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`
+        return `<mark class="${classNames}" title="${_.escape(tag)}" onmousedown="_handleTagClick('${id}','${_.escape(
+          tag
+        )}','${_.escape(text)}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`
       }
       // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
       // NOTE: rel="opener" is required by Chrome for target="_blank" to work. rel="external" is said to replace target=_blank but does NOT open a new window (in Safari or chrome), so we are forced to used _blank+opener.
       let attribs = ''
       if (!href.startsWith('javascript:')) attribs = ` target="_blank" rel="opener"`
-      return `<a${attribs} title="${href}" href="${href}" onclick="_handleLinkClick('${id}','${href_escaped}',event)">${text}</a>`
+      return `<a${attribs} title="${_.escape(href)}" href="${_.escape(
+        href
+      )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
     // marked.use({ renderer });
     marked.setOptions({
@@ -704,8 +716,7 @@
     // add onclick handler to html links
     text = text.replace(/<a\s(?:"[^"]*"|[^>"])*?href\s*=\s*"(.*?)"(?:"[^"]*"|[^>"])*>/gi, function (m, href) {
       if (m.match(/onclick/i)) return m // link has custom onclick handler
-      const href_escaped = href.replace(/'/g, "\\'") // escape single-quotes for argument to _handleLinkClick
-      return m.substring(0, m.length - 1) + ` onclick="_handleLinkClick('${id}','${href_escaped}',event)">`
+      return m.substring(0, m.length - 1) + ` onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">`
     })
 
     // append log summary div
@@ -1111,16 +1122,17 @@
     // linkify urls & tags in code comments (tag regex from util.js)
     const link_urls = text =>
       text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, href) => {
-        const href_escaped = href.replace(/'/g, "\\'")
         return (
-          `${pfx}<a href="${href}" target="_blank" title="${href}" ` +
-          `onclick="_handleLinkClick('${id}','${href_escaped}',event)">${href}</a>`
+          `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
+          `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
         )
       })
     const link_tags = text =>
       text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
-        return `${pfx}<a href="#" title="${tag_resolved}" onmousedown="_handleTagClick('${id}','${tag_resolved}','${tag_resolved}',event)">${tag}</a>`
+        return `${pfx}<a href="#" title="${_.escape(tag_resolved)}" onmousedown="_handleTagClick('${id}','${_.escape(
+          tag_resolved
+        )}','${_.escape(tag_resolved)}',event)">${tag}</a>`
       })
     itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))
