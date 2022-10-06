@@ -1314,6 +1314,7 @@
   let padding = 0
   let lastViewHeight = 0
   function updateVerticalPadding(skip_scroll = false) {
+    if (ios) return // disabled on ios due to scrolling inconsistencies before/after focus (i.e. virtual keyboard)
     if (!itemsdiv) return
     // replace "vh" units with "px" which is better supported on android (and presumably elsewhere also)
     // in particular on android "vh" units can cause jitter or flicker during scrolling tall views
@@ -4578,8 +4579,11 @@
 
       // if caret is too far up or down, bring it to ~upper-middle of page
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
-      if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + visualViewport.height - 200)
-        scrollTo(Math.max(0, caretTop - visualViewport.height / 4))
+      // waiting for dom update significantly improves consistency on ios, likely due to toggling of items below, e.g. due to editing mode change (which can also be revisited if there are other similar issues)
+      update_dom().then(() => {
+        if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + visualViewport.height - 200)
+          scrollTo(Math.max(0, caretTop - visualViewport.height / 4))
+      })
     })
   }
 
