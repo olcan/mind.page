@@ -372,10 +372,10 @@
 
     // replace naked URLs with markdown links (or images) named after host name
     // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
-    const urlRegex = new RegExp(tagRegexExclusions + '|' + /(^|.?.?)(https?:\/\/[^\s)<:]*[^\s)<:;,.])/.source, 'g')
+    const urlRegex = new RegExp(tagRegexExclusions + '|' + /(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/.source, 'g')
     const replaceURLs = text =>
       text.replace(urlRegex, (m, pfx, url, offset, orig_str) => {
-        if (!pfx) return m // skip exclusion
+        if (pfx === undefined) return m // skip exclusion
         // disallow matching prefix ](\s+ to avoid matching urls inside markdown links
         if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
         let sfx = ''
