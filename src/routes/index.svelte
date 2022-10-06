@@ -1820,7 +1820,7 @@
           if (!item.listen) return
           if (!itemDefinesFunction(item, '_on_change')) return
           Promise.resolve(
-            _item(item.id).eval(`_on_change(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+            _item(item.id).eval(`_on_change(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
               trigger: 'listen',
               async: item.deepasync, // run async if item is async or has async deps
               async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
@@ -2335,7 +2335,7 @@
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_search')) return
         Promise.resolve(
-          _item(item.id).eval(`_on_search(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+          _item(item.id).eval(`_on_search(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
             trigger: 'listen',
             async: item.deepasync, // run async if item is async or has async deps
             async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
@@ -3371,7 +3371,7 @@
             const cmd = text.match(/^\/\w+/)[0]
             let args = text
               .replace(/^\/\w+/, '')
-              .replace(/([`\\$])/g, '\\$1')
+              .replace(/[`\\$]/g, '\\$&')
               .trim()
             // for commands we provide whitespace-split args as additional arguments
             const cmd_args = [args, ...args.split(/\s+/)].map(arg => `\`${arg}\``)
@@ -3982,7 +3982,7 @@
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_create')) return
         Promise.resolve(
-          _item(item.id).eval(`_on_create(\`${editorText.replace(/([`\\$])/g, '\\$1')}\`)`, {
+          _item(item.id).eval(`_on_create(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
             trigger: 'listen',
             async: item.deepasync, // run async if item is async or has async deps
             async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
