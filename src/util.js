@@ -44,10 +44,11 @@ export function highlight(code, language) {
   const link_urls = text =>
     text.replace(
       // url scheme regex from https://stackoverflow.com/a/190405
-      // note we are more restrictive on the tail (last character), disallowing common punctuation
-      // if matching in html/markdown (vs plain text), consider disallowing < and allowing ; in the tail for entities (e.g. &gt;)
-      // here we also allow @ prefix due to use in stack traces in some browsers
-      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)/]+\/?[^\s):]*[^\s):;,.])/gi,
+      // we are more restrictive on the tail (last character), disallowing common punctuation
+      // we allow @ prefix due to use in stack traces in some browsers
+      // consider allowing semi-colon in tail when matching in escaped html, e.g. in editor
+      // (for simplicity we do not currently have a separate pattern for escaped html)
+      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/gi,
       (m, pfx, href) =>
         `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )

@@ -379,7 +379,7 @@
     // replace naked URLs (regex from util.js) with markdown links (or images) named after host name
     // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
     const urlRegex = new RegExp(
-      tagRegexExclusions + '|' + /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:,.])/.source,
+      tagRegexExclusions + '|' + /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/.source,
       'g'
     )
     const replaceURLs = text =>
@@ -1124,7 +1124,7 @@
 
     // linkify urls & tags in code comments (regexes from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:,.])/g, (m, pfx, href) => {
+      text.replace(/(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/g, (m, pfx, href) => {
         return (
           `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
           `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
