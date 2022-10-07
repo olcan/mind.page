@@ -45,12 +45,14 @@ export function highlight(code, language) {
     text.replace(
       // url scheme regex from https://stackoverflow.com/a/190405
       // note we are more restrictive on the tail (last character), disallowing common punctuation
-      // semi-colon tail should be allowed when matching in html to avoid breaking entities (e.g. &gt;)
-      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/gi,
-      (m, pfx, href) => `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${href}</a>`
+      // if matching in html/markdown (vs plain text), consider disallowing < and allowing ; in the tail for entities (e.g. &gt;)
+      // here we also allow @ prefix due to use in stack traces in some browsers
+      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)/]+\/?[^\s):]*[^\s):;,.])/gi,
+      (m, pfx, href) =>
+        `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )
   if (language == '_log') {
-    return link_urls(_.escape(code))
+    return link_urls(code)
       .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')
       .replace(/^(WARNING:.*)$/gm, '<span class="console-warn">$1</span>')
       .replace(/^(INFO:.*)$/gm, '<span class="console-info">$1</span>')
