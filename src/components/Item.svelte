@@ -1162,7 +1162,11 @@
     // NOTE: _* suffix is added by highlight.js dependening on scope depth
     if (window['_highlight']) {
       itemdiv.querySelectorAll('._highlight,._highlight_,._highlight__,._highlight___').forEach(elem => {
-        window['_highlight'](elem, id)
+        try {
+          window['_highlight'](elem, id)
+        } catch (e) {
+          console.error('error in window._highlight:', e)
+        }
       })
     }
 
