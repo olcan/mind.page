@@ -43,7 +43,10 @@ export function highlight(code, language) {
   language = language.replace(/(?:_removed|_hidden)$/, '')
   const link_urls = text =>
     text.replace(
-      /(^|\s|\(|@)(https?:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/g,
+      // url scheme regex from https://stackoverflow.com/a/190405
+      // note we are more restrictive on the tail (last character), disallowing common punctuation
+      // semi-colon tail should be allowed when matching in html to avoid breaking entities (e.g. &gt;)
+      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:;,.])/gi,
       (m, pfx, href) => `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${href}</a>`
     )
   if (language == '_log') {

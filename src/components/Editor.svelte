@@ -140,7 +140,8 @@
     return text
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
-        /(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g,
+        // url regex from util.js, with less restrictive tail due to markdown link syntax [](...)
+        /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*)/gi,
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
@@ -260,8 +261,9 @@
 
     highlights.innerHTML = html
 
-    // linkify urls & tags in comments (tag regex from util.js)
-    const link_urls = text => text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, '$1<a>$2</a>')
+    // linkify urls & tags in comments (regexes from util.js)
+    const link_urls = text =>
+      text.replace(/(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:,.])/gi, '$1<a>$2</a>')
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))

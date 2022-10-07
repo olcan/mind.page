@@ -376,9 +376,12 @@
     const tagRegex = `(^|\\s|\\()(${regexTags.join('|')})`
     const isMenu = tags.includes('#_menu')
 
-    // replace naked URLs with markdown links (or images) named after host name
+    // replace naked URLs (regex from util.js) with markdown links (or images) named after host name
     // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
-    const urlRegex = new RegExp(tagRegexExclusions + '|' + /(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/.source, 'g')
+    const urlRegex = new RegExp(
+      tagRegexExclusions + '|' + /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:,.])/.source,
+      'g'
+    )
     const replaceURLs = text =>
       text.replace(urlRegex, (m, pfx, url, offset, orig_str) => {
         if (pfx === undefined) return m // skip exclusion
@@ -1119,9 +1122,9 @@
       renderMath(math)
     })
 
-    // linkify urls & tags in code comments (tag regex from util.js)
+    // linkify urls & tags in code comments (regexes from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()(https?:\/\/[^\s)<:]*[^\s)<:;,.])/g, (m, pfx, href) => {
+      text.replace(/(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)</]+\/?[^\s)<:]*[^\s)<:,.])/g, (m, pfx, href) => {
         return (
           `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
           `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
