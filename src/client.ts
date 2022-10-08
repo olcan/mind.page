@@ -6,8 +6,9 @@ window['_'] = _
 
 // import/expose firebase on window
 import { firebaseConfig } from '../firebase-config.js' // ~0
-import { initializeApp } from 'firebase/app' // ~10K
+import { initializeApp, onLog } from 'firebase/app' // ~10K
 const firebase = initializeApp(firebaseConfig)
+firebase['onLog'] = onLog // for use in index.svelte
 window['firebase'] = firebase
 
 // import/expose firebase/auth on window

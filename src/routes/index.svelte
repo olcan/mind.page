@@ -5527,7 +5527,6 @@
 
         // start listening for remote changes
         // (also initialize if items were not returned by server)
-        let firebase_snapshot_errors = 0
         onSnapshot(
           query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc')),
           snapshot => {
@@ -5688,15 +5687,9 @@
             // either way set up callback to complete "synchronization" and set up welcome item if needed
             if (firstSnapshot) {
               if (!initTime) {
-                // alert on empty init for user known to have items, or on any errors before/during first snapshot
-                // TODO: remove this once you've debugged the issue where first snapshot is blank and items are added in subsequent snapshot(s), triggering the "welcome" dialog and many errors as items are added incrementally (and slowly) post-initialization ... if there are no relevant error/warnings and no other ways to detect a problem, then we may have to either track total number of items, or new users w/ empty accounts, or both.
-                // NOTE: this triggers rarely now, and whenever it triggered, there were 0 errors listed, BUT in most (all?) cases there was an error in console (could not reach backend in 10s, client using offline mode for now) after closing the dialog, so if we can confirm that, that would be a way to detect a problem trigger an alert and/or reload.
-                if (first_snapshot_items == 0 && user.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2') {
-                  alert(
-                    `failed init w/ zero items for non-empty account; changes: ${first_snapshot_changes} (see warnings for types), errors: ${firebase_snapshot_errors}; see console for details, reload to retry`
-                  )
-                } else if (firebase_snapshot_errors > 0) {
-                  alert(`failed init w/ ${firebase_snapshot_errors} errors; see console for details, reload to retry`)
+                // alert on any firebase errors before/during first snapshot
+                if (firebase_errors > 0) {
+                  if (confirm(`MindPage could not access Google Cloud (Firestore). Try again?`)) location.reload()
                 } else {
                   initTime = window['_init_time'] = Date.now()
                   initialize()
@@ -5738,7 +5731,6 @@
             }
           },
           error => {
-            firebase_snapshot_errors++
             console.error(error)
             if (error.code == 'permission-denied') {
               // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
@@ -6526,6 +6518,12 @@
       return resp
     }
   }
+  // set up firebase log handler to count firebase errors (client only)
+  let firebase_errors = 0
+  if (isClient)
+    firebase.onLog(({ level }) => {
+      if (level == 'error') firebase_errors++
+    })
 
   function onWebcamClick(e) {
     intro = !intro
