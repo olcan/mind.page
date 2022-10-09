@@ -5760,7 +5760,7 @@
           snapshot => {
             instances = Array.from(snapshot.docs, (doc: any) => doc.data())
             instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
-            instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
+            instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
             primary = instances[0]?.init_time == initTime
           }
         )
