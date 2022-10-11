@@ -140,9 +140,8 @@
     return text
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
-        // url regex from util.js, with less restrictive tail due to markdown link syntax [](...)
-        // note for simplicity we do not yet have a separate url regex for escaped html
-        /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*)/gi,
+        // same as in link_urls above, see comments there
+        /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:,.])/gi,
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
