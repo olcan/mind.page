@@ -1116,8 +1116,8 @@
         }
       }
       const _item = item(this.id)
-      if (!_item.tasks) _item.tasks = {}
-      _item.tasks[name] = task // replaces any previous task under same name
+      _item.tasks ??= {}
+      _item.tasks[name] = task // cancels/replaces any previous task under same name
       this.dispatch(task, delay_ms) // initial dispatch
     }
 
