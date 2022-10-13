@@ -1035,11 +1035,11 @@
       try {
         let out = func()
         // if function returns promise, attach it and set up default rejection handler
-        if (out instanceof Promise) {
+        // note rethrowing errors triggers outer try/catch block via _separate_ invoke wrapper (see onRejected below)
+        if (out instanceof Promise)
           out = this.attach(out).catch(e => {
             throw e // handled & rethrown in outer catch block
           })
-        }
         if (evalStack.pop() != this.id) console.error('invalid stack')
         return out
       } catch (e) {
@@ -1096,24 +1096,30 @@
         if (!_exists(this.id)) return // item deleted
         const _item = item(this.id)
         if (_item.tasks[name] != task) return // task cancelled or replaced
-        try {
-          this.resolve(func())
-            .then(out => {
-              if (out === null) {
-                delete _item.tasks[name]
-                return
-              }
-              if (out >= 0) this.dispatch(task, out) // dispatch repeat
-              else if (repeat_ms >= 0) this.dispatch(task, repeat_ms) // dispatch repeat
-            })
-            .catch(e => {
-              console.error(`stopping task '${name}' due to error: ${e}`)
-              return
-            })
-        } catch (e) {
-          console.error(`stopping task '${name}' due to error: ${e}`)
-          return
-        }
+        _item.running_tasks ??= {}
+        _item.running_tasks[name] = this.resolve(_item.running_tasks[name]).then(() => {
+          if (_item.tasks[name] != task) return // task cancelled or replaced
+          try {
+            this.resolve(func())
+              .then(out => {
+                if (out === null) {
+                  delete _item.tasks[name] // task cancelled!
+                  return
+                }
+                if (out >= 0) this.dispatch(task, out) // dispatch repeat
+                else if (repeat_ms >= 0) this.dispatch(task, repeat_ms) // dispatch repeat
+                else delete _item.tasks[name] // task done!
+              })
+              .catch(e => {
+                console.error(`stopping task '${name}' due to error: ${e}`)
+                delete _item.tasks[name] // task finished (w/ error)!
+              })
+          } catch (e) {
+            // handle error in sync func
+            console.error(`stopping task '${name}' due to error: ${e}`)
+            delete _item.tasks[name] // task finished (w/ error)!
+          }
+        })
       }
       const _item = item(this.id)
       _item.tasks ??= {}
