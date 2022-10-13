@@ -3058,13 +3058,16 @@
       // reset focus for generated text
       textarea.selectionStart = textarea.selectionEnd = 0
       let item = _create(text, obj)
-      // run programmatic initializer function if any
-      try {
-        if (obj.init) Promise.resolve(obj.init(item)).catch(handleError)
-      } catch (e) {
-        handleError(e)
-        throw e
+      // run programmatic initializer (and return promise) if any
+      if (obj.init) {
+        try {
+          return Promise.resolve(obj.init(item)).catch(handleError)
+        } catch (e) {
+          handleError(e)
+          throw e
+        }
       }
+      return item
     }
   }
 
@@ -3845,22 +3848,20 @@
               }
               try {
                 let cmd_item = items[_item('#commands' + cmd).index]
-                Promise.resolve(
+                // return promise so caller can wait for command output
+                return (window['_mindbox_return'] = Promise.resolve(
                   _item('#commands' + cmd).eval(`run(${cmd_args})`, {
                     trigger: 'command',
                     async: cmd_item.deepasync, // run async if item is async or has async deps
                     async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                   })
                 )
-                  .then(obj => {
-                    handleCommandReturn(cmd, cmd_item, obj, run, editing, handleError)
-                  })
-                  .catch(handleError)
+                  .then(obj => handleCommandReturn(cmd, cmd_item, obj, run, editing, handleError))
+                  .catch(handleError))
               } catch (e) {
                 handleError(e)
                 throw e
               }
-              return
             } else {
               // as last effort, invoke on first listener that handles _on_command_<name>
               let found_listener = false
@@ -3881,15 +3882,14 @@
                   async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                 })
                 if (ret === null) continue // did not handle command (synchronously)
-                Promise.resolve(ret)
-                  .then(obj => {
+                // return promise so caller can wait for command output
+                return window['_mindbox_return'] = Promise.resolve(ret)
+                  .then(obj =>
                     handleCommandReturn(cmd, item, obj, run, editing, handleError)
-                  })
+                  )
                   .catch(handleError)
-                found_listener = true
-                break // stop on first listener handling command (synchronously)
               }
-              if (!found_listener) alert(`unknown command ${cmd} ${args}`)
+              alert(`unknown command ${cmd} ${args}`)
               return
             }
           } else if (text.match(/^\/\s+/s)) {
