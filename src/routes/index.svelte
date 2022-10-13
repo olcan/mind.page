@@ -125,6 +125,7 @@
   // use mindbox_text == '' to force clear, sensible for item creation via commands (as in handleCommandReturn)
   // use mindbox_text == null to let onEditorDone (including any handled command) determine mindbox text
   // use emulate_button == true to emulate "create" button behavior
+  // use return_alerts == true to return alert message strings (useful for background calls)
   function _create(
     text = '',
     {
@@ -134,6 +135,7 @@
       command = false,
       mindbox_text = undefined,
       emulate_button = false,
+      return_alerts = false,
     } = {},
     attr = null
   ) {
@@ -157,7 +159,8 @@
       !!run, // run?
       edit == true, // edit? (true/false only, null requires keyboard event)
       attr, // used internally for /_install
-      !command // ignore command unless command truthy
+      !command, // ignore command unless command truthy
+      return_alerts // return alert messages? (instead of display in alert dialog)
     )
 
     // restore mindbox text
@@ -3030,7 +3033,7 @@
     return item
   }
 
-  function handleCommandReturn(cmd, item, obj, run, edit, handleError) {
+  function handleCommandReturn(cmd, item, obj, run, edit, return_alerts, handleError) {
     if (typeof obj == 'string') {
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(obj)
@@ -3054,6 +3057,7 @@
       obj.history ??= false
       obj.command ??= false
       obj.mindbox_text ??= ''
+      obj.return_alerts ??= return_alerts
       let textarea = textArea(-1)
       // reset focus for generated text
       textarea.selectionStart = textarea.selectionEnd = 0
@@ -3087,7 +3091,8 @@
     run: boolean = false,
     editing = null,
     attr = null,
-    ignore_command = false
+    ignore_command = false,
+    return_alerts = false
   ) {
     editorText = text // in case invoked without setting editorText
     const key = e?.code || e?.key
@@ -3135,21 +3140,22 @@
     // force editing if text is empty
     // if (!text.trim()) editing = true
 
+    // overload alert function to return alert message if return_alerts==true (useful for background commands)
+    // should always be invoked as return alert(...)
+    const alert = msg => {
+      if (return_alerts) return msg // return alert message string
+      else window.alert(msg)
+    }
+
     if (!ignore_command) {
       switch (text.trim()) {
         case '/_signout': {
-          if (!signedin) {
-            alert('already signed out')
-            return
-          }
+          if (!signedin) return alert('already signed out')
           signOut()
           return
         }
         case '/_signin': {
-          if (signedin) {
-            alert('already signed in')
-            return
-          }
+          if (signedin) return alert('already signed in')
           signIn()
           return
         }
@@ -3162,19 +3168,13 @@
           break
         }
         case '/_times': {
-          if (editingItems.length == 0) {
-            alert('/_times: no item selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_times: no item selected')
           const item = items[editingItems[0]]
           text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`
           break
         }
         case '/_edit': {
-          if (editingItems.length == 0) {
-            alert('/_edit: no item selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_edit: no item selected')
           const item = items[editingItems[0]]
           _item(item.id).editable = true // set via _Item setter
           tick().then(() => textArea(item.index)?.focus())
@@ -3183,10 +3183,7 @@
           return
         }
         case '/_unedit': {
-          if (editingItems.length == 0) {
-            alert('/_unedit: no item selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_unedit: no item selected')
           const item = items[editingItems[0]]
           _item(item.id).editable = false // set via _Item setter
           lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -3194,15 +3191,9 @@
           return
         }
         case '/_updates': {
-          if (editingItems.length == 0) {
-            alert('/_updates: no item selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_updates: no item selected')
           const item = items[editingItems[0]]
-          if (!item.attr) {
-            alert(`/_updates: selected item ${item.name} was not installed via /_install command`)
-            return
-          }
+          if (!item.attr) return alert(`/_updates: selected item ${item.name} was not installed via /_install command`)
           const attr = item.attr
           const history = attr.source.replace('/blob/', '/commits/')
           const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`
@@ -3272,27 +3263,15 @@
           return
         }
         case '/_dependencies': {
-          if (editingItems.length == 0) {
-            alert('/_dependencies: no item selected')
-            return
-          }
-          if (editingItems.length > 1) {
-            alert('/_dependencies: too many items selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_dependencies: no item selected')
+          if (editingItems.length > 1) return alert('/_dependencies: too many items selected')
           text = items[editingItems[0]].depsString
           clearLabel = true
           break
         }
         case '/_dependents': {
-          if (editingItems.length == 0) {
-            alert('/_dependents: no item selected')
-            return
-          }
-          if (editingItems.length > 1) {
-            alert('/_dependents: too many items selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_dependents: no item selected')
+          if (editingItems.length > 1) return alert('/_dependents: too many items selected')
           text = items[editingItems[0]].dependentsString
           clearLabel = true
           break
@@ -3323,27 +3302,15 @@
           return
         }
         case '/_tweet': {
-          if (editingItems.length == 0) {
-            alert('/_tweet: no item selected')
-            return
-          }
-          if (editingItems.length > 1) {
-            alert('/_tweet: too many items selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_tweet: no item selected')
+          if (editingItems.length > 1) return alert('/_tweet: too many items selected')
           let item = items[editingItems[0]]
           location.href = 'twitter://post?message=' + encodeURIComponent(item.text)
           return
         }
         case '/_duplicate': {
-          if (editingItems.length == 0) {
-            alert('/_duplicate: no item selected')
-            return
-          }
-          if (editingItems.length > 1) {
-            alert('/_duplicate: too many items selected')
-            return
-          }
+          if (editingItems.length == 0) return alert('/_duplicate: no item selected')
+          if (editingItems.length > 1) return alert('/_duplicate: too many items selected')
           let item = items[editingItems[0]]
           time = item.time
           text = item.text
@@ -3351,10 +3318,7 @@
           break
         }
         case '/_undelete': {
-          if (deletedItems.length == 0) {
-            alert('/_undelete: nothing to undelete (in this session)')
-            return
-          }
+          if (deletedItems.length == 0) return alert('/_undelete: nothing to undelete (in this session)')
           // NOTE: undelete command does NOT restore item id and associated history in firebase or github
           time = deletedItems[0].time
           attr = deletedItems[0].attr
@@ -3419,39 +3383,24 @@
                 )
               )
                 .then(examples => {
-                  alert(`retrieved ${examples.docs.length} example items`)
+                  console.log(`/_example: retrieved ${examples.docs.length} example items`)
                 })
                 .catch(console.error)
               return
             } else if (cmd == '/_watch') {
-              if (hostname != 'localhost') {
-                alert(`/_watch: can not watch on ${hostname}`)
-                return
-              }
+              if (hostname != 'localhost') return alert(`/_watch: can not watch on ${hostname}`)
               let [name, file] = args.split(/\s+/)
-              if (!name || !file) {
-                alert(`usage: ${cmd} name file`)
-                return
-              }
+              if (!name || !file) return alert(`usage: ${cmd} name file`)
               // look up item
               const item = _item(name)
-              if (!item) {
-                alert(`${cmd}: item '${name}' missing or ambiguous`)
-                return
-              }
+              if (!item) return alert(`${cmd}: item '${name}' missing or ambiguous`)
               ;(async () => {
                 try {
                   // look up file
                   const resp = await fetch(`/file/${file}`)
-                  if (!resp.ok) {
-                    alert(`${cmd}: failed to fetch file '${file}'`)
-                    return
-                  }
+                  if (!resp.ok) return alert(`${cmd}: failed to fetch file '${file}'`)
                   const text = await resp.text()
-                  if (text != item.text) {
-                    alert(`${cmd}: contents of file ${file} does not match item ${name}`)
-                    return
-                  }
+                  if (text != item.text) return alert(`${cmd}: contents of file ${file} does not match item ${name}`)
                   console.debug(`watching file ${file} for item ${name} ...`)
                   item.dispatch_task(
                     `${cmd} ${file}`,
@@ -3472,7 +3421,7 @@
                   )
                 } catch (e) {
                   console.error(`${cmd}: failed to read file ${file}: ` + e)
-                  alert(`${cmd}: failed to read ${file}: ` + e)
+                  return alert(`${cmd}: failed to read ${file}: ` + e)
                 }
               })()
               lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -3499,39 +3448,27 @@
               if (!owner) owner = 'olcan'
               if (!token) token = localStorage.getItem('mindpage_github_token') // try localStorage
               if (!token) token = null // no token, use unauthenticated client
-              if (!path) {
-                alert(`usage: ${cmd} path [repo branch owner token]`)
-                return
-              }
+              if (!path) return alert(`usage: ${cmd} path [repo branch owner token]`)
               // drop optional leading slash in paths for consistency
               if (path.startsWith('/')) path = path.substring(1)
-              if (path.startsWith('/')) {
-                alert(`invalid path '${path}'`)
-                return
-              }
+              if (path.startsWith('/')) return alert(`invalid path '${path}'`)
               // if path is specified as #label, extract path from named item
               // note path==label is not required in general, indeed labels could be missing or non-unique
               // however path==label is required for dependencies (see below) so their paths can be inferred
               let label
               if (path.startsWith('#')) {
                 label = path
-                if (idsFromLabel.get(label.toLowerCase())?.length > 1) {
-                  alert(`can not update multiple items labeled ${label}`)
-                  return
-                } else if (!_exists(label)) {
-                  alert(`missing item ${label}`)
-                  return
-                }
+                if (idsFromLabel.get(label.toLowerCase())?.length > 1)
+                  return alert(`can not update multiple items labeled ${label}`)
+                else if (!_exists(label)) return alert(`missing item ${label}`)
                 path = _item(label).attr.path
               }
               // check file extension in path
               // default (and preferred) extension is .md for installable items
               // .markdown is also supported but preferred more for sync/backup/export purposes
               if (!path.includes('.')) path += '.md'
-              else if (!path.endsWith('.md') && !path.endsWith('.markdown')) {
-                alert(`${cmd}: invalid file extension in path '${path}'`)
-                return
-              }
+              else if (!path.endsWith('.md') && !path.endsWith('.markdown'))
+                return alert(`${cmd}: invalid file extension in path '${path}'`)
 
               // distinguish "root" vs dependency installation
               // we use a global 'installing' flag, which MUST be reset on return by root
@@ -3803,7 +3740,7 @@
                     // #pusher should exist since it sets pushable, but we check anyway ...
                     if (item.pushable) {
                       if (_item('#pusher')) onEditorDone('/push ' + item.name)
-                      else alert(`unable to push item ${item.name} due to missing (deleted?) #pusher`)
+                      else console.error(`${cmd}: unable to push item ${item.name} due to missing (deleted?) #pusher`)
                       // item.pushable = false // clear flag even if push command failed
                     }
                     // ask about reloading for changes to init/welcome items ...
@@ -3828,9 +3765,9 @@
                   return item
                 } catch (e) {
                   console.error(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
-                  alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                   // close/cancel all modals on error (even if non-root command)
                   await _modal_close()
+                  return alert(`${updating ? 'update' : 'install'} failed for ${path}: ` + e)
                 } finally {
                   // close/cancel modals and clear installing flag for root command
                   if (root) {
@@ -3844,7 +3781,7 @@
               function handleError(e) {
                 const log = _item('#commands' + cmd).get_log({ since: start, level: 'error' })
                 let msg = [`#commands${cmd} run(${cmd_args}) failed:`, ...log, e].join('\n')
-                alert(msg)
+                return alert(msg)
               }
               try {
                 let cmd_item = items[_item('#commands' + cmd).index]
@@ -3856,7 +3793,7 @@
                     async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                   })
                 )
-                  .then(obj => handleCommandReturn(cmd, cmd_item, obj, run, editing, handleError))
+                  .then(obj => handleCommandReturn(cmd, cmd_item, obj, run, editing, return_alerts, handleError))
                   .catch(handleError))
               } catch (e) {
                 handleError(e)
@@ -3874,7 +3811,7 @@
                 function handleError(e) {
                   const log = _item(item.id).get_log({ since: start, level: 'error' })
                   let msg = [`${item.name} _on_command_${name}(${cmd_args}) failed: `, ...log, e].join('\n')
-                  alert(msg)
+                  return alert(msg)
                 }
                 const ret = _item(item.id).eval(`return _on_command_${name}(${cmd_args})`, {
                   trigger: 'listen',
@@ -3883,14 +3820,11 @@
                 })
                 if (ret === null) continue // did not handle command (synchronously)
                 // return promise so caller can wait for command output
-                return window['_mindbox_return'] = Promise.resolve(ret)
-                  .then(obj =>
-                    handleCommandReturn(cmd, item, obj, run, editing, handleError)
-                  )
-                  .catch(handleError)
+                return (window['_mindbox_return'] = Promise.resolve(ret)
+                  .then(obj => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError))
+                  .catch(handleError))
               }
-              alert(`unknown command ${cmd} ${args}`)
-              return
+              return alert(`unknown command ${cmd} ${args}`)
             }
           } else if (text.match(/^\/\s+/s)) {
             // clear /(space) as a mechanism to disable search
