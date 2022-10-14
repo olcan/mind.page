@@ -627,11 +627,26 @@
           content.push(_item(id).read(type, options))
         })
       }
+
       // indicate item name in comments for certain types of reads
-      if (type == 'js' || type == 'webppl') content.push(`/* ${type} @ ${item.name} */`)
-      else if (type == 'html') content.push(`<!-- ${type} @ ${item.name} -->`)
-      let text = type ? extractBlock(item.text, type, options['keep_empty_lines']) : item.text
-      if (options['exclude_tests_and_benchmarks']) {
+      if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${item.name} */`)
+      else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${item.name} -->`)
+
+      // exclude async content (and return early) if requested
+      if (options['exclude_async'] && item.deepasync) return content.filter(s => s).join('\n')
+
+      // read text from specified block type (or whole item if type is blank)
+      let text = type ? extractBlock(item.text, type, options['remove_empty_lines']) : item.text
+
+      // remove empty lines if requested
+      if (options['remove_empty_lines']) text = text.replace(/(^|\n)\s*(?:\n|$)/g, '$1').trim() // trim for last \n
+
+      // remove comment lines if requested (for js type only for now)
+      if (options['remove_comment_lines'] && type.match(/^(?:js)(?:_|$)/))
+        text = text.replace(/(^|\n)(?:\s*\/\/.*?(?:\n|$))+/g, '$1').trim() // trim for last \n
+
+      // remove tests & benchmarks if requested (for js type only for now)
+      if (options['remove_tests_and_benchmarks'] && type.match(/^(?:js)(?:_|$)/)) {
         // simple regex matches top-level definitions w/ closing brace on new line; prior comments also removed following same regex in mind.items/util/core.js
         text = text.replace(
           /(?:^|\n)(?:(?:\/\/[^\n]*?\n)*)(?:async function|function|const|let) +(?:_test_|_benchmark_)\w+ *=? *\(.*?\) *(?:=>)? *\{.*?\n\}/gs,
@@ -643,16 +658,12 @@
           ''
         )
       }
-      // remove any empty lines unless kept explicitly via options
-      if (!options['keep_empty_lines']) text = text.replace(/(^|\n)\s*(?:\n|$)/g, '$1').trim() // trim for last \n
 
-      // remove comment lines (for js type) unless kept explicitly via options
-      if (type == 'js' && !options['keep_comment_lines'])
-        text = text.replace(/(^|\n)(?:\s*\/\/.*?(?:\n|$))+/g, '$1').trim() // trim for last \n
-
+      // replace $ids if requested
       if (options['replace_ids']) text = text.replace(/\$id/g, skipEscaped(item.id))
-      if (!options['exclude_async'] || !item.deepasync) content.push(text)
-      // console.debug(content);
+
+      content.push(text)
+      // console.debug(content)
       return content.filter(s => s).join('\n')
     }
 
@@ -662,13 +673,20 @@
       return this.read(type, Object.assign({ include_deps: true }, options))
     }
 
-    // read function intended for reading *_input blocks with code prefix
+    // read function intended for reading *_input code blocks with prefix from dependents
+    // default options are modified (see below) as appropriate for reading code
     read_input(type: string, options: object = {}) {
       if (!type) throw new Error('read_input requires block type')
-      return [
-        this.read_deep(type, Object.assign({ replace_ids: true }, options)),
-        this.read(type + '_input', options),
-      ].join('\n')
+      const read_options = Object.assign(
+        {
+          replace_ids: true,
+          remove_empty_lines: true,
+          remove_comment_lines: true,
+          remove_tests_and_benchmarks: true,
+        },
+        options
+      )
+      return [this.read_deep(type, read_options), this.read(type + '_input', read_options)].join('\n')
     }
 
     // accessor for console log associated with item
@@ -858,6 +876,23 @@
       if (missing_deps.length > 0)
         throw new Error('missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
 
+      // set up options used to read prefix below
+      // used both to read prefix for eval, and to read items returned by eval macros
+      const prefix_read_options = Object.assign(
+        {
+          // async deps are excluded by default, i.e. unless async:true in options
+          // this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
+          // notable exceptions are async runs, commands, listeners, etc
+          exclude_async_deps: !options['async'],
+          // other options are same as used to read prefix in read_input
+          replace_ids: true,
+          remove_empty_lines: true,
+          remove_comment_lines: true,
+          remove_tests_and_benchmarks: true,
+        },
+        options
+      )
+
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
         // remove comment lines
@@ -910,16 +945,7 @@
 
         // prepend context prefix (if not excluded)
         if (!options['exclude_prefix']) {
-          let prefix = this.read_deep(
-            options['type'] || 'js',
-            // NOTE: by default, async deps are excluded unless async:true in options
-            //       this affects ALL default eval, including e.g. 'macro_*' evals (see Item.svelte)
-            //       notable exceptions are async runs, commands, listeners, etc
-            Object.assign(
-              { replace_ids: true, exclude_async_deps: !options['async'], exclude_tests_and_benchmarks: true },
-              options
-            )
-          )
+          let prefix = this.read_deep(options['type'] || 'js', prefix_read_options)
           evaljs = [prefix, evaljs].join(';\n').trim()
         }
 
@@ -958,9 +984,10 @@
             trigger: 'eval_macro_' + macroIndex++,
             exclude_prefix: true /* avoid infinite recursion */,
           })
-          // If output is an item, read(*_macro) by default, where * is the prefix type
-          // (using _macro suffix allow item to be a dependency without importing same code as prefix)
-          if (out instanceof _Item) out = out.read_deep((options['type'] || 'js') + '_macro')
+          // if output is an item, read(*_macro) by default, where * is the prefix type
+          // (using _macro suffix allows item to be a dependency without importing same code as prefix)
+          // read options are same as those used to read prefix above
+          if (out instanceof _Item) out = out.read_deep((options['type'] || 'js') + '_macro', prefix_read_options)
           return out
         } catch (e) {
           console.error(`eval_macro error in item ${this.label || 'id:' + this.id}: ${e}`)

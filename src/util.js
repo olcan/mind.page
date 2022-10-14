@@ -10,10 +10,10 @@ export function blockRegExp(type_regex) {
   return new RegExp('((?:^|\\n) *)```(' + type_regex + ')\\n( *|.*?\\n *)```', 'ugsi')
 }
 
-export function extractBlock(text, type, keep_empty_lines = false) {
+export function extractBlock(text, type, remove_empty_lines = false) {
   // NOTE: this per-line regex is mostly consistent w/ that in updateTextDivs in Editor.svelte or toHTML in Item.svelte, and in particular allows a colon-separated prefix and suffix, w/ the suffix required to contain a period; only notable difference is that the type is allowed to match the colon-separated suffix if it matches exactly
   let insideBlock = false
-  let regex = RegExp('^\\s*```(?:\\S+:)?(?:' + type + ')(?:_hidden|_removed)?(?::\\S*\\.\\S*)?(?:\\s|$)', 'ui')
+  const regex = RegExp('^\\s*```(?:\\S+:)?(?:' + type + ')(?:_hidden|_removed)?(?::\\S*\\.\\S*)?(?:\\s|$)', 'ui')
   const lines = text
     .split('\n')
     .map(line => {
@@ -28,12 +28,8 @@ export function extractBlock(text, type, keep_empty_lines = false) {
       return line
     })
     .filter(l => l !== undefined)
-  return keep_empty_lines
-    ? lines.join('\n')
-    : lines
-        .filter(t => t)
-        .join('\n')
-        .trim()
+  if (remove_empty_lines) _.remove(lines, l => !l || !/\S/.test(l))
+  return lines.join('\n')
 }
 
 export function highlight(code, language) {
