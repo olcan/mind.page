@@ -2255,7 +2255,6 @@
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
-    hideIndex = Math.max(hideIndex, hideIndexFromRanking)
 
     // update layout (used below, e.g. aboveTheFold, editingItems, etc)
     updateItemLayout()
@@ -2314,7 +2313,7 @@
       _.findIndex(items, item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
     )
 
-    // auto-show session items if no position-based toggles, otherwise use minimal
+    // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
     hideIndex = Math.max(hideIndex, toggles.length == 0 ? hideIndexForSession : hideIndexMinimal)
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal
