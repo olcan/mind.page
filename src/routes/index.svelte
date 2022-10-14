@@ -2210,7 +2210,7 @@
     tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
     let tailTime = items[tailIndex]?.time || 0
     hideIndexFromRanking = tailIndex
-    hideIndex = hideIndexFromRanking
+    hideIndex = Math.max(hideIndex, hideIndexFromRanking)
 
     // update layout (used below, e.g. aboveTheFold, editingItems, etc)
     updateItemLayout()
@@ -2254,7 +2254,7 @@
       }
     }
 
-    // calculate "minimal" hide index used when window is defocused or items edited
+    // calculate "minimal" hide index used in certain situations, e.g. when window is defocused
     // minimal index is either the first time-ranked item, or the first position-based hidden item
     // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
     hideIndexMinimal =
@@ -2270,9 +2270,7 @@
     )
 
     // auto-show session items if no position-based toggles, otherwise use minimal
-    hideIndex = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
-    // hideIndex = hideIndexForSession
-    // hideIndex = hideIndexMinimal
+    hideIndex = Math.max(hideIndex, toggles.length == 0 ? hideIndexForSession : hideIndexMinimal)
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal
 
@@ -4270,7 +4268,7 @@
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(editorText) // editing state (and possibly time) has changed
       // retreat to minimal hide index to focus on edited item
-      hideIndex = hideIndexMinimal
+      // hideIndex = hideIndexMinimal
       // layout above does not trigger focus/scroll since editor is not rendered at that point
       // if (ios) textArea(-1).focus(); // allows refocus outside of click handler
       // on ios we still need a well-timed focus() call to bring up the keyboard
