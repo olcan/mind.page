@@ -23,13 +23,13 @@ export function extractBlock(text, type, remove_empty_lines = false) {
       }
       if (line.match(/^\s*```/)) {
         insideBlock = false
-        return '' // to get the \n after previous line
+        return '' // for extra \n between blocks (final block delimiter is dropped below)
       }
       return line
     })
     .filter(l => l !== undefined)
   if (remove_empty_lines) _.remove(lines, l => !l || !/\S/.test(l))
-  return lines.join('\n')
+  return lines.join('\n').replace(/\n$/, '') // drop \n part of final block delimiter \n```
 }
 
 export function highlight(code, language) {

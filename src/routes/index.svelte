@@ -397,7 +397,7 @@
       return item(this.id).dependents
     }
     get saving(): boolean {
-      return item(this.id).saving
+      return !!item(this.id).saving
     }
     get saving_global_store(): boolean {
       const _item = item(this.id)
@@ -622,15 +622,14 @@
         options = _.merge({}, options, { include_deps: false }) // deps are recursive already
         item.deps.forEach(id => {
           const dep = __item(id)
-          // NOTE: we allow async dependents to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
+          // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
           if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
+          // indicate dependency name in comments for certain types of reads
+          if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${dep.name} */`)
+          else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${dep.name} -->`)
           content.push(_item(id).read(type, options))
         })
       }
-
-      // indicate item name in comments for certain types of reads
-      if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${item.name} */`)
-      else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${item.name} -->`)
 
       // exclude async content (and return early) if requested
       if (options['exclude_async'] && item.deepasync) return content.filter(s => s).join('\n')
@@ -5239,6 +5238,7 @@
 
   let updateInstance_task
   function updateInstance() {
+    if (anonymous) return // can not track anonymous instances (at least not by user, and can not write to firestore)
     const task = () => {
       if (updateInstance_task != task) return // task cancelled or replaced
       if (!instanceId) return setTimeout(task, 1000) // instance id not set yet, try again in 1s
@@ -5733,21 +5733,23 @@
           }
         )
 
-        // also listen for instances and maintain window._instances && window._primary
-        onSnapshot(
-          query(
-            collection(getFirestore(firebase), 'instances'),
-            where('user', '==', user.uid), // instances for user only
-            where('update_time', '>', Date.now() - 2 * 60 * 1000), // live only (as of init)
-            orderBy('update_time', 'desc') // required by index
-          ),
-          snapshot => {
-            instances = Array.from(snapshot.docs, (doc: any) => doc.data())
-            instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
-            instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
-            primary = instances[0]?.init_time == initTime
-          }
-        )
+        if (!anonymous) {
+          // also listen for instances and maintain window._instances && window._primary
+          onSnapshot(
+            query(
+              collection(getFirestore(firebase), 'instances'),
+              where('user', '==', user.uid), // instances for user only
+              where('update_time', '>', Date.now() - 2 * 60 * 1000), // live only (as of init)
+              orderBy('update_time', 'desc') // required by index
+            ),
+            snapshot => {
+              instances = Array.from(snapshot.docs, (doc: any) => doc.data())
+              instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
+              instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
+              primary = instances[0]?.init_time == initTime
+            }
+          )
+        }
       }
 
       onMount(() => {
