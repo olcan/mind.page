@@ -150,7 +150,10 @@
     if (!emulate_button) disableScrollingOnLayout = true
 
     // save mindbox text to be restored (or set) below
-    if (mindbox_text !== null) mindbox_text ??= editorText
+    if (mindbox_text !== null) {
+      ignoreEditorChanges = true // ignore changes to editor from onEditorDone (e.g. by commands handled synchronously)
+      mindbox_text ??= editorText
+    }
 
     const item = onEditorDone(
       text,
@@ -165,6 +168,7 @@
 
     // restore mindbox text
     if (mindbox_text !== null) {
+      ignoreEditorChanges = false // re-enable changes to editor
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(mindbox_text)
     }
@@ -1827,8 +1831,10 @@
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
   let editorChangesWithTimeKept = new Set()
+  let ignoreEditorChanges = false
 
   function onEditorChange(text: string, keep_times = false) {
+    if (ignoreEditorChanges) return
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -3080,11 +3086,12 @@
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(obj)
       setTimeout(() => textArea(-1).focus()) // refocus (may require dispatch)
-    } else if (!obj) {
-      // NOTE: we take any falsy return as default behavior, but docs only specify returning nothing/unknown, allowing us to reserve other falsy values for future internal use (e.g. null to indicate non-handling)
+    } else if (obj === undefined) {
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange('')
       setTimeout(() => textArea(-1).blur()) // defocus, requires dispatch on chrome
+    } else if (obj === null || obj instanceof _Item) {
+      return obj // return null or item as is, w/o any changes to editor for full flexibility
     } else if (typeof obj != 'object' || !obj.text || typeof obj.text != 'string') {
       alert(`invalid return for command ${cmd} handled in item ${item.name}`)
     } else {
@@ -3842,7 +3849,7 @@
                 throw e
               }
             } else {
-              // as last effort, invoke on first listener that handles _on_command_<name>
+              // as last effort, invoke on first listener that defines _on_command_<name>
               let found_listener = false
               for (let item of items) {
                 if (!item.listen) continue
@@ -3860,7 +3867,6 @@
                   async: item.deepasync, // run async if item is async or has async deps
                   async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                 })
-                if (ret === null) continue // did not handle command (synchronously)
                 // return promise so caller can wait for command output
                 return (window['_mindbox_return'] = Promise.resolve(ret)
                   .then(obj => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError))
