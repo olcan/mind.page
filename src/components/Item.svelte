@@ -259,15 +259,12 @@
     let hasMacroErrors = false
     let macroIndex = 0
     const replaceMacro = (m, js) => {
-      if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
+      if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
       try {
-        let out = window['_item'](id).eval(js, {
+        return window['_item'](id).eval(js, {
           trigger: 'macro_' + macroIndex++,
-          cid: `${id}-${deephash}-${++cacheIndex}`,
+          cid: `${id}-${deephash}-${++cacheIndex}`, // enable replacement of $cid
         })
-        // NOTE: replacing $id/etc in macro output would deviate from treatment as typed-in content
-        // console.debug("macro output: ", out);
-        return out
       } catch (e) {
         hasMacroErrors = true
         // display missing dependencies using special style

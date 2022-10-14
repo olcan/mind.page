@@ -638,6 +638,28 @@
       // read text from specified block type (or whole item if type is blank)
       let text = type ? extractBlock(item.text, type, options['remove_empty_lines']) : item.text
 
+      // evaluate <<macros>> if requested (logic mirrors that in Item.svelte)
+      if (options['eval_macros']) {
+        let cacheIndex = 0
+        let macroIndex = 0
+        const replaceMacro = (m, js) => {
+          if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
+          try {
+            return this.eval(js, {
+              trigger: 'macro_' + macroIndex++,
+              cid: `${this.id}-${this.deephash}-${++cacheIndex}`, // enable replacement of $cid
+            })
+          } catch (e) {
+            console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
+            throw e
+          }
+        }
+        text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+      }
+
+      // replace $ids if requested
+      if (options['replace_ids']) text = text.replace(/\$id/g, skipEscaped(item.id))
+
       // remove empty lines if requested
       if (options['remove_empty_lines']) text = text.replace(/(^|\n)\s*(?:\n|$)/g, '$1').trim() // trim for last \n
 
@@ -658,9 +680,6 @@
           ''
         )
       }
-
-      // replace $ids if requested
-      if (options['replace_ids']) text = text.replace(/\$id/g, skipEscaped(item.id))
 
       content.push(text)
       // console.debug(content)
@@ -978,7 +997,7 @@
       // evaluate inline @{eval_macros}@
       let macroIndex = 0
       const replaceMacro = (m, js) => {
-        if (!isBalanced(js)) return m // skip unbalanced <<macros>>, e.g. ((x<<2)>>2)
+        if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x @{ 2) }@ 2)
         try {
           let out = this.eval(js, {
             trigger: 'eval_macro_' + macroIndex++,
@@ -997,7 +1016,7 @@
       // evaljs = evaljs.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro));
       evaljs = evaljs.replace(/@\{(.*?)\}@/g, skipEscaped(replaceMacro))
 
-      // replace any remaining $id, $hash, $deephash, just like in macros or _html(_*) blocks
+      // replace any remaining $id, $hash, $deephash, just like in _html(_*) blocks in Item.svelte
       evaljs = evaljs.replace(/\$id/g, skipEscaped(this.id))
       evaljs = evaljs.replace(/\$hash/g, skipEscaped(this.hash))
       evaljs = evaljs.replace(/\$deephash/g, skipEscaped(this.deephash))
