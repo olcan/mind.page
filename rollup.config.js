@@ -20,6 +20,7 @@ const onwarn = (warning, onwarn) =>
   (warning.code === 'CIRCULAR_DEPENDENCY' && /[/\\]@sapper[/\\]|[/\\]@jupyterlab[/\\]/.test(warning.message)) ||
   warning.code === 'THIS_IS_UNDEFINED' ||
   warning.code === 'EVAL' ||
+  warning.code === 'a11y-click-events-have-key-events' ||
   onwarn(warning)
 
 export default {
@@ -39,6 +40,7 @@ export default {
           dev,
           hydratable: true,
         },
+        onwarn,
       }),
       url({
         sourceDir: path.resolve(__dirname, 'src/node_modules/images'),
@@ -102,6 +104,7 @@ export default {
           hydratable: true,
           dev,
         },
+        onwarn,
       }),
       url({
         sourceDir: path.resolve(__dirname, 'src/node_modules/images'),
