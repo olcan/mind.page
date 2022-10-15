@@ -5257,6 +5257,10 @@
         update_time: Date.now(),
         focus_time: focus_time, // as of update_time; note focus_time tracks interactions beyond focused=true
         user_agent: navigator.userAgent,
+        screen_size: { width: screen.width, height: screen.height },
+        screen_avail: { left: screen['availLeft'], top: screen['availTop'], width: screen['availWidth'], height: screen['availHeight'] },
+        screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
+        hardware_concurrency: navigator.hardwareConcurrency,
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
         .catch(console.error)

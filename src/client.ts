@@ -87,6 +87,10 @@ window['marked'] = marked
 import { KernelManager, SessionManager, ServerConnection } from '@jupyterlab/services' // ~250K
 window['jupyter'] = { KernelManager, SessionManager, ServerConnection }
 
+// import/expose UAParser
+import { UAParser } from 'ua-parser-js' // ~16K
+window['UAParser'] = UAParser
+
 // comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
 window['_client_start_time'] = Math.round(performance.now())
 sapper.start({ target: document.querySelector('#sapper') })
