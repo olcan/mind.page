@@ -2329,7 +2329,10 @@
     )
 
     // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
-    hideIndex = Math.max(hideIndex, toggles.length == 0 ? hideIndexForSession : hideIndexMinimal)
+    const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
+    // disallow decrease in hideIndex unless there is a query, to improve focus
+    if (editorText.trim() || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
+
     // if ranking while unfocused, retreat to minimal index
     // if (!focused) hideIndex = hideIndexMinimal
 
