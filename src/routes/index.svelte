@@ -685,8 +685,9 @@
         )
       }
 
-      // remove hidden|removed markdown blocks or html sections (via comments) if requested (whole item reads only)
-      if (options['remove_hidden_parts'] && !type) {
+      // remove unrendered parts if requested (whole item reads only)
+      // includes hidden|removed markdown blocks or html sections (via delimiter comments)
+      if (options['remove_unrendered_parts'] && !type) {
         text = text.replace(blockRegExp('.*(?:_hidden|_removed) *'), '')
         text = text.replace(/<\!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs, '')
         text = text.replace(/<\!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, '')
