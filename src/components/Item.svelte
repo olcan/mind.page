@@ -1324,7 +1324,6 @@
             // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
             // these are sometimes used to prevent styling in markdown editors/previews/etc
             if (
-              elem.children.length &&
               !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
               _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
             )
