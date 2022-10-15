@@ -5523,164 +5523,18 @@
         onSnapshot(
           query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc')),
           snapshot => {
+            // ignore (and warn about) snapshots disabled via _disable_sync
             if (window['_disable_sync']) {
               console.warn('ignoring firestore snapshot due to _disable_sync')
               return
             }
-            let first_snapshot_items = 0
-            let first_snapshot_changes = 0
-            snapshot.docChanges().forEach(function (change) {
-              const doc = change.doc
-              // on first snapshot, if initialization has not started (initTime = 0), we simply append items into an array and then initialize; otherwise we ignore the first snapshot, which is presumably coming from a local cache so that it is cheap and worse than whatever we already got from the server
-              if (firstSnapshot) {
-                first_snapshot_changes++
-                if (change.type != 'added') console.warn('unexpected change type: ', change.type)
-                if (!initTime) {
-                  first_snapshot_items++
-                  // NOTE: snapshot items do not have updateTime/createTime available
-                  items.push(Object.assign(doc.data(), { id: doc.id }))
-                }
-                return
-              }
-              if (doc.metadata.hasPendingWrites) return // ignore local change
-              decryptItem(doc.data()).then(savedItem => {
-                // remote changes indicate non-focus: update sessionTime and invoke onFocus
-                sessionTime = Date.now() + 1000 /* margin for small time differences */
-                onFocus() // focused = document.hasFocus()
-
-                // console.debug("detected remote change:", change.type, doc.id);
-                if (change.type === 'added') {
-                  if (savedItem.hidden) {
-                    const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                    if (hiddenItemsByName.has(wrapper.name))
-                      console.warn(
-                        'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
-                      )
-                    hiddenItems.set(wrapper.id, wrapper)
-                    if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
-                      hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
-                    hiddenItemChangedRemotely(wrapper.name, change.type)
-                    return
-                  }
-                  // NOTE: remote add is similar to onEditorDone without js, saving, etc
-                  let item = initItemState({}, 0, {
-                    ...savedItem,
-                    id: doc.id,
-                    savedId: doc.id,
-                    savedTime: savedItem.time,
-                    savedAttr: _.cloneDeep(savedItem.attr),
-                    savedText: savedItem.text,
-                  })
-                  // update mutable ux properties from item.attr
-                  item.editable = item.attr?.editable ?? true
-                  item.pushable = item.attr?.pushable ?? false
-                  items = [item, ...items]
-                  // update indices as needed by itemTextChanged
-                  items.forEach((item, index) => indexFromId.set(item.id, index))
-                  itemTextChanged(
-                    0,
-                    item.text,
-                    true /* update_deps */,
-                    false /* run_deps */,
-                    false /* keep_time */,
-                    true /* remote */
-                  )
-                  lastEditorChangeTime = 0 // disable debounce even if editor focused
-                  // hideIndex++; // show one more item (skip this for remote add)
-                  onEditorChange(editorText) // integrate new item at index 0
-                } else if (change.type == 'removed') {
-                  if (savedItem.hidden) {
-                    const wrapper = hiddenItems.get(doc.id)
-                    if (!wrapper) {
-                      // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
-                      // console.warn("remote-deleted hidden item missing locally", doc.id);
-                      return
-                    }
-                    hiddenItems.delete(wrapper.id)
-                    hiddenItemsByName.delete(wrapper.name)
-                    // switch to any other hidden item w/ same name & with minimal id
-                    for (const dup of hiddenItems.values()) {
-                      if (dup.name == wrapper.name && !(hiddenItemsByName.get(dup.name)?.id < dup.id))
-                        hiddenItemsByName.set(dup.name, dup)
-                    }
-                    hiddenItemChangedRemotely(wrapper.name, change.type)
-                    return
-                  }
-                  // NOTE: remote remove is similar to deleteItem
-                  // NOTE: document may be under temporary id if it was added locally
-                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
-                  if (index === undefined) return // nothing to remove
-                  let item = items[index]
-                  itemTextChanged(
-                    index,
-                    '',
-                    true /* update_deps */,
-                    false /* run_deps */,
-                    false /* keep_time */,
-                    true /* remote */
-                  )
-                  items.splice(index, 1)
-                  if (index < hideIndex) hideIndex-- // back up hide index
-                  // update indices as needed by onEditorChange
-                  indexFromId = new Map<string, number>()
-                  items.forEach((item, index) => indexFromId.set(item.id, index))
-                  lastEditorChangeTime = 0 // disable debounce even if editor focused
-                  onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
-                  deletedItems.unshift({
-                    time: item.savedTime,
-                    attr: _.cloneDeep(item.savedAttr),
-                    text: item.savedText,
-                  }) // for /undelete
-                } else if (change.type == 'modified') {
-                  if (savedItem.hidden) {
-                    const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                    if (!hiddenItems.has(wrapper.id))
-                      console.warn('remote-modified hidden item missing locally', wrapper.id)
-                    else if (hiddenItems.get(wrapper.id).name != wrapper.name)
-                      console.warn(
-                        `remote-modified hidden item has new name ${wrapper.name}; older name ${
-                          hiddenItems.get(wrapper.id).name
-                        } will still work locally until reload`
-                      )
-                    hiddenItems.set(wrapper.id, wrapper)
-                    if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
-                      hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
-                    hiddenItemChangedRemotely(wrapper.name, change.type)
-                    return
-                  }
-                  // NOTE: remote modify is similar to _write without saving
-                  // NOTE: document may be under temporary id if it was added locally
-                  let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
-                  if (index === undefined) return // nothing to modify
-                  let item = items[index]
-                  item.time = item.savedTime = savedItem.time
-                  item.text = item.savedText = savedItem.text
-                  item.attr = savedItem.attr
-                  // update mutable ux properties from item.attr
-                  item.editable = item.attr?.editable ?? true
-                  item.pushable = item.attr?.pushable ?? false
-                  item.savedAttr = _.cloneDeep(item.attr)
-                  itemTextChanged(
-                    index,
-                    item.text,
-                    true /* update_deps */,
-                    false /* run_deps */,
-                    true /* keep_time */,
-                    true /* remote */
-                  )
-                  lastEditorChangeTime = 0 // disable debounce even if editor focused
-                  onEditorChange(editorText) // item time/text has changed
-                  // reset preview hash to prevent warning when previews are synced across tabs
-                  delete item.local_store?._preview_hash
-                }
-              })
-            }) // snapshot.docChanges().forEach
-
-            // if this is first snapshot and initialization has not started (initTime = 0), start it now
-            // either way set up callback to complete "synchronization" and set up welcome item if needed
+            // on first snapshot, if init has not started (!initTime), we simply populate items array and trigger initialization; otherwise we must be already initializing items received directly from server so we ignore the first snapshot (presumably coming from a local cache) and simply set up init completion logic
             if (firstSnapshot) {
               if (!initTime) {
+                // NOTE: snapshot items do not have updateTime/createTime available
+                snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
+                // note we refuse to initialize with errors to avoid potential corruption
                 if (firebase_errors > 0) {
                   if (confirm(`MindPage could not access Google Cloud (Firestore). Try again?`)) location.reload()
                 } else {
@@ -5688,10 +5542,14 @@
                   initialize()
                 }
               }
+              // set up callback to complete init (or "sync")
               Promise.resolve(initialization).then(() => {
-                if (!initialized) return // initialization failed, we should be signing out ...
+                if (!initialized) {
+                  // initialization failed, we should be signing out ...
+                  if (!signingOut) alert("initialization failed w/o signout")
+                  return
+                }
                 init_log(`synchronized ${items.length} items`)
-                firstSnapshot = false
 
                 // update instance info (user, init time, etc) in instances collection
                 instanceId ??= user.uid + '-' + initTime
@@ -5721,7 +5579,154 @@
                 if (narrating)
                   document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
               })
+
+              firstSnapshot = false
+              return // done with first snapshot
             }
+
+            // handle changes in non-first snapshot, waiting for init if necessary
+            Promise.resolve(initialization).then(() => {
+              if (!initialized) {
+                // initialization failed, we should be signing out ...
+                if (!signingOut) alert("initialization failed w/o signout")
+                return
+              }
+              snapshot.docChanges().forEach(function (change) {
+                const doc = change.doc
+                if (doc.metadata.hasPendingWrites) return // ignore local changes
+                decryptItem(doc.data()).then(savedItem => {
+                  // remote changes indicate non-focus: update sessionTime and invoke onFocus
+                  sessionTime = Date.now() + 1000 /* margin for small time differences */
+                  onFocus() // focused = document.hasFocus()
+
+                  // console.debug("detected remote change:", change.type, doc.id);
+                  if (change.type === 'added') {
+                    if (savedItem.hidden) {
+                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                      if (hiddenItemsByName.has(wrapper.name))
+                        console.warn(
+                          'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
+                        )
+                      hiddenItems.set(wrapper.id, wrapper)
+                      if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
+                        hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
+                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      return
+                    }
+                    // NOTE: remote add is similar to onEditorDone without js, saving, etc
+                    let item = initItemState({}, 0, {
+                      ...savedItem,
+                      id: doc.id,
+                      savedId: doc.id,
+                      savedTime: savedItem.time,
+                      savedAttr: _.cloneDeep(savedItem.attr),
+                      savedText: savedItem.text,
+                    })
+                    // update mutable ux properties from item.attr
+                    item.editable = item.attr?.editable ?? true
+                    item.pushable = item.attr?.pushable ?? false
+                    items = [item, ...items]
+                    // update indices as needed by itemTextChanged
+                    items.forEach((item, index) => indexFromId.set(item.id, index))
+                    itemTextChanged(
+                      0,
+                      item.text,
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      false /* keep_time */,
+                      true /* remote */
+                    )
+                    lastEditorChangeTime = 0 // disable debounce even if editor focused
+                    // hideIndex++; // show one more item (skip this for remote add)
+                    onEditorChange(editorText) // integrate new item at index 0
+                  } else if (change.type == 'removed') {
+                    if (savedItem.hidden) {
+                      const wrapper = hiddenItems.get(doc.id)
+                      if (!wrapper) {
+                        // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
+                        // console.warn("remote-deleted hidden item missing locally", doc.id);
+                        return
+                      }
+                      hiddenItems.delete(wrapper.id)
+                      hiddenItemsByName.delete(wrapper.name)
+                      // switch to any other hidden item w/ same name & with minimal id
+                      for (const dup of hiddenItems.values()) {
+                        if (dup.name == wrapper.name && !(hiddenItemsByName.get(dup.name)?.id < dup.id))
+                          hiddenItemsByName.set(dup.name, dup)
+                      }
+                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      return
+                    }
+                    // NOTE: remote remove is similar to deleteItem
+                    // NOTE: document may be under temporary id if it was added locally
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                    if (index === undefined) return // nothing to remove
+                    let item = items[index]
+                    itemTextChanged(
+                      index,
+                      '',
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      false /* keep_time */,
+                      true /* remote */
+                    )
+                    items.splice(index, 1)
+                    if (index < hideIndex) hideIndex-- // back up hide index
+                    // update indices as needed by onEditorChange
+                    indexFromId = new Map<string, number>()
+                    items.forEach((item, index) => indexFromId.set(item.id, index))
+                    lastEditorChangeTime = 0 // disable debounce even if editor focused
+                    onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
+                    deletedItems.unshift({
+                      time: item.savedTime,
+                      attr: _.cloneDeep(item.savedAttr),
+                      text: item.savedText,
+                    }) // for /undelete
+                  } else if (change.type == 'modified') {
+                    if (savedItem.hidden) {
+                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                      if (!hiddenItems.has(wrapper.id))
+                        console.warn('remote-modified hidden item missing locally', wrapper.id)
+                      else if (hiddenItems.get(wrapper.id).name != wrapper.name)
+                        console.warn(
+                          `remote-modified hidden item has new name ${wrapper.name}; older name ${
+                            hiddenItems.get(wrapper.id).name
+                          } will still work locally until reload`
+                        )
+                      hiddenItems.set(wrapper.id, wrapper)
+                      if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
+                        hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
+                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      return
+                    }
+                    // NOTE: remote modify is similar to _write without saving
+                    // NOTE: document may be under temporary id if it was added locally
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                    if (index === undefined) return // nothing to modify
+                    let item = items[index]
+                    item.time = item.savedTime = savedItem.time
+                    item.text = item.savedText = savedItem.text
+                    item.attr = savedItem.attr
+                    // update mutable ux properties from item.attr
+                    item.editable = item.attr?.editable ?? true
+                    item.pushable = item.attr?.pushable ?? false
+                    item.savedAttr = _.cloneDeep(item.attr)
+                    itemTextChanged(
+                      index,
+                      item.text,
+                      true /* update_deps */,
+                      false /* run_deps */,
+                      true /* keep_time */,
+                      true /* remote */
+                    )
+                    lastEditorChangeTime = 0 // disable debounce even if editor focused
+                    onEditorChange(editorText) // item time/text has changed
+                    // reset preview hash to prevent warning when previews are synced across tabs
+                    delete item.local_store?._preview_hash
+                  }
+                })
+              }) // snapshot.docChanges().forEach
+            }) // Promise.resolve(initialization).then
           },
           error => {
             console.error(error)
