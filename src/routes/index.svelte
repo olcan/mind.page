@@ -7,6 +7,7 @@
     onAuthStateChanged,
     GoogleAuthProvider,
     signInWithRedirect,
+    signInWithPopup,
     setPersistence,
     browserLocalPersistence,
   } = firebase?.auth ?? {}
@@ -5311,15 +5312,16 @@
     getAuth(firebase).useDeviceLanguage()
     setPersistence(getAuth(firebase), browserLocalPersistence).then(() => {
       // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
-      // NOTE: we have now switched to redirect on all platforms due to blocked popups on desktop
-      // if (!android()) getAuth(firebase).signInWithRedirect(provider);
-      // if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      // else {
-      //   signInWithPopup(getAuth(firebase), provider)
-      //     .then(() => location.reload())
-      //     .catch(console.error)
-      // }
+      // NOTE: switched to redirect on all platforms due to blocked popups on desktop
+      // NOTE 2: switched back to popup (on non-ios) as redirect stopped working on Ventura Safari
+      // if (!android()) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      // signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      else {
+        signInWithPopup(getAuth(firebase), provider)
+          .then(() => location.reload())
+          .catch(console.error)
+      }
     })
   }
 
@@ -5411,59 +5413,63 @@
       if (!readonly) {
         // if initializing items, wait for that before signing in user since errors can trigger signout
         Promise.resolve(initialization).then(() => {
-          onAuthStateChanged(getAuth(firebase), authUser => {
-            // console.debug("onAuthStateChanged", user, authUser);
-            if (readonly) {
-              console.warn('ignoring unexpected signin')
-              return
-            }
-            if (!authUser) {
-              if (anonymous) return // anonymous user can be signed in or out
-              if (signingOut) return // ignore during signout
-              document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-              if (confirm(`MindPage could not sign into your Google account. Try again?`)) signIn()
-              return
-            }
-            resetUser() // clean up first
-            user = authUser
-            init_log('signed in', user.email)
-            const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
-            localStorage.setItem('mindpage_user', userInfoString)
-            anonymous = readonly = false // just in case (should already be false)
-            signedin = true
-
-            // update user info (email, name, etc) in users collection
-            const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
-            // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
-            setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
-
-            // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
-            //       (this is the only case where user != getAuth(firebase).currentUser)
-            admin = isAdmin()
-            if (admin) {
-              useAnonymousAccount()
-            } else {
-              // set up server-side session cookie
-              // maximum max-age seems to be 7 days for Safari & we refresh daily
-              // store user's ID token as a __session cookie to send to server for preload
-              // __session is the only cookie allowed by firebase for efficient caching
-              // (see https://stackoverflow.com/a/44935288)
-              const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
-              function updateSessionCookie() {
-                user
-                  .getIdToken(false /*force refresh*/)
-                  .then(token => {
-                    // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
-                    document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
-                  })
-                  .catch(console.error)
+          onAuthStateChanged(
+            getAuth(firebase),
+            authUser => {
+              // console.debug("onAuthStateChanged", user, authUser)
+              if (readonly) {
+                console.warn('ignoring unexpected signin')
+                return
               }
-              updateSessionCookie()
-              setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
-            }
+              if (!authUser) {
+                if (anonymous) return // anonymous user can be signed in or out
+                if (signingOut) return // ignore during signout
+                document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
+                if (confirm(`MindPage could not sign into your Google account. Try again?`)) signIn()
+                return
+              }
+              resetUser() // clean up first
+              user = authUser
+              init_log('signed in', user.email)
+              const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
+              localStorage.setItem('mindpage_user', userInfoString)
+              anonymous = readonly = false // just in case (should already be false)
+              signedin = true
 
-            initFirebaseRealtime()
-          })
+              // update user info (email, name, etc) in users collection
+              const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
+              // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
+              setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
+
+              // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
+              //       (this is the only case where user != getAuth(firebase).currentUser)
+              admin = isAdmin()
+              if (admin) {
+                useAnonymousAccount()
+              } else {
+                // set up server-side session cookie
+                // maximum max-age seems to be 7 days for Safari & we refresh daily
+                // store user's ID token as a __session cookie to send to server for preload
+                // __session is the only cookie allowed by firebase for efficient caching
+                // (see https://stackoverflow.com/a/44935288)
+                const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
+                function updateSessionCookie() {
+                  user
+                    .getIdToken(false /*force refresh*/)
+                    .then(token => {
+                      // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
+                      document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
+                    })
+                    .catch(console.error)
+                }
+                updateSessionCookie()
+                setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+              }
+
+              initFirebaseRealtime()
+            },
+            console.error
+          )
         })
       } else if (anonymous && items_preload.length == 0) {
         initFirebaseRealtime() // synchronize anonymous items using firebase realtime
