@@ -685,6 +685,10 @@
         )
       }
 
+      // remove hidden|removed blocks if requested (for blank type [whole item read] only)
+      if (options['remove_hidden_blocks'] && !type)
+        text = text.replace(blockRegExp('.*(?:_hidden|_removed) *'), '')
+
       content.push(text)
       // console.debug(content)
       return content.filter(s => s).join('\n')
