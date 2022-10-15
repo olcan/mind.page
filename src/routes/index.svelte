@@ -4664,6 +4664,7 @@
   let lastScrollTime = 0
   let historyUpdatePending = false
   function onScroll() {
+    if (!headerdiv) return
     // adjust header button text based on scroll position if visible
     const y = document.body.scrollTop - headerdiv.offsetTop
     if (y < 24) {
@@ -5418,6 +5419,7 @@
             }
             if (!authUser) {
               if (anonymous) return // anonymous user can be signed in or out
+              if (signingOut) return // ignore during signout
               document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
               if (confirm(`MindPage could not sign into your Google account. Try again?`)) signIn()
               return
