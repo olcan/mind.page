@@ -5269,7 +5269,12 @@
         focus_time: focus_time, // as of update_time; note focus_time tracks interactions beyond focused=true
         user_agent: navigator.userAgent,
         screen_size: { width: screen.width, height: screen.height },
-        screen_avail: { left: screen['availLeft'], top: screen['availTop'], width: screen['availWidth'], height: screen['availHeight'] },
+        screen_avail: {
+          left: screen['availLeft'],
+          top: screen['availTop'],
+          width: screen['availWidth'],
+          height: screen['availHeight'],
+        },
         screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
         hardware_concurrency: navigator.hardwareConcurrency,
       }
@@ -5413,8 +5418,8 @@
             }
             if (!authUser) {
               if (anonymous) return // anonymous user can be signed in or out
-              console.error('failed to sign in') // can happen in chrome for localhost, and on android occasionally
               document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
+              if (confirm(`MindPage could not sign into your Google account. Try again?`)) signIn()
               return
             }
             resetUser() // clean up first
@@ -5561,7 +5566,7 @@
               Promise.resolve(initialization).then(() => {
                 if (!initialized) {
                   // initialization failed, we should be signing out ...
-                  if (!signingOut) alert("initialization failed w/o signout")
+                  if (!signingOut) alert('initialization failed w/o signout')
                   return
                 }
                 init_log(`synchronized ${items.length} items`)
@@ -5603,7 +5608,7 @@
             Promise.resolve(initialization).then(() => {
               if (!initialized) {
                 // initialization failed, we should be signing out ...
-                if (!signingOut) alert("initialization failed w/o signout")
+                if (!signingOut) alert('initialization failed w/o signout')
                 return
               }
               snapshot.docChanges().forEach(function (change) {
