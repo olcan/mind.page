@@ -425,143 +425,179 @@
       .split('\n')
       .map(line => {
         let str = line
-        if (!insideBlock && str.match(/^\s*```/s))
-          // allow extra chars (consistent w/ marked)
-          insideBlock = true
-        else if (insideBlock && str.match(/^\s*```\s*$/s))
-          // do not allow extra chars (consistent w/ marked)
+        if (!insideBlock && str.match(/^\s*```/s)) insideBlock = true
+        else if (insideBlock && str.match(/^\s*```\s*$/s)) {
           insideBlock = false
+          lastLine = line
+          return str
+        }
 
-        // highlights errors/warnings using console styling even if outside blocks
+        // also detect indented blocks
+        const indentedBlock = !!str.match(/^     *(?:[^-*+ ]| *$)/)
+
+        // start indented blocks with an extra \n
+        if (!insideBlock && indentedBlock && !lastLine.match(/^     *(?:[^-*+ ]| *$)/)) str = '\n' + str
+
+        // skip further processing inside blocks, including indented blocks
+        if (insideBlock || indentedBlock) {
+          lastLine = line
+          return str
+        }
+
+        // break lines using <br> in menu items w/ flex-display paragraphs (<p> tags)
+        // this forces marked to generate separate paragraphs for each line
+        // otherwise marked.parse(... {breaks:true}) does NOT break lines
+        if (isMenu) str = str += '<br>\n'
+
+        // highlight errors/warnings using console styling even if outside blocks
         // (to be consistent with detection/ordering logic in index.svelte onEditorChange)
-        if (!insideBlock && str.match(/^(?:ERROR|WARNING):/)) {
+        if (str.match(/^(?:ERROR|WARNING):/)) {
           str = str
             .replace(/^(ERROR:.+?)(; STACK:|$)/, '<span class="console-error">$1</span>$2')
             .replace(/^(WARNING:.*)$/, '<span class="console-warn">$1</span>')
             .replace(/(; STACK:.+)$/, '<span class="console-debug">$1</span>')
         }
 
-        // preserve line breaks by inserting <br>\n outside of code blocks
-        // (we miss indented blocks that start with bullets [-*+] for now since it requires prior-line context)
-        // (we exclude /^\s*\|/ to avoid breaking table syntax, which is tricky to match exactly)
-        // (we also exclude /^\s*>/ to break inside blockquotes for now)
-        // (we also ignore spacer lines after tables or blockquotes, as required for closing/splitting)
-        // (also note since we process lines, \s does not match \n)
-        if (
-          !insideBlock &&
-          (str.match(/\\$/) || !str.match(/^\s*```|^     *[^-*+ ]|^\s*---+|^\s*\[[^^].*\]:|^\s*<|^\s*>|^\s*\|/)) &&
-          (str.match(/\S/) || !lastLine.match(/^\s*>|^\s*\|/))
+        // preserve extra spaces between non-whitespace, except inside or between html tags (using exclusion prefix)
+        str = str.replace(
+          /<\w(?:"[^"]*"|[^>"])*?>.*(?:<\/\w(?:"[^"]*"|[^>"])*?>)?|(\S) ( +)(\S)/g,
+          (m, pfx, spc, sfx) => {
+            if (!pfx) return m // matched inside html tag
+            return pfx + spc.replace(/ /g, '&nbsp;') + sfx
+          }
         )
-          str = str + '<br>\n'
+
+        // insert spacers at empty lines (otherwise ignored by marked)
+        // if (!str.match(/\S/)) str += '&nbsp;'
+
+        // insert spacers at empty lines in blockquotes (otherwise ignored by marked)
+        if (str.match(/^[> ]*$/)) str += '&nbsp;'
 
         // NOTE: some lines (e.g. html tag lines) require an extra \n for markdown parser
-        if (!insideBlock && str.match(/^\s*```|^     *[^-*+ ]|^\s*</)) str += '\n'
+        if (str.match(/^\s*```|^\s*</)) str += '\n'
 
-        // NOTE: for blockquotes (>...) we break lines using double-space
-        if (!insideBlock && str.match(/^\s*>/)) str += '  '
-
-        const depline = str.startsWith('<div class="deps-and-dependents">')
-        if (!insideBlock && (depline || !str.match(/^\s*```|^     *[^-*+ ]/))) {
-          // wrap math inside span.math (unless text matches search terms)
-          if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has('$')))
-            str = str.replace(
-              /([$]?[$]`.+?`[$][$]?)/g,
-              skipEscaped((m, math) =>
-                (math.startsWith('$`') && math.endsWith('`$')) || (math.startsWith('$$`') && math.endsWith('`$$'))
-                  ? wrapMath(math)
-                  : m
-              )
+        // wrap math inside span.math (unless text matches search terms)
+        if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has('$')))
+          str = str.replace(
+            /([$]?[$]`.+?`[$][$]?)/g,
+            skipEscaped((m, math) =>
+              (math.startsWith('$`') && math.endsWith('`$')) || (math.startsWith('$$`') && math.endsWith('`$$'))
+                ? wrapMath(math)
+                : m
             )
-          // style vertical separator bar (│)
-          str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
-          // wrap #tags inside clickable <mark></mark>
-          if (tags.length)
-            str = replaceTags(str, tagRegex, (m, pfx, tag, offset, orig_str) => {
-              // disallow matching prefix ](\s+ to avoid matching tag links (unlike in editor where we want them)
-              if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
-              // drop hidden tag prefix
-              const hidden = tag.startsWith('#_')
-              tag = tag.replace(/^#_/, '#')
-              // make relative tags absolute
-              if (label && tag != label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
-              else if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
-              else if (label && tag != label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
+          )
 
-              const lctag = tag.toLowerCase()
-              let classNames = ''
-              if (missingTags.has(lctag)) classNames += ' missing'
-              if (hidden) classNames += ' hidden'
-              if (lctag == label) {
-                classNames += ' label'
-                if (labelUnique) classNames += ' unique'
-              }
-              classNames = classNames.trim()
-              // if (depline) classNames = ""; // disable styling for deps/dependents
-              if (classNames) classNames = ` class="${classNames}"`
+        // style vertical separator bar (│)
+        str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
 
-              // shorten tag if possible
-              // we can shorten children (<label>/child) and siblings (<parentLabel>/sibling) and parent-siblings (<grandParentLabel>/parent)
-              let reltag = tag
-              if (
-                label &&
-                tag.length > label.length &&
-                tag[label.length] == '/' &&
-                tag.substring(0, label.length) == labelText
-              )
-                reltag = '#' + tag.substring(label.length)
-              else if (
-                parentLabel &&
-                tag != labelText &&
-                tag.length > parentLabel.length &&
-                tag[parentLabel.length] == '/' &&
-                tag.substring(0, parentLabel.length) == parentLabelText
-              )
-                reltag = '#' + tag.substring(parentLabel.length)
-              else if (
-                grandParentLabel &&
-                tag != labelText &&
-                tag.length > grandParentLabel.length &&
-                tag[grandParentLabel.length] == '/' &&
-                tag.substring(0, grandParentLabel.length) == grandParentLabelText
-              )
-                reltag = '#' + tag.substring(grandParentLabel.length)
+        // wrap #tags inside clickable <mark></mark>
+        if (tags.length) {
+          str = replaceTags(str, tagRegex, (m, pfx, tag, offset, orig_str) => {
+            // disallow matching prefix ](\s+ to avoid matching tag links (unlike in editor where we want them)
+            if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
+            // drop hidden tag prefix
+            const hidden = tag.startsWith('#_')
+            tag = tag.replace(/^#_/, '#')
+            // make relative tags absolute
+            if (label && tag != label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
+            else if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
+            else if (label && tag != label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
 
-              // shorten selected label to its context label (i.e. closest existing ancestor name)
-              if (lctag == label && contextLabel && (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag)))
-                reltag = '#…' + tag.substring(contextLabel.length)
+            const lctag = tag.toLowerCase()
+            let classNames = ''
+            if (missingTags.has(lctag)) classNames += ' missing'
+            if (hidden) classNames += ' hidden'
+            if (lctag == label) {
+              classNames += ' label'
+              if (labelUnique) classNames += ' unique'
+            }
+            classNames = classNames.trim()
+            // if (depline) classNames = ""; // disable styling for deps/dependents
+            if (classNames) classNames = ` class="${classNames}"`
 
-              // shorten prefix-matching labels
-              if (
-                lctag == label &&
-                label.includes('/') &&
-                label.length > firstTerm.length &&
-                label[firstTerm.length] == '/' &&
-                label.substring(0, firstTerm.length) == firstTerm
-              )
-                reltag = '#…' + tag.substring(firstTerm.length)
-              return (
-                `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
-                `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
-                  reltag
-                )}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
-                `${renderTag(reltag)}</mark>`
-              )
-            })
+            // shorten tag if possible
+            // we can shorten children (<label>/child) and siblings (<parentLabel>/sibling) and parent-siblings (<grandParentLabel>/parent)
+            let reltag = tag
+            if (
+              label &&
+              tag.length > label.length &&
+              tag[label.length] == '/' &&
+              tag.substring(0, label.length) == labelText
+            )
+              reltag = '#' + tag.substring(label.length)
+            else if (
+              parentLabel &&
+              tag != labelText &&
+              tag.length > parentLabel.length &&
+              tag[parentLabel.length] == '/' &&
+              tag.substring(0, parentLabel.length) == parentLabelText
+            )
+              reltag = '#' + tag.substring(parentLabel.length)
+            else if (
+              grandParentLabel &&
+              tag != labelText &&
+              tag.length > grandParentLabel.length &&
+              tag[grandParentLabel.length] == '/' &&
+              tag.substring(0, grandParentLabel.length) == grandParentLabelText
+            )
+              reltag = '#' + tag.substring(grandParentLabel.length)
+
+            // shorten selected label to its context label (i.e. closest existing ancestor name)
+            if (lctag == label && contextLabel && (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag)))
+              reltag = '#…' + tag.substring(contextLabel.length)
+
+            // shorten prefix-matching labels
+            if (
+              lctag == label &&
+              label.includes('/') &&
+              label.length > firstTerm.length &&
+              label[firstTerm.length] == '/' &&
+              label.substring(0, firstTerm.length) == firstTerm
+            )
+              reltag = '#…' + tag.substring(firstTerm.length)
+            return (
+              `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
+              `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
+                reltag
+              )}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
+              `${renderTag(reltag)}</mark>`
+            )
+          })
         }
+
         // replace URLs (except in lines that look like a reference-style link)
-        if (!insideBlock && !str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str)
+        if (!str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str)
 
         // close table with extra \n to prevent leading pipe ambiguity (now required) and line-eating
-        if (!insideBlock && lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = '\n' + str
+        if (lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = '\n' + str
 
-        // close blockquotes with an extra \n before next line
-        // NOTE: this does not work for nested blockquotes (e.g. going from  >> to >), which requires counting >s
-        if (!insideBlock && lastLine.match(/^\s*>/) && !line.match(/^\s*>/)) str = '\n' + str
+        // close bullet lists with extra \n before next line
+        if (lastLine.match(/^\s*[-*+]/) && !line.match(/^\s*[-*+]/)) str = '\n' + str
+
+        // handle horizontal rule syntax and disable heading syntax based on -|= to prevent ambiguity
+        if (str.match(/^ *(?:---+|___+|\*\*\*+) *$/)) str = `<hr>`
+        // disable heading syntax based on -|= to prevent ambiguity w/ horizontal rule syntax
+        // we do this by inserting an empty line that is removed post-markdown
+        else if (line.match(/^ *(?:-+|=+) *$/)) str += ' &nbsp;'
+
+        // close blockquotes with an empty line at upper level
+        // see https://github.com/markedjs/marked/issues/225 for nested blockquote behavior in marked & gfm
+        const last_line_blockquote_depth = lastLine
+          .match(/^[> ]*/)
+          .pop()
+          .replace(/ /g, '').length
+        const line_blockquote_depth = line
+          .match(/^[> ]*/)
+          .pop()
+          .replace(/ /g, '').length
+        if (line_blockquote_depth < last_line_blockquote_depth) str = line.match(/^[> ]*/).pop() + '\n' + str
+
         lastLine = line
         return str
       })
       .join('\n')
-      .replace(/\\<br>\n\n/g, '')
+      .replace(/\\\n/g, '')
+      .replace(/\\<br>\n\n/g, '') // used inside menu items
       .replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
 
     // remove *_removed blocks
@@ -640,7 +676,7 @@
     let checkboxIndex = 0
     text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => m + '%%' + checkboxIndex++ + '%%')
 
-    text = marked.parse(text)
+    text = marked.parse(text, { breaks: true })
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
     // NOTE: you can test by creating an empty block and seeing its size and non-matching of :empty
@@ -1262,39 +1298,40 @@
       }
     })
 
-    // hide any top-level <br> preceding 0-height tail, including hidden tags, hidden blocks, etc
-    // process matching tags in reverse order to handle arbitrarily long series of br tags
-    // this is in addition to hiding rules in css, e.g. see rules for br:last-child below
+    // hide any top-level <br> or <p> preceding or leading 0-height tail, including hidden tags, hidden blocks, etc
+    // process matching tags in reverse order to handle arbitrarily long series of tags
     // allows useful visual spacing in editor of item tail w/ hidden code, tags, etc
-    Array.from(itemdiv.querySelectorAll('.item > br'))
+    Array.from(itemdiv.querySelectorAll('.item > :is(br,p)'))
       .reverse()
-      .forEach((br: HTMLElement) => {
+      .forEach((x: HTMLElement) => {
         let height_below = 0
-        let elem = br
-        while ((elem = elem.nextElementSibling as HTMLElement)) {
-          // ignore auto-generated tail divs
-          if (
-            elem.className == 'deps-and-dependents' ||
-            elem.className == 'deps-summary' ||
-            elem.className == 'dependents-summary' ||
-            elem.className == 'log-summary'
-          )
-            continue
-          // ignore _log blocks that are toggled via .showLogs class
-          if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
-          // ignore hidden tags, even if visible (e.g. when missing)
-          if (elem.classList.contains('hidden')) continue
-          // ignore container elements (div, p, etc) that only contain hidden tags or <br> tags
-          // these are sometimes used to prevent styling in markdown editors/previews/etc
-          if (
-            elem.children.length &&
-            !elem.innerText &&
-            _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
-          )
-            continue
-          height_below += elem.offsetHeight
-        }
-        if (height_below == 0) br.style.display = 'none'
+        let elem = x
+        if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement // skip <br> itself
+        if (elem)
+          do {
+            // ignore auto-generated tail divs
+            if (
+              elem.className == 'deps-and-dependents' ||
+              elem.className == 'deps-summary' ||
+              elem.className == 'dependents-summary' ||
+              elem.className == 'log-summary'
+            )
+              continue
+            // ignore _log blocks that are toggled via .showLogs class
+            if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
+            // ignore hidden tags, even if visible (e.g. when missing)
+            if (elem.classList.contains('hidden')) continue
+            // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
+            // these are sometimes used to prevent styling in markdown editors/previews/etc
+            if (
+              elem.children.length &&
+              !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
+              _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
+            )
+              continue
+            height_below += elem.offsetHeight
+          } while ((elem = elem.nextElementSibling as HTMLElement))
+        if (height_below == 0) x.style.display = 'none'
       })
 
     // trigger execution of script tags by adding/removing them to <head>
@@ -2045,25 +2082,25 @@
   }
 
   /* .menu styling: paragraphs become flex boxes */
-  :global(.item .menu p) {
+  :global(.item > .menu p) {
     display: flex;
     line-height: 24px; /* same as .menu img below */
     width: 96%; /* align right side while leaving space for item number and tapping for editing */
   }
-  :global(.item .menu a),
-  :global(.item .menu mark:not(.hidden)) {
+  :global(.item > .menu a),
+  :global(.item > .menu mark:not(.hidden)) {
     padding: 4px;
     font-size: 110%;
     font-weight: 600;
   }
-  :global(.item .menu p a, .item .menu p mark:not(.hidden)) {
+  :global(.item > .menu p a, .item > .menu p mark:not(.hidden)) {
     flex: 1 1 auto;
     display: flex;
     justify-content: center;
     align-items: center;
     margin: 2px;
   }
-  :global(.item .menu img) {
+  :global(.item > .menu img) {
     width: 24px;
     height: 24px;
     min-width: 24px; /* necessary on smaller device */
@@ -2096,21 +2133,13 @@
     display: none;
   }
   /* hide tags more aggressively in menu items */
-  :global(.item .menu mark.hidden:not(.missing/*, .selected*/)) {
+  :global(.item > .menu mark.hidden:not(.missing/*, .selected*/)) {
     display: none;
   }
 
-  /* disable <br> added by marked as last child under other html tags (e.g. p) */
-  :global(.item br:last-child) {
+  /* disable <br> added by marked as last child under <p> in menu items */
+  :global(.item > .menu p > br:last-child) {
     display: none;
-  }
-  /* preserve <br> inside blockquotes */
-  :global(.item blockquote br:last-child) {
-    display: inline;
-  }
-  /* preserve <br> inside tables */
-  :global(.item table br:last-child) {
-    display: inline;
   }
 
   :global(.item mark.hidden.missing) {
@@ -2149,8 +2178,8 @@
     flex-grow: 1;
   }
   /* disable spacers inside .menu highlights when prefix and suffix matches coincide */
-  :global(.item .menu mark .spacer:nth-last-of-type(4)),
-  :global(.item .menu mark .spacer:nth-last-child(2)) {
+  :global(.item > .menu mark .spacer:nth-last-of-type(4)),
+  :global(.item > .menu mark .spacer:nth-last-child(2)) {
     display: none;
   }
 
@@ -2439,8 +2468,8 @@
     }
 
     /* smaller menu fonts can take a little more weight */
-    /* :global(.item .menu a),
-    :global(.item .menu mark) {
+    /* :global(.item > .menu a),
+    :global(.item > .menu mark) {
       font-weight: 700;
     } */
   }
