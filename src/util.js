@@ -7,6 +7,8 @@ export function numberWithCommas(x) {
 
 export function blockRegExp(type_regex) {
   if (type_regex.source) type_regex = type_regex.source // get source string if passed regex
+  // sanity check against patterns that can match across multiple blocks
+  if (type_regex.match(/\.[+*]/)) throw new Error(`invalid block type regex '${type_regex}' can match across blocks`)
   return new RegExp('((?:^|\\n) *)```(' + type_regex + ')\\n( *|.*?\\n *)```', 'ugsi')
 }
 
