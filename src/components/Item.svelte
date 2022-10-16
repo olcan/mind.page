@@ -230,6 +230,11 @@
   // create cache objects (subobjects are created on first entry)
   window['_elem_cache'] ??= {}
   window['_html_cache'] ??= {}
+  const _elem_cache_limit_per_item = 10
+  const _html_cache_limit_per_item = 10
+  function limit_cache_size(cache, limit) {
+    while (cache.size > limit) cache.delete(cache.keys().next().value)
+  }
 
   function toHTML(
     text: string,
@@ -247,10 +252,10 @@
   ) {
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
-    if (!window['_html_cache'][id]) window['_html_cache'][id] = {}
-    if (window['_html_cache'][id].hasOwnProperty(cache_key)) {
+    window['_html_cache'][id] ??= new Map()
+    if (window['_html_cache'][id].has(cache_key)) {
       // console.debug("toHTML skipped");
-      return window['_html_cache'][id][cache_key]
+      return window['_html_cache'][id].get(cache_key)
     }
     // console.debug("toHTML", name, deephash, version);
 
@@ -804,8 +809,9 @@
 
     // do not cache with macro errors
     if (hasMacroErrors) return text
-    if (!window['_html_cache'][id]) return text
-    else return (window['_html_cache'][id][cache_key] = text)
+    window['_html_cache'][id].set(cache_key, text)
+    limit_cache_size(window['_html_cache'][id], _html_cache_limit_per_item)
+    return text
   }
 
   // we use afterUpdate hook to make changes to the DOM after rendering/updates
@@ -816,13 +822,13 @@
   function cacheElems() {
     // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
     itemdiv.querySelectorAll('[_cache_key]').forEach(elem => {
-      if (!window['_elem_cache'][id]) window['_elem_cache'][id] = {}
+      window['_elem_cache'][id] ??= new Map()
       if (elem.hasAttribute('_cached')) return // already cached/restored
       const key = elem.getAttribute('_cache_key')
-      if (window['_elem_cache'][id].hasOwnProperty(key)) {
+      if (window['_elem_cache'][id].has(key)) {
         // console.debug("reusing cached element", key, elem.tagName, elem.id);
-        // if (window["_elem_cache"][id][key].querySelector("script")) console.warn("cached element contains script(s)");
-        let cached = window['_elem_cache'][id][key]
+        // if (window["_elem_cache"][id].get(key).querySelector("script")) console.warn("cached element contains script(s)");
+        let cached = window['_elem_cache'][id].get(key)
         if (document.getElementById('cache-div').contains(cached)) {
           cached.remove()
           cached.style.width = cached['_width']
@@ -843,7 +849,8 @@
         elem.setAttribute('_cached', Date.now().toString())
         // console.debug("caching element", key, elem.tagName);
         // (elem as HTMLElement).style.width = window.getComputedStyle(elem).width;
-        window['_elem_cache'][id][key] = elem //.cloneNode(true);
+        window['_elem_cache'][id].set(key, elem) //.cloneNode(true);
+        limit_cache_size(window['_elem_cache'][id], _elem_cache_limit_per_item)
       }
     })
   }
@@ -871,7 +878,7 @@
 
     // itemdiv or its parent can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
     if (!itemdiv?.parentElement) {
-      Object.values(window['_elem_cache'][id] || {}).forEach(adoptCachedElem)
+      window['_elem_cache'][id]?.forEach(adoptCachedElem)
       return
     }
 
@@ -1406,7 +1413,7 @@
 
   onDestroy(() => {
     // move cached elements into dom to prevent offloading by browser
-    Object.values(window['_elem_cache'][id] || {}).forEach(adoptCachedElem)
+    window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
   if (!window['_dot_rendered']) {
