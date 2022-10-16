@@ -285,7 +285,7 @@
     })
 
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
-    text = text.replace(blockRegExp('(?:_markdown|_md).*?'), (m, pfx, type, body) => {
+    text = text.replace(blockRegExp('(?:_markdown|_md)\\S* *'), (m, pfx, type, body) => {
       if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
       // remove trailing newline in body (as in extractBlock) to avoid extra lines between blocks
       // for tables/blockquotes, we instead append an escape to force breaking across blocks w/o forcing spacing
@@ -1145,18 +1145,20 @@
       let math = []
       itemdiv.querySelectorAll('span.math,span.math-display').forEach(elem => {
         if (elem.hasAttribute('_rendered')) return
-        // console.debug("rendering math", math.innerHTML);
-        elem.setAttribute('_rendered', Date.now().toString())
+        // console.debug("rendering math", elem.innerHTML);
         // unwrap code blocks (should exist for both $``$ and $$``$$)
         let code
         if ((code = elem.querySelector('code'))) code.outerHTML = code.innerHTML
         // insert delimiters if missing (in particular for multi-line _math blocks)
-        if (!elem.textContent.match(/^\$.+\$$/)) {
-          elem.innerHTML = '$$' + '\n' + elem.innerHTML + '\n' + '$$'
-        }
+        if (!elem.textContent.match(/^\$.+\$$/)) elem.innerHTML = '$$' + '\n' + elem.innerHTML + '\n' + '$$'
         math.push(elem)
       })
-      renderMath(math)
+      renderMath(math, () => {
+        math.forEach(elem => {
+          // console.debug("rendered math", elem.innerHTML)
+          elem.setAttribute('_rendered', Date.now().toString())
+        })
+      })
     })
 
     // linkify urls & tags in code comments (regexes from util.js)
@@ -1364,7 +1366,7 @@
         ) {
           console.warn('script will execute at every render due to uncached parent (missing _cache_key)')
         }
-        script.remove() // remove script to indicate execution
+
         // NOTE: we do not support .src yet, when we do we need to fetch the script using AJAX, prefix w/ __id, and ensure proper completion/error handling via script.onerror assuming that works.
         if (script.hasAttribute('src')) {
           console.error('script src not supported yet')
@@ -1389,6 +1391,7 @@
           }
         }
 
+        script.remove() // remove script to indicate execution
         pendingScripts--
         if (pendingScripts > 0) return
         // console.debug(`all scripts done in item ${name}`);

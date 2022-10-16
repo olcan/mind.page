@@ -687,13 +687,19 @@
         )
       }
 
-      // remove unrendered parts if requested (whole item reads only)
+      // remove hidden|removed sections if requested (whole item reads only)
       // includes hidden|removed markdown blocks or html sections (via delimiter comments)
-      if (options['remove_unrendered_parts'] && !type) {
-        text = text.replace(blockRegExp('.*(?:_hidden|_removed) *'), '')
+      if (options['remove_hidden'] && !type) {
+        text = text.replace(blockRegExp('.*_hidden *'), '')
         text = text.replace(/<\!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs, '')
+      }
+      if (options['remove_removed'] && !type) {
+        text = text.replace(blockRegExp('.*_removed *'), '')
         text = text.replace(/<\!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, '')
       }
+
+      // remove specific blocks if requested (whole item reads only)
+      if (options['remove_blocks'] && !type) text = text.replace(blockRegExp(options['remove_blocks']), '')
 
       content.push(text)
       // console.debug(content)
@@ -4077,7 +4083,7 @@
   function onItemResized(id, container, trigger: string) {
     if (!container) return
     const index = indexFromId.get(id)
-    if (index == undefined) return
+    if (index == undefined) return // item was deleted
     let item = items[index]
     // exclude any ._log elements since they are usually collapsed
     let logHeight = 0
@@ -4086,9 +4092,19 @@
     const prevHeight = item.height
     if (prevHeight == 0) {
       if (height == 0) console.warn(`zero initial height for item ${item.name} at position ${index + 1}`)
-      if (item.resolve_render) item.resolve_render(container.closest('.super-container')) // resolve w/ super container
+      item.resolve_height?.(height)
+      item.resolve_height = null
+    }
+    // count number of elements that will trigger additional resizes
+    // if no more resizes are expected, invoke resolve_render (if set up)
+    item.pendingElems = container.querySelectorAll(
+      ['script', 'img:not([_loaded])', ':is(span.math,span.math-display):not([_rendered])'].join()
+    ).length
+    if (item.pendingElems == 0) {
+      item.resolve_render?.(container.closest('.super-container'))
       item.resolve_render = null
     }
+
     if (height == prevHeight) return // nothing has changed
     if (height == 0 && prevHeight > 0) {
       console.warn(`ignoring zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`)
@@ -5103,7 +5119,8 @@
     item.timeString = ''
     item.timeOutOfOrder = false
     item.height = 0
-    item.resolve_render = null // invoked from onItemResized on first resize during render
+    item.resolve_height = null // invoked from onItemResized on first resize during render
+    item.resolve_render = null // invoked from onItemResized when rendering is complete
     item.column = 0
     item.lastColumn = 0
     item.nextColumn = -1
@@ -5237,30 +5254,26 @@
   function renderRange(start, end, chunk, cutoff, delay) {
     renderStart = start
     renderEnd = Math.min(cutoff, end)
-    return tick()
-      .then(() =>
-        Promise.all(
-          items.slice(renderStart, renderEnd).map(
-            item =>
-              new Promise(resolve => {
-                if (item.height > 0) resolve(_item(item.id).elem)
-                else item.resolve_render = resolve // resolve later in onItemResized
-              })
-          )
-        )
+    return Promise.all(
+      items.slice(renderStart, renderEnd).map(
+        item =>
+          new Promise(resolve => {
+            if (item.height > 0) resolve(item.height)
+            else item.resolve_height = resolve // resolve later in onItemResized
+          })
       )
-      .then(() => {
-        if (!keepOnPageDuringDelay) renderStart = renderEnd
-        if (renderEnd < cutoff) {
-          // init_log(`rendered items ${renderStart}-${renderEnd}`);
-          if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
-            init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
-          tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
-        } else {
-          init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
-          rendered = true
-        }
-      })
+    ).then(() => {
+      if (!keepOnPageDuringDelay) renderStart = renderEnd
+      if (renderEnd < cutoff) {
+        // init_log(`rendered items ${renderStart}-${renderEnd}`);
+        if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
+          init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
+        tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
+      } else {
+        init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
+        rendered = true
+      }
+    })
   }
 
   async function renderItem(item) {
@@ -5268,14 +5281,18 @@
     if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
     renderStart = item.index
     renderEnd = item.index + 1
-    return tick().then(
-      () =>
-        new Promise(resolve => {
-          const _item = __item(item.id)
-          if (_item.height > 0) resolve(item.elem)
-          else _item.resolve_render = resolve // resolve later in onItemResized
-        })
-    )
+    return new Promise(resolve => {
+      const _item = __item(item.id)
+      if (_item.pendingElems == 0) resolve(item.elem)
+      else {
+        // chain together multiple render promises to be resolved together
+        const prev_resolve = _item.resolve_render
+        _item.resolve_render = elem => {
+          prev_resolve?.(elem)
+          resolve(elem)
+        }
+      }
+    })
   }
 
   let updateInstance_task
