@@ -170,6 +170,10 @@ const sapper_server = express().use(
           res.send(data)
         }
       })
+    } else if (hostname == 'localhost' && req.path == '/preview') {
+      const body = `<script>document.body.innerHTML=localStorage.getItem('mindpage_preview_body') ?? 'missing body'</script>`
+      const html = `<!doctype html><head><meta charset=utf-8><title>preview</title></head><body>${body}</body></html>`
+      res.status(400).contentType('text/html').send(html)
     } else {
       next()
     }
@@ -211,8 +215,10 @@ const sapper_server = express().use(
     next()
   },
 
-  // handle POST for webhooks
+  // parse json in request body (if any)
   express.json(),
+
+  // handle POST for webhooks
   (req, res, next) => {
     if (req.path == '/webhooks') {
       console.log(`received /webhooks for user '${req.query.user}'`, req.body)
@@ -245,7 +251,6 @@ const sapper_server = express().use(
   },
 
   // handle POST for github_webhooks
-  express.json(),
   (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
