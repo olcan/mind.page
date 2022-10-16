@@ -287,11 +287,11 @@
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
     text = text.replace(blockRegExp('(?:_markdown|_md).*?'), (m, pfx, type, body) => {
       if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
-      // remove trailing newline in body to take the one from block suffix (```\n)
-      // this allows block delimiter lines (```) to be completely dropped during unwrapping
-      // we make an exception for tables/blockquotes to force closing/breaking (as is more intuitive) across blocks
-      // note this does NOT cause extra spacing since spacer lines are excepted in preserve-line-breaks logic below
+      // remove trailing newline in body (as in extractBlock) to avoid extra lines between blocks
+      // for tables/blockquotes, we instead append an escape to force breaking across blocks w/o forcing spacing
+      // note the second \n comes from the closing block delimiter ```\n since blockRegExp excludes the final \n
       if (!body.match(/(?:^|\n)\s*[|>][^\n]*\n$/)) body = body.replace(/\n$/, '')
+      else body = body.replace(/\n$/, '\n\\')
       return pfx + body
     })
 
@@ -444,10 +444,14 @@
           return str
         }
 
-        // break lines using <br> in menu items w/ flex-display paragraphs (<p> tags)
+        // suffix html lines with \n for proper treatment in markdown parser
+        const html_line = str.match(/^\s*<\/?\w.*>\s*$/)
+        if (html_line) str += '\n'
+
+        // break non-html lines in menu items using <br> w/ flex-display paragraphs (<p> tags)
         // this forces marked to generate separate paragraphs for each line
-        // otherwise marked.parse(... {breaks:true}) does NOT break lines
-        if (isMenu) str = str += '<br>\n'
+        // otherwise marked.parse(..., {breaks:true}) does NOT break lines
+        if (isMenu && !html_line) str += '<br>\n'
 
         // highlight errors/warnings using console styling even if outside blocks
         // (to be consistent with detection/ordering logic in index.svelte onEditorChange)
@@ -468,13 +472,10 @@
         )
 
         // insert spacers at empty lines (otherwise ignored by marked)
-        // if (!str.match(/\S/)) str += '&nbsp;'
+        if (str.match(/^ *$/)) str += '&nbsp;'
 
         // insert spacers at empty lines in blockquotes (otherwise ignored by marked)
-        if (str.match(/^[> ]*$/)) str += '&nbsp;'
-
-        // NOTE: some lines (e.g. html tag lines) require an extra \n for markdown parser
-        if (str.match(/^\s*```|^\s*</)) str += '\n'
+        if (str.match(/^ *>[> ]*$/)) str += '&nbsp;'
 
         // wrap math inside span.math (unless text matches search terms)
         if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has('$')))
@@ -568,19 +569,19 @@
         // replace URLs (except in lines that look like a reference-style link)
         if (!str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str)
 
-        // close table with extra \n to prevent leading pipe ambiguity (now required) and line-eating
-        if (lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = '\n' + str
-
         // close bullet lists with extra \n before next line
         if (lastLine.match(/^\s*[-*+]/) && !line.match(/^\s*[-*+]/)) str = '\n' + str
 
         // handle horizontal rule syntax and disable heading syntax based on -|= to prevent ambiguity
-        if (str.match(/^ *(?:---+|___+|\*\*\*+) *$/)) str = `<hr>`
+        if (str.match(/^ *(?:---+|___+|\*\*\*+) *$/)) str = `<hr>\n`
         // disable heading syntax based on -|= to prevent ambiguity w/ horizontal rule syntax
         // we do this by inserting an empty line that is removed post-markdown
         else if (line.match(/^ *(?:-+|=+) *$/)) str += ' &nbsp;'
 
-        // close blockquotes with an empty line at upper level
+        // close table with extra \n to prevent leading pipe ambiguity (now required) and line-eating
+        if (lastLine.match(/^\s*\|/) && !line.match(/^\s*\|/)) str = '\n' + str
+
+        // close blockquotes with an empty line when popping back up at least one level
         // see https://github.com/markedjs/marked/issues/225 for nested blockquote behavior in marked & gfm
         const last_line_blockquote_depth = lastLine
           .match(/^[> ]*/)
@@ -708,8 +709,11 @@
     text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, '$1&lt;&lt;$2') // \<<
     text = text.replace(/(<code>.*?)\\@\{(.*?<\/code>)/g, '$1@{$2') // \@{
 
-    // wrap menu items in special .menu div, but exclude deps/dependents
-    if (isMenu) text = '<div class="menu">' + text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, '$1</div>$2')
+    // wrap item content in .content div, adding .menu class for #menu items
+    // note this wrapper div excludes deps-and-dependents, deps-summary, and menu-<id> divs (created in afterUpdate)
+    text =
+      `<div class="content${isMenu ? ' menu' : ''}">` +
+      text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, '$1</div>$2')
 
     // wrap list items in span to control spacing from bullets
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, '</span></li>')
@@ -1301,7 +1305,7 @@
     // hide any top-level <br> or <p> preceding or leading 0-height tail, including hidden tags, hidden blocks, etc
     // process matching tags in reverse order to handle arbitrarily long series of tags
     // allows useful visual spacing in editor of item tail w/ hidden code, tags, etc
-    Array.from(itemdiv.querySelectorAll('.item > :is(br,p)'))
+    Array.from(itemdiv.querySelectorAll('.item > .content > :is(br,p)'))
       .reverse()
       .forEach((x: HTMLElement) => {
         let height_below = 0
@@ -1952,12 +1956,12 @@
     padding-bottom: 2px;
   }
   /* add some space before/after lists for more even spacing with surrounding text */
-  :global(.item > ul:not(:first-child)),
-  :global(.item > ol:not(:first-child)) {
+  :global(.item > .content > ul:not(:first-child)),
+  :global(.item > .content > ol:not(:first-child)) {
     padding-top: 2px;
   }
-  :global(.item > ul:not(:last-child)),
-  :global(.item > ol:not(:first-child)) {
+  :global(.item > .content > ul:not(:last-child)),
+  :global(.item > .content > ol:not(:first-child)) {
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
@@ -2189,7 +2193,7 @@
     display: inline-block;
   }
   /* display top-level .math-display as block */
-  /* :global(.item > span.math-display) {
+  /* :global(.item > .content > span.math-display) {
     display: block;
   } */
   :global(.item hr) {
@@ -2426,10 +2430,10 @@
     padding-top: 4px;
     padding-bottom: 4px;
   }
-  :global(.item > .math-display:first-child) {
+  :global(.item > .content > .math-display:first-child) {
     padding-top: 0;
   }
-  :global(.item > .math-display:last-child) {
+  :global(.item > .content > .math-display:last-child) {
     padding-bottom: 0;
   }
 
