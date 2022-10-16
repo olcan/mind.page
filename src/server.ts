@@ -171,7 +171,7 @@ const sapper_server = express().use(
         }
       })
     } else if (hostname == 'localhost' && req.path == '/preview') {
-      const body = `<script>document.write(localStorage.getItem('mindpage_preview_html') ?? 'missing html')</script>`
+      const body = `<script>document.body.innerHTML = localStorage.getItem('mindpage_preview_body') ?? 'missing body'</script>`
       const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title></head><body>${body}</body></html>`
       res.status(400).contentType('text/html').send(html)
     } else {
