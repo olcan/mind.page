@@ -291,6 +291,7 @@
     window['_decrypt_bytes'] = decrypt_bytes
     window['_encrypt_item'] = encryptItem
     window['_decrypt_item'] = decryptItem
+    window['_render_item'] = renderItem
     window['_parse_tags'] = parseTags
     window['_parse_label'] = parseLabel
     window['_replace_tags'] = replaceTags
@@ -4085,7 +4086,7 @@
     const prevHeight = item.height
     if (prevHeight == 0) {
       if (height == 0) console.warn(`zero initial height for item ${item.name} at position ${index + 1}`)
-      if (item.resolve_render) item.resolve_render(height)
+      if (item.resolve_render) item.resolve_render(container.closest('.super-container')) // resolve w/ super container
       item.resolve_render = null
     }
     if (height == prevHeight) return // nothing has changed
@@ -5102,7 +5103,7 @@
     item.timeString = ''
     item.timeOutOfOrder = false
     item.height = 0
-    item.resolve_render = null // invoked from onItemResized on first call
+    item.resolve_render = null // invoked from onItemResized (triggered by render)
     item.column = 0
     item.lastColumn = 0
     item.nextColumn = -1
@@ -5236,26 +5237,45 @@
   function renderRange(start, end, chunk, cutoff, delay) {
     renderStart = start
     renderEnd = Math.min(cutoff, end)
-    return Promise.all(
-      items.slice(renderStart, renderEnd).map(
-        item =>
-          new Promise(resolve => {
-            if (item.height > 0) resolve(item.height)
-            else item.resolve_render = resolve // resolve later in onItemResized
-          })
+    return tick()
+      .then(() =>
+        Promise.all(
+          items.slice(renderStart, renderEnd).map(
+            item =>
+              new Promise(resolve => {
+                if (item.height > 0) resolve(_item(item.id).elem)
+                else item.resolve_render = resolve // resolve later in onItemResized
+              })
+          )
+        )
       )
-    ).then(() => {
-      if (!keepOnPageDuringDelay) renderStart = renderEnd
-      if (renderEnd < cutoff) {
-        // init_log(`rendered items ${renderStart}-${renderEnd}`);
-        if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
-          init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
-        tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
-      } else {
-        init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
-        rendered = true
-      }
-    })
+      .then(() => {
+        if (!keepOnPageDuringDelay) renderStart = renderEnd
+        if (renderEnd < cutoff) {
+          // init_log(`rendered items ${renderStart}-${renderEnd}`);
+          if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
+            init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
+          tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
+        } else {
+          init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
+          rendered = true
+        }
+      })
+  }
+
+  async function renderItem(item) {
+    if (!(item instanceof _Item)) throw new Error('invalid item, must be of type _Item')
+    if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
+    renderStart = item.index
+    renderEnd = item.index + 1
+    return tick().then(
+      () =>
+        new Promise(resolve => {
+          const _item = __item(item.id)
+          if (_item.height > 0) resolve(item.elem)
+          else _item.resolve_render = resolve // resolve later in onItemResized
+        })
+    )
   }
 
   let updateInstance_task
