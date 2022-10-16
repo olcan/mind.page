@@ -5103,7 +5103,7 @@
     item.timeString = ''
     item.timeOutOfOrder = false
     item.height = 0
-    item.resolve_render = null // invoked from onItemResized (triggered by render)
+    item.resolve_render = null // invoked from onItemResized on first resize during render
     item.column = 0
     item.lastColumn = 0
     item.nextColumn = -1
