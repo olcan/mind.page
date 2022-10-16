@@ -232,8 +232,12 @@
   window['_html_cache'] ??= {}
   const _elem_cache_limit_per_item = 10
   const _html_cache_limit_per_item = 10
-  function limit_cache_size(cache, limit) {
-    while (cache.size > limit) cache.delete(cache.keys().next().value)
+  function limit_cache_size(cache, limit, destroy = null) {
+    while (cache.size > limit) {
+      const key = cache.keys().next().value
+      if (destroy?.(cache.get(key)) === null) break // allow cleanup and cancellation
+      cache.delete(key)
+    }
   }
 
   function toHTML(
@@ -850,7 +854,13 @@
         // console.debug("caching element", key, elem.tagName);
         // (elem as HTMLElement).style.width = window.getComputedStyle(elem).width;
         window['_elem_cache'][id].set(key, elem) //.cloneNode(true);
-        limit_cache_size(window['_elem_cache'][id], _elem_cache_limit_per_item)
+        limit_cache_size(window['_elem_cache'][id], _elem_cache_limit_per_item, elem => {
+          if (itemdiv.contains(elem)) return null // cancel deletions since oldest elem is on item
+          // destroy all children and SELF w/ _destroy attribute (and property)
+          elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
+          elem._destroy?.()
+          elem.remove()
+        })
       }
     })
   }
