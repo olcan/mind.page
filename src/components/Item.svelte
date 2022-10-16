@@ -610,7 +610,7 @@
     // hide hidden sections
     text = text.replace(
       /<\!--\s*hidden\s*-->(.*?)<\!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
-      '<div style="display:none">\n$1\n</div>\n'
+      '<div style="display: none;">\n$1\n</div>\n'
     )
 
     // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles
