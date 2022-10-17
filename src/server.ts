@@ -7,6 +7,7 @@ import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
 import os from 'os'
+import ip from 'ip'
 import crypto from 'crypto'
 
 const { PORT, NODE_ENV } = process.env
@@ -266,13 +267,12 @@ const sapper_server = express().use(
   },
 
   // populate session w/ cookie, see https://sapper.svelte.dev/docs#Seeding_session_data
-  // also populate with request ip, see https://stackoverflow.com/a/14631683
   sapper.middleware({
     session: (req, res) => ({
       cookie: res['cookie'],
       server_name: os.hostname(),
-      server_ip: req.socket.localAddress,
-      client_ip: req.socket.remoteAddress,
+      server_ip: ip.address(), // see https://stackoverflow.com/a/43888492
+      client_ip: req['ip'], // see https://stackoverflow.com/a/14631683
     }),
   })
 )
