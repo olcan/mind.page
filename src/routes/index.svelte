@@ -5292,7 +5292,7 @@
     if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
     renderStart = item.index
     renderEnd = item.index + 1
-    return new Promise(resolve => {
+    return tick().then(()=>new Promise(resolve => {
       const _item = __item(item.id)
       if (_item.pendingElems == 0) resolve(item.elem)
       else {
@@ -5303,7 +5303,7 @@
           resolve(elem)
         }
       }
-    })
+    }))
   }
 
   let updateInstance_task
