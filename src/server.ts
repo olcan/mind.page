@@ -272,7 +272,11 @@ const sapper_server = express().use(
       cookie: res['cookie'],
       server_name: os.hostname(),
       server_ip: ip.address(), // see https://stackoverflow.com/a/43888492
-      // note this _should_ work on firebase w/ the 'trust proxy' setting (set below), but otherwise you can try accessing headers directly as in https://stackoverflow.com/a/67397092
+      // we use client_ip to help identify distinct client devices (_should_ work on firebase w/ the 'trust proxy' setting set below, but otherwise you can try accessing headers directly as in https://stackoverflow.com/a/67397092)
+      // aside from public ip & user agent, there is no info in http headers that can help identify client machine
+      // browsers do not reveal any more info to servers than they do to local javascript via navigator.*
+      // browsers do provide user-level identifiers for authentication, but we are interested in devices
+      // see https://code-maze.com/http-series-part-3/#headers for some more info about relevant headers
       client_ip: req['ip'], // see https://stackoverflow.com/a/14631683
     }),
   })
