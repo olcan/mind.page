@@ -1,3 +1,11 @@
+<script context="module" lang="ts">
+  // preload function that can be called on either client or server
+  // See https://sapper.svelte.dev/docs#preloading
+  export async function preload(page, session) {
+    return process['server-preload'](page, session) // see server.ts
+  }
+</script>
+
 <script lang="ts">
   const isClient = typeof window !== 'undefined'
   // import firebase via client.ts (can also be via server.ts if preloading used again)
@@ -36,6 +44,9 @@
   export let items = []
   export let items_preload = [] // items returned by server preload (see above and server.ts)
   export let error = null
+  export let server_name
+  export let server_ip
+  export let client_ip
   let user = null
   let deletedItems = []
   let editingItems = []
@@ -5316,6 +5327,9 @@
         },
         screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
         hardware_concurrency: navigator.hardwareConcurrency,
+        client_ip,
+        server_ip,
+        server_name,
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
         .catch(console.error)
@@ -5996,7 +6010,7 @@
         init_log('initialized document')
       })
 
-      init_log('initialized client')
+      init_log(`initialized client ${client_ip} -> ${server_ip} [${server_name}]`)
     })
 
   function onColumnPaddingMouseDown(e) {
