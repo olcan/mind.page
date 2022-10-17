@@ -280,6 +280,7 @@
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
     Object.defineProperty(window, '_focused', { get: () => focused })
     Object.defineProperty(window, '_focus_time', { get: () => focus_time })
+    Object.defineProperty(window, '_instance', { get: getInstanceInfo })
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
@@ -5317,33 +5318,38 @@
     )
   }
 
+  function getInstanceInfo() {
+    return {
+      user: user.uid,
+      init_time: initTime,
+      update_time: instances.find(i => i.init_time == initTime)?.update_time ?? 0,
+      focus_time, // note this is _live_ focus_time, unlike focus_time in instances[], which is as of update_time
+      user_agent: navigator.userAgent,
+      client_ip, // public ip
+      server_ip, // server local ip
+      server_name: server_name, // server local (host) name
+      server_domain: location.host, // server public domain (a.k.a. host) name
+      screen_size: { width: screen.width, height: screen.height },
+      screen_avail: {
+        left: screen['availLeft'],
+        top: screen['availTop'],
+        width: screen['availWidth'],
+        height: screen['availHeight'],
+      },
+      screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
+      hardware_concurrency: navigator.hardwareConcurrency,
+      ...(JSON.parse(localStorage.getItem('mindpage_instance')) ?? {}), // custom instance info via local storage
+    }
+  }
+
   let updateInstance_task
   function updateInstance() {
     if (anonymous) return // can not track anonymous instances (at least not by user, and can not write to firestore)
     const task = () => {
       if (updateInstance_task != task) return // task cancelled or replaced
       if (!instanceId) return setTimeout(task, 1000) // instance id not set yet, try again in 1s
-      const instanceInfo = {
-        user: user.uid,
-        init_time: initTime,
-        update_time: Date.now(),
-        focus_time: focus_time, // as of update_time; note focus_time tracks interactions beyond focused=true
-        user_agent: navigator.userAgent,
-        screen_size: { width: screen.width, height: screen.height },
-        screen_avail: {
-          left: screen['availLeft'],
-          top: screen['availTop'],
-          width: screen['availWidth'],
-          height: screen['availHeight'],
-        },
-        screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
-        hardware_concurrency: navigator.hardwareConcurrency,
-        client_ip, // public ip
-        server_ip, // server local ip
-        server_name: server_name, // server local (host) name
-        server_domain: location.host, // server public domain (a.k.a. host) name
-      }
-      setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
+      const instance = _.set(getInstanceInfo(), 'update_time', Date.now())
+      setDoc(doc(getFirestore(firebase), 'instances', instanceId), instance)
         .catch(console.error)
         .finally(() => {
           setTimeout(task, 1000 * 60) // update again in ~60 (+setDoc time)
@@ -5627,7 +5633,9 @@
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
                 if (firebase_errors > 0) {
-                  _modal_confirm(`MindPage could not access Google Cloud (Firestore). Try again?`, ()=>location.reload())
+                  _modal_confirm(`MindPage could not access Google Cloud (Firestore). Try again?`, () =>
+                    location.reload()
+                  )
                 } else {
                   initTime = window['_init_time'] = Date.now()
                   initialize()
@@ -6636,7 +6644,7 @@
 
   // convenient _modal-based async replacement for window.confirm
   function _modal_confirm(msg, confirmed = null, cancelled = null) {
-    return _modal(msg, {confirm:'OK', cancel:'Cancel'}).then(ok =>{
+    return _modal(msg, { confirm: 'OK', cancel: 'Cancel' }).then(ok => {
       if (ok) confirmed?.()
       else cancelled?.()
       return ok
@@ -6645,7 +6653,7 @@
 
   // convenient _modal-based async replacement for window.prompt
   function _modal_prompt(msg, default_text = '', confirmed = null, cancelled = null) {
-    return _modal(msg, {confirm:'OK', cancel:'Cancel', input:default_text}).then(text =>{
+    return _modal(msg, { confirm: 'OK', cancel: 'Cancel', input: default_text }).then(text => {
       if (text !== null) confirmed?.(text)
       else cancelled?.()
       return text
