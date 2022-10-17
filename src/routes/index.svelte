@@ -5329,8 +5329,8 @@
         hardware_concurrency: navigator.hardwareConcurrency,
         client_ip, // public ip
         server_ip, // server local ip
-        server_name: server_name, // server local host name
-        server_host: location.host, // server public host name
+        server_name: server_name, // server local (host) name
+        server_domain: location.host, // server public domain (a.k.a. host) name
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
         .catch(console.error)
