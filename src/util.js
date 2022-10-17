@@ -240,7 +240,7 @@ export function adoptCachedElem(elem) {
 }
 
 export function checkElemCache() {
-  window['_elem_cache'] ??= {}
+  if (!window['_elem_cache']) window['_elem_cache'] = {}
   Object.keys(window['_elem_cache']).forEach(id => {
     window['_elem_cache'][id]?.forEach(elem => {
       if (document.contains(elem)) return // elem is already on the page
