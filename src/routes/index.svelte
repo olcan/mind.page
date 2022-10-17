@@ -293,6 +293,9 @@
     window['_modal_close'] = _modal_close
     window['_modal_update'] = _modal_update
     window['_modal_visible'] = _modal_visible
+    window['_modal_alert'] = _modal_alert
+    window['_modal_confirm'] = _modal_confirm
+    window['_modal_prompt'] = _modal_prompt
     window['_delay'] = _delay
     window['_update_dom'] = update_dom
     window['_scroll_to'] = scrollTo
@@ -2512,8 +2515,8 @@
     if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
       if (prefix_click) {
         // assuming trying to go to a parent/ancestor
-        if (!confirm(`${tag} already selected; clear selection?`)) return
-      } // else if (!confirm(`${tag} already selected; clear selection?`)) return
+        if (!confirm(`Tag ${tag} already selected. Clear selection?`)) return
+      } // else if (!confirm(`Tag ${tag} already selected. Clear selection?`)) return
       editorText = '' // assume intentional toggle (clear)
     } else {
       editorText = tag + ' ' // space in case more text is added
@@ -4490,7 +4493,7 @@
         // if js_input modified, confirm overwrite
         if (
           hash(run_item.read('js_input')) != _item(item.id).global_store.run_hash &&
-          !confirm(`overwrite changes in js_input block in ${run_name}?`)
+          !confirm(`Overwrite changes in js_input block in ${run_name}?`)
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
@@ -4539,7 +4542,7 @@
   }
 
   function onItemTouch(index: number, e: MouseEvent = null) {
-    if (items[index].log && !confirm(`modify time for #log item?\ncreation time/ordering will be lost`)) return
+    if (items[index].log && !confirm(`Modify time for #log item?\ncreation time/ordering will be lost`)) return
     // if (items[index].time > newestTime) console.warn('invalid item time')
     if (items[index].time > newestTime) newestTime = items[index].time
     if (e?.altKey && e?.metaKey) {
@@ -4946,7 +4949,7 @@
       item.text != item.previewText &&
       item.local_store?._preview_hash && // may be first preview, or reset due to remote changes
       hash(item.text) != item.local_store._preview_hash &&
-      !confirm(`item ${item.name} has non-preview changes; overwrite to preview anyway?`)
+      !(await _modal_confirm(`Item ${item.name} has non-preview changes. Overwrite to preview anyway?`))
     ) {
       console.warn(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
       return
@@ -5485,7 +5488,7 @@
                 if (anonymous) return // anonymous user can be signed in or out
                 if (signingOut) return // ignore during signout
                 document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-                if (confirm(`MindPage could not sign into your Google account. Try again?`)) signIn()
+                _modal_confirm(`MindPage could not sign into your Google account. Try again?`, signIn)
                 return
               }
               resetUser() // clean up first
@@ -5624,7 +5627,7 @@
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
                 if (firebase_errors > 0) {
-                  if (confirm(`MindPage could not access Google Cloud (Firestore). Try again?`)) location.reload()
+                  _modal_confirm(`MindPage could not access Google Cloud (Firestore). Try again?`, ()=>location.reload())
                 } else {
                   initTime = window['_init_time'] = Date.now()
                   initialize()
@@ -6619,11 +6622,34 @@
     const replace_dialog = method => {
       const _dialog = window[method] as any
       window[method] = function (...args) {
-        console.warn(`window.${method} can stop working on iOS devices; consider using _modal instead`)
+        console.warn(`window.${method} can stop working on iOS devices; consider using _modal_${method} instead`)
         return _dialog(...args)
       } as any
     }
     ;['alert', 'confirm', 'prompt'].forEach(replace_dialog)
+  }
+
+  // convenient _modal-based async replacement for window.alert
+  function _modal_alert(msg, done = null) {
+    return _modal(msg).then(() => done?.())
+  }
+
+  // convenient _modal-based async replacement for window.confirm
+  function _modal_confirm(msg, confirmed = null, cancelled = null) {
+    return _modal(msg, {confirm:'OK', cancel:'Cancel'}).then(ok =>{
+      if (ok) confirmed?.()
+      else cancelled?.()
+      return ok
+    })
+  }
+
+  // convenient _modal-based async replacement for window.prompt
+  function _modal_prompt(msg, default_text = '', confirmed = null, cancelled = null) {
+    return _modal(msg, {confirm:'OK', cancel:'Cancel', input:default_text}).then(text =>{
+      if (text !== null) confirmed?.(text)
+      else cancelled?.()
+      return text
+    })
   }
 
   function onWebcamClick(e) {

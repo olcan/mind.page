@@ -358,7 +358,12 @@
   <script>
     setTimeout(() => {
       document.activeElement?.blur()
-      document.querySelector('#modal-input')?.focus()
+      // auto-focus/select input
+      const input = document.querySelector('#modal-input')
+      if (input) {
+        input.setSelectionRange(0, input.value.length)
+        input.focus()
+      }
     })
   </script>
 {/if}
