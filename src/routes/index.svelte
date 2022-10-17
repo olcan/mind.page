@@ -6010,7 +6010,7 @@
         init_log('initialized document')
       })
 
-      init_log(`initialized client ${client_ip} -> ${server_ip} [${server_name}]`)
+      init_log(`initialized client`)
     })
 
   function onColumnPaddingMouseDown(e) {
