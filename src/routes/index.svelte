@@ -3127,7 +3127,7 @@
     } else if (typeof obj != 'object' || !obj.text || typeof obj.text != 'string') {
       const msg = `invalid return for command ${cmd} handled in item ${item.name}`
       if (return_alerts) return msg
-      alert(msg)
+      _modal(msg)
     } else {
       const text = obj.text
       // since we are async, we need to call onEditorDone again with run/editing set properly
@@ -3224,10 +3224,11 @@
     // if (!text.trim()) editing = true
 
     // overload alert function to return alert message if return_alerts==true (useful for background commands)
+    // also uses async _modal due to known issues with alert in ios (see assignment to window.alert)
     // should always be invoked as return alert(...)
     const alert = msg => {
       if (return_alerts) return msg // return alert message string
-      else window.alert(msg)
+      else _modal(msg)
     }
 
     if (!ignore_command) {
@@ -4456,7 +4457,7 @@
 
     if (item.attr) {
       if (!item.name.startsWith('#')) {
-        alert('cannot run unnamed installed item')
+        _modal('cannot run unnamed installed item')
         return
       }
       const run_name = item.name + '/run'
@@ -4546,13 +4547,13 @@
       items[index].time = items[index].time - 24 * 3600 * 1000
     } else if (e?.altKey) {
       if (index == items.length - 1 || items[index].time < items[index + 1].time) {
-        alert('can not move item down')
+        _modal('can not move item down')
         return
       }
       items[index].time = items[index + 1].time - 1
     } else if (e?.metaKey) {
       if (index == 0 || items[index].time > items[index - 1].time) {
-        alert('can not move item up')
+        _modal('can not move item up')
         return
       }
       items[index].time = items[index - 1].time + 1
@@ -4571,7 +4572,7 @@
 
   function onItemPush(index: number) {
     if (!_item('#pusher')) {
-      alert(`can not push ${items[index].name}, #pusher must be installed first`)
+      _modal(`can not push ${items[index].name}, #pusher must be installed first`)
       return
     }
     onEditorDone('/push ' + items[index].name)
@@ -4627,7 +4628,7 @@
     let index = indexFromId.get(lastEditItem)
     if (index === undefined) return
     if (index >= hideIndex) {
-      alert(`last edited item ${items[index].name} is currently hidden; try going back or revealing more items`)
+      _modal(`last edited item ${items[index].name} is currently hidden; try going back or revealing more items`)
       return
     }
     if (items[index].editing) return
@@ -4735,7 +4736,7 @@
     }
     e.stopPropagation()
     if (showDotted && editingItems.some(index => items[index].dotted)) {
-      alert('can not minimize items while editing')
+      _modal('can not minimize items while editing')
       return
     }
     showDotted = !showDotted
@@ -4926,7 +4927,7 @@
     } catch (e) {
       const msg = `failed to fetch preview for ${item.name} from ${repo}/${path}: ${e}`
       console.error(msg)
-      alert(msg)
+      _modal(msg)
     }
   }
 
@@ -4954,7 +4955,7 @@
     // disallow renaming preview
     const parsed_label = parseLabel(text)
     if (parsed_label != item.name) {
-      alert(
+      _modal(
         `preview failed: parsed label '${parsed_label}' does not match current name ${item.name} for preview from ${repo}/${path}`
       )
       return
@@ -5353,9 +5354,9 @@
   function signIn() {
     // if user appears to be signed in, sign out instead
     if (getAuth(firebase).currentUser) {
-      if (!signedin) alert('inconsistent signin state, signing out ...')
       console.warn('attempted to sign in while already signed in, signing out ...')
-      signOut()
+      if (!signedin) _modal('inconsistent signin state! signing out ...').then(signOut)
+      else signOut()
       return
     }
     signingIn = true
@@ -5633,7 +5634,7 @@
               Promise.resolve(initialization).then(() => {
                 if (!initialized) {
                   // initialization failed, we should be signing out ...
-                  if (!signingOut) alert('initialization failed w/o signout')
+                  if (!signingOut) _modal('initialization failed (w/o triggering signout)')
                   return
                 }
                 init_log(`synchronized ${items.length} items`)
@@ -5675,7 +5676,7 @@
             Promise.resolve(initialization).then(() => {
               if (!initialized) {
                 // initialization failed, we should be signing out ...
-                if (!signingOut) alert('initialization failed w/o signout')
+                if (!signingOut) _modal('initialization failed (w/o triggering signout)')
                 return
               }
               snapshot.docChanges().forEach(function (change) {
@@ -6008,7 +6009,7 @@
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
                 onEditorChange(tag)
               } else {
-                alert(`url fragment ${tag} does not match any items`)
+                _modal(`url fragment ${tag} does not match any items`)
               }
               // if tag matches a unique item, scroll to that item if needed
               if (unique) update_dom().then(scrollToTarget)
@@ -6092,7 +6093,7 @@
           // target.dispatchEvent(new Event("mousedown"));
           // target.dispatchEvent(new Event("click"));
         } else {
-          alert(`item numbered ${index + 1} (${item.name}) is not visible`)
+          _modal(`item numbered ${index + 1} (${item.name}) is not visible`)
         }
       } else if (item) {
         _item(item.id).touch()
@@ -6588,7 +6589,7 @@
     let msg = errorMessage(e)
     console.error(msg)
     // if spinner is active (condition mirrors svelte {#if ...} block below), show error using alert
-    if (!user || !initialized || !headerScrolled || signingIn || signingOut) alert(msg)
+    if (!user || !initialized || !headerScrolled || signingIn || signingOut) _modal(msg)
   }
   // wrap fetch to throw exceptions on HTTP errors, since they (unlike XMLHTTPRequest) do not throw exceptions or even log to console using console.error (since they also do not show up in mindpage console)
   if (isClient) {
@@ -6611,6 +6612,19 @@
     firebase.onLog(({ level }) => {
       if (level == 'error') firebase_errors++
     })
+
+  // replace window.{alert,confirm,prompt} to warn that they may stop working on iOS devices
+  // known bug since 2016, see e.g. https://stackoverflow.com/questions/38083702/alert-confirm-and-prompt-not-working-after-using-history-api-on-safari-ios
+  if (isClient) {
+    const replace_dialog = method => {
+      const _dialog = window[method] as any
+      window[method] = function (...args) {
+        console.warn(`window.${method} can stop working on iOS devices; consider using _modal instead`)
+        return _dialog(...args)
+      } as any
+    }
+    ;['alert', 'confirm', 'prompt'].forEach(replace_dialog)
+  }
 
   function onWebcamClick(e) {
     intro = !intro
@@ -7062,7 +7076,7 @@
         })
         .catch(console.error)
     } else {
-      alert('unable to access webcam')
+      _modal('unable to access webcam')
     }
   </script>
 {/if}
