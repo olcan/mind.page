@@ -5327,10 +5327,10 @@
         },
         screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
         hardware_concurrency: navigator.hardwareConcurrency,
-        client_ip,
-        server_ip,
-        server_name,
-        server_host: location.host,
+        client_ip, // public ip
+        server_ip, // server local ip
+        server_name: server_name, // server local host name
+        server_host: location.host, // server public host name
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
         .catch(console.error)
