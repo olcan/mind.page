@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
+import os from 'os'
 import crypto from 'crypto'
 
 const { PORT, NODE_ENV } = process.env
@@ -265,9 +266,13 @@ const sapper_server = express().use(
   },
 
   // populate session w/ cookie, see https://sapper.svelte.dev/docs#Seeding_session_data
+  // also populate with request ip, see https://stackoverflow.com/a/14631683
   sapper.middleware({
     session: (req, res) => ({
       cookie: res['cookie'],
+      server_name: os.hostname(),
+      server_ip: req.socket.localAddress,
+      client_ip: req.socket.remoteAddress,
     }),
   })
 )
@@ -300,7 +305,7 @@ if (!on_firebase) {
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`
 process['server-preload'] = async (page, session) => {
   // console.debug("preloading, client?", typeof window !== undefined, page, session);
-  return {} // disable server preload for now, even for anonymous account
+  return { ...session } // disable server preload for now, even for anonymous account
 
   let user = null
   if (session.cookie == 'signin_pending') {
