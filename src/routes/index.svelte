@@ -4102,23 +4102,25 @@
     const height = container.offsetHeight - logHeight
     const prevHeight = item.height
     if (prevHeight == 0) {
-      if (height == 0) console.warn(`zero initial height for item ${item.name} at position ${index + 1}`)
-      item.resolve_height?.(height)
-      item.resolve_height = null
+      if (height <= 0) console.warn(`invalid height (${height}) for item ${item.name} at index ${index}`)
+      else {
+        item.resolve_height?.(height)
+        item.resolve_height = null
+      }
     }
     // count number of elements that will trigger additional resizes
-    // if no more resizes are expected, invoke resolve_render (if set up)
+    // if height>0 and no more resizes are expected, invoke resolve_render (if set up)
     item.pendingElems = container.querySelectorAll(
       ['script', 'img:not([_loaded])', ':is(span.math,span.math-display):not([_rendered])'].join()
     ).length
-    if (item.pendingElems == 0) {
+    if (height > 0 && item.pendingElems == 0) {
       item.resolve_render?.(container.closest('.super-container'))
       item.resolve_render = null
     }
 
     if (height == prevHeight) return // nothing has changed
-    if (height == 0 && prevHeight > 0) {
-      console.warn(`ignoring zero height (was ${prevHeight}) for item ${item.name} at position ${index + 1}`)
+    if (height <= 0 && prevHeight > 0) {
+      console.warn(`ignoring invalid height ${height} (was ${prevHeight}) for item ${item.name} at index ${index}`)
       return
     }
     // console.debug(`item ${item.name} height changed from ${prevHeight}} to ${height}`);
@@ -5270,7 +5272,7 @@
         item =>
           new Promise(resolve => {
             if (item.height > 0) resolve(item.height)
-            else item.resolve_height = resolve // resolve later in onItemResized
+            else item.resolve_height = resolve // resolve later from onItemResized
           })
       )
     ).then(() => {
@@ -5292,18 +5294,23 @@
     if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
     renderStart = item.index
     renderEnd = item.index + 1
-    return tick().then(()=>new Promise(resolve => {
-      const _item = __item(item.id)
-      if (_item.pendingElems == 0) resolve(item.elem)
-      else {
-        // chain together multiple render promises to be resolved together
-        const prev_resolve = _item.resolve_render
-        _item.resolve_render = elem => {
-          prev_resolve?.(elem)
-          resolve(elem)
-        }
-      }
-    }))
+    return tick().then(
+      () =>
+        new Promise(resolve => {
+          const _item = __item(item.id)
+          // set up resolve_render callback to be resolved from onItemResized
+          // ensure any other pending render promises are also resolved
+          const prev_resolve = _item.resolve_render
+          _item.resolve_render = elem => {
+            prev_resolve?.(elem)
+            resolve(elem)
+          }
+          // if item container is available, we can invoke onItemResized immediately
+          // note this will compute latest height and look for pending elements to see if render can be resolved
+          const container = item.elem?.querySelector('.container')
+          if (container) onItemResized(item.id, container, 'renderItem')
+        })
+    )
   }
 
   let updateInstance_task

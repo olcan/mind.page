@@ -312,7 +312,12 @@ if (!on_firebase) {
 // NOTE: for development server, admin credentials require `gcloud auth application-default login`
 process['server-preload'] = async (page, session) => {
   // console.debug("preloading, client?", typeof window !== undefined, page, session);
-  return { ...session } // disable server preload for now, even for anonymous account
+  // disable server preload for now, even for anonymous account
+  return {
+    server_name: session.server_name,
+    server_ip: session.server_ip,
+    client_ip: session.client_ip,
+  }
 
   let user = null
   if (session.cookie == 'signin_pending') {
