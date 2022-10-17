@@ -272,6 +272,7 @@ const sapper_server = express().use(
       cookie: res['cookie'],
       server_name: os.hostname(),
       server_ip: ip.address(), // see https://stackoverflow.com/a/43888492
+      // note this _should_ work on firebase w/ the 'trust proxy' setting (set below), but otherwise you can try accessing headers directly as in https://stackoverflow.com/a/67397092
       client_ip: req['ip'], // see https://stackoverflow.com/a/14631683
     }),
   })
