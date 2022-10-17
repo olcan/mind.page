@@ -5330,6 +5330,7 @@
         client_ip,
         server_ip,
         server_name,
+        server_host: location.host,
       }
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instanceInfo)
         .catch(console.error)
