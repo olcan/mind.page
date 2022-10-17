@@ -277,6 +277,8 @@ const sapper_server = express().use(
   })
 )
 
+sapper_server.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
+
 const on_firebase = 'FIREBASE_CONFIG' in process.env
 let sapper_https_server // started here unless on_firebase
 
