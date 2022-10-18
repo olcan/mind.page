@@ -1057,6 +1057,9 @@
       evaljs = evaljs.replace(/\$deephash/g, skipEscaped(this.deephash))
       if (options['cid']) evaljs = evaljs.replace(/\$cid/g, skipEscaped(options['cid']))
 
+      // if skipping eval, just return the js code
+      if (options['skip_eval']) return evaljs
+
       // store eval text under item.debug_store[trigger] for debugging, including a reverse stack string
       let stack = evalStack
         .map(id => item(id).name)
