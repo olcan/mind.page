@@ -280,7 +280,7 @@
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
     Object.defineProperty(window, '_focused', { get: () => focused })
     Object.defineProperty(window, '_focus_time', { get: () => focus_time })
-    Object.defineProperty(window, '_instance', { get: getInstanceInfo })
+    Object.defineProperty(window, '_instance', { get: () => instance })
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
@@ -5083,6 +5083,26 @@
 
   let initTime = 0 // set where initialize is invoked
   let instanceId // set after signin (depends on user id)
+  let instance = !isClient ? null : {
+    user: null, // set after signin (along w/ instanceId)
+    init_time: 0, // set after init (together w/ initTime)
+    update_time: 0, // set/updated at each update
+    focus_time: 0, // set/updated at each update
+    user_agent: navigator.userAgent,
+    client_ip, // public ip
+    server_ip, // server local ip
+    server_name: server_name, // server local (host) name
+    server_domain: location.host, // server public domain (a.k.a. host) name
+    screen_size: { width: screen.width, height: screen.height },
+    screen_avail: {
+      left: screen['availLeft'],
+      top: screen['availTop'],
+      width: screen['availWidth'],
+      height: screen['availHeight'],
+    },
+    screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
+    hardware_concurrency: navigator.hardwareConcurrency,
+  }
   let instances = [] // list of live instances, most recently focused first
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
@@ -5318,37 +5338,15 @@
     )
   }
 
-  function getInstanceInfo() {
-    return {
-      user: user.uid,
-      init_time: initTime,
-      update_time: instances.find(i => i.init_time == initTime)?.update_time ?? 0,
-      focus_time, // note this is _live_ focus_time, unlike focus_time in instances[], which is as of update_time
-      user_agent: navigator.userAgent,
-      client_ip, // public ip
-      server_ip, // server local ip
-      server_name: server_name, // server local (host) name
-      server_domain: location.host, // server public domain (a.k.a. host) name
-      screen_size: { width: screen.width, height: screen.height },
-      screen_avail: {
-        left: screen['availLeft'],
-        top: screen['availTop'],
-        width: screen['availWidth'],
-        height: screen['availHeight'],
-      },
-      screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
-      hardware_concurrency: navigator.hardwareConcurrency,
-      ...(JSON.parse(localStorage.getItem('mindpage_instance')) ?? {}), // custom instance info via local storage
-    }
-  }
-
   let updateInstance_task
   function updateInstance() {
     if (anonymous) return // can not track anonymous instances (at least not by user, and can not write to firestore)
     const task = () => {
       if (updateInstance_task != task) return // task cancelled or replaced
       if (!instanceId) return setTimeout(task, 1000) // instance id not set yet, try again in 1s
-      const instance = _.set(getInstanceInfo(), 'update_time', Date.now())
+      if (instanceId != instance.user + '-' + instance.init_time) console.error('inconsistent instance id/info')
+      if (instance.focus_time != focus_time) console.error('inconsistent instance info (focus_time)')
+      instance.update_time = Date.now()
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instance)
         .catch(console.error)
         .finally(() => {
@@ -5473,7 +5471,7 @@
           items = []
         } else {
           // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
-          initTime = window['_init_time'] = Date.now() // indicate initialization started
+          initTime = window['_init_time'] = instance.init_time = Date.now() // init started
           initialize()
         }
       }
@@ -5504,6 +5502,7 @@
               localStorage.setItem('mindpage_user', userInfoString)
               anonymous = readonly = false // just in case (should already be false)
               signedin = true
+              instance.user = user.uid
 
               // update user info (email, name, etc) in users collection
               const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
@@ -5637,7 +5636,7 @@
                     location.reload()
                   )
                 } else {
-                  initTime = window['_init_time'] = Date.now()
+                  initTime = window['_init_time'] = instance.init_time = Date.now() // init started
                   initialize()
                 }
               }
@@ -5651,7 +5650,7 @@
                 init_log(`synchronized ${items.length} items`)
 
                 // update instance info (user, init time, etc) in instances collection
-                instanceId ??= user.uid + '-' + initTime
+                instanceId = user.uid + '-' + initTime
                 updateInstance()
 
                 // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
@@ -6388,7 +6387,8 @@
     if (ios || android) return // focus handled in focus/checkFocus below
     const was_focused = focused
     focused = document.hasFocus()
-    if (focused) focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
+    // note focus_time tracks interactions beyond focused=true
+    if (focused) focus_time = instance.focus_time = Date.now()
     if (focused && !was_focused) onFocused() // handle change to focused=true
     // retreat to minimal hide index when window is defocused
     // if (was_focused && !focused) hideIndex = hideIndexMinimal;
@@ -6412,7 +6412,7 @@
 
   let lastBlurredElem
   function focus() {
-    focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
+    focus_time = instance.focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
     if (!ios && !android) {
       onFocus() // focus based on document.hasFocus()
       return
