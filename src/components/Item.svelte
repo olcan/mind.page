@@ -417,7 +417,7 @@
     const regexTerms = Array.from(matchingTerms)
       .map(_.escapeRegExp)
       .sort((a, b) => b.length - a.length)
-    let mathTermRegex = new RegExp(`[$]\`.*(?:${regexTerms.join('|')}).*\`[$]`, 'i')
+    let mathTermRegex = new RegExp(`\$\`.*(?:${regexTerms.join('|')}).*\`\$`, 'i')
 
     const parentLabel = label.replace(/\/[^\/]*$/, '')
     const parentLabelText = labelText.replace(/\/[^\/]*$/, '')
@@ -488,14 +488,7 @@
 
         // wrap math inside span.math (unless text matches search terms)
         if (matchingTerms.size == 0 || (!str.match(mathTermRegex) && !matchingTerms.has('$')))
-          str = str.replace(
-            /([$]?[$]`.+?`[$][$]?)/g,
-            skipEscaped((m, math) =>
-              (math.startsWith('$`') && math.endsWith('`$')) || (math.startsWith('$$`') && math.endsWith('`$$'))
-                ? wrapMath(math)
-                : m
-            )
-          )
+          str = str.replace(/\$\$`.+?`\$\$|\$`.+?`\$/g, skipEscaped(wrapMath))
 
         // style vertical separator bar (│)
         str = str.replace(/│/g, '<span class="vertical-bar">│</span>')
@@ -713,8 +706,8 @@
     })
 
     // allow escaping of math and macro delimiters in inline code blocks, used in documenting syntax
-    text = text.replace(/(<code>.*?)\\[$]`(.*?<\/code>)/g, '$1$$`$2') // \$`
-    text = text.replace(/(<code>.*?)\\[$][$]`(.*?<\/code>)/g, '$1$$$$`$2') // \$$`
+    text = text.replace(/(<code>.*?)\\\$`(.*?<\/code>)/g, '$1$$`$2') // \$`
+    text = text.replace(/(<code>.*?)\\\$\$`(.*?<\/code>)/g, '$1$$$$`$2') // \$$`
     text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, '$1&lt;&lt;$2') // \<<
     text = text.replace(/(<code>.*?)\\@\{(.*?<\/code>)/g, '$1@{$2') // \@{
 

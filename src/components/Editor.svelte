@@ -92,25 +92,43 @@
     return (
       text
         .replace(
-          /([$]?[$]`|&lt;&lt;|@\{|&lt;!--|&lt;(?=[/\w]))(.*?)((?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)|--&gt;|\}@|&gt;&gt;|`[$][$]?)/g,
-          skipEscaped((m, begin, content, end) => {
-            // undo any tag highlighting inside highlighted sections
-            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1')
-            if ((begin == '$`' && end == '`$') || (begin == '$$`' && end == '`$$'))
-              return `<span class="math">` + highlight(_.unescape(begin + content + end), 'latex') + `</span>`
-            else if ((begin == '&lt;&lt;' && end == '&gt;&gt;') || (begin == '@{' && end == '}@'))
-              return (
-                `<span class="macro"><span class="macro-delimiter">${begin}</span>` +
-                highlight(_.unescape(content), 'js') +
-                `<span class="macro-delimiter">${end}</span></span>`
-              )
-            // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
-            else if (
-              (begin == '&lt;' && end.match(/^(?:[/\w]|&#39;|&quot;)&gt;$/)) ||
-              (begin == '&lt;!--' && end == '--&gt;' && !content.match(/^\s*\/?(?:hidden|removed)\s*$/))
+          // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
+          /&lt;(?=[/\w]).*(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)/g,
+          skipEscaped(m => {
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
+            return highlight(_.unescape(m), 'html')
+          })
+        )
+        .replace(
+          /&lt;!--.*--&gt;(?:(?!&gt;)|$)/g,
+          skipEscaped(m => {
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            return highlight(_.unescape(m), 'html')
+          })
+        )
+        .replace(
+          /&lt;&lt;(.*)&gt;&gt;/g,
+          skipEscaped((m, content) => {
+            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
+            return (
+              '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
+              highlight(_.unescape(content), 'js') +
+              '<span class="macro-delimiter">&gt;&gt;</span></span>'
             )
-              return highlight(_.unescape(begin + content + end), 'html')
-            else return m
+          })
+        )
+        .replace(
+          /\$\$`.*`\$\$/g,
+          skipEscaped(m => {
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
+          })
+        )
+        .replace(
+          /\$`.*`\$/g,
+          skipEscaped(m => {
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
           })
         )
         // NOTE: symmetric delimiters (e.g. `code`) are handled separately w/ _lazy_ matching (.*?) of content
