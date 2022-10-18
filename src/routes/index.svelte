@@ -5083,26 +5083,28 @@
 
   let initTime = 0 // set where initialize is invoked
   let instanceId // set after signin (depends on user id)
-  let instance = !isClient ? null : {
-    user: null, // set after signin (along w/ instanceId)
-    init_time: 0, // set after init (together w/ initTime)
-    update_time: 0, // set/updated at each update
-    focus_time: 0, // set/updated at each update
-    user_agent: navigator.userAgent,
-    client_ip, // public ip
-    server_ip, // server local ip
-    server_name: server_name, // server local (host) name
-    server_domain: location.host, // server public domain (a.k.a. host) name
-    screen_size: { width: screen.width, height: screen.height },
-    screen_avail: {
-      left: screen['availLeft'],
-      top: screen['availTop'],
-      width: screen['availWidth'],
-      height: screen['availHeight'],
-    },
-    screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
-    hardware_concurrency: navigator.hardwareConcurrency,
-  }
+  let instance = !isClient
+    ? null
+    : {
+        user: null, // set after signin (along w/ instanceId)
+        init_time: 0, // set after init (together w/ initTime)
+        update_time: 0, // set at each update
+        focus_time: 0, // set whenever focus_time is set
+        user_agent: navigator.userAgent,
+        client_ip, // public ip
+        server_ip, // server local ip
+        server_name: server_name, // server local (host) name
+        server_domain: location.host, // server public domain (a.k.a. host) name
+        screen_size: { width: screen.width, height: screen.height },
+        screen_avail: {
+          left: screen['availLeft'],
+          top: screen['availTop'],
+          width: screen['availWidth'],
+          height: screen['availHeight'],
+        },
+        screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
+        hardware_concurrency: navigator.hardwareConcurrency,
+      }
   let instances = [] // list of live instances, most recently focused first
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
