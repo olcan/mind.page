@@ -66,13 +66,15 @@ Object.assign((firebase['firestore'] = {}), {
 })
 
 // import/expose firebase/storage on window
-import { getStorage, ref, getMetadata, getDownloadURL, uploadBytes } from 'firebase/storage'
+import { getStorage, ref, getMetadata, getDownloadURL, deleteObject, uploadBytes, getBytes } from 'firebase/storage'
 Object.assign((firebase['storage'] = {}), {
   getStorage,
   ref,
   getMetadata,
   getDownloadURL,
+  deleteObject,
   uploadBytes,
+  getBytes,
 }) // ~35K
 
 // import/expose Octokit as window.Octokit
