@@ -2034,12 +2034,15 @@
     content: '✔︎'; /* could be: ✔︎✓ */
   }
 
-  /* use default inner-column-spacing and top-alignment for tables */
+  /* use default top-alignment & column-spacing and for tables. note border-spacing forces same spacing on outer borders; most robust alternative (robust to e.g. cells w/ rowspan) seems to be uniform horizontal padding on all cells, which cuts the outer spacing by half; unfortunately this still causes some inset, but looks excellent for tables with background colors */
   :global(.item table) {
-    border-spacing: 10px 0;
-    margin: 0 -10px; /* to undo outer border-spacing */
+    /* border-spacing: 10px 0; */
+    border-spacing: 0;
   }
-  :global(.item table td) {
+  :global(.item table :is(td, th)) {
+    padding: 0 5px;
+  }
+  :global(.item table :is(td, th)) {
     vertical-align: top;
   }
 
