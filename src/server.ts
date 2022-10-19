@@ -173,8 +173,7 @@ const sapper_server = express().use(
         }
       })
     } else if (hostname == 'localhost' && req.path == '/preview') {
-      const body = `<script>document.body.innerHTML = localStorage.getItem('mindpage_preview_body') ?? 'missing body'</script>`
-      const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title></head><body>${body}</body></html>`
+      const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title><script>document.open('text/html');document.write(localStorage.getItem('mindpage_preview_html') ?? 'missing html');document.close()</script></head></html>`
       res.status(200).contentType('text/html').send(html)
     } else {
       next()
