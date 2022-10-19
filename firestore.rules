@@ -62,6 +62,13 @@ service cloud.firestore {
 }
 service firebase.storage {
   match /b/{bucket}/o {
+
+    // generic access rule to disable read/write except under specific paths configured below
+		// default is to allow read/write under auth, see https://firebase.google.com/docs/storage/security#authorization
+		match /{path=**} {
+      allow read, write: if false;
+    }
+
 		// <owner>/images/...
 		// ANYONE can read if owner=anonymous
 		// admin user can read/write owner=anonymous files
