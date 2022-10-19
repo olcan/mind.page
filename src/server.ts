@@ -17,19 +17,11 @@ const chokidar = dev ? require('chokidar') : null
 const events = {} // recorded fs events for /watch/... requests
 
 // initialize firebase admin client
-// NOTE: we are using v8 client on server because we could not get v9 client to work properly ...
-//       using getFirestore from firebase-admin/firestore causes an 'invalid argument' error for collection
-//       using getFirestore from firebase/firestore causes an undefined object error during a getProvider call
-//       trying to import collection from firebase-admin fails (no such export)
-//       some errors (e.g. invalid argument) are logged at debug level (search for text "FirebaseError")
+// NOTE: Firebase ADMIN API is NOT to be confused with Firebase API
+// see https://firebase.google.com/docs/reference/admin vs https://firebase.google.com/docs/reference
 import { firebaseConfig } from '../firebase-config.js'
-//const { initializeApp } = require('firebase-admin/app')
-//const { getFirestore } = require('firebase-admin/firestore')
-//const { addDoc, collection, query, where, orderBy, getDocs } = require('firebase/firestore')
-//const { getAuth } = require('firebase/auth')
-//const firebase = initializeApp(firebaseConfig)
 const admin = require('firebase-admin')
-const firebase = admin.initializeApp(firebaseConfig)
+const firebase_admin = admin.initializeApp(firebaseConfig)
 
 // helper to determine host name
 // also sets globalThis.hostname for easy access from other files (e.g. index.svelte)
@@ -236,7 +228,7 @@ const sapper_server = express().use(
         res.status(400).send('webhook missing user parameter')
         return
       }
-      firebase
+      firebase_admin
         .firestore()
         .collection('webhooks')
         .add({
@@ -255,7 +247,7 @@ const sapper_server = express().use(
   (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
-      firebase.firestore().collection('github_webhooks').add({
+      firebase_admin.firestore().collection('github_webhooks').add({
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
       })
@@ -338,43 +330,76 @@ process['server-preload'] = async (page, session) => {
   } else {
     if (!ids) return resp // skip non-anonymous full preload since firebase realtime can be much faster
 
-    // user = await getAuth(firebase).verifyIdToken(session.cookie).catch(console.error)
-    user = await firebase.auth().verifyIdToken(session.cookie).catch(console.error)
-    if (!user) return { ...resp, server_warning: 'invalid/expired session cookie' }
+    user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
+    if (!user) return { ...resp, server_warning: 'invalid/expired signin' }
     // console.debug('user', user)
   }
 
   const start = Date.now()
-  let docs // items preloaded from firebase
+  let items // items preloaded from firebase
 
   if (ids) {
-    console.debug(`retrieving items ${ids} for user ${user.email} (${user.uid}) ...`)
-    docs = await Promise.all(ids.map(id => firebase.firestore().collection('items').doc(id).get()))
-    const missing_ids = docs.filter(doc => !doc.exists).map(doc => doc.id)
-    if (missing_ids.length) return { ...resp, server_error: 'missing document(s) ' + missing_ids }
+    if (ids.every(id => id.length == 20)) {
+      // using 20-byte firebase docids that require auth (unless item.user == 'anonymous')
+      console.debug(`retrieving ${ids.length} items for user ${user.email} (${user.uid}) ...`)
+      const docs = await Promise.all(ids.map(id => firebase_admin.firestore().collection('items').doc(id).get()))
+      const missing_ids = docs.filter(doc => !doc.exists).map(doc => doc.id)
+      if (missing_ids.length) return { ...resp, server_error: 'missing item(s) ' + missing_ids }
+      items = docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
+      const unauth_ids = items.filter(item => item.user != 'anonymous' && item.user != user.uid).map(item => item.id)
+      if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
+    } else if (ids.every(id => id.startsWith('https://'))) {
+      // using download urls, typically firebase storage download urls w/ security token, e.g. https://firebasestorage.googleapis.com/v0/b/olcanswiki.appspot.com/o/y2swh7JY2ScO5soV7mJMHVltAOX2%2Fuploads%2Fpublic%2F7cbf6e293452978a?alt=media&token=a1501c15-cd27-45ef-b72f-c1c5cecba41f
+      console.debug(`retrieving ${ids.length} items by downloading from urls ${ids} ...`)
+      try {
+        items = await Promise.all(
+          ids.map(url => fetch(url).then(r => (r.ok ? r.json() : { url, error: `${r.status} ${r.statusText}` })))
+        )
+        const errors = items.filter(item => item.error).map(item => `${item.url} (${item.error})`)
+        if (errors.length) return { ...resp, server_error: 'could not download item(s) ' + errors }
+        items.forEach(item => (item.user = user.uid)) // just assign to authenticated user (if any)
+        // console.debug(items)
+      } catch {
+        return { ...resp, server_error: 'could not download item(s) ' + ids + '; fetch failed' }
+      }
+    } else if (ids.every(id => id.includes('/') && !id.startsWith('https://'))) {
+      // using firebase storage paths, e.g. y2swh7JY2ScO5soV7mJMHVltAOX2/uploads/public/7cbf6e293452978a
+      // all paths not under <user>/uploads/public/... will require authentication!
+      console.debug(`retrieving ${ids.length} items by downloading from paths ${ids} ...`)
+      try {
+        // see https://firebase.google.com/docs/storage/admin/start
+        // see https://googleapis.dev/nodejs/storage/latest/index.html
+        // see https://nodejs.org/api/stream.html#readabletoarrayoptions
+        const data = await Promise.all(
+          ids.map(path => firebase_admin.storage().bucket().file(path).createReadStream().toArray().then(Buffer.concat))
+        )
+        const decoder = new TextDecoder('utf-8')
+        items = data.map(bytes => JSON.parse(decoder.decode(bytes)))
+        items.forEach(item => (item.user = user.uid)) // just assign to authenticated user (if any)
+        // console.debug(items)
+      } catch (e) {
+        return { ...resp, server_error: 'could not download item(s) ' + ids + '; ' + e }
+      }
+    } else {
+      return { ...resp, server_error: 'invalid items ' + ids }
+    }
   } else {
     console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
-    const start = Date.now()
-    docs = (
-      await firebase
-        .firestore()
-        .collection('items') // server always reads from primary collection
-        .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
-        .orderBy('time', 'desc')
-        .get()
-    ).docs
+    const resp = await firebase_admin
+      .firestore()
+      .collection('items') // server always reads from primary collection
+      .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
+      .orderBy('time', 'desc')
+      .get()
+    items = resp.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
   }
-  console.debug(`retrieved ${docs.length} items for user ${user.email} (${user.uid}) in ${Date.now() - start}ms`)
-
-  // use _preload suffix to avoid replacing items[] on client on back/forward
-  resp['items_preload'] = docs.map(doc =>
-    Object.assign(doc.data(), {
-      id: doc.id,
-      updateTime: doc.updateTime.seconds,
-      createTime: doc.createTime.seconds,
-    })
+  const bytes = JSON.stringify(items).length
+  console.debug(
+    `retrieved ${items.length} items (${bytes} bytes) for user ` +
+      `${user.email} (${user.uid}) in ${Date.now() - start}ms`
   )
-  console.debug('preload size is ' + JSON.stringify(resp).length + ' bytes')
+
+  resp['items_preload'] = items // _preload suffix avoids replacing client-side items[] on back/forward
   return resp
 }
 

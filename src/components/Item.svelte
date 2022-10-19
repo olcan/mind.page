@@ -48,8 +48,6 @@
   export let time: number
   export let timeString: string
   export let timeOutOfOrder: boolean
-  export let updateTime: number
-  export let createTime: number
   export let depsString: string
   export let dependentsString: string
   export let aboveTheFold: boolean
@@ -96,7 +94,7 @@
   let showDebugString = false
   let debugString
   // NOTE: the debugString also helps get rid of the "unused property" warning
-  $: debugString = `${height} ${time} ${updateTime} ${createTime} ${matchingTerms} ${matchingTermsSecondary}`
+  $: debugString = `${height} ${time} ${matchingTerms} ${matchingTermsSecondary}`
 
   function onDone(editorText: string, e: KeyboardEvent, cancelled: boolean, run: boolean) {
     if (run && !cancelled) {

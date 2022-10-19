@@ -63,7 +63,7 @@
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
   let show_ids = url_params?.show?.split(',') ?? []
   let hide_ids = url_params?.hide?.split(',') ?? []
-  let fixed = isClient && (show_ids.length || hide_ids.length) // fixed render mode
+  let fixed = isClient && (show_ids.length > 0 || hide_ids.length > 0) // fixed render mode
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -476,6 +476,7 @@
       // return document.getElementById("item-" + this.id);
       return document.getElementById('super-container-' + this.id)
     }
+
     // default log options for write_log, reset in each eval w/ 'run' trigger
     get log_options(): object {
       const _item = item(this.id)
@@ -2572,7 +2573,7 @@
 
   let scrollToTopOnPopState = false
   function onPopState(e) {
-    readonly = anonymous && !admin
+    readonly = (anonymous && !admin) || fixed
     if (!e?.state) return // for fragment (#id) hrefs
     if (!initialized) {
       // NOTE: this can happen when tab is restored, seems harmless so far
@@ -3274,7 +3275,8 @@
         case '/_times': {
           if (editingItems.length == 0) return alert('/_times: no item selected')
           const item = items[editingItems[0]]
-          text = `${new Date(item.time)}\n${new Date(item.updateTime)}\n${new Date(item.createTime)}`
+          // note updateTime and createTime are also available in firebase docs (not shapshots)
+          text = new Date(item.time).toString()
           break
         }
         case '/_edit': {
@@ -5192,13 +5194,12 @@
   }
 
   async function initialize() {
-
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
     if (signingOut) return // encryption error
 
-    // filter "admin" items (e.g. welcome item) on readonly account
-    if (readonly) items = items.filter(item => !adminItems.has(item.id))
+    // remove "admin" items (e.g. welcome item) on readonly account
+    if (readonly) _.remove(items, item => adminItems.has(item.id))
 
     // filter "hidden" items used for encrypted synced storage
     // also move into hiddenItems map for easy access later
@@ -5465,7 +5466,7 @@
       admin = isAdmin()
       if (admin) useAnonymousAccount() // become anonymous for item checks below
       anonymous = user?.uid == 'anonymous'
-      readonly = anonymous && !admin
+      readonly = (anonymous && !admin) || fixed
 
       // print client load time w/ preloaded item count, excluding admin and hidden items
       const preload_count = _.sumBy(items_preload, ({ hidden, id }) =>
@@ -5647,7 +5648,6 @@
             // on first snapshot, if init has not started (!initTime), we simply populate items array and trigger initialization; otherwise we must be already initializing items received directly from server so we ignore the first snapshot (presumably coming from a local cache) and simply set up init completion logic
             if (firstSnapshot) {
               if (!initTime) {
-                // NOTE: snapshot items do not have updateTime/createTime available
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
@@ -5983,7 +5983,7 @@
 
         // display signin modal on readonly accounts, unless the url was for a specific item
         let welcome = null
-        if (readonly && !location.hash) {
+        if (readonly && !fixed && !location.hash) {
           welcome = modal.show({
             content:
               'Welcome to MindPage! This is an **anonymous demo account**. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
@@ -6875,8 +6875,6 @@
                 target_context={item.target_context}
                 timeString={item.timeString}
                 timeOutOfOrder={item.timeOutOfOrder}
-                updateTime={item.updateTime}
-                createTime={item.createTime}
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
                 aboveTheFold={item.aboveTheFold}
