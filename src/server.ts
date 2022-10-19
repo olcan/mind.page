@@ -313,7 +313,7 @@ if (!on_firebase) {
 process['server-preload'] = async (page, session) => {
   // note we have never seen preload being invoked on client side, so we add this check to detect if that happens
   if (typeof window !== 'undefined') throw new Error('server-preload invoked on client side')
-  console.debug('preloading', page, session)
+  // console.debug('preloading', page, session)
 
   // server session information included in all responses
   // these should match up with exported variables in index.svelte
