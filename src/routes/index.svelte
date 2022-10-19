@@ -1,7 +1,7 @@
 <script context="module" lang="ts">
-  // preload function that can be called on either client or server
-  // See https://sapper.svelte.dev/docs#preloading
+  // server-side preload function, see server.ts for comments
   export async function preload(page, session) {
+    // this.error(404, 'Not found')
     return process['server-preload'](page, session) // see server.ts
   }
 </script>
@@ -43,7 +43,8 @@
   import Item from '../components/Item.svelte'
   export let items = []
   export let items_preload = [] // items returned by server preload (see above and server.ts)
-  export let error = null
+  export let server_error = null // error from server?
+  export let server_warning = null // warning from server?
   export let server_name
   export let server_ip
   export let client_ip
@@ -58,6 +59,11 @@
   let admin = false
   let anonymous = false
   let readonly = false
+  let url_hash = isClient ? decodeURIComponent(location.hash) : null
+  let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
+  let show_ids = url_params?.show?.split(',') ?? []
+  let hide_ids = url_params?.hide?.split(',') ?? []
+  let fixed = isClient && (show_ids.length || hide_ids.length) // fixed render mode
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -1874,6 +1880,13 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
+    if (fixed) {
+      items = items
+      updateItemLayout()
+      hideIndex = show_ids.length
+      return
+    }
+
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top
       if (
@@ -2201,11 +2214,11 @@
     })
 
     // returns position of minimum non-negative number, or -1 if none found
-    function min_pos(xJ) {
-      let jmin = -1
-      for (let j = 0; j < xJ.length; ++j) if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j
-      return jmin
-    }
+    // function min_pos(xJ) {
+    //   let jmin = -1
+    //   for (let j = 0; j < xJ.length; ++j) if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j
+    //   return jmin
+    // }
 
     // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
     //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
@@ -5112,8 +5125,7 @@
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
   let initialized = false
-  let maxRenderedAtInit = 100
-  let locationHrefAtInit
+  let maxRenderedAtInit = fixed ? show_ids.length : 100
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
   let hiddenItemsByName
@@ -5180,7 +5192,6 @@
   }
 
   async function initialize() {
-    locationHrefAtInit = location.href
 
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
@@ -5400,7 +5411,7 @@
   function isAdmin() {
     return (
       user?.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2' &&
-      (location.host == 'mindbox.io' || location.href.match(/user=(?:anonymous|admin)/) != null)
+      (location.host == 'mindbox.io' || url_params.user == 'anonymous' || url_params.user == 'admin')
     )
   }
 
@@ -5431,8 +5442,12 @@
         }
       })
 
-      // NOTE: We simply log the server side error as a warning. Currently only possible error is "invalid session cookie" (see session.ts), and assuming items are not returned/initialized below, firebase realtime should be able to initialize items without requiring a page reload, which is why this can be just a warning.
-      if (error) console.warn(error) // log server-side error
+      if (server_warning) console.warn('server warning: ', server_warning)
+      if (server_error) {
+        console.error('server error: ', server_error)
+        alert(`Server returned error '${server_error}'`) // modal not available (undefined) at this point
+        return // stop loading on server errors
+      }
 
       // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
       // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
@@ -6004,29 +6019,26 @@
               })()
             }
 
-            // if initial url fragment corresponds to an item tag or id, focus on that item ...
-            // we have to use locationHrefAtInit since location is updated/cleared during init
-            let tag = locationHrefAtInit.match(/#.+$/)?.pop()
-            if (tag) {
-              tag = decodeURIComponent(tag)
+            // if url fragment ("hash") corresponds to an item tag or id, focus on that item ...
+            if (url_hash) {
               // if it is a valid item id, then we convert it to name
               // this means tags that match item ids can not be linked to, which seems fine
-              const index = indexFromId.get(tag.substring(1))
+              const index = indexFromId.get(url_hash.substring(1))
               let unique = false
               if (index !== undefined) {
                 unique = true
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
                 onEditorChange(items[index].name)
-              } else if (idsFromLabel.get(tag.toLowerCase())?.length) {
-                unique = idsFromLabel.get(tag.toLowerCase())?.length == 1
+              } else if (idsFromLabel.get(url_hash.toLowerCase())?.length) {
+                unique = idsFromLabel.get(url_hash.toLowerCase())?.length == 1
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange(tag)
+                onEditorChange(url_hash)
               } else {
-                _modal(`url fragment ${tag} does not match any items`)
+                _modal(`url fragment ${url_hash} does not match any items`)
               }
-              // if tag matches a unique item, scroll to that item if needed
+              // if hash matches a unique item, scroll to that item if needed
               if (unique) update_dom().then(scrollToTarget)
             }
           })
@@ -6942,6 +6954,19 @@
     }
     textarea {
       caret-color: #0ff !important; /* maintain red (#f00) caret */
+    }
+  </style>
+{/if}
+
+{#if fixed}
+  <style>
+    .column-padding,
+    .header-container,
+    .super-container > .time {
+      display: none !important;
+    }
+    .items {
+      padding-bottom: 0 !important;
     }
   </style>
 {/if}

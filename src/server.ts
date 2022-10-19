@@ -307,49 +307,75 @@ if (!on_firebase) {
     })
 }
 
-// server-side preload hidden from client-side code
-// NOTE: for development server, admin credentials require `gcloud auth application-default login`
+// server-side preload hidden from client code (see index.svelte)
+// see https://sapper.svelte.dev/docs#preloading for documentation
+// NOTE: for dev server, admin credentials require `gcloud auth application-default login`
 process['server-preload'] = async (page, session) => {
-  // console.debug("preloading, client?", typeof window !== undefined, page, session);
-  // disable server preload for now, even for anonymous account
-  return {
+  // note we have never seen preload being invoked on client side, so we add this check to detect if that happens
+  if (typeof window !== 'undefined') throw new Error('server-preload invoked on client side')
+  console.debug('preloading', page, session)
+
+  // server session information included in all responses
+  // these should match up with exported variables in index.svelte
+  const resp = {
     server_name: session.server_name,
     server_ip: session.server_ip,
     client_ip: session.client_ip,
   }
+  // return resp // skip preload
+
+  // extract target item ids from show/hide parameters
+  // take last entry in array-valued parameters (specified multiple times)
+  const show_ids = page.query.show?.pop?.() ?? page.query.show
+  const hide_ids = page.query.hide?.pop?.() ?? page.query.hide
+  const ids = show_ids?.split(',')?.concat(hide_ids?.split(',') ?? [])
 
   let user = null
   if (session.cookie == 'signin_pending') {
-    return {} // signin pending, do not waste time retrieving data
+    return resp // signin pending, do not waste time retrieving data
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
-    // NOTE: we no longer preload for non-anonymous accounts because it slows down initial page load for larger accounts, and firebase realtime can be much more efficient due to client-side caching
-    return {}
-    // user = await getAuth(firebase).verifyIdToken(session.cookie).catch(console.error);
-    // if (!user) return { error: "invalid/expired session cookie" };
-  }
-  let items = await firebase
-    .firestore()
-    .collection('items') // server always reads from primary collection
-    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
-    .orderBy('time', 'desc')
-    .get()
-  // let items = await getDocs(
-  //   query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
-  // )
+    if (!ids) return resp // skip non-anonymous full preload since firebase realtime can be much faster
 
-  // console.debug(`retrieved ${items.docs.length} items for user '${user.uid}'`);
-  return {
-    // NOTE: we use _preload suffix to avoid replacing items on back/forward
-    items_preload: items.docs.map(doc =>
-      Object.assign(doc.data(), {
-        id: doc.id,
-        updateTime: doc.updateTime.seconds,
-        createTime: doc.createTime.seconds,
-      })
-    ),
+    // user = await getAuth(firebase).verifyIdToken(session.cookie).catch(console.error)
+    user = await firebase.auth().verifyIdToken(session.cookie).catch(console.error)
+    if (!user) return { ...resp, server_warning: 'invalid/expired session cookie' }
+    // console.debug('user', user)
   }
+
+  const start = Date.now()
+  let docs // items preloaded from firebase
+
+  if (ids) {
+    console.debug(`retrieving items ${ids} for user ${user.email} (${user.uid}) ...`)
+    docs = await Promise.all(ids.map(id => firebase.firestore().collection('items').doc(id).get()))
+    const missing_ids = docs.filter(doc => !doc.exists).map(doc => doc.id)
+    if (missing_ids.length) return { ...resp, server_error: 'missing document(s) ' + missing_ids }
+  } else {
+    console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
+    const start = Date.now()
+    docs = (
+      await firebase
+        .firestore()
+        .collection('items') // server always reads from primary collection
+        .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
+        .orderBy('time', 'desc')
+        .get()
+    ).docs
+  }
+  console.debug(`retrieved ${docs.length} items for user ${user.email} (${user.uid}) in ${Date.now() - start}ms`)
+
+  // use _preload suffix to avoid replacing items[] on client on back/forward
+  resp['items_preload'] = docs.map(doc =>
+    Object.assign(doc.data(), {
+      id: doc.id,
+      updateTime: doc.updateTime.seconds,
+      createTime: doc.createTime.seconds,
+    })
+  )
+  console.debug('preload size is ' + JSON.stringify(resp).length + ' bytes')
+  return resp
 }
 
 export { sapper_server } // for use as handler in functions.ts
