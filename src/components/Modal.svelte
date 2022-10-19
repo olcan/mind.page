@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { marked } from 'marked'
+  const marked = globalThis['marked'] // imported (and set up) in client.ts
   import { numberWithCommas } from '../util.js'
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
 
@@ -83,8 +83,8 @@
 
           // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
           // chrome fails to trigger onchange and enable confirm button despite autofill
-          const isSafari = navigator.userAgent.toLowerCase().indexOf('safari/') > -1
-          if (!isSafari && input != null && autocomplete) {
+          const browser = new window['UAParser'](navigator.userAgent).getBrowser().name
+          if (browser == 'Chrome' && input != null && autocomplete) {
             const promise_visible_at_dispatch = promise_visible
             const checkForChromeAutofill = () => {
               if (promise_visible != promise_visible_at_dispatch) return // cancel
@@ -92,6 +92,7 @@
                 if (inputelem?.matches(':-internal-autofill-selected')) {
                   input = inputelem.value // did not work in experiments but just in case
                   enabled = true
+                  return
                 }
                 setTimeout(checkForChromeAutofill, 100)
               } catch (e) {

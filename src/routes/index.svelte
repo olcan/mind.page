@@ -36,7 +36,7 @@
   } = firebase?.firestore ?? {}
   const { getStorage, ref, getDownloadURL, uploadBytes } = firebase?.storage ?? {}
 
-  import _ from 'lodash' // NOTE: this reuses import in client.ts (removing that import shifts ~72K to index.js)
+  const _ = globalThis['_'] // imported in client.ts
   import { Circle2 } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
   import Editor from '../components/Editor.svelte'

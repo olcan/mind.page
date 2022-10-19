@@ -1,6 +1,6 @@
 <script lang="ts">
-  import _ from 'lodash'
-  import { marked } from 'marked'
+  const _ = globalThis['_'] // imported in client.ts
+  const marked = globalThis['marked'] // imported (and set up) in client.ts
   import {
     highlight,
     blockRegExp,
@@ -472,18 +472,21 @@
         }
 
         // preserve extra spaces between non-whitespace, except inside or between html tags (using exclusion prefix)
-        str = str.replace(
-          /<\w(?:"[^"]*"|[^>"])*?>.*(?:<\/\w(?:"[^"]*"|[^>"])*?>)?|(\S) ( +)(\S)/g,
-          (m, pfx, spc, sfx) => {
-            if (!pfx) return m // matched inside html tag
-            return pfx + spc.replace(/ /g, '&nbsp;') + sfx
-          }
-        )
+        // NOTE: disabling this as it is also problematic in table syntax (where spacing can be used to align columns)
+        // str = str.replace(
+        //   /<\w(?:"[^"]*"|[^>"])*?>.*(?:<\/\w(?:"[^"]*"|[^>"])*?>)?|(\S) ( +)(\S)/g,
+        //   (m, pfx, spc, sfx) => {
+        //     if (!pfx) return m // matched inside html tag
+        //     return pfx + spc.replace(/ /g, '&nbsp;') + sfx
+        //   }
+        // )
 
         // insert spacers at empty lines (otherwise ignored by marked)
-        if (str.match(/^ *$/)) str += '&nbsp;'
+        // using <br> (vs &nbsp;) avoids non-breaking of certain syntax (e.g. tables)
+        if (str.match(/^ *$/)) str += '<br>\n'
 
         // insert spacers at empty lines in blockquotes (otherwise ignored by marked)
+        // using non-breaking space (&nbsp;) avoid breaking blockquotes
         if (str.match(/^ *>[> ]*$/)) str += '&nbsp;'
 
         // wrap math inside span.math (unless text matches search terms)
@@ -679,6 +682,7 @@
     let checkboxIndex = 0
     text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => m + '%%' + checkboxIndex++ + '%%')
 
+    // parse markdown, adding <br> on a each single line break, see https://marked.js.org/using_advanced#options
     text = marked.parse(text, { breaks: true })
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
@@ -705,11 +709,17 @@
       return wrapMath(_math)
     })
 
-    // allow escaping of math and macro delimiters in inline code blocks, used in documenting syntax
-    text = text.replace(/(<code>.*?)\\\$`(.*?<\/code>)/g, '$1$$`$2') // \$`
-    text = text.replace(/(<code>.*?)\\\$\$`(.*?<\/code>)/g, '$1$$$$`$2') // \$$`
-    text = text.replace(/(<code>.*?)\\&lt;&lt;(.*?<\/code>)/g, '$1&lt;&lt;$2') // \<<
-    text = text.replace(/(<code>.*?)\\@\{(.*?<\/code>)/g, '$1@{$2') // \@{
+    // allow escaping of math ($), macro (&lt;,@), and table (|) delimiters in inline code blocks
+    text = text.replace(/<code>(.*?)<\/code>/g, (m, code) => {
+      code = code.replace(/\\\$/g, '$$')
+      code = code.replace(/\\&lt;/g, '&lt;')
+      code = code.replace(/\\@/g, '@')
+      code = code.replace(/\\\|/g, '|')
+      return `<code>${code}</code>`
+    })
+
+    // allow escaping pipes in inline code blocks, to avoid confusion w/ table syntax
+    text = text.replace(/(<code>.*?)\\\|(.*?<\/code>)/g, '$1|$2') // \$`
 
     // wrap item content in .content div, adding .menu class for #menu items
     // note this wrapper div excludes deps-and-dependents, deps-summary, and menu-<id> divs (created in afterUpdate)
@@ -2024,13 +2034,10 @@
     content: '✔︎'; /* could be: ✔︎✓ */
   }
 
-  /* eliminate border spacing for tables */
-  /* add horizontal spacing via left-padding on non-first columns */
+  /* use default inner-column-spacing and top-alignment for tables */
   :global(.item table) {
-    border-spacing: 0;
-  }
-  :global(.item table :is(td, th):not(:first-child)) {
-    padding-left: 10px;
+    border-spacing: 10px 0;
+    margin: 0 -10px; /* to undo outer border-spacing */
   }
   :global(.item table td) {
     vertical-align: top;

@@ -23,7 +23,8 @@
   export let onPrev = () => {}
   export let onNext = () => {}
 
-  import _ from 'lodash'
+  const _ = globalThis['_'] // imported in client.ts
+
   // import he from "he";
   import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped } from '../util.js'
 

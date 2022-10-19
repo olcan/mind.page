@@ -82,7 +82,10 @@ import { Octokit } from '../node_modules/@octokit/rest' // ~50K
 window['Octokit'] = Octokit
 
 // import/expose marked as window.marked
+// also extend marked to use marked-extended-tables
 import { marked } from 'marked' // ~36K
+import marked_extended_tables from 'marked-extended-tables' // ~3K
+marked.use(marked_extended_tables())
 window['marked'] = marked
 
 // import/expose jupyter services under window.jupyter
