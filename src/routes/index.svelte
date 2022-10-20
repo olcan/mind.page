@@ -3942,8 +3942,10 @@
         }
       }
     }
-    alert('can not create new item in fixed mode')
-    return
+    if (fixed) {
+      alert('can not create new item in fixed mode')
+      return
+    }
 
     let itemToSave = { user: user.uid, time, attr, text }
     let item = initItemState(_.clone(itemToSave), 0, {
