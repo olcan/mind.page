@@ -5424,7 +5424,7 @@
   function isAdmin() {
     return (
       user?.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2' &&
-      (location.host == 'mindbox.io' || url_params.user == 'anonymous' || url_params.user == 'admin')
+      (location.host == 'mindbox.io' || url_params.user == 'anonymous')
     )
   }
 
@@ -5494,10 +5494,11 @@
         if (window.sessionStorage.getItem('mindpage_signin_pending')) {
           console.warn(`ignoring ${items.length} items during signin`)
           items = []
-        } else if (user && user.uid != items[0].user) {
+        } else if (user && user.uid != items[0].user && !(fixed && items[0].user == 'anonymous')) {
           // items are for wrong user, usually anonymous, due to missing (not expired) cookie
           // you can test this with document.cookie='__session=;max-age=0' in console
           // can also happen when admin is logged in but acting as anonymous
+          // in fixed mode, this is fine as long as items are anonymous
           console.warn(`ignoring ${items.length} items for ${items[0].user}`)
           items = []
         } else {
