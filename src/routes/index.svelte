@@ -2757,9 +2757,9 @@
     item.debug = item.tagsRaw.includes('#_debug')
     item.autorun = item.tagsRaw.includes('#_autorun')
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
-    item.pinned = pintags.length > 0
+    item.pinned = !fixed && pintags.length > 0
     item.pinTerm = pintags[0] || ''
-    item.dotted = pintags.findIndex(t => t.match(/^#_pin\/dot(?:\/|$)/)) >= 0
+    item.dotted = !fixed && pintags.findIndex(t => t.match(/^#_pin\/dot(?:\/|$)/)) >= 0
     item.dotTerm = pintags.filter(t => t.match(/^#_pin\/dot(?:\/|$)/))[0] || ''
 
     // if item stats with visible #tag, it is taken as a "label" for the item
@@ -2965,6 +2965,7 @@
   import { tick } from 'svelte'
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
+    if (readonly) throw Error('readonly mode should not require a secret phrase')
     if (secret) return secret // already initialized from localStorage
     secret = localStorage.getItem('mindpage_secret')
     if (secret) return secret // retrieved from localStorage
@@ -3248,8 +3249,9 @@
     // also uses async _modal due to known issues with alert in ios (see assignment to window.alert)
     // should always be invoked as return alert(...)
     const alert = msg => {
+      const was_focused = document.activeElement == textArea(-1)
       if (return_alerts) return msg // return alert message string
-      else _modal(msg)
+      else _modal_alert(msg, () => was_focused && textArea(-1).focus())
     }
 
     if (!ignore_command) {
@@ -3940,6 +3942,8 @@
         }
       }
     }
+    alert('can not create new item in fixed mode')
+    return
 
     let itemToSave = { user: user.uid, time, attr, text }
     let item = initItemState(_.clone(itemToSave), 0, {
@@ -5443,10 +5447,10 @@
         }
       })
 
-      if (server_warning) console.warn('server warning: ', server_warning)
+      if (server_warning) console.warn(server_warning)
       if (server_error) {
-        console.error('server error: ', server_error)
-        alert(`Server returned error '${server_error}'`) // modal not available (undefined) at this point
+        console.error(server_error)
+        alert(server_error) // modal not available (undefined) at this point
         return // stop loading on server errors
       }
 
@@ -5497,15 +5501,15 @@
         }
       }
 
-      // NOTE: we do not attempt login for readonly account (if login hangs, this is suspect)
-      if (!readonly) {
+      // NOTE: we do not attempt login for readonly account unless fixed (if login hangs, this is suspect)
+      if (!readonly || fixed) {
         // if initializing items, wait for that before signing in user since errors can trigger signout
         Promise.resolve(initialization).then(() => {
           onAuthStateChanged(
             getAuth(firebase),
             authUser => {
               // console.debug("onAuthStateChanged", user, authUser)
-              if (readonly) {
+              if (readonly && !fixed) {
                 console.warn('ignoring unexpected signin')
                 return
               }
@@ -5521,7 +5525,9 @@
               init_log('signed in', user.email)
               const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
               localStorage.setItem('mindpage_user', userInfoString)
-              anonymous = readonly = false // just in case (should already be false)
+              anonymous = false // just in case (should already be false)
+              // NOTE: we now allow readonly signin for 'fixed' mode
+              // readonly = false
               signedin = true
               instance.user = user.uid
 
@@ -5677,7 +5683,8 @@
                 if (items.length == 0) onEditorDone('/_welcome')
 
                 // if necessary, init secret by triggering a test encryption/decryption
-                if (!secret) {
+                // note this is not necessary if we are logged in readonly, i.e. for fixed mode
+                if (!secret && !readonly) {
                   const hello_item = { user: user.uid, time: Date.now(), text: 'hello' }
                   encryptItem(hello_item)
                     .then(decryptItem)
@@ -6959,12 +6966,28 @@
 {#if fixed}
   <style>
     .column-padding,
-    .header-container,
+    .header .editor,
+    .header .spacer,
+    .header .status .counts,
     .super-container > .time {
       display: none !important;
     }
+    .header .header-container {
+      justify-content: center;
+      background: transparent !important;
+      border: none !important;
+      margin-bottom: -30px;
+    }
+    .header .status {
+      margin-bottom: 35px;
+      margin-top: -65px;
+    }
     .items {
       padding-bottom: 0 !important;
+    }
+    .container > .item-menu,
+    .item > div:first-child {
+      display: none !important;
     }
   </style>
 {/if}

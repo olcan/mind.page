@@ -324,7 +324,7 @@ process['server-preload'] = async (page, session) => {
 
   let user = null
   if (session.cookie == 'signin_pending') {
-    return resp // signin pending, do not waste time retrieving data
+    return resp // signin pending, do not waste time retrieving items
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
@@ -341,6 +341,7 @@ process['server-preload'] = async (page, session) => {
   if (ids) {
     if (ids.every(id => id.length == 20)) {
       // using 20-byte firebase docids that require auth (unless item.user == 'anonymous')
+      // NOTE: admin has access to all docs, so we have to perform auth check here
       console.debug(`retrieving ${ids.length} items for user ${user.email} (${user.uid}) ...`)
       const docs = await Promise.all(ids.map(id => firebase_admin.firestore().collection('items').doc(id).get()))
       const missing_ids = docs.filter(doc => !doc.exists).map(doc => doc.id)
@@ -350,6 +351,7 @@ process['server-preload'] = async (page, session) => {
       if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
     } else if (ids.every(id => id.startsWith('https://'))) {
       // using download urls, typically firebase storage download urls w/ security token, e.g. https://firebasestorage.googleapis.com/v0/b/olcanswiki.appspot.com/o/y2swh7JY2ScO5soV7mJMHVltAOX2%2Fuploads%2Fpublic%2F7cbf6e293452978a?alt=media&token=a1501c15-cd27-45ef-b72f-c1c5cecba41f
+      // NOTE: download urls are always public (once shared), though can be revoked via console or deletion/re-upload (see #util/cloud)
       console.debug(`retrieving ${ids.length} items by downloading from urls ${ids} ...`)
       try {
         items = await Promise.all(
@@ -364,8 +366,15 @@ process['server-preload'] = async (page, session) => {
       }
     } else if (ids.every(id => id.includes('/') && !id.startsWith('https://'))) {
       // using firebase storage paths, e.g. y2swh7JY2ScO5soV7mJMHVltAOX2/uploads/public/7cbf6e293452978a
-      // all paths not under <user>/uploads/public/... will require authentication!
+      // only paths .../uploads/public/... or <user>/uploads/... are allowed for now
+      // NOTE: admin has access to all files, so we have to perform auth check here
+      // file metadata can be used for sharing w/ specific users in the future
+      // see https://firebase.google.com/docs/storage/web/file-metadata#web-version-9_1
       console.debug(`retrieving ${ids.length} items by downloading from paths ${ids} ...`)
+      const unauth_ids = ids.filter(
+        path => !path.includes('/uploads/public/') && !path.startsWith(user.uid + '/uploads/')
+      )
+      if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
       try {
         // see https://firebase.google.com/docs/storage/admin/start
         // see https://googleapis.dev/nodejs/storage/latest/index.html
