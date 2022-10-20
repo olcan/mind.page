@@ -389,9 +389,11 @@ process['server-preload'] = async (page, session) => {
         // see https://firebase.google.com/docs/storage/admin/start
         // see https://googleapis.dev/nodejs/storage/latest/index.html
         // see https://nodejs.org/api/stream.html#readabletoarrayoptions
-        // see toArray alternative read_stream above
+        // see read_to_buffer above as an alternative to toArray (added in node 16.5)
+
         const data = await Promise.all(
-          ids.map(path => read_to_buffer(firebase_admin.storage().bucket().file(path).createReadStream()))
+          ids.map(path => firebase_admin.storage().bucket().file(path).createReadStream().toArray().then(Buffer.concat))
+          // ids.map(path => read_to_buffer(firebase_admin.storage().bucket().file(path).createReadStream()))
         )
         const decoder = new TextDecoder('utf-8')
         items = data.map(bytes => JSON.parse(decoder.decode(bytes)))
