@@ -6889,6 +6889,7 @@
                 saving={item.saving}
                 running={item.running}
                 admin={item.admin}
+                {fixed}
                 source={item.attr ? item.attr.source : ''}
                 path={item.attr ? item.attr.path : ''}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
@@ -7028,7 +7029,7 @@
       display: none !important;
     }
     .item mark {
-      cursor: default !important;
+      cursor: auto !important;
     }
   </style>
 {/if}

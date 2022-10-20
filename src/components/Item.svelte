@@ -27,6 +27,7 @@
   export let saving = false
   export let running = false
   export let admin = false
+  export let fixed = false
   export let source = null
   export let path = null
   export let hidden = false
@@ -189,6 +190,7 @@
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {}
   if (!window['_handleTagClick'])
     window['_handleTagClick'] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
+      if (fixed) return // ignore tag events in fixed mode
       tag = _.unescape(tag)
       reltag = _.unescape(reltag)
       e.stopPropagation()
