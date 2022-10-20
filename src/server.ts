@@ -4,10 +4,6 @@ import { createProxyMiddleware } from 'http-proxy-middleware'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
-// NOTE: this is needed because firebase only has node 16; can be removed once firebase has node 17(.5)
-//       also note we are restricted to node-fetch 2.6.7 because later version do not support import
-//       see https://stackoverflow.com/a/69093538
-import fetch from 'node-fetch'
 import https from 'https'
 import fs from 'fs'
 import os from 'os'
@@ -363,21 +359,6 @@ process['server-preload'] = async (page, session) => {
       items = docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
       const unauth_ids = items.filter(item => item.user != 'anonymous' && item.user != user.uid).map(item => item.id)
       if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
-    } else if (ids.every(id => id.startsWith('https://'))) {
-      // using download urls, typically firebase storage download urls w/ security token, e.g. https://firebasestorage.googleapis.com/v0/b/olcanswiki.appspot.com/o/y2swh7JY2ScO5soV7mJMHVltAOX2%2Fuploads%2Fpublic%2F7cbf6e293452978a?alt=media&token=a1501c15-cd27-45ef-b72f-c1c5cecba41f
-      // NOTE: download urls are always public (once shared), though can be revoked via console or deletion/re-upload (see #util/cloud)
-      console.debug(`retrieving ${ids.length} items by downloading from urls ${ids} ...`)
-      try {
-        items = await Promise.all(
-          ids.map(url => fetch(url).then(r => (r.ok ? r.json() : { url, error: `${r.status} ${r.statusText}` })))
-        )
-        const errors = items.filter(item => item.error).map(item => `${item.url} (${item.error})`)
-        if (errors.length) return { ...resp, server_error: 'could not download item(s) ' + errors }
-        items.forEach(item => (item.user = user.uid)) // just assign to authenticated user (if any)
-        // console.debug(items)
-      } catch (e) {
-        return { ...resp, server_error: 'could not download item(s) ' + ids + '; ' + e }
-      }
     } else if (ids.every(id => id.includes('/') && !id.startsWith('https://'))) {
       // using firebase storage paths, e.g. y2swh7JY2ScO5soV7mJMHVltAOX2/uploads/public/7cbf6e293452978a
       // only paths .../uploads/public/... or <user>/uploads/... are allowed for now
