@@ -335,7 +335,7 @@ process['server-preload'] = async (page, session) => {
   const show_ids = page.query.show?.pop?.() ?? page.query.show
   const hide_ids = page.query.hide?.pop?.() ?? page.query.hide
   const ids = show_ids?.split(',')?.concat(hide_ids?.split(',') ?? [])
-  if (ids) resp['fixed_count'] = show_ids?.length ?? 0
+  if (ids) resp['fixed_count'] = ids.length // TODO: visible only
 
   let user = null
   if (session.cookie == 'signin_pending') {

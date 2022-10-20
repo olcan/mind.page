@@ -6805,9 +6805,11 @@
               {#if items.length > 0}
                 <div class="counts">
                   {#if matchingItemCount > 0}
-                    &nbsp;<span class="matching">{matchingItemCount} matching items</span>
+                    &nbsp;<span class="matching"
+                      >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
+                    >
                   {:else}
-                    {fixed_count || items.length} items
+                    {fixed_count || items.length} item{(fixed_count || items.length) > 1 ? 's' : ''}
                   {/if}
                 </div>
               {/if}
@@ -7016,6 +7018,7 @@
     }
     .header .status .counts {
       right: 40px !important;
+      display: none; /* does not seem useful */
     }
     .header .status :is(.console-summary, .console) {
       left: 7px !important; /* ~matches top spacing of console */
