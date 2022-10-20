@@ -5423,8 +5423,7 @@
 
   function isAdmin() {
     return (
-      user?.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2' &&
-      (location.host == 'mindbox.io' || url_params.user == 'anonymous')
+      user?.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2' && (location.host == 'mindbox.io' || url_params.user == 'anonymous')
     )
   }
 
@@ -7019,7 +7018,7 @@
       right: 40px !important;
     }
     .header .status :is(.console-summary, .console) {
-      left: 8px !important; /* ~matches top spacing of console */
+      left: 7px !important; /* ~matches top spacing of console */
     }
     .items {
       padding-bottom: 0 !important;
@@ -7027,6 +7026,9 @@
     .container > .item-menu,
     .item > div:first-child {
       display: none !important;
+    }
+    .item mark {
+      cursor: default !important;
     }
   </style>
 {/if}

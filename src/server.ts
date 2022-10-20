@@ -156,7 +156,7 @@ const sapper_server = express().use(
           // use /proxy for HTTP to avoid mixed content errors
           // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
           data = data.replace('http:', '/proxy/http:')
-          // force reload on re-connect; otherwise server restarts are NOT detected via proxy
+          // force reload on re-connecserver_skipped_preloadt; otherwise server restarts are NOT detected via proxy
           data = data.replace(
             `console.log(\`[SAPPER] dev client connected\`);`,
             `if (window._dev_client_connected) { location.reload() } else { console.log(\`[SAPPER] dev client connected\`) }; window._dev_client_connected = true`
@@ -338,14 +338,14 @@ process['server-preload'] = async (page, session) => {
   let user = null
   if (session.cookie == 'signin_pending') {
     // if signin is pending, we do not want to waste time loading anonymous items, and we also can not risk any auth errors (e.g. when loading fixed items) that would interrupt signin, so we simply return nothing (with an indication that preloading was skipped) and expect client to reload if server-side loading is required (i.e. if client-side fallback is not available)
-    return { ...resp, server_preload_skipped: true }
+    return { ...resp, server_skipped_preload: true }
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
     if (!ids) return resp // skip non-anonymous full preload since firebase realtime can be much faster
 
     user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
-    if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_preload_skipped: true }
+    if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_skipped_preload: true }
     // console.debug('user', user)
   }
 
