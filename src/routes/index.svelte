@@ -5331,7 +5331,7 @@
     ).then(() => {
       if (!keepOnPageDuringDelay) renderStart = renderEnd
       if (renderEnd < cutoff) {
-        init_log(`rendered items ${renderStart}-${renderEnd}`)
+        // init_log(`rendered items ${renderStart}-${renderEnd}`)
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
           init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
         tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
@@ -5587,6 +5587,7 @@
             return
           }
 
+          // note we initialize firebase even in anonymous mode, because (1) we can fallback to initial snapshot if items are not preloaded, and (2) we allow one-way sync of anonymous items from admin account
           initFirebaseRealtime()
         },
         console.error

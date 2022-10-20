@@ -156,7 +156,7 @@ const sapper_server = express().use(
           // use /proxy for HTTP to avoid mixed content errors
           // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
           data = data.replace('http:', '/proxy/http:')
-          // force reload on re-connecserver_skipped_preloadt; otherwise server restarts are NOT detected via proxy
+          // force reload on re-connect; otherwise server restarts are NOT detected via proxy
           data = data.replace(
             `console.log(\`[SAPPER] dev client connected\`);`,
             `if (window._dev_client_connected) { location.reload() } else { console.log(\`[SAPPER] dev client connected\`) }; window._dev_client_connected = true`
@@ -326,6 +326,8 @@ process['server-preload'] = async (page, session) => {
   }
   // return resp // skip preload
 
+  // TODO: restructure this to better treat arrays, require at least one visible item, etc
+  //       maybe just specify 'items' and 'deps', rather than show/hide, allowing some sources to have dependencies
   // extract target item ids from show/hide parameters
   // take last entry in array-valued parameters (specified multiple times)
   // TODO: pass these on to client, and consider renaming?
@@ -343,8 +345,11 @@ process['server-preload'] = async (page, session) => {
     return { ...resp, server_skipped_preload: true }
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
+    // preload is optional for anonymous users
+    if (!ids) return { ...resp, server_skipped_preload: true }
   } else {
-    if (!ids) return resp // skip non-anonymous full preload since firebase realtime can be much faster
+    // skip preload once user is signed in, since firebase realtime should be faster (w/ caching etc)
+    if (!ids) return { ...resp, server_skipped_preload: true }
 
     user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
     if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_skipped_preload: true }
