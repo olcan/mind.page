@@ -49,6 +49,7 @@
   export let server_name
   export let server_ip
   export let client_ip
+  export let fixed_count = 0 // number of fixed items (controlled by server)
   let user = null
   let deletedItems = []
   let editingItems = []
@@ -60,11 +61,9 @@
   let admin = false
   let anonymous = false
   let readonly = false
+  let fixed = fixed_count > 0
   let url_hash = isClient ? decodeURIComponent(location.hash) : null
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
-  let show_ids = url_params?.show?.split(',') ?? []
-  let hide_ids = url_params?.hide?.split(',') ?? []
-  let fixed = isClient && (show_ids.length > 0 || hide_ids.length > 0) // fixed render mode
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -1885,7 +1884,7 @@
     if (fixed) {
       items = items
       updateItemLayout()
-      hideIndex = show_ids.length
+      hideIndex = fixed_count
       return
     }
 
@@ -5139,7 +5138,7 @@
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
   let initialized = false
-  let maxRenderedAtInit = fixed ? show_ids.length : 100
+  let maxRenderedAtInit = fixed_count || 100
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
   let hiddenItemsByName
@@ -6808,7 +6807,7 @@
                   {#if matchingItemCount > 0}
                     &nbsp;<span class="matching">{matchingItemCount} matching items</span>
                   {:else}
-                    {items.length} items
+                    {fixed_count || items.length} items
                   {/if}
                 </div>
               {/if}
