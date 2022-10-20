@@ -299,6 +299,16 @@ if (!on_firebase) {
     })
 }
 
+// helper to read stream into buffer, from https://stackoverflow.com/a/67729663
+function read_to_buffer(stream) {
+  return new Promise((resolve, reject) => {
+    const bufs = []
+    stream.on('data', chunk => bufs.push(chunk))
+    stream.on('end', () => resolve(Buffer.concat(bufs)))
+    stream.on('error', reject)
+  })
+}
+
 // server-side preload hidden from client code (see index.svelte)
 // see https://sapper.svelte.dev/docs#preloading for documentation
 // NOTE: for dev server, admin credentials require `gcloud auth application-default login`
@@ -361,8 +371,8 @@ process['server-preload'] = async (page, session) => {
         if (errors.length) return { ...resp, server_error: 'could not download item(s) ' + errors }
         items.forEach(item => (item.user = user.uid)) // just assign to authenticated user (if any)
         // console.debug(items)
-      } catch {
-        return { ...resp, server_error: 'could not download item(s) ' + ids + '; fetch failed' }
+      } catch (e) {
+        return { ...resp, server_error: 'could not download item(s) ' + ids + '; ' + e }
       }
     } else if (ids.every(id => id.includes('/') && !id.startsWith('https://'))) {
       // using firebase storage paths, e.g. y2swh7JY2ScO5soV7mJMHVltAOX2/uploads/public/7cbf6e293452978a
@@ -379,8 +389,9 @@ process['server-preload'] = async (page, session) => {
         // see https://firebase.google.com/docs/storage/admin/start
         // see https://googleapis.dev/nodejs/storage/latest/index.html
         // see https://nodejs.org/api/stream.html#readabletoarrayoptions
+        // see toArray alternative read_stream above
         const data = await Promise.all(
-          ids.map(path => firebase_admin.storage().bucket().file(path).createReadStream().toArray().then(Buffer.concat))
+          ids.map(path => read_to_buffer(firebase_admin.storage().bucket().file(path).createReadStream()))
         )
         const decoder = new TextDecoder('utf-8')
         items = data.map(bytes => JSON.parse(decoder.decode(bytes)))
