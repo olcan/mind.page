@@ -1514,7 +1514,7 @@
 
       item.timeString = ''
       item.timeOutOfOrder = false
-      if (!item.pinned && (index == 0 || timeString != lastTimeString)) {
+      if (!fixed && !item.pinned && (index == 0 || timeString != lastTimeString)) {
         item.timeString = timeString
         item.timeOutOfOrder = index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString
         lastTimeString = timeString // for grouping of subsequent items
@@ -1581,7 +1581,7 @@
       // if non-pinned item is first in its column or section and missing time string, add it now
       // also mark it as a "leader" for styling its index number
       item.leader = !item.pinned && (columnLastItem[item.column] < 0 || item.column != lastItem.column)
-      if (item.leader && !item.timeString) {
+      if (!fixed && item.leader && !item.timeString) {
         item.timeString = timeString
         lastTimeString = timeString // for grouping of subsequent items
         // add time string height now, assuming we are not ignoring item height
