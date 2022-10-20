@@ -5128,6 +5128,12 @@
         },
         screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
         hardware_concurrency: navigator.hardwareConcurrency,
+        gpu: (() => {
+          const gl = document.createElement('canvas').getContext("experimental-webgl") as any
+          const gl_renderer_param = gl?.getExtension("WEBGL_debug_renderer_info")
+            .UNMASKED_RENDERER_WEBGL
+          return gl_renderer_param ? gl.getParameter(gl_renderer_param) : 'unknown'
+        })()
       }
   let instances = [] // list of live instances, most recently focused first
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
@@ -5643,6 +5649,32 @@
       function initFirebaseRealtime() {
         if (!user) return // need user.uid
 
+        // listen for instances if user is not anonymous
+        if (!anonymous) {
+          onSnapshot(
+            query(
+              collection(getFirestore(firebase), 'instances'),
+              where('user', '==', user.uid), // instances for user only
+              where('update_time', '>', Date.now() - 2 * 60 * 1000), // live only (as of init)
+              orderBy('update_time', 'desc') // required by index
+            ),
+            snapshot => {
+              instances = Array.from(snapshot.docs, (doc: any) => doc.data())
+              instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
+              instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
+              primary = instances[0]?.init_time == initTime
+            }
+          )
+        }
+
+        // shortcut init in fixed mode, just update instances if user is signed in
+        if (fixed) {
+          if (!initTime) throw new Error('preload required for fixed mode')
+          instanceId = user.uid + '-' + initTime
+          if (!anonymous) updateInstance()
+          return
+        }
+
         // start listening for remote changes
         // (also initialize if items were not returned by server)
         onSnapshot(
@@ -5685,8 +5717,7 @@
                 if (items.length == 0) onEditorDone('/_welcome')
 
                 // if necessary, init secret by triggering a test encryption/decryption
-                // note this is not necessary if we are logged in readonly, i.e. for fixed mode
-                if (!secret && !readonly) {
+                if (!secret) {
                   const hello_item = { user: user.uid, time: Date.now(), text: 'hello' }
                   encryptItem(hello_item)
                     .then(decryptItem)
@@ -5873,24 +5904,6 @@
             }
           }
         )
-
-        if (!anonymous) {
-          // also listen for instances and maintain window._instances && window._primary
-          onSnapshot(
-            query(
-              collection(getFirestore(firebase), 'instances'),
-              where('user', '==', user.uid), // instances for user only
-              where('update_time', '>', Date.now() - 2 * 60 * 1000), // live only (as of init)
-              orderBy('update_time', 'desc') // required by index
-            ),
-            snapshot => {
-              instances = Array.from(snapshot.docs, (doc: any) => doc.data())
-              instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
-              instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
-              primary = instances[0]?.init_time == initTime
-            }
-          )
-        }
       }
 
       onMount(() => {
