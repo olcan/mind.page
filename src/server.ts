@@ -328,13 +328,18 @@ process['server-preload'] = async (page, session) => {
 
   // extract target item ids from show/hide parameters
   // take last entry in array-valued parameters (specified multiple times)
+  // TODO: pass these on to client, and consider renaming?
+  // TODO: note server should ensure that either the items are returned, or an error is returned
+  //       (except when preload is skipped due to pending signin)
   const show_ids = page.query.show?.pop?.() ?? page.query.show
   const hide_ids = page.query.hide?.pop?.() ?? page.query.hide
   const ids = show_ids?.split(',')?.concat(hide_ids?.split(',') ?? [])
 
   let user = null
   if (session.cookie == 'signin_pending') {
-    return resp // signin pending, do not waste time retrieving items
+    // if signin is pending, we do not want to waste time loading anonymous items, and we also can not risk any auth errors (e.g. when loading fixed items) that would interrupt signin, so we simply return nothing (with an indication that preloading was skipped) and expect client to reload if server-side loading is required (i.e. if client-side fallback is not available)
+    resp['server_skipped_preload'] = true
+    return resp
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {

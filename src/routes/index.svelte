@@ -45,6 +45,7 @@
   export let items_preload = [] // items returned by server preload (see above and server.ts)
   export let server_error = null // error from server?
   export let server_warning = null // warning from server?
+  export let server_skipped_preload = false
   export let server_name
   export let server_ip
   export let client_ip
@@ -5470,7 +5471,7 @@
       } else if (window.sessionStorage.getItem('mindpage_signin_pending')) {
         init_log('resuming signin ...')
         window.sessionStorage.removeItem('mindpage_signin_pending') // no longer considered pending
-        user = secret = null
+        user = secret = null // user is to be determined at onAuthStateChanged
       } else {
         useAnonymousAccount()
       }
@@ -5487,112 +5488,110 @@
         `[${window['_client_start_time']}ms] loaded client` + (preload_count > 0 ? ` + ${preload_count} items` : '')
       )
 
-      // if items were returned from server, confirm user, then initialize if valid
+      // if items were preloaded, confirm user and either ignore or init items
       if (items_preload.length > 0) {
         items = items_preload
         if (window.sessionStorage.getItem('mindpage_signin_pending')) {
           console.warn(`ignoring ${items.length} items during signin`)
           items = []
         } else if (user && user.uid != items[0].user) {
-          // items are for wrong user, usually anonymous, due to missing/expired cookie
+          // items are for wrong user, usually anonymous, due to missing (not expired) cookie
           // you can test this with document.cookie='__session=;max-age=0' in console
           // can also happen when admin is logged in but acting as anonymous
-          // NOTE: we now refresh session cookie regularly and do not expect this warning
-          // if (items[0].user != "anonymous")
-          console.warn(`ignoring ${items.length} items (${items[0].user})`)
+          console.warn(`ignoring ${items.length} items for ${items[0].user}`)
           items = []
         } else {
-          // NOTE: at this point item heights (and totalItemHeight) will be zero and the loading indicator stays, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
+          // NOTE: at this point item heights (and totalItemHeight) may be zero and loading overlay should be visible, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
           initTime = window['_init_time'] = instance.init_time = Date.now() // init started
           initialize()
         }
       }
 
-      // NOTE: we do not attempt/expect login for readonly account unless fixed (if login hangs, this is suspect)
-      // TODO: what actually triggers the login? does this prevent firebase init if we are signed out?
-      // TODO: also weird that anonymous non-preload account does NOT listen for changes ... maybe we should just stop
-      //       listening as soon as signin is complete, but again not clear why we are guaranteed a signin.
-      //       maybe you should set a signing flag above and only listen if we are signing in?
-      if (!readonly || fixed) {
-        // if initializing items, wait for that before signing in user since errors can trigger signout
-        Promise.resolve(initialization).then(() => {
-          onAuthStateChanged(
-            getAuth(firebase),
-            authUser => {
-              // console.debug("onAuthStateChanged", user, authUser)
-              if (authUser && readonly && !fixed) {
-                console.warn('ignoring unexpected signin')
-                return
-              }
-              if (authUser && signedin) {
-                console.warn('ignoring redundant signin')
-                return
-              }
-              if (!authUser) {
-                if (anonymous) return // anonymous user can be signed in or out
-                if (signingOut) return // ignore during signout
-                // TODO: Note once firebase realtime is initialized, _any_ auth changes should force an automatic reload, because otherwise you have to clean up firebase listeners.
-                if (signedin) {
-                  // must have been signed out on another tab
-                  document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-                  _modal_alert(`MindPage was signed out of your Google account and needs to reload.`, () =>
-                    location.reload()
-                  )
-                  return
-                }
-                document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
-                _modal_confirm(`MindPage could not sign into your Google account. Try again?`, signIn)
-                return
-              }
-              resetUser() // clean up first
-              user = authUser
-              init_log('signed in', user.email)
-              const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
-              localStorage.setItem('mindpage_user', userInfoString)
-              anonymous = false // just in case (should already be false)
-              // NOTE: we now allow readonly signin for 'fixed' mode
-              // readonly = false
-              signedin = true
-              instance.user = user.uid
+      // start listening for auth changes & initialize firebase on first callback
+      // NOTE: we expect a callback in all cases (e.g. even when user is signed out or anonymous)
+      //       we use any additional callbacks to trigger an automatic reload ...
+      let authStateReceived = false
+      onAuthStateChanged(
+        getAuth(firebase),
+        authUser => {
+          init_log('user:', authUser?.email || 'anonymous')
 
-              // update user info (email, name, etc) in users collection
-              const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
-              // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
-              setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
+          // console.debug("onAuthStateChanged", user, authUser)
+          if (signingIn || signingOut) return // ignore auth changes when signing in/out, which should trigger a reload
 
-              // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
-              //       (this is the only case where user != getAuth(firebase).currentUser)
-              admin = isAdmin()
-              if (admin) {
-                useAnonymousAccount()
-              } else {
-                // set up server-side session cookie
-                // maximum max-age seems to be 7 days for Safari & we refresh daily
-                // store user's ID token as a __session cookie to send to server for preload
-                // __session is the only cookie allowed by firebase for efficient caching
-                // (see https://stackoverflow.com/a/44935288)
-                const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
-                function updateSessionCookie() {
-                  user
-                    .getIdToken(false /*force refresh*/)
-                    .then(token => {
-                      // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
-                      document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
-                    })
-                    .catch(console.error)
-                }
-                updateSessionCookie()
-                setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+          // reload automatically if auth state is modified, e.g. due to signin/signout on another tab
+          if (authStateReceived) {
+            console.warn('auth state modified, reloading ...')
+            location.reload()
+            return
+          }
+          authStateReceived = true
+
+          if (!authUser) {
+            // if we were expecting signin, then we should let user know that we failed and offer to retry ...
+            if (!anonymous) {
+              _modal(`MindPage could not sign into your Google account.`, {
+                confirm: 'Try Again',
+                cancel: 'Cancel',
+                onConfirm: signIn,
+                onCancel: () => location.reload(),
+              })
+              return // cancel init (no need to indicate visually since reload is required)
+            }
+          } else {
+            resetUser() // clean up first
+            user = authUser
+            const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
+            localStorage.setItem('mindpage_user', userInfoString)
+            anonymous = false // just in case (should already be false)
+            // NOTE: we now allow readonly signin for 'fixed' mode
+            // readonly = false
+            signedin = true
+            instance.user = user.uid
+
+            // update user info (email, name, etc) in users collection
+            const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
+            // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
+            setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
+
+            // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
+            //       (this is the only case where user != getAuth(firebase).currentUser)
+            admin = isAdmin()
+            if (admin) {
+              useAnonymousAccount()
+            } else {
+              // set up server-side session cookie
+              // maximum max-age seems to be 7 days for Safari & we refresh daily
+              // store user's ID token as a __session cookie to send to server for preload
+              // __session is the only cookie allowed by firebase for efficient caching
+              // (see https://stackoverflow.com/a/44935288)
+              const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
+              function updateSessionCookie() {
+                user
+                  .getIdToken(false /*force refresh*/)
+                  .then(token => {
+                    // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
+                    document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
+                  })
+                  .catch(console.error)
               }
+              updateSessionCookie()
+              setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+            }
+          }
 
-              initFirebaseRealtime()
-            },
-            console.error
-          )
-        })
-      } else if (anonymous && items_preload.length == 0) {
-        initFirebaseRealtime() // synchronize anonymous items using firebase realtime
-      }
+          // in fixed mode, we currently require server-side preload w/ no client-side fallback, so we have to reload
+          // note this reload should be relatively seamless given the loading overlay
+          if (fixed && server_skipped_preload) {
+            console.warn('server skipped preload due to pending signin in fixed mode, reloading ...')
+            location.reload()
+            return
+          }
+
+          initFirebaseRealtime()
+        },
+        console.error
+      )
 
       // Visual viewport resize/scroll handlers ...
       let lastDocumentWidth = 0
@@ -5685,7 +5684,7 @@
 
         // shortcut init in fixed mode, just update instances if user is signed in
         if (fixed) {
-          if (!initTime) throw new Error('preload required for fixed mode')
+          if (!initTime) throw new Error('missing preload for fixed mode')
           instanceId = user.uid + '-' + initTime
           if (!anonymous) updateInstance()
           return
@@ -5708,9 +5707,11 @@
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
                 if (firebase_errors > 0) {
-                  _modal_confirm(`MindPage could not access Google Cloud (Firestore). Try again?`, () =>
-                    location.reload()
-                  )
+                  _modal(`MindPage could not access Google Cloud (Firestore).`, {
+                    confirm: 'Try Again',
+                    background: 'confirm',
+                    onConfirm: () => location.reload(),
+                  })
                 } else {
                   initTime = window['_init_time'] = instance.init_time = Date.now() // init started
                   initialize()
@@ -5909,7 +5910,6 @@
               //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
               // NOTE: as of 3/1/2022, all users are allowed, except those in blocked_users collection
               //       (so any emails should be investigated as a request to be unblocked)
-              document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
               signingOut = true // no other option at this point
               modal.show({
                 content: `Welcome ${window['_user'].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
