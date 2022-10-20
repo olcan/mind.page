@@ -5301,7 +5301,7 @@
     const unpinnedIndex = _.findLastIndex(items, item => item.pinned) + 1
     await renderRange(
       0,
-      unpinnedIndex /*initial chunk*/,
+      unpinnedIndex || 10 /*initial chunk*/,
       10 /*chunk*/,
       Math.min(maxRenderedAtInit, items.length) /*cutoff*/,
       100 /*delay*/
@@ -5331,7 +5331,7 @@
     ).then(() => {
       if (!keepOnPageDuringDelay) renderStart = renderEnd
       if (renderEnd < cutoff) {
-        // init_log(`rendered items ${renderStart}-${renderEnd}`);
+        init_log(`rendered items ${renderStart}-${renderEnd}`)
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
           init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
         tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
