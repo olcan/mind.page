@@ -749,7 +749,7 @@
     ) {
       if (enterStart >= 0) {
         // extend bullet points to new lines
-        const bullet = textarea.value.substring(0, enterStart).match(/(?:^|\n) *([-*+] ).*$/)
+        const bullet = textarea.value.substring(0, enterStart).match(/(?:^|\n) *([-*+] (?:\[[xX ]\] )?).*$/)
         if (bullet) enterIndentation += bullet[1]
         if (enterIndentation) {
           let offset = textarea.value
