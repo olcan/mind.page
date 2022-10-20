@@ -338,15 +338,14 @@ process['server-preload'] = async (page, session) => {
   let user = null
   if (session.cookie == 'signin_pending') {
     // if signin is pending, we do not want to waste time loading anonymous items, and we also can not risk any auth errors (e.g. when loading fixed items) that would interrupt signin, so we simply return nothing (with an indication that preloading was skipped) and expect client to reload if server-side loading is required (i.e. if client-side fallback is not available)
-    resp['server_skipped_preload'] = true
-    return resp
+    return { ...resp, server_preload_skipped: true }
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
     if (!ids) return resp // skip non-anonymous full preload since firebase realtime can be much faster
 
     user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
-    if (!user) return { ...resp, server_warning: 'invalid/expired signin' }
+    if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_preload_skipped: true }
     // console.debug('user', user)
   }
 
