@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
 // NOTE: this is needed because firebase only has node 16; can be removed once firebase has node 17(.5)
 //       also note we are restricted to node-fetch 2.6.7 because later version do not support import
+//       see https://stackoverflow.com/a/69093538
 import fetch from 'node-fetch'
 import https from 'https'
 import fs from 'fs'
