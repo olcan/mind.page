@@ -16,6 +16,7 @@ const dev = mode === 'development'
 const legacy = !!process.env.SAPPER_LEGACY_BUILD
 
 const onwarn = (warning, onwarn) =>
+  (warning.code === 'PLUGIN_WARNING' && /package\.json/.test(warning.message)) ||
   (warning.code === 'MISSING_EXPORT' && /'preload'/.test(warning.message)) ||
   (warning.code === 'CIRCULAR_DEPENDENCY' && /[/\\]@sapper[/\\]|[/\\]@jupyterlab[/\\]/.test(warning.message)) ||
   warning.code === 'THIS_IS_UNDEFINED' ||
