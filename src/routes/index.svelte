@@ -5129,11 +5129,10 @@
         screen_colors: { color_depth: screen.colorDepth, pixel_depth: screen.pixelDepth },
         hardware_concurrency: navigator.hardwareConcurrency,
         gpu: (() => {
-          const gl = document.createElement('canvas').getContext("experimental-webgl") as any
-          const gl_renderer_param = gl?.getExtension("WEBGL_debug_renderer_info")
-            .UNMASKED_RENDERER_WEBGL
+          const gl = document.createElement('canvas').getContext('experimental-webgl') as any
+          const gl_renderer_param = gl?.getExtension('WEBGL_debug_renderer_info').UNMASKED_RENDERER_WEBGL
           return gl_renderer_param ? gl.getParameter(gl_renderer_param) : 'unknown'
-        })()
+        })(),
       }
   let instances = [] // list of live instances, most recently focused first
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
@@ -5509,7 +5508,11 @@
         }
       }
 
-      // NOTE: we do not attempt login for readonly account unless fixed (if login hangs, this is suspect)
+      // NOTE: we do not attempt/expect login for readonly account unless fixed (if login hangs, this is suspect)
+      // TODO: what actually triggers the login? does this prevent firebase init if we are signed out?
+      // TODO: also weird that anonymous non-preload account does NOT listen for changes ... maybe we should just stop
+      //       listening as soon as signin is complete, but again not clear why we are guaranteed a signin.
+      //       maybe you should set a signing flag above and only listen if we are signing in?
       if (!readonly || fixed) {
         // if initializing items, wait for that before signing in user since errors can trigger signout
         Promise.resolve(initialization).then(() => {
@@ -5517,13 +5520,26 @@
             getAuth(firebase),
             authUser => {
               // console.debug("onAuthStateChanged", user, authUser)
-              if (readonly && !fixed) {
+              if (authUser && readonly && !fixed) {
                 console.warn('ignoring unexpected signin')
+                return
+              }
+              if (authUser && signedin) {
+                console.warn('ignoring redundant signin')
                 return
               }
               if (!authUser) {
                 if (anonymous) return // anonymous user can be signed in or out
                 if (signingOut) return // ignore during signout
+                // TODO: Note once firebase realtime is initialized, _any_ auth changes should force an automatic reload, because otherwise you have to clean up firebase listeners.
+                if (signedin) {
+                  // must have been signed out on another tab
+                  document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
+                  _modal_alert(`MindPage was signed out of your Google account and needs to reload.`, () =>
+                    location.reload()
+                  )
+                  return
+                }
                 document.cookie = '__session=;max-age=0' // delete cookie to prevent preload on reload
                 _modal_confirm(`MindPage could not sign into your Google account. Try again?`, signIn)
                 return
@@ -6982,8 +6998,7 @@
   <style>
     .column-padding,
     .header .editor,
-    .header .spacer,
-    .header .status .counts,
+    /* .header .spacer, */
     .super-container > .time {
       display: none !important;
     }
@@ -6993,9 +7008,17 @@
       border: none !important;
       margin-bottom: -30px;
     }
-    .header .status {
-      margin-bottom: 35px;
-      margin-top: -65px;
+    .header .header-container .user {
+      height: 28px;
+      width: 28px;
+      min-width: 28px;
+      z-index: 1;
+    }
+    .header .status .counts {
+      right: 40px !important;
+    }
+    .header .status :is(.console-summary, .console) {
+      left: 8px !important; /* ~matches top spacing of console */
     }
     .items {
       padding-bottom: 0 !important;
