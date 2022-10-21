@@ -1681,7 +1681,7 @@
     user-select: none;
   }
   .button {
-    background: #666;
+    background: #999;
     display: inline-flex;
     cursor: pointer;
     align-items: center;

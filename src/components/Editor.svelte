@@ -1090,7 +1090,7 @@
   .clear:not(.clearable) {
     /* NOTE: display: none leaks click on "create" to #header as create button moves right */
     /* display: none; */
-    background: #444;
+    background: #666;
     cursor: not-allowed;
   }
   .buttons:not(.focused) .image {
