@@ -61,7 +61,8 @@
   let readonly = false
   let url_hash = isClient ? decodeURIComponent(location.hash) : null
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
-  let fixed = !!url_params?.shared?.match(/^\w+$/)
+  let fixed = !!url_params?.shared
+  let shared_key = url_params?.shared?.replace(/^\w+\//,'')
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -5203,7 +5204,7 @@
     item.editable = !fixed && (item.attr?.editable ?? true)
     item.pushable = !fixed && (item.attr?.pushable ?? false)
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
-    item.unrendered = fixed && item.shared && !(item.shared.indices?.[url_params.shared] >= 0)
+    item.unrendered = fixed && item.shared && !(item.shared.indices?.[shared_key] >= 0)
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5349,7 +5350,7 @@
 
     // in fixed mode, determine fixed ordering and hideIndex == maxRenderedAtInit before rendering
     if (fixed) {
-      items = _.sortBy(items, item => item.attr.shared.indices?.[url_params.shared] ?? Infinity)
+      items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
       maxRenderedAtInit = hideIndexMinimal = hideIndex = _.sumBy(items, item => (!item.unrendered ? 1 : 0))
     }
     const unpinnedIndex = _.findLastIndex(items, item => item.pinned) + 1
@@ -5742,6 +5743,20 @@
             where('user', '==', user.uid),
             where('attr.shared.keys', 'array-contains', key)
           )
+        } else if (url_params.shared?.match(/^\w+\/\w+$/)) {
+          const [owner, key] = url_params.shared.split('/')
+          items_query = query(
+            collection(getFirestore(firebase), 'items'),
+            where('user', '==', owner),
+            where('attr.shared.keys', 'array-contains', key)
+          )
+        } else if (url_params.shared) {
+          _modal(`No shared items found under key '${url_params.shared}'.`, {
+            confirm: 'Try Again',
+            background: 'confirm',
+            onConfirm: () => location.reload(),
+          })
+          return
         }
 
         // start listening for remote changes
@@ -5782,7 +5797,7 @@
 
                 // if account is empty in fixed mode, stop & present modal to try again
                 if (items.length === 0 && fixed) {
-                  _modal(`No shared items found for key '${url_params.shared}'.`, {
+                  _modal(`No shared items found under key '${url_params.shared}'.`, {
                     confirm: 'Try Again',
                     background: 'confirm',
                     onConfirm: () => location.reload(),
@@ -5798,7 +5813,7 @@
                 if (items.length == 0) onEditorDone('/_welcome')
 
                 // if necessary, init secret by triggering a test encryption/decryption
-                if (!secret) {
+                if (!secret && !fixed) {
                   const hello_item = { user: user.uid, time: Date.now(), text: 'hello' }
                   encryptItem(hello_item)
                     .then(decryptItem)
