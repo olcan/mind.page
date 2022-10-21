@@ -1572,7 +1572,9 @@
           </div>
         {/if}
         <div class="button cancel" on:click={onCancelClick}>close</div>
-        <div class="button delete" on:click={onDeleteClick}>delete</div>
+        {#if !fixed}
+          <div class="button delete" on:click={onDeleteClick}>delete</div>
+        {/if}
       </div>
 
       <Editor
@@ -1582,6 +1584,7 @@
         bind:focused
         bind:selectionStart
         bind:selectionEnd
+        cancelOnDelete={fixed}
         {onRun}
         {onPrev}
         {onNext}

@@ -326,84 +326,33 @@ process['server-preload'] = async (page, session) => {
     client_ip: session.client_ip,
   }
 
-  // TODO: replace this with client-side sharing support
-  // extract target item ids from show/hide parameters
-  // take last entry in array-valued parameters (specified multiple times)
-  const show_ids = page.query.show?.pop?.() ?? page.query.show
-  const hide_ids = page.query.hide?.pop?.() ?? page.query.hide
-  const ids = show_ids?.split(',')?.concat(hide_ids?.split(',') ?? [])
-  if (ids) resp['fixed_count'] = ids.length // TODO: visible only
-
-  // skip preload except or specific items, since firebase realtime is often faster due to client-side caching
-  if (!ids) return { ...resp, server_skipped_preload: true }
+  // disable preload for now since firebase realtime is often faster due to client-side caching
+  return resp
 
   let user = null
   if (session.cookie == 'signin_pending') {
     // if signin is pending, we do not want to waste time loading anonymous items, and we also can not risk any auth errors (e.g. when loading fixed items) that would interrupt signin, so we simply return nothing (with an indication that preloading was skipped) and expect client to reload if server-side loading is required (i.e. if client-side fallback is not available)
-    return { ...resp, server_skipped_preload: true }
+    return resp
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
     user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
-    if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_skipped_preload: true }
+    if (!user) return { ...resp, server_warning: 'invalid/expired signin' }
     // console.debug('user', user)
   }
 
   const start = Date.now()
   let items // items preloaded from firebase
 
-  if (ids) {
-    if (ids.every(id => id.length == 20)) {
-      // using 20-byte firebase docids that require auth (unless item.user == 'anonymous')
-      // NOTE: admin has access to all docs, so we have to perform auth check here
-      console.debug(`retrieving ${ids.length} items for user ${user.email} (${user.uid}) ...`)
-      const docs = await Promise.all(ids.map(id => firebase_admin.firestore().collection('items').doc(id).get()))
-      const missing_ids = docs.filter(doc => !doc.exists).map(doc => doc.id)
-      if (missing_ids.length) return { ...resp, server_error: 'missing item(s) ' + missing_ids }
-      items = docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
-      const unauth_ids = items.filter(item => item.user != 'anonymous' && item.user != user.uid).map(item => item.id)
-      if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
-    } else if (ids.every(id => id.includes('/') && !id.startsWith('https://'))) {
-      // using firebase storage paths, e.g. y2swh7JY2ScO5soV7mJMHVltAOX2/uploads/public/7cbf6e293452978a
-      // only paths .../uploads/public/... or <user>/uploads/... are allowed for now
-      // NOTE: admin has access to all files, so we have to perform auth check here
-      // file metadata can be used for sharing w/ specific users in the future
-      // see https://firebase.google.com/docs/storage/web/file-metadata#web-version-9_1
-      console.debug(`retrieving ${ids.length} items by downloading from paths ${ids} ...`)
-      const unauth_ids = ids.filter(
-        path => !path.includes('/uploads/public/') && !path.startsWith(user.uid + '/uploads/')
-      )
-      if (unauth_ids.length) return { ...resp, server_error: 'unauthorized item(s) ' + unauth_ids }
-      try {
-        // see https://firebase.google.com/docs/storage/admin/start
-        // see https://googleapis.dev/nodejs/storage/latest/index.html
-        // see https://nodejs.org/api/stream.html#readabletoarrayoptions
-        // see read_to_buffer above as an alternative to toArray (added in node 16.5)
+  console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
+  const item_docs = await firebase_admin
+    .firestore()
+    .collection('items') // server always reads from primary collection
+    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
+    .orderBy('time', 'desc')
+    .get()
+  items = item_docs.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
 
-        const data = await Promise.all(
-          ids.map(path => firebase_admin.storage().bucket().file(path).createReadStream().toArray().then(Buffer.concat))
-          // ids.map(path => read_to_buffer(firebase_admin.storage().bucket().file(path).createReadStream()))
-        )
-        const decoder = new TextDecoder('utf-8')
-        items = data.map(bytes => JSON.parse(decoder.decode(bytes)))
-        items.forEach(item => (item.user = user.uid)) // just assign to authenticated user (if any)
-        // console.debug(items)
-      } catch (e) {
-        return { ...resp, server_error: 'could not download item(s) ' + ids + '; ' + e }
-      }
-    } else {
-      return { ...resp, server_error: 'invalid items ' + ids }
-    }
-  } else {
-    console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
-    const resp = await firebase_admin
-      .firestore()
-      .collection('items') // server always reads from primary collection
-      .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
-      .orderBy('time', 'desc')
-      .get()
-    items = resp.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
-  }
   const bytes = JSON.stringify(items).length
   console.debug(
     `retrieved ${items.length} items (${bytes} bytes) for user ` +

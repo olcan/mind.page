@@ -962,6 +962,7 @@
     autocapitalize="off"
     {spellcheck}
     disabled={!editable}
+    class:editable
     value={text}
   />
   {#if showButtons}
@@ -1031,6 +1032,9 @@
   }
   .editor.focused > textarea {
     visibility: visible; /* see onBackdropClick for comments */
+  }
+  textarea:not(.editable) {
+    cursor: auto; /* better for selection */
   }
 
   /* NOTE: transparent selection text in textarea allows backdrop highlights to show through but then selection background is on top of the text, which does not look great, and moving the backdrop to the front does not work because the caret and selection lives in the textarea */

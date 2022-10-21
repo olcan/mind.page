@@ -45,11 +45,9 @@
   export let items_preload = [] // items returned by server preload (see above and server.ts)
   export let server_error = null // error from server?
   export let server_warning = null // warning from server?
-  export let server_skipped_preload = false
   export let server_name
   export let server_ip
   export let client_ip
-  export let fixed_count = 0 // number of fixed items (controlled by server)
   let user = null
   let deletedItems = []
   let editingItems = []
@@ -61,9 +59,9 @@
   let admin = false
   let anonymous = false
   let readonly = false
-  let fixed = fixed_count > 0
   let url_hash = isClient ? decodeURIComponent(location.hash) : null
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
+  let fixed = !!url_params?.shared?.match(/^\w+$/)
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -1926,12 +1924,7 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
-    if (fixed) {
-      items = items // TODO: consider ordering by a pre-assigned item.attr.shared.index
-      updateItemLayout()
-      hideIndex = fixed_count
-      return
-    }
+    if (fixed) return updateItemLayout() // sorting and hideIndex are determined in initialize()
 
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top
@@ -5192,7 +5185,7 @@
   let primary = false // is this instance "primary", i.e. most recently focused live instance?
   let processed = false
   let initialized = false
-  let maxRenderedAtInit = fixed_count || 100
+  let maxRenderedAtInit = 100
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
   let hiddenItemsByName
@@ -5207,9 +5200,10 @@
     // state used in onEditorChange
     if (!item.attr) item.attr = null // default to null for older items missing attr
     // NOTE: editable and pushable are transient UX state unless saved in item.attr
-    item.editable = item.attr?.editable ?? true
-    item.pushable = item.attr?.pushable ?? false
+    item.editable = !fixed && (item.attr?.editable ?? true)
+    item.pushable = !fixed && (item.attr?.pushable ?? false)
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
+    item.unrendered = fixed && item.shared && !(item.shared.indices?.[url_params.shared] >= 0)
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5353,6 +5347,11 @@
 
     // NOTE: last step in initialization is rendering, which is handled asynchronously by svelte and considered completed when onItemResized is invoked for each item (zero heights are logged as warning); we support initialization in chunks, but it seems background rendering can make rendered items unresponsive (even if done in small chunks with large intervals), so best option may be to have a hard truncation point to limit initialization time -- the downside of uninitialized items is that their heights are not known until they are rendered
 
+    // in fixed mode, determine fixed ordering and hideIndex == maxRenderedAtInit before rendering
+    if (fixed) {
+      items = _.sortBy(items, item => item.attr.shared.indices?.[url_params.shared] ?? Infinity)
+      maxRenderedAtInit = hideIndexMinimal = hideIndex = _.sumBy(items, item => (!item.unrendered ? 1 : 0))
+    }
     const unpinnedIndex = _.findLastIndex(items, item => item.pinned) + 1
     await renderRange(
       0,
@@ -5634,14 +5633,6 @@
             }
           }
 
-          // in fixed mode, we currently require server-side preload w/ no client-side fallback, so we have to reload
-          // note this reload should be relatively seamless given the loading overlay
-          if (fixed && server_skipped_preload) {
-            console.warn('server skipped preload due to pending signin in fixed mode, reloading ...')
-            location.reload()
-            return
-          }
-
           // note we initialize firebase even in anonymous mode, because (1) we can fallback to initial snapshot if items are not preloaded, and (2) we allow one-way sync of anonymous items from admin account
           initFirebaseRealtime()
         },
@@ -5737,18 +5728,26 @@
           )
         }
 
-        // shortcut init in fixed mode, just update instances if user is signed in
-        if (fixed) {
-          if (!initTime) throw new Error('missing preload for fixed mode')
-          instanceId = user.uid + '-' + initTime
-          if (!anonymous) updateInstance()
-          return
+        // determine query for shared items
+        // note this fixed mode is different from server-side fixed mode, which shortcuts firebase sync above
+        let items_query = query(
+          collection(getFirestore(firebase), 'items'),
+          where('user', '==', user.uid),
+          orderBy('time', 'desc')
+        )
+        if (url_params.shared?.match(/^\w+$/)) {
+          const key = url_params.shared
+          items_query = query(
+            collection(getFirestore(firebase), 'items'),
+            where('user', '==', user.uid),
+            where('attr.shared.keys', 'array-contains', key)
+          )
         }
 
         // start listening for remote changes
         // (also initialize if items were not returned by server)
         onSnapshot(
-          query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc')),
+          items_query,
           snapshot => {
             // ignore (and warn about) snapshots disabled via _disable_sync
             if (window['_disable_sync']) {
@@ -5780,6 +5779,16 @@
                   return
                 }
                 init_log(`synchronized ${items.length} items`)
+
+                // if account is empty in fixed mode, stop & present modal to try again
+                if (items.length === 0 && fixed) {
+                  _modal(`No shared items found for key '${url_params.shared}'.`, {
+                    confirm: 'Try Again',
+                    background: 'confirm',
+                    onConfirm: () => location.reload(),
+                  })
+                  return
+                }
 
                 // update instance info (user, init time, etc) in instances collection
                 instanceId = user.uid + '-' + initTime
@@ -6867,7 +6876,7 @@
                       >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
                     >
                   {:else}
-                    {fixed_count || items.length} item{(fixed_count || items.length) > 1 ? 's' : ''}
+                    {items.length} item{items.length > 1 ? 's' : ''}
                   {/if}
                 </div>
               {/if}
