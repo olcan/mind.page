@@ -313,9 +313,10 @@ function read_to_buffer(stream) {
 // see https://sapper.svelte.dev/docs#preloading for documentation
 // NOTE: for dev server, admin credentials require `gcloud auth application-default login`
 process['server-preload'] = async (page, session) => {
-  // note we have never seen preload being invoked on client side, so we add this check to detect if that happens
-  if (typeof window !== 'undefined') throw new Error('server-preload invoked on client side')
   // console.debug('preloading', page, session)
+
+  // sanity check that this function is not invoked on the client side
+  if (typeof window !== 'undefined') throw new Error('server-preload invoked on client side')
 
   // server session information included in all responses
   // these should match up with exported variables in index.svelte
@@ -324,20 +325,17 @@ process['server-preload'] = async (page, session) => {
     server_ip: session.server_ip,
     client_ip: session.client_ip,
   }
-  // return resp // skip preload
 
-  // TODO: restructure this to better treat arrays, require at least one visible item, etc
-  //       maybe just specify 'items' and 'deps', rather than show/hide, allowing some sources to have dependencies
+  // TODO: replace this with client-side sharing support
   // extract target item ids from show/hide parameters
   // take last entry in array-valued parameters (specified multiple times)
-  // TODO: pass these on to client, and consider renaming?
-  // TODO: note server should ensure that either the items are returned, or an error is returned
-  //       (except when preload is skipped due to pending signin)
-  // TODO: only specify visible items, w/ dependencies being hidden!
   const show_ids = page.query.show?.pop?.() ?? page.query.show
   const hide_ids = page.query.hide?.pop?.() ?? page.query.hide
   const ids = show_ids?.split(',')?.concat(hide_ids?.split(',') ?? [])
   if (ids) resp['fixed_count'] = ids.length // TODO: visible only
+
+  // skip preload except or specific items, since firebase realtime is often faster due to client-side caching
+  if (!ids) return { ...resp, server_skipped_preload: true }
 
   let user = null
   if (session.cookie == 'signin_pending') {
@@ -345,12 +343,7 @@ process['server-preload'] = async (page, session) => {
     return { ...resp, server_skipped_preload: true }
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
-    // preload is optional for anonymous users
-    if (!ids) return { ...resp, server_skipped_preload: true }
   } else {
-    // skip preload once user is signed in, since firebase realtime should be faster (w/ caching etc)
-    if (!ids) return { ...resp, server_skipped_preload: true }
-
     user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
     if (!user) return { ...resp, server_warning: 'invalid/expired signin', server_skipped_preload: true }
     // console.debug('user', user)

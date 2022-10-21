@@ -138,7 +138,7 @@
   }
 
   // creates a new item with the given text and options
-  // third argument (attr) is used internally for /_install
+  // third argument (attr) is used internally for installed and shared items
   // default mindbox_text == undefined maintains existing mindbox text, sensible for programmatic creation
   // use mindbox_text == '' to force clear, sensible for item creation via commands (as in handleCommandReturn)
   // use mindbox_text == null to let onEditorDone (including any handled command) determine mindbox text
@@ -180,7 +180,7 @@
       false, // not cancelled
       !!run, // run?
       edit == true, // edit? (true/false only, null requires keyboard event)
-      attr, // used internally for /_install
+      attr, // used internally for installed and shared items
       !command, // ignore command unless command truthy
       return_alerts // return alert messages? (instead of display in alert dialog)
     )
@@ -447,7 +447,7 @@
         _item.editable = editable
         items = items // trigger svelte render
       }
-      // if item was installed (has attr), also update/save in attr
+      // if item has attr (was installed or shared), also update/save in attr
       if (this.attr && this.attr['editable'] !== editable) {
         this.attr['editable'] = editable
         this.save()
@@ -464,7 +464,7 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
-      // if item was installed (has attr), also update/save in attr
+      // if item has attr (was installed or shared), also update/save in attr
       if (this.attr && this.attr['pushable'] !== pushable) {
         this.attr['pushable'] = pushable
         this.save()
@@ -1882,7 +1882,7 @@
     else editorChangesWithTimeKept.clear()
 
     if (fixed) {
-      items = items
+      items = items // TODO: consider ordering by a pre-assigned item.attr.shared.index
       updateItemLayout()
       hideIndex = fixed_count
       return
@@ -3115,6 +3115,8 @@
   async function encryptItem(item) {
     if (anonymous) return item // do not encrypt for anonymous user
     if (item.cipher) return item // already encrypted
+    if (item.shared) return item // do not encrypt shared items
+    // TODO: skip encryption for shared items that include an attr.shared field (w/ key, index, users, ...), firebase security rules can then do ("users" in shared) or ("shared" in data) or (uid in shared.users), etc, see https://stackoverflow.com/a/53458469
     item.cipher = await encrypt(JSON.stringify(item))
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
     // full removal in update (but not add/set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
@@ -3300,7 +3302,8 @@
         case '/_updates': {
           if (editingItems.length == 0) return alert('/_updates: no item selected')
           const item = items[editingItems[0]]
-          if (!item.attr) return alert(`/_updates: selected item ${item.name} was not installed via /_install command`)
+          if (!item.attr?.source)
+            return alert(`/_updates: selected item ${item.name} was not installed via /_install command`)
           const attr = item.attr
           const history = attr.source.replace('/blob/', '/commits/')
           const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`
@@ -3677,6 +3680,7 @@
                     owner,
                     token /* to authenticate for updates */,
                     embeds: null, // may be filled in below
+                    shared: null, // used separately for sharing
                   }
 
                   // extract embed paths
@@ -3789,9 +3793,10 @@
                         return
                       }
                     }
-                    // maintain pushable and editable flags updated separately below
+                    // maintain pushable, editable & shared flags before replacing attr
                     attr.pushable = item.pushable
                     attr.editable = item.editable
+                    attr.shared = item.shared
                     __item(item.id).attr = attr
                     item.write(text, '')
                   } else {
@@ -4482,7 +4487,8 @@
       return
     }
 
-    if (item.attr) {
+    // create separate "run item" for installed items
+    if (item.attr?.source) {
       if (!item.name.startsWith('#')) {
         _modal('cannot run unnamed installed item')
         return
@@ -4841,7 +4847,7 @@
     console.debug(`fetching previews from local repo ${repo} ...`)
     const start = Date.now()
     for (const item of items) {
-      if (!item.attr) continue // item not installed
+      if (!item.attr?.source) continue // item not installed
       if (item.attr.repo != repo) continue // item not from modified local repo
       await fetchPreview(item)
     }
@@ -4864,7 +4870,7 @@
       for (const changed_path of changed_paths) {
         console.debug(`detected change in local repo path ${changed_path}`)
         for (const item of items) {
-          if (!item.attr) continue // item not installed
+          if (!item.attr?.source) continue // item not installed
           if (item.attr.repo != repo) continue // item not from modified local repo
           const attr = item.attr
           // calculate item paths, including any embeds, removing slash prefixes
@@ -4962,7 +4968,7 @@
     if (!item.previewable) throw new Error('item not previewable')
     if (!item.previewText) throw new Error('preview item missing preview text')
     if (item.text == item.previewText) throw new Error('item marked previweable w/o changes')
-    if (!item.attr) throw new Error('preview item missing attr')
+    if (!item.attr?.source) throw new Error('preview item not an installed item')
     const attr = item.attr
     const { repo, path } = attr
     const text = item.previewText
@@ -5154,6 +5160,7 @@
     // NOTE: editable and pushable are transient UX state unless saved in item.attr
     item.editable = item.attr?.editable ?? true
     item.pushable = item.attr?.pushable ?? false
+    item.shared = item.attr?.shared ?? null
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5799,6 +5806,7 @@
                     // update mutable ux properties from item.attr
                     item.editable = item.attr?.editable ?? true
                     item.pushable = item.attr?.pushable ?? false
+                    item.shared = item.attr?.shared ?? null
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index))
@@ -5884,6 +5892,7 @@
                     // update mutable ux properties from item.attr
                     item.editable = item.attr?.editable ?? true
                     item.pushable = item.attr?.pushable ?? false
+                    item.shared = item.attr?.shared ?? null
                     item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
