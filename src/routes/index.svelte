@@ -3115,7 +3115,6 @@
   async function encryptItem(item) {
     if (anonymous) return item // do not encrypt for anonymous user
     if (item.cipher) return item // already encrypted
-    if (!item.text) return item // nothing to encrypt
     item.cipher = await encrypt(JSON.stringify(item))
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
     // full removal in update (but not add/set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
@@ -4046,7 +4045,7 @@
     encryptItem(itemToSave)
       .then(itemToSave => {
         ;(readonly
-          ? Promise.resolve({ id: item.id, delete: Promise.resolve })
+          ? Promise.resolve({ id: item.id, delete: Promise.resolve /* dummy promise */ })
           : addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
         )
           .then(doc => {
