@@ -477,6 +477,7 @@
     // share item under key (unique at user level) at index (or no index if hidden)
     share(key, index) {
       if (!key) throw new Error('sharing key is required')
+      // note besides alphanumeric characters we only allow dashes since those are also ok in tag names
       if (typeof key !== 'string' || !key.match(/^[\w-]+$/)) throw new Error('sharing key must be alphanumeric string')
       if (key.length > 128) throw new Error('sharing key too long (>128 chars)')
       if (index !== undefined)
@@ -4984,14 +4985,16 @@
       if (item.previewable) {
         // auto-preview if non-blank non-comment lines are unchanged across all code blocks
         // also need label & dependencies (all tags, not just hidden) to be unchanged
+        // also need non-block lines to be unchanged
         const requires_manual_preview = line => line.trim() && !line.match(/^ *\/\//)
         if (
           _.isEqual(
-            extractBlock(item.text, '.*').split('\n').filter(requires_manual_preview),
-            extractBlock(item.previewText, '.*').split('\n').filter(requires_manual_preview)
+            extractBlock(item.text, '\\S*').split('\n').filter(requires_manual_preview),
+            extractBlock(item.previewText, '\\S*').split('\n').filter(requires_manual_preview)
           ) &&
           _.isEqual(parseLabel(item.text), parseLabel(item.previewText)) &&
-          _.isEqual(parseTags(item.text).all, parseTags(item.previewText).all)
+          _.isEqual(parseTags(item.text).all, parseTags(item.previewText).all) &&
+          _.isEqual(removeBlock(item.text, '\\S*'), removeBlock(item.previewText, '\\S*'))
         )
           await previewItem(item)
       }

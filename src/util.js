@@ -13,6 +13,8 @@ export function blockRegExp(type_regex) {
 }
 
 export function extractBlock(text, type, remove_empty_lines = false) {
+  // sanity check against patterns that can match across multiple blocks
+  if (type.match(/\.[+*]/)) throw new Error(`invalid block type '${type}' can match across blocks`)
   // NOTE: this per-line regex is mostly consistent w/ that in updateTextDivs in Editor.svelte or toHTML in Item.svelte, and in particular allows a colon-separated prefix and suffix, w/ the suffix required to contain a period; only notable difference is that the type is allowed to match the colon-separated suffix if it matches exactly
   let insideBlock = false
   const regex = RegExp('^\\s*```(?:\\S+:)?(?:' + type + ')(?:_hidden|_removed)?(?::\\S*\\.\\S*)?(?:\\s|$)', 'ui')
