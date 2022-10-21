@@ -5722,6 +5722,7 @@
               orderBy('update_time', 'desc') // required by index
             ),
             snapshot => {
+              // note we always use the full snapshot, including local changes not yet synced to firebase
               instances = Array.from(snapshot.docs, (doc: any) => doc.data())
               instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
               instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
