@@ -7115,13 +7115,15 @@
       z-index: 1;
     }
     .header .status .counts {
-      right: 40px !important;
-    }
-    .header .status :is(.console-summary, .console) {
-      left: 7px !important; /* ~matches top spacing of console */
+      max-width: 65%; /* vs 30% for .console-summary */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
     .header .status {
+      margin-left: 7px; /* inset .console-summary to ~match top inset */
+      margin-right: 40px; /* clear .user */
       -webkit-touch-callout: auto !important;
       -webkit-user-select: auto !important;
       user-select: auto !important;
