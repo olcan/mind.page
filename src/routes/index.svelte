@@ -6115,7 +6115,13 @@
         }
         if (fixed) {
           _modal(
-            'Welcome to MindPage! You are currently viewing _shared items_. Your edits on shared items will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.'
+            'Welcome to MindPage! You are currently viewing _shared items_ on a simplified page with limited features. Your edits on shared items will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
+            {
+              confirm: 'View Shared Items',
+              cancel: 'Go to MindPage',
+              onCancel: () => (location.href = 'https://' + location.host),
+              background: 'confirm',
+            }
           )
         }
 
@@ -6891,7 +6897,9 @@
               {/if}
               {#if items.length > 0}
                 <div class="counts">
-                  {#if matchingItemCount > 0}
+                  {#if fixed}
+                    {hideIndex} item{hideIndex > 1 ? 's' : ''} shared @ {url_params.shared}
+                  {:else if matchingItemCount > 0}
                     &nbsp;<span class="matching"
                       >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
                     >
@@ -7087,7 +7095,7 @@
   <style>
     .column-padding,
     .header .editor,
-    /* .header .spacer, */
+    .header .history,
     .super-container > .time {
       display: none !important;
     }
@@ -7105,10 +7113,22 @@
     }
     .header .status .counts {
       right: 40px !important;
-      display: none; /* does not seem useful */
     }
     .header .status :is(.console-summary, .console) {
       left: 7px !important; /* ~matches top spacing of console */
+    }
+    /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
+    .header .status {
+      -webkit-touch-callout: auto !important;
+      -webkit-user-select: auto !important;
+      user-select: auto !important;
+      cursor: auto !important;
+    }
+    .header .status .console-summary {
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      cursor: pointer;
     }
     .items {
       padding-bottom: 0 !important;
