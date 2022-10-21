@@ -5751,7 +5751,7 @@
             where('attr.shared.keys', 'array-contains', key)
           )
         } else if (url_params.shared) {
-          _modal(`No shared items found under key '${url_params.shared}'.`, {
+          _modal(`No shared items found @ ${url_params.shared}.`, {
             confirm: 'Try Again',
             background: 'confirm',
             onConfirm: () => location.reload(),
@@ -5797,7 +5797,7 @@
 
                 // if account is empty in fixed mode, stop & present modal to try again
                 if (items.length === 0 && fixed) {
-                  _modal(`No shared items found under key '${url_params.shared}'.`, {
+                  _modal(`No shared items found @ ${url_params.shared}.`, {
                     confirm: 'Try Again',
                     background: 'confirm',
                     onConfirm: () => location.reload(),
@@ -6100,7 +6100,7 @@
         //   console.debug("service workers not available");
         // }
 
-        // display signin modal on readonly accounts, unless the url was for a specific item
+        // display signin modal on readonly non-fixed accounts, unless the url was for a specific item
         let welcome = null
         if (readonly && !fixed && !location.hash) {
           welcome = modal.show({
@@ -6113,6 +6113,8 @@
             background: 'confirm',
           })
         }
+        // display welcome modal for viewing shared (fixed) items
+        // note this is done pre-init so e.g. number of items is unknown at this point
         if (fixed) {
           _modal(
             'Welcome to MindPage! You are currently viewing _shared items_ on a simplified page with limited features. Your edits on shared items will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
