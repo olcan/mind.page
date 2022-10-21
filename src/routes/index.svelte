@@ -477,7 +477,7 @@
     // share item under key (unique at user level) at index (or no index if hidden)
     share(key, index) {
       if (!key) throw new Error('sharing key is required')
-      if (typeof key !== 'string' || !key.match(/^\w+$/)) throw new Error('sharing key must be alphanumeric string')
+      if (typeof key !== 'string' || !key.match(/^[\w-]+$/)) throw new Error('sharing key must be alphanumeric string')
       if (key.length > 128) throw new Error('sharing key too long (>128 chars)')
       if (index !== undefined)
         if (!Number.isInteger(index) || index < 0) throw new Error('sharing index must be integer >= 0')
@@ -5738,14 +5738,14 @@
           where('user', '==', user.uid),
           orderBy('time', 'desc')
         )
-        if (url_params.shared?.match(/^\w+$/)) {
+        if (url_params.shared?.match(/^[\w-]+$/)) {
           const key = url_params.shared
           items_query = query(
             collection(getFirestore(firebase), 'items'),
             where('user', '==', user.uid),
             where('attr.shared.keys', 'array-contains', key)
           )
-        } else if (url_params.shared?.match(/^\w+\/\w+$/)) {
+        } else if (url_params.shared?.match(/^\w+\/[\w-]+$/)) {
           const [owner, key] = url_params.shared.split('/')
           items_query = query(
             collection(getFirestore(firebase), 'items'),
