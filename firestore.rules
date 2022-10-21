@@ -101,7 +101,7 @@ service firebase.storage {
 		// <owner>/uploads/public/...
 		// same rules as uploads above, except ANYONE can read
 		match /{owner}/uploads/public/{path=**} {
-      allow read: user_not_blocked();
+      allow read: if user_not_blocked();
 			allow write: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") ||
 											 request.auth.uid == owner) && user_not_blocked();
     }
