@@ -4,6 +4,7 @@ service cloud.firestore {
 
     // generic user-based access rules (for ANY document in ANY collection w/ user field)
 		// ANYONE can read user=anonymous items
+		// ANYONE can read shared items (where attr.shared exists and is non-null)
 		// admin user (y2swh7JY2ScO5soV7mJMHVltAOX2) can read/write user=anonymous items
 		// logged in <user> can read/write user=<user> items
 		// - logged in <user> must NOT be in blocked_users collection
@@ -12,6 +13,7 @@ service cloud.firestore {
 		// - for update, check user in new AND existing items
 		match /{document=**} {
 			allow read: if (resource.data.user == "anonymous") ||
+			      					('shared' in resource.data.attr && resource.data.attr.shared != null) ||
 						 	      	 (request.auth.uid == resource.data.user &&
 							           !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
 			allow delete: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
