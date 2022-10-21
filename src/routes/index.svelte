@@ -62,7 +62,7 @@
   let url_hash = isClient ? decodeURIComponent(location.hash) : null
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
   let fixed = !!url_params?.shared
-  let shared_key = url_params?.shared?.replace(/^\w+\//,'')
+  let shared_key = url_params?.shared?.replace(/^\w+\//, '')
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -3990,7 +3990,7 @@
       }
     }
     if (fixed) {
-      alert('can not create new item in fixed mode')
+      alert('can not create new item when viewing shared items')
       return
     }
 
@@ -5201,8 +5201,8 @@
     // state used in onEditorChange
     if (!item.attr) item.attr = null // default to null for older items missing attr
     // NOTE: editable and pushable are transient UX state unless saved in item.attr
-    item.editable = !fixed && (item.attr?.editable ?? true)
-    item.pushable = !fixed && (item.attr?.pushable ?? false)
+    item.editable = (item.attr?.editable ?? true) || fixed // fixed items are always editable (but not deletable)
+    item.pushable = (item.attr?.pushable ?? false) && !fixed // fixed items are not pushable
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
     item.unrendered = fixed && item.shared && !(item.shared.indices?.[shared_key] >= 0)
     item.previewable = false // should be true iff previewText && previewText != text
@@ -6112,6 +6112,11 @@
             onCancel: signIn,
             background: 'confirm',
           })
+        }
+        if (fixed) {
+          _modal(
+            'Welcome to MindPage! You are currently viewing _shared items_. Your edits on shared items will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.'
+          )
         }
 
         // once initialization is done, welcome dialog is dismissed, dom is fully updated ...
