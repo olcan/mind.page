@@ -448,8 +448,8 @@
         items = items // trigger svelte render
       }
       // if item has attr (was installed or shared), also update/save in attr
-      if (this.attr && this.attr['editable'] !== editable) {
-        this.attr['editable'] = editable
+      if (_item.attr && _item.attr.editable !== editable) {
+        _item.attr.editable = editable
         this.save()
       }
     }
@@ -465,10 +465,55 @@
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
       // if item has attr (was installed or shared), also update/save in attr
-      if (this.attr && this.attr['pushable'] !== pushable) {
-        this.attr['pushable'] = pushable
+      if (_item.attr && _item.attr.pushable !== pushable) {
+        _item.attr.pushable = pushable
         this.save()
       }
+    }
+
+    get shared(): object {
+      return item(this.id).shared
+    }
+
+    // share item under key (unique at user level) at index (or no index if hidden)
+    share(key, index) {
+      if (!key) throw new Error('sharing key is required')
+      if (typeof key !== 'string' || !key.match(/^\w+$/)) throw new Error('sharing key must be alphanumeric string')
+      if (index !== undefined)
+        if (!Number.isInteger(index) || index < 0) throw new Error('sharing index must be integer >= 0')
+      const _item = item(this.id)
+      _item.shared ??= {}
+      _item.shared.keys ??= []
+      if (!_item.shared.keys.includes(key)) _item.shared.keys.push(key)
+      if (index !== undefined) {
+        _item.shared.indices ??= {}
+        _item.shared.indices[key] = index
+      }
+      // if item has attr (was installed or shared), also update/save in attr
+      // otherwise create new attr just for sharing
+      _item.attr ??= {}
+      if (!_.isEqual(_item.attr.shared, _item.shared)) {
+        _item.attr.shared = _.cloneDeep(_item.shared)
+        this.save()
+      }
+      return _item.shared
+    }
+
+    // unshare item under key (unique at user level)
+    unshare(key) {
+      if (!key) throw new Error('sharing key is required')
+      if (typeof key !== 'string' || !key.match(/^\w+$/)) throw new Error('sharing key must be alphanumeric string')
+      const _item = item(this.id)
+      if (!_item.shared?.keys) return
+      _.pull(_item.shared.keys, key)
+      delete _item.shared.indices?.[key]
+      if (_.isEmpty(_item.shared.indices)) delete _item.shared.indices // for consistency w/ share
+      if (!_item.shared.keys.length) _item.shared = null // no longer shared
+      if (!_.isEqual(_item.attr.shared, _item.shared)) {
+        _item.attr.shared = _.cloneDeep(_item.shared)
+        this.save()
+      }
+      return _item.shared
     }
 
     get elem(): HTMLElement {
@@ -3115,7 +3160,11 @@
   async function encryptItem(item) {
     if (anonymous) return item // do not encrypt for anonymous user
     if (item.cipher) return item // already encrypted
-    if (item.shared) return item // do not encrypt shared items
+    if (item.attr?.shared) {
+      // do not encrypt shared items
+      item.cipher = null // clear cipher if was previously encrypted
+      return item
+    }
     // TODO: skip encryption for shared items that include an attr.shared field (w/ key, index, users, ...), firebase security rules can then do ("users" in shared) or ("shared" in data) or (uid in shared.users), etc, see https://stackoverflow.com/a/53458469
     item.cipher = await encrypt(JSON.stringify(item))
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
@@ -3796,7 +3845,7 @@
                     // maintain pushable, editable & shared flags before replacing attr
                     attr.pushable = item.pushable
                     attr.editable = item.editable
-                    attr.shared = item.shared
+                    attr.shared = _.cloneDeep(item.shared)
                     __item(item.id).attr = attr
                     item.write(text, '')
                   } else {
@@ -5160,7 +5209,7 @@
     // NOTE: editable and pushable are transient UX state unless saved in item.attr
     item.editable = item.attr?.editable ?? true
     item.pushable = item.attr?.pushable ?? false
-    item.shared = item.attr?.shared ?? null
+    item.shared = _.cloneDeep(item.attr?.shared) ?? null
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5806,7 +5855,7 @@
                     // update mutable ux properties from item.attr
                     item.editable = item.attr?.editable ?? true
                     item.pushable = item.attr?.pushable ?? false
-                    item.shared = item.attr?.shared ?? null
+                    item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
                     items.forEach((item, index) => indexFromId.set(item.id, index))
@@ -5892,7 +5941,7 @@
                     // update mutable ux properties from item.attr
                     item.editable = item.attr?.editable ?? true
                     item.pushable = item.attr?.pushable ?? false
-                    item.shared = item.attr?.shared ?? null
+                    item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
