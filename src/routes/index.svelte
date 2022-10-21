@@ -478,6 +478,7 @@
     share(key, index) {
       if (!key) throw new Error('sharing key is required')
       if (typeof key !== 'string' || !key.match(/^\w+$/)) throw new Error('sharing key must be alphanumeric string')
+      if (key.length > 128) throw new Error('sharing key too long (>128 chars)')
       if (index !== undefined)
         if (!Number.isInteger(index) || index < 0) throw new Error('sharing index must be integer >= 0')
       const _item = item(this.id)
@@ -501,7 +502,7 @@
     // unshare item under key (unique at user level)
     unshare(key) {
       if (!key) throw new Error('sharing key is required')
-      if (typeof key !== 'string' || !key.match(/^\w+$/)) throw new Error('sharing key must be alphanumeric string')
+      if (typeof key !== 'string') throw new Error('sharing key must be string')
       const _item = item(this.id)
       if (!_item.shared?.keys) return
       _.pull(_item.shared.keys, key)
