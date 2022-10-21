@@ -1,35 +1,37 @@
 rules_version = '2';
 service cloud.firestore {
 	match /databases/{database}/documents {
-
+		// returns true iff user is not blocked
+		// checks for existence of a document under blocked_users database
+		// logged out users are considered not blocked since user id is not available
+		function user_not_blocked() {
+      return request.auth == null ||
+				!exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid))
+    }
     // generic user-based access rules (for ANY document in ANY collection w/ user field)
 		// ANYONE can read user=anonymous items
 		// ANYONE can read shared items (where attr.shared exists and is non-null)
 		// admin user (y2swh7JY2ScO5soV7mJMHVltAOX2) can read/write user=anonymous items
+		// logged in <user> must NOT be in blocked_users collection
 		// logged in <user> can read/write user=<user> items
-		// - logged in <user> must NOT be in blocked_users collection
 		// - for read/delete, check user in existing item
 		// - for create, check user in new item
 		// - for update, check user in new AND existing items
 		match /{document=**} {
-			allow read: if (resource.data.user == "anonymous") ||
-			      					('shared' in resource.data.attr && resource.data.attr.shared != null) ||
-						 	      	 (request.auth.uid == resource.data.user &&
-							           !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
-			allow delete: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
-							           resource.data.user == "anonymous") ||
-							             (request.auth.uid == resource.data.user &&
-							               !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
-			allow create: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
-							           request.resource.data.user == "anonymous") ||
-							             (request.auth.uid == request.resource.data.user &&
-							               !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
-			allow update: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
-							           request.resource.data.user == "anonymous" &&
-							             resource.data.user == "anonymous") ||
-							              (request.auth.uid == request.resource.data.user &&
-							                request.auth.uid == resource.data.user &&
-							                  !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+			allow read: if (resource.data.user == "anonymous" ||
+			      				  ('shared' in resource.data.attr && resource.data.attr.shared != null) ||
+						 	      	request.auth.uid == resource.data.user) && user_not_blocked();
+			allow delete: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+							          resource.data.user == "anonymous") ||
+							          request.auth.uid == resource.data.user) && user_not_blocked();
+			allow create: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+							          request.resource.data.user == "anonymous") ||
+							          request.auth.uid == request.resource.data.user) && user_not_blocked();
+			allow update: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+							          request.resource.data.user == "anonymous" &&
+							          resource.data.user == "anonymous") ||
+							          (request.auth.uid == request.resource.data.user &&
+							          request.auth.uid == resource.data.user)) && user_not_blocked();
 	  }
 
 		// webhooks collection
@@ -47,7 +49,7 @@ service cloud.firestore {
 		// note documents in this collection are not considered shared across ALL users
     match /github_webhooks/{item} {
 			allow write: if false;
-			allow read: if !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid));
+			allow read: if request.auth != null && user_not_blocked();
 			// see other inherited document=** rules above
     }
 
@@ -55,8 +57,7 @@ service cloud.firestore {
 		// logged in <user> can read/write own document where document id matches uid
 		// user must NOT be in blocked_users collection
     match /users/{user} {
-			allow read, write: if (request.auth.uid == user &&
-												     !exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid)));
+			allow read, write: if request.auth.uid == user && user_not_blocked();
 			// see other inherited document=** rules above
     }
 
@@ -64,6 +65,14 @@ service cloud.firestore {
 }
 service firebase.storage {
   match /b/{bucket}/o {
+		// returns true iff user is not blocked
+		// checks for existence of a document under blocked_users database
+		// logged out users are considered not blocked since user id is not available
+		// note cross-service security rules are a recent feature, see https://stackoverflow.com/a/73887203
+		function user_not_blocked() {
+      return request.auth == null ||
+				!firestore.exists(/databases/(default)/documents/blocked_users/$(request.auth.uid))
+    }
 
     // generic access rule to disable read/write except under specific paths configured below
 		// default is to allow read/write under auth, see https://firebase.google.com/docs/storage/security#authorization
@@ -75,21 +84,26 @@ service firebase.storage {
 		// ANYONE can read if owner=anonymous
 		// admin user can read/write owner=anonymous files
 		// logged in <user> can read/write owner=<user> files
+		// logged in <user> must NOT be in blocked_users collection
+		// note cross-service security rules are a recent feature, see https://stackoverflow.com/a/73887203
 		match /{owner}/images/{hash} {
-      allow read: if owner == "anonymous" || request.auth.uid == owner;
-			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
+      allow read: if (owner == "anonymous" || request.auth.uid == owner) && user_not_blocked();
+			allow write: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") ||
+											 request.auth.uid == owner) && user_not_blocked();
     }
 		// <owner>/uploads/...
 		// same rules as images above
 		match /{owner}/uploads/{path=**} {
-      allow read: if owner == "anonymous" || request.auth.uid == owner;
-			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
+      allow read: if (owner == "anonymous" || request.auth.uid == owner) && user_not_blocked();
+			allow write: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") ||
+											 request.auth.uid == owner) && user_not_blocked();
     }
 		// <owner>/uploads/public/...
 		// same rules as uploads above, except ANYONE can read
 		match /{owner}/uploads/public/{path=**} {
-      allow read: if true;
-			allow write: if (request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") || request.auth.uid == owner
+      allow read: user_not_blocked();
+			allow write: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" && owner == "anonymous") ||
+											 request.auth.uid == owner) && user_not_blocked();
     }
   }
 }
