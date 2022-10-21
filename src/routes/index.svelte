@@ -1847,7 +1847,8 @@
       tag == '#spell' ||
       tag == '#nospell' ||
       !!tag.match(/^#pin(?:\/|$)/) ||
-      !!tag.match(/\/pin(?:\/|$)/)
+      !!tag.match(/\/pin(?:\/|$)/) ||
+      tag.match(/^#shared\/([\w-]+)(?:\/(\d+))?$/)
     )
   }
 
@@ -1866,6 +1867,7 @@
     else if (tag == '#spell') return ['#features/_spell']
     else if (tag == '#nospell') return ['#features/_nospell']
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ['#features/_pin']
+    else if (tag.match(/^#shared\/([\w-]+)(?:\/(\d+))?$/)) return ['#features/_shared']
     else return []
   }
 
