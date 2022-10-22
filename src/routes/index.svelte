@@ -1848,7 +1848,7 @@
       tag == '#nospell' ||
       !!tag.match(/^#pin(?:\/|$)/) ||
       !!tag.match(/\/pin(?:\/|$)/) ||
-      tag.match(/^#share\/[\w-]+(?:\/\d+)?$/)
+      specialTagFunctions.some(f => f(tag))
     )
   }
 
@@ -1867,8 +1867,10 @@
     else if (tag == '#spell') return ['#features/_spell']
     else if (tag == '#nospell') return ['#features/_nospell']
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ['#features/_pin']
-    else if (tag.match(/^#share\/([\w-]+)(?:\/(\d+))?$/)) return ['#features/_share']
-    else return []
+    else
+      return specialTagFunctions
+        .map(f => f(tag))
+        .filter(Array.isArray).flat().filter(t=>typeof t == 'string' && tagRegex.test(t))
   }
 
   function tagPrefixes(tag) {
@@ -5087,6 +5089,7 @@
   import {
     extractBlock,
     blockRegExp,
+    tagRegex,
     parseTags,
     parseLabel,
     replaceTags,
@@ -5193,6 +5196,7 @@
   let processed = false
   let initialized = false
   let maxRenderedAtInit = 100
+  let specialTagFunctions = []
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
   let hiddenItemsByName
@@ -5315,6 +5319,20 @@
         hiddenItemsByName.set(wrapper.name, wrapper)
       })
     items = items.filter(item => !item.hidden)
+
+    // extract special tag functions
+    for (const item of items) {
+      if (!item.text.includes('_special_tag_aliases')) continue // quick check
+      const js = extractBlock(item.text, 'js')
+      if (!js) continue
+      try {
+        const f = eval.call(window, js + ';_special_tag_aliases')
+        if (typeof f !== 'function') throw new Error('invalid non-function _special_tag_aliases in item' + item.id)
+        specialTagFunctions.push(f)
+      } catch (e) {
+        console.error(e)
+      }
+    }
 
     indexFromId = new Map<string, number>() // needed for initial itemTextChanged
     items.forEach((item, index) => indexFromId.set(item.id, index))
@@ -6138,18 +6156,6 @@
         Promise.all([initialization, welcome])
           .then(update_dom)
           .then(() => {
-            // evaluate _on_welcome on welcome items
-            items.forEach(item => {
-              if (!item.welcome) return
-              if (!itemDefinesFunction(item, '_on_welcome')) return
-              Promise.resolve(
-                _item(item.id).eval('_on_welcome()', {
-                  trigger: 'welcome',
-                  async: item.deepasync, // run async if item is async or has async deps
-                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-                })
-              ).catch(e => {}) // already logged
-            })
 
             // on localhost, start watching local repo paths for installed items
             if (hostname == 'localhost') {
@@ -6180,6 +6186,21 @@
               // if hash matches a unique item, scroll to that item if needed
               if (unique) update_dom().then(scrollToTarget)
             }
+
+            // finalize dom & evaluate _on_welcome on welcome items
+            update_dom().then(()=>{
+              items.forEach(item => {
+                if (!item.welcome) return
+                if (!itemDefinesFunction(item, '_on_welcome')) return
+                Promise.resolve(
+                  _item(item.id).eval('_on_welcome()', {
+                    trigger: 'welcome',
+                    async: item.deepasync, // run async if item is async or has async deps
+                    async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                  })
+                ).catch(e => {}) // already logged
+              })
+            })
           })
 
         init_log('initialized document')

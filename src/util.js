@@ -87,11 +87,15 @@ export function skipEscaped(f) {
   }
 }
 
+// single tag regex
+export const tagRegex = /^#[^#\s<>&\?!,.;:"'`(){}\[\]]+$/
+
 // regex alternation string of "exclusions" (e.g. ex1|ex2|...) to be used as prefix <exclusions>|<tag_regex>
 // filter out exclusions by using capture groups and checking if first group (e.g. pfx) is undefined
 // this particular set of exclusions should be consistent w/ parseTags below
 // assumes flags gs for multiple & multi-line matching (use [^\n]* instead of .* to simulate single-line matching)
 // exclusions can NOT contain capture groups since it is useless and prohibits simple filtering via undefined captures
+// exclusions currently miss indented block lines that starts w/ bullets (since it requires context to parse correctly)
 export const tagRegexExclusions = [
   '(?:^|\\n) *```.*?\\n *```', // multi-line block
   '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
@@ -134,6 +138,7 @@ export function replaceTags(text, tagRegex, replacer, escaped) {
   })
 }
 
+// TODO: rewrite this to use tagRegexExclusions & tagRegex
 export function parseTags(text) {
   const tags = _.uniq(
     Array.from(
