@@ -1936,7 +1936,7 @@
     if (fixed) {
       // apply fixed ordering and hide index, which can change due to remote changes
       items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
-      hideIndexMinimal = hideIndex = _.sumBy(items, item => (!item.unrendered ? 1 : 0))
+      hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
       return updateItemLayout() // sorting and hideIndex are determined in initialize()
     }
 
@@ -5222,7 +5222,6 @@
     item.editable = (item.attr?.editable ?? true) || fixed // fixed items are always editable (but not deletable)
     item.pushable = (item.attr?.pushable ?? false) && !fixed // fixed items are not pushable
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
-    item.unrendered = fixed && item.shared && !(item.shared.indices?.[shared_key] >= 0)
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5383,7 +5382,7 @@
     // in fixed mode, determine fixed ordering and hideIndex == maxRenderedAtInit before rendering
     if (fixed) {
       items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
-      maxRenderedAtInit = hideIndexMinimal = hideIndex = _.sumBy(items, item => (!item.unrendered ? 1 : 0))
+      maxRenderedAtInit = hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
     }
     const unpinnedIndex = _.findLastIndex(items, item => item.pinned) + 1
     await renderRange(
