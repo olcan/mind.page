@@ -696,13 +696,13 @@
       if (options['include_deps']) {
         options = _.merge({}, options, { include_deps: false }) // deps are recursive already
         item.deps.forEach(id => {
-          const dep = __item(id)
+          const dep = _item(id)
           // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
           if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
           // indicate dependency name in comments for certain types of reads
           if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${dep.name} */`)
           else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${dep.name} -->`)
-          content.push(_item(id).read(type, options))
+          content.push(dep.read(type, options))
         })
       }
 
@@ -4022,7 +4022,7 @@
 
     // update indices as needed by itemTextChanged
     indexFromId = new Map<string, number>()
-    items.forEach((item, index) => indexFromId.set(item.id, index))
+    items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     itemTextChanged(0, text)
 
     // if text is not synthetic and starts with a tag, keep if non-unique label
@@ -4287,7 +4287,9 @@
       jsin = `if (typeof _run != 'function') console.error('missing _run function for non-js _input block; enabling #_tag may be missing (e.g. #_typescript for ts_input)')`
     }
     // always defer to _run function if defined, even if there is js_input (for custom handling of js code), but allow skipping by returning null
-    jsin = [`if (typeof _run == 'function') { const out = _run(); if (out !== null) return out }`, jsin].join('\n')
+    // note this does not apply to debug items which already contain complete run/eval logic from a prior run/eval
+    if (!item.debug)
+      jsin = [`if (typeof _run == 'function') { const out = _run(); if (out !== null) return out }`, jsin].join('\n')
     jsin = jsin.trim()
     // if (!jsin) return item.text // input missing or empty, ignore
     let jsout
@@ -4389,7 +4391,7 @@
     if (index < hideIndex) hideIndex-- // back up hide index
     // update indices as needed by onEditorChange
     indexFromId = new Map<string, number>()
-    items.forEach((item, index) => indexFromId.set(item.id, index))
+    items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     // deletion can affect ordering (e.g. due to missingTags), so we need onEditorChange
     // we also clear query if deleted item was being navigated
     if (editorText.trim().toLowerCase() == name.toLowerCase()) {
@@ -5140,6 +5142,7 @@
   // returns true iff item defines specified function _without_ any dependencies
   // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
   function itemDefinesFunction(item, name, options = {}) {
+    if (item.debug) return false // debug item should be excluded from all definition checks (and hook invocations)
     if (!item.text.includes(name)) return false // quick check
     try {
       return _item(item.id).eval(`(typeof ${name} == 'function')`, {
@@ -5343,7 +5346,7 @@
     }
 
     indexFromId = new Map<string, number>() // needed for initial itemTextChanged
-    items.forEach((item, index) => indexFromId.set(item.id, index))
+    items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     items.forEach((item, index) => {
       itemTextChanged(index, item.text, false /*update_deps*/) // deps handled below after index assignment
       initItemState(item, index, {
@@ -5918,7 +5921,7 @@
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
-                    items.forEach((item, index) => indexFromId.set(item.id, index))
+                    items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
                     itemTextChanged(
                       0,
                       item.text,
@@ -5965,7 +5968,7 @@
                     if (index < hideIndex) hideIndex-- // back up hide index
                     // update indices as needed by onEditorChange
                     indexFromId = new Map<string, number>()
-                    items.forEach((item, index) => indexFromId.set(item.id, index))
+                    items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
                     lastEditorChangeTime = 0 // disable debounce even if editor focused
                     onEditorChange(editorText) // deletion can affect ordering (e.g. due to missingTags)
                     deletedItems.unshift({

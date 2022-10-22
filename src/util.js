@@ -149,7 +149,7 @@ export function parseTags(text) {
   for (const m of text.matchAll(regex)) if (m[1]) uniq_tags.add(m[1])
   const tags = Array.from(uniq_tags)
   return {
-    raw: _.clone(tags),
+    raw: tags,
     all: _.uniq(tags.map(t => t.replace(/^#_/, '#'))),
     visible: tags.filter(t => !t.startsWith('#_')),
     hidden: tags.filter(t => t.startsWith('#_')).map(t => t.replace(/^#_/, '#')),
