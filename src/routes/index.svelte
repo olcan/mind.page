@@ -4576,6 +4576,7 @@
 
       if (!run_item) {
         run_item = _create(run_text, { run: true })
+        if (!run_item) throw new Error('failed to create new item to run')
       } else {
         // if js_input modified, confirm overwrite
         if (
