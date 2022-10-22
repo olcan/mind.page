@@ -88,6 +88,11 @@ export function skipEscaped(f) {
 }
 
 // single tag regex
+// allowed characters are extensive, well outside of [\p{L}\d/_-]
+// some examples of characters found useful in tags are: ⇧⏎²… and θμσ…
+// there is no trailing delimiter, which would be simply the inverse of allowed chars
+// tag patterns matching _specific_ tags should use the inverse as trailing delimiter for consistency
+// this is done automatically in replaceTags below, but other functions can use tagRegexDelimiter
 export const tagRegex = /^#[^#\s<>&\?!,.;:"'`(){}\[\]]+$/
 
 // regex alternation string of "exclusions" (e.g. ex1|ex2|...) to be used as prefix <exclusions>|<tag_regex>
@@ -138,34 +143,13 @@ export function replaceTags(text, tagRegex, replacer, escaped) {
   })
 }
 
-// TODO: rewrite this to use tagRegexExclusions & tagRegex
 export function parseTags(text) {
-  const tags = _.uniq(
-    Array.from(
-      text
-        .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
-        // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
-        .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-        .replace(/`.*?`/g, skipEscaped('')) // remove inline code spans
-        .replace(/\$?\$`.+?`\$\$?/g, skipEscaped('')) // remove math
-        .replace(/<script.*?>.*?<\/script>/gs, skipEscaped('')) // remove scripts (can be multi-line)
-        .replace(/<style.*?>.*?<\/style>/gs, skipEscaped('')) // remove styles (can be multi-line)
-        .replace(/<\/?\w(?:"[^"]*"|[^>"])*>/gs, skipEscaped('')) // remove html tags (can be multi-line)
-        .replace(/<!--.*?-->/gs, skipEscaped('')) // remove html comment tags (can be multi-line)
-        .replace(/<<.*?>>/g, skipEscaped('')) // remove macros
-        .replace(/@\{.*?\}@/g, skipEscaped('')) // remove macros
-        // NOTE: we intentially allow most characters, well outside of say [\p{L}\d/_-]
-        //       some examples of characters found useful in tags are: ⇧⏎²…
-        //       also greek letters like θμσ…, but those are covered under unicode \p{L}
-        //       we do not match a trailing delimiter because it would be redundant as inverse of allowed chars
-        //       tag patterns matching _specific_ tags should use the inverse as trailing delimiter for consistency
-        //       this is done automatically in replaceTags above, but other functions can use tagRegexDelimiter
-        .matchAll(/(?:^|\s|\()(#[^#\s<>&\?!,.;:"'`(){}\[\]]+)/g),
-      m => m[1]
-    )
-  )
+  const regex = new RegExp(tagRegexExclusions + '|(?:^|\\s|\\()(' + tagRegex.source.slice(1, -1) + ')', 'gs')
+  let tags = new Set()
+  for (const m of text.matchAll(regex)) m[1] && tags.add(m[1])
+  tags = Array.from(tags)
   return {
-    raw: _.uniq(tags),
+    raw: tags,
     all: _.uniq(tags.map(t => t.replace(/^#_/, '#'))),
     visible: tags.filter(t => !t.startsWith('#_')),
     hidden: tags.filter(t => t.startsWith('#_')).map(t => t.replace(/^#_/, '#')),
