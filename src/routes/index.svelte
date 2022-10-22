@@ -4551,7 +4551,7 @@
         return
       }
       const run_name = item.name + '/run'
-      const run_item = _item(run_name, false /* do not log errors */)
+      let run_item = _item(run_name, false /* do not log errors */)
 
       // copy only input blocks, prepend label and dependency on parent
       const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
@@ -4575,7 +4575,7 @@
       }
 
       if (!run_item) {
-        _create(run_text, { run: true })
+        run_item = _create(run_text, { run: true })
       } else {
         // if js_input modified, confirm overwrite
         if (
