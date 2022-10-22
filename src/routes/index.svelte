@@ -1870,7 +1870,9 @@
     else
       return specialTagFunctions
         .map(f => f(tag))
-        .filter(Array.isArray).flat().filter(t=>typeof t == 'string' && tagRegex.test(t))
+        .filter(Array.isArray)
+        .flat()
+        .filter(t => typeof t == 'string' && tagRegex.test(t))
   }
 
   function tagPrefixes(tag) {
@@ -1931,7 +1933,12 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
-    if (fixed) return updateItemLayout() // sorting and hideIndex are determined in initialize()
+    if (fixed) {
+      // apply fixed ordering and hide index, which can change due to remote changes
+      items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
+      hideIndexMinimal = hideIndex = _.sumBy(items, item => (!item.unrendered ? 1 : 0))
+      return updateItemLayout() // sorting and hideIndex are determined in initialize()
+    }
 
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top
@@ -2632,7 +2639,8 @@
 
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
-    sessionStateHistoryIndex = e.state.index
+    if (e.state.index === null) console.error('popping state w/o index! (taking it as 0)')
+    sessionStateHistoryIndex = e.state.index ?? 0
 
     // restore editor text and unsaved times
     editorText = e.state.editorText || ''
@@ -6156,7 +6164,6 @@
         Promise.all([initialization, welcome])
           .then(update_dom)
           .then(() => {
-
             // on localhost, start watching local repo paths for installed items
             if (hostname == 'localhost') {
               ;(async () => {
@@ -6188,7 +6195,7 @@
             }
 
             // finalize dom & evaluate _on_welcome on welcome items
-            update_dom().then(()=>{
+            update_dom().then(() => {
               items.forEach(item => {
                 if (!item.welcome) return
                 if (!itemDefinesFunction(item, '_on_welcome')) return

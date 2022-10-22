@@ -145,11 +145,11 @@ export function replaceTags(text, tagRegex, replacer, escaped) {
 
 export function parseTags(text) {
   const regex = new RegExp(tagRegexExclusions + '|(?:^|\\s|\\()(' + tagRegex.source.slice(1, -1) + ')', 'gs')
-  let tags = new Set()
-  for (const m of text.matchAll(regex)) m[1] && tags.add(m[1])
-  tags = Array.from(tags)
+  const uniq_tags = new Set()
+  for (const m of text.matchAll(regex)) if (m[1]) uniq_tags.add(m[1])
+  const tags = Array.from(uniq_tags)
   return {
-    raw: tags,
+    raw: _.clone(tags),
     all: _.uniq(tags.map(t => t.replace(/^#_/, '#'))),
     visible: tags.filter(t => !t.startsWith('#_')),
     hidden: tags.filter(t => t.startsWith('#_')).map(t => t.replace(/^#_/, '#')),
