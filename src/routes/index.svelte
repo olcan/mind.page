@@ -2994,19 +2994,19 @@
       item.dependentsString = itemDependentsString(item)
 
       // update dependents for dependencies and vice versa (including strings)
-      _.uniq(item.deps.concat(prevDeps)).forEach(id => {
-        const dep = __item(id as string)
+      _.uniq(item.deps.concat(prevDeps)).forEach((id: string) => {
+        const dep = __item(id)
         if (item.deps.includes(dep.id) && !dep.dependents.includes(item.id)) dep.dependents.push(item.id)
         else if (!item.deps.includes(dep.id) && dep.dependents.includes(item.id)) {
           // NOTE: when removing item as a dependent from a previous dependency, we have to review all dependents of the dependecy since it may also have _indirect_ dependents through this item
-          dep.dependents = dep.dependents.filter(id => id != item.id && __item(id).deps.includes(dep.id))
+          _.remove(dep.dependents, (id: string) => id == item.id || !__item(id).deps.includes(dep.id))
           // console.debug('updated dependency dependents:', dep.name, dep.dependents)
         }
         dep.dependentsString = itemDependentsString(dep)
         // console.debug("updated dependentsString:", dep.dependentsString);
       })
-      _.uniq(item.dependents.concat(prevDependents)).forEach(id => {
-        const dep = __item(id as string)
+      _.uniq(item.dependents.concat(prevDependents)).forEach((id: string) => {
+        const dep = __item(id)
         dep.depsString = itemDepsString(dep)
       })
     }
@@ -5382,7 +5382,10 @@
     // in fixed mode, determine fixed ordering and hideIndex == maxRenderedAtInit before rendering
     if (fixed) {
       items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
-      maxRenderedAtInit = hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
+      maxRenderedAtInit =
+        hideIndexMinimal =
+        hideIndex =
+          _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
     }
     const unpinnedIndex = _.findLastIndex(items, item => item.pinned) + 1
     await renderRange(
