@@ -99,7 +99,7 @@
   // additional arguments are for internal use
   function _item(name: string, silent: any = false, read_only = undefined, default_read_only_id = undefined): any {
     if (!name) return null
-    if (typeof silent == 'object') ({ silent, read_only, default_read_only_id } = silent)
+    if (typeof silent == 'object') ({ silent = false, read_only, default_read_only_id } = silent)
     let item
     if (name.startsWith('#')) {
       // item is specified by unique label (i.e. name)
@@ -122,7 +122,7 @@
       item = items[index]
     }
     read_only ??= item.id == default_read_only_id
-    return Object.freeze(new _Item(item.id, !read_only /* silent? */)) // defined below
+    return Object.freeze(new _Item(item.id, read_only)) // defined below
   }
 
   // same as _item, but for existence checks, and allows multiple matches
