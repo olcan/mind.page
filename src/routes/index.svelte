@@ -1539,8 +1539,8 @@
     resizeHiddenColumn()
     updateVerticalPadding()
 
-    // as soon as header is available, add top margin and scroll down to header
-    // also store header offset for all other scrollTo calculations
+    // as soon as header is available, scroll down to header
+    // also store header offset for all other scrollTo calculation
     if (headerdiv && !headerScrolled) {
       scrollTo(headerdiv.offsetTop)
       headerScrolled = true
@@ -4385,6 +4385,10 @@
   const ios = isIOS()
 
   function deleteItem(index, confirm_delete = undefined): boolean {
+    if (fixed) {
+      _modal('can not delete item when viewing shared items')
+      return false
+    }
     const item = items[index]
     // by default, confirm if item has saved text (not new item) & unique label
     confirm_delete ??= item.savedText && item.labelUnique
@@ -4452,6 +4456,13 @@
         item.editing = true
         return
       }
+    }
+
+    // check for deletion by emptying out item, which is disallowed in fixed mode
+    if (item.text.trim().length == 0 && fixed) {
+      _modal('can not delete item when viewing shared items').then(()=>textArea(item.index)?.focus())
+      item.editing = true
+      return
     }
 
     if (editing) {
@@ -5435,6 +5446,9 @@
       } else {
         init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
         rendered = true
+        // trigger a layout, even if onItemResized was never invoked
+        // ensures scroll-to-header as needed to remove loading overlay
+        updateItemLayout()
       }
     })
   }
@@ -5840,7 +5854,7 @@
                 init_log(`synchronized ${items.length} items`)
 
                 // if account is empty in fixed mode, stop & present modal to try again
-                if (items.length === 0 && fixed) {
+                if ((items.length === 0 || hideIndex == 0) && fixed) {
                   _modal(`No shared items found @ ${url_params.shared}.`, {
                     confirm: 'Try Again',
                     background: 'confirm',
@@ -7186,9 +7200,6 @@
     .container > .item-menu,
     .item > div:first-child {
       display: none !important;
-    }
-    .item mark {
-      cursor: auto !important;
     }
   </style>
 {/if}

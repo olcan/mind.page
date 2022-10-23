@@ -190,7 +190,6 @@
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {}
   if (!window['_handleTagClick'])
     window['_handleTagClick'] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
-      if (fixed) return // ignore tag events in fixed mode
       tag = _.unescape(tag)
       reltag = _.unescape(reltag)
       e.stopPropagation()
@@ -563,9 +562,9 @@
               reltag = '#…' + tag.substring(firstTerm.length)
             return (
               `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
-              `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(reltag)}',event)" onclick="${
-                fixed ? '' : 'event.preventDefault();event.stopPropagation();'
-              }">` +
+              `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
+                reltag
+              )}',event)" onclick="event.preventDefault();event.stopPropagation();">` +
               `${renderTag(reltag)}</mark>`
             )
           })
@@ -647,9 +646,7 @@
         classNames = classNames.trim()
         return `<mark class="${classNames}" title="${_.escape(tag)}" onmousedown="_handleTagClick('${id}','${_.escape(
           tag
-        )}','${_.escape(text)}',event)" onclick="${
-          fixed ? '' : 'event.preventDefault();event.stopPropagation();'
-        }">${text}</mark>`
+        )}','${_.escape(text)}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`
       }
       // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
       // NOTE: rel="opener" is required by Chrome for target="_blank" to work. rel="external" is said to replace target=_blank but does NOT open a new window (in Safari or chrome), so we are forced to used _blank+opener.
@@ -1196,9 +1193,7 @@
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
         return `${pfx}<a href="#" title="${_.escape(tag_resolved)}" onmousedown="_handleTagClick('${id}','${_.escape(
           tag_resolved
-        )}','${_.escape(tag_resolved)}',event)" onclick="${
-          fixed ? '' : 'event.preventDefault();event.stopPropagation();'
-        }">${tag}</a>`
+        )}','${_.escape(tag_resolved)}',event)" onclick="event.preventDefault();event.stopPropagation();">${tag}</a>`
       })
     itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))
