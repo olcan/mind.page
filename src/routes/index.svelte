@@ -1937,13 +1937,6 @@
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
 
-    if (fixed) {
-      // apply fixed ordering and hide index, which can change due to remote changes
-      items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
-      hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
-      return updateItemLayout() // sorting and hideIndex are determined in initialize()
-    }
-
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top
       if (
@@ -2204,15 +2197,19 @@
         }
       }
 
-      // calculate missing tags (excluding certain special tags from consideration)
+      // calculate missing tags in non-fixed mode (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
       // hidden "special" tags are not considered "missing" since they toggle special features
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       // NOTE: tagCounts include prefix tags, deduplicated at item level
-      item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
-        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+      item.missingTags = fixed
+        ? []
+        : item.tagsVisible
+            .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+            .concat(
+              item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
+            )
 
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
@@ -2239,230 +2236,243 @@
       })
     }
 
-    // insert dummy item to determine "tail" of items that can be hidden behind a toggle by default
-    // tail is defined as any items ranked below dummy item, where id == null and time == now
-    // tail includes items ranked purely by time and any other criteria below item.dummy (see below)
-    // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
-    items.push({
-      dotted: false,
-      dotTerm: '',
-      pinned: false,
-      pinTerm: '',
-      pinnedMatch: false,
-      pinnedMatchTerm: '',
-      log: false,
-      uniqueLabel: '',
-      target: false,
-      editing: false,
-      hasError: false,
-      previewable: false,
-      pushable: false,
-      target_nesting: -Infinity,
-      target_prefix_nesting: -Infinity,
-      firstTagMatch: false,
-      tagMatches: 0,
-      labelMatch: false,
-      prefixMatch: false,
-      matchingTerms: [],
-      id: null, // indicates dummy
-      matchingTermsSecondary: [],
-      missingTags: [],
-      time: now + 1000 /* dominate any offsets used above */,
-    })
-
-    // returns position of minimum non-negative number, or -1 if none found
-    // function min_pos(xJ) {
-    //   let jmin = -1
-    //   for (let j = 0; j < xJ.length; ++j) if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j
-    //   return jmin
-    // }
-
-    // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
-    //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
-    //       (afterUpdate is also triggered by the various assignments above)
-    // NOTE: undefined values produce NaN, which is treated as 0
-    // NOTE: bool - bool is fine (even w/o parens), but true - undefined is NaN~0
-    items = items.sort(
-      (a, b) =>
-        // dotted? (contains #_pin/dot or #_pin/dot/*)
-        b.dotted - a.dotted ||
-        // alphanumeric ordering on #_pin/dot/* term (see https://stackoverflow.com/a/38641281)
-        a.dotTerm.localeCompare(b.dotTerm, undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        }) ||
-        // pinned? (contains #_pin or #_pin/*)
-        b.pinned - a.pinned ||
-        // alphanumeric ordering on #_pin/* term
-        a.pinTerm.localeCompare(b.pinTerm, undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        }) ||
-        // pinned match? (contains /pin or /pin/*)
-        b.pinnedMatch - a.pinnedMatch ||
-        // alphanumeric ordering on #*/pin/* term
-        a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm, undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        }) ||
-        // log items matching #log query ordered by time
-        (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
-        // listing item context position (includes labelPrefixes)
-        context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
-        // target item (listing item or id-matching item)
-        b.target - a.target ||
-        // editing mode (except log items)
-        (!b.log && b.editing) - (!a.log && a.editing) ||
-        // errors
-        b.hasError - a.hasError ||
-        // previewables
-        b.previewable - a.previewable ||
-        // pushables
-        b.pushable - a.pushable ||
-        // nesting (depth of nested label) under target item
-        b.target_nesting - a.target_nesting ||
-        // minimum nesting (depth of nested label) under prefixes of target item
-        b.target_prefix_nesting - a.target_prefix_nesting ||
-        // position of (unique) label in listing item (item w/ unique label = first term)
-        // (listing is reversed so larger index is better and missing=-1)
-        listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
-        // first term tag match
-        b.firstTagMatch - a.firstTagMatch ||
-        // # of matching (visible) tags from query
-        b.tagMatches - a.tagMatches ||
-        // label match (OR tag matches to prevent non-unique labels dominating tags)
-        Math.max(b.labelMatch, b.tagMatches.length) - Math.max(a.labelMatch, a.tagMatches.length) ||
-        // // // position of longest matching label prefix in listing item
-        // // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
-        // //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
-        // prefix match on first term
-        b.prefixMatch - a.prefixMatch ||
-        // # of matching words/tags from query
-        b.matchingTerms.length - a.matchingTerms.length ||
-        // dummy item, below which is considered "tail" (see above)
-        Number(b.id === null) - Number(a.id === null) ||
-        // # of matching secondary words from query
-        b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
-        // missing tag prefixes
-        b.missingTags.length - a.missingTags.length ||
-        // time (most recent first)
-        b.time - a.time
-    )
-
-    // certain items need prominence to be considered in hide index and toggle point computations
-    // note for editing items, log items which are edited "in place" and can be quite far down
-    const needs_prominence = item =>
-      item.target ||
-      item.editing ||
-      item.hasError ||
-      item.missingTags.length ||
-      item.running ||
-      item.pushable ||
-      item.previewable
-
-    // determine "tail" index (see above for definition)
-    let tailIndex = items.findIndex(item => item.id === null)
-    items.splice(tailIndex, 1)
-    tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
-    let tailTime = items[tailIndex]?.time || 0
-    hideIndexFromRanking = tailIndex
-
-    // update layout (used below, e.g. aboveTheFold, editingItems, etc)
-    updateItemLayout()
-    lastEditorChangeTime = Infinity // force minimum wait for next change
-
-    // determine "toggle" indices (ranges) where item visibility can be toggled
-    toggles = []
-
-    // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
-    // we include target + everything included above in hideIndexFromRanking to ensure prominence
-    let unpinnedIndex = _.findLastIndex(items, item => item.pinned || needs_prominence(item)) + 1
-    let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
-    if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
-      toggles.push({
-        start: unpinnedIndex,
-        end: Math.min(belowFoldIndex, hideIndexFromRanking),
-        positionBased: true,
+    if (fixed) {
+      const target = items.find(item => item.name == text)
+      if (target) {
+        items = [target, ..._.without(items, target)]
+        hideIndexMinimal = hideIndex = 1
+      } else {
+        items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
+        hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
+      }
+      updateItemLayout()
+    } else {
+      // insert dummy item to determine "tail" of items that can be hidden behind a toggle by default
+      // tail is defined as any items ranked below dummy item, where id == null and time == now
+      // tail includes items ranked purely by time and any other criteria below item.dummy (see below)
+      // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
+      items.push({
+        dotted: false,
+        dotTerm: '',
+        pinned: false,
+        pinTerm: '',
+        pinnedMatch: false,
+        pinnedMatchTerm: '',
+        log: false,
+        uniqueLabel: '',
+        target: false,
+        editing: false,
+        hasError: false,
+        previewable: false,
+        pushable: false,
+        target_nesting: -Infinity,
+        target_prefix_nesting: -Infinity,
+        firstTagMatch: false,
+        tagMatches: 0,
+        labelMatch: false,
+        prefixMatch: false,
+        matchingTerms: [],
+        id: null, // indicates dummy
+        matchingTermsSecondary: [],
+        missingTags: [],
+        time: now + 1000 /* dominate any offsets used above */,
       })
-    }
-    if (belowFoldIndex < hideIndexFromRanking) {
-      let lastToggleIndex = belowFoldIndex
-      ;[10, 30, 50, 100, 200, 500, 1000].forEach(toggleIndex => {
-        if (lastToggleIndex >= hideIndexFromRanking) return
+
+      // returns position of minimum non-negative number, or -1 if none found
+      // function min_pos(xJ) {
+      //   let jmin = -1
+      //   for (let j = 0; j < xJ.length; ++j) if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j
+      //   return jmin
+      // }
+
+      // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
+      //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
+      //       (afterUpdate is also triggered by the various assignments above)
+      // NOTE: undefined values produce NaN, which is treated as 0
+      // NOTE: bool - bool is fine (even w/o parens), but true - undefined is NaN~0
+      items = items.sort(
+        (a, b) =>
+          // dotted? (contains #_pin/dot or #_pin/dot/*)
+          b.dotted - a.dotted ||
+          // alphanumeric ordering on #_pin/dot/* term (see https://stackoverflow.com/a/38641281)
+          a.dotTerm.localeCompare(b.dotTerm, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          }) ||
+          // pinned? (contains #_pin or #_pin/*)
+          b.pinned - a.pinned ||
+          // alphanumeric ordering on #_pin/* term
+          a.pinTerm.localeCompare(b.pinTerm, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          }) ||
+          // pinned match? (contains /pin or /pin/*)
+          b.pinnedMatch - a.pinnedMatch ||
+          // alphanumeric ordering on #*/pin/* term
+          a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          }) ||
+          // log items matching #log query ordered by time
+          (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
+          // listing item context position (includes labelPrefixes)
+          context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
+          // target item (listing item or id-matching item)
+          b.target - a.target ||
+          // editing mode (except log items)
+          (!b.log && b.editing) - (!a.log && a.editing) ||
+          // errors
+          b.hasError - a.hasError ||
+          // previewables
+          b.previewable - a.previewable ||
+          // pushables
+          b.pushable - a.pushable ||
+          // nesting (depth of nested label) under target item
+          b.target_nesting - a.target_nesting ||
+          // minimum nesting (depth of nested label) under prefixes of target item
+          b.target_prefix_nesting - a.target_prefix_nesting ||
+          // position of (unique) label in listing item (item w/ unique label = first term)
+          // (listing is reversed so larger index is better and missing=-1)
+          listing.indexOf(b.uniqueLabel) - listing.indexOf(a.uniqueLabel) ||
+          // first term tag match
+          b.firstTagMatch - a.firstTagMatch ||
+          // # of matching (visible) tags from query
+          b.tagMatches - a.tagMatches ||
+          // label match (OR tag matches to prevent non-unique labels dominating tags)
+          Math.max(b.labelMatch, b.tagMatches.length) - Math.max(a.labelMatch, a.tagMatches.length) ||
+          // // // position of longest matching label prefix in listing item
+          // // min_pos(listing.map((pfx) => b.uniqueLabelPrefixes.indexOf(pfx))) -
+          // //   min_pos(listing.map((pfx) => a.uniqueLabelPrefixes.indexOf(pfx))) ||
+          // prefix match on first term
+          b.prefixMatch - a.prefixMatch ||
+          // # of matching words/tags from query
+          b.matchingTerms.length - a.matchingTerms.length ||
+          // dummy item, below which is considered "tail" (see above)
+          Number(b.id === null) - Number(a.id === null) ||
+          // # of matching secondary words from query
+          b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
+          // missing tag prefixes
+          b.missingTags.length - a.missingTags.length ||
+          // time (most recent first)
+          b.time - a.time
+      )
+
+      // certain items need prominence to be considered in hide index and toggle point computations
+      // note for editing items, log items which are edited "in place" and can be quite far down
+      const needs_prominence = item =>
+        item.target ||
+        item.editing ||
+        item.hasError ||
+        item.missingTags.length ||
+        item.running ||
+        item.pushable ||
+        item.previewable
+
+      // determine "tail" index (see above for definition)
+      let tailIndex = items.findIndex(item => item.id === null)
+      items.splice(tailIndex, 1)
+      tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
+      let tailTime = items[tailIndex]?.time || 0
+      hideIndexFromRanking = tailIndex
+
+      // update layout (used below, e.g. aboveTheFold, editingItems, etc)
+      updateItemLayout()
+      lastEditorChangeTime = Infinity // force minimum wait for next change
+
+      // determine "toggle" indices (ranges) where item visibility can be toggled
+      toggles = []
+
+      // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
+      // we include target + everything included above in hideIndexFromRanking to ensure prominence
+      let unpinnedIndex = _.findLastIndex(items, item => item.pinned || needs_prominence(item)) + 1
+      let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
+      if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
         toggles.push({
-          start: lastToggleIndex,
-          end: Math.min(belowFoldIndex + toggleIndex, hideIndexFromRanking),
+          start: unpinnedIndex,
+          end: Math.min(belowFoldIndex, hideIndexFromRanking),
           positionBased: true,
         })
-        lastToggleIndex = belowFoldIndex + toggleIndex
-      })
-    }
-
-    // ensure contiguity of position-based toggles up to hideIndexFromRanking
-    if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking
-
-    // merge position-based toggles smaller than 10 indices
-    for (let i = 1; i < toggles.length; i++) {
-      if (toggles[i - 1].end - toggles[i - 1].start < 10 || toggles[i].end - toggles[i].start < 10) {
-        toggles[i - 1].end = toggles[i].end
-        toggles.splice(i--, 1) // merged into last
       }
-    }
+      if (belowFoldIndex < hideIndexFromRanking) {
+        let lastToggleIndex = belowFoldIndex
+        ;[10, 30, 50, 100, 200, 500, 1000].forEach(toggleIndex => {
+          if (lastToggleIndex >= hideIndexFromRanking) return
+          toggles.push({
+            start: lastToggleIndex,
+            end: Math.min(belowFoldIndex + toggleIndex, hideIndexFromRanking),
+            positionBased: true,
+          })
+          lastToggleIndex = belowFoldIndex + toggleIndex
+        })
+      }
 
-    // calculate "minimal" hide index used in certain situations, e.g. when window is defocused
-    // minimal index is either the first time-ranked item, or the first position-based hidden item
-    // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
-    hideIndexMinimal =
-      toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end
+      // ensure contiguity of position-based toggles up to hideIndexFromRanking
+      if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking
 
-    // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
-    // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
-    // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
-    // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
-    hideIndexForSession = Math.max(
-      hideIndexFromRanking, // in case findIndex returns -1
-      _.findIndex(items, item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
-    )
+      // merge position-based toggles smaller than 10 indices
+      for (let i = 1; i < toggles.length; i++) {
+        if (toggles[i - 1].end - toggles[i - 1].start < 10 || toggles[i].end - toggles[i].start < 10) {
+          toggles[i - 1].end = toggles[i].end
+          toggles.splice(i--, 1) // merged into last
+        }
+      }
 
-    // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
-    const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
-    // disallow decrease in hideIndex unless there is a query, to improve focus
-    if (editorText.trim() || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
+      // calculate "minimal" hide index used in certain situations, e.g. when window is defocused
+      // minimal index is either the first time-ranked item, or the first position-based hidden item
+      // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
+      hideIndexMinimal =
+        toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end
 
-    // if ranking while unfocused, retreat to minimal index
-    // if (!focused) hideIndex = hideIndexMinimal
+      // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
+      // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
+      // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
+      // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
+      hideIndexForSession = Math.max(
+        hideIndexFromRanking, // in case findIndex returns -1
+        _.findIndex(items, item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
+      )
 
-    if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
-      toggles.push({
-        start: hideIndexFromRanking,
-        end: hideIndexForSession,
+      // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
+      const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
+      // disallow decrease in hideIndex unless there is a query, to improve focus
+      if (editorText.trim() || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
+
+      // if ranking while unfocused, retreat to minimal index
+      // if (!focused) hideIndex = hideIndexMinimal
+
+      if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
+        toggles.push({
+          start: hideIndexFromRanking,
+          end: hideIndexForSession,
+        })
+        tailIndex = hideIndexForSession
+        tailTime = items[hideIndexForSession].time
+      }
+
+      // add toggle points for "extended tail times"
+      // NOTE: we do this by time to help avoid big gaps in time (that cross these thresholds)
+      ;[1, 3, 7, 14, 30].forEach(daysAgo => {
+        const extendedTailTime = Date.now() - daysAgo * 24 * 3600 * 1000
+        if (extendedTailTime > tailTime) return
+        const extendedTailIndex =
+          tailIndex + items.slice(tailIndex).filter(item => item.time >= extendedTailTime).length
+        if (extendedTailIndex <= tailIndex || extendedTailIndex >= items.length) return
+        toggles.push({
+          start: tailIndex,
+          end: extendedTailIndex,
+        })
+        tailIndex = extendedTailIndex
+        tailTime = items[extendedTailIndex].time
       })
-      tailIndex = hideIndexForSession
-      tailTime = items[hideIndexForSession].time
+      // add final toggle point for all items
+      if (tailIndex < items.length) {
+        toggles.push({
+          start: tailIndex,
+          end: items.length,
+        })
+      }
+      // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
-
-    // add toggle points for "extended tail times"
-    // NOTE: we do this by time to help avoid big gaps in time (that cross these thresholds)
-    ;[1, 3, 7, 14, 30].forEach(daysAgo => {
-      const extendedTailTime = Date.now() - daysAgo * 24 * 3600 * 1000
-      if (extendedTailTime > tailTime) return
-      const extendedTailIndex = tailIndex + items.slice(tailIndex).filter(item => item.time >= extendedTailTime).length
-      if (extendedTailIndex <= tailIndex || extendedTailIndex >= items.length) return
-      toggles.push({
-        start: tailIndex,
-        end: extendedTailIndex,
-      })
-      tailIndex = extendedTailIndex
-      tailTime = items[extendedTailIndex].time
-    })
-    // add final toggle point for all items
-    if (tailIndex < items.length) {
-      toggles.push({
-        start: tailIndex,
-        end: items.length,
-      })
-    }
-    // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -2484,6 +2494,9 @@
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
           pushState(state)
+          sessionStateHistory.forEach((state,j)=>{
+            if (!state) console.error(`sessionStateHistory has gap at ${j}/${sessionStateHistory.length} (index ${sessionStateHistoryIndex})`)
+          })
         } else {
           state.index = sessionStateHistoryIndex
           replaceState(state)
@@ -4460,7 +4473,7 @@
 
     // check for deletion by emptying out item, which is disallowed in fixed mode
     if (item.text.trim().length == 0 && fixed) {
-      _modal('can not delete item when viewing shared items').then(()=>textArea(item.index)?.focus())
+      _modal('can not delete item when viewing shared items').then(() => textArea(item.index)?.focus())
       item.editing = true
       return
     }
