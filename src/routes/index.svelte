@@ -1508,8 +1508,8 @@
   let defaultItemHeight = 0 // if zero, initial layout will be single-column
   let totalItemHeight = 0
   let lastFocusedEditElement = null
-  let lastTimeStringUpdateTime = 0
   let disableScrollingOnLayout = false
+  let lastLayoutTime = 0
   let showDotted = false
 
   function updateItemLayout() {
@@ -1534,7 +1534,7 @@
     oldestTime = Infinity
     oldestTimeString = ''
     totalItemHeight = 0
-    lastTimeStringUpdateTime = Date.now()
+    lastLayoutTime = Date.now()
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
     updateVerticalPadding()
@@ -1658,7 +1658,11 @@
 
     if (disableScrollingOnLayout) return
     const dispatchTime = Date.now()
+    const lastLayoutTimeAtDispatch = lastLayoutTime
+    const numItemsAtDispatch = items.length
     update_dom().then(() => {
+      if (lastLayoutTimeAtDispatch != lastLayoutTime) return // layout changed since dispatch
+      if (items.length != numItemsAtDispatch) console.warn('number of items changed unexpectedly')
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
       if (focusedEditElement && activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
         focusedEditElement.focus()
@@ -2494,8 +2498,11 @@
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
           pushState(state)
-          sessionStateHistory.forEach((state,j)=>{
-            if (!state) console.error(`sessionStateHistory has gap at ${j}/${sessionStateHistory.length} (index ${sessionStateHistoryIndex})`)
+          sessionStateHistory.forEach((state, j) => {
+            if (!state)
+              console.error(
+                `sessionStateHistory has gap at ${j}/${sessionStateHistory.length} (index ${sessionStateHistoryIndex})`
+              )
           })
         } else {
           state.index = sessionStateHistoryIndex
@@ -3190,7 +3197,6 @@
       item.cipher = null // clear cipher if was previously encrypted
       return item
     }
-    // TODO: skip encryption for shared items that include an attr.shared field (w/ key, index, users, ...), firebase security rules can then do ("users" in shared) or ("shared" in data) or (uid in shared.users), etc, see https://stackoverflow.com/a/53458469
     item.cipher = await encrypt(JSON.stringify(item))
     // setting item.text = null ensures !item.text and that field is cleared in update on firestore
     // full removal in update (but not add/set) requires setting item.text = window["firebase"].firestore.FieldValue.delete()
@@ -5751,8 +5757,8 @@
 
         // update time strings every 10 seconds
         // NOTE: we do NOT update time string visibility/grouping here, and there can be differences (from layout strings) in both directions (time string hidden while distinct from previous item, or time string shown while identical to previous item) but arguably we may not want to show/hide time strings (and shift items) outside of an actual layout, and time strings should be interpreted as rough (but correct) markers along the timeline, with items grouped between them in correct order and with increments within the same order of unit (m,h,d) implied by last shown time string
-        if (Date.now() - lastTimeStringUpdateTime > 10000) {
-          lastTimeStringUpdateTime = Date.now()
+        if (Date.now() - lastLayoutTime > 10000) {
+          lastLayoutTime = Date.now()
           items.forEach((item, index) => {
             if (!item.timeString) return
             item.timeString = itemTimeString(item.time)
