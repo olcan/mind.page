@@ -296,7 +296,7 @@
     highlightPositions(matched_positions, 'matched')
     highlightPositions(unmatched_positions, 'unmatched')
 
-    textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
+    textarea.style.height = editor.style.height = backdrop.scrollHeight + 2 + 'px'
   }
 
   function cleanTextForDelimiterMatching(text) {
