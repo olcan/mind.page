@@ -63,6 +63,7 @@
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
   let fixed = !!url_params?.shared
   let shared_key = url_params?.shared?.replace(/^\w+\//, '')
+  let sharer = url_params?.shared?.match(/^(\w+)\//)?.pop() // may be set to user.uid later
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -2628,7 +2629,7 @@
 
   let scrollToTopOnPopState = false
   function onPopState(e) {
-    readonly = (anonymous && !admin) || fixed
+    readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
     if (!e?.state) return // for fragment (#id) hrefs
     if (!initialized) {
       // NOTE: this can happen when tab is restored, seems harmless so far
@@ -5572,7 +5573,7 @@
       admin = isAdmin()
       if (admin) useAnonymousAccount() // become anonymous for item checks below
       anonymous = user?.uid == 'anonymous'
-      readonly = (anonymous && !admin) || fixed
+      readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
 
       // print client load time w/ preloaded item count, excluding admin and hidden items
       const preload_count = _.sumBy(items_preload, ({ hidden, id }) =>
@@ -5640,9 +5641,10 @@
             localStorage.setItem('mindpage_user', userInfoString)
             anonymous = false // just in case (should already be false)
             // NOTE: we now allow readonly signin for 'fixed' mode
-            // readonly = false
             signedin = true
             instance.user = user.uid
+            sharer ??= user.uid // if not already set by &shared=<user>/<key>
+            readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
 
             // update user info (email, name, etc) in users collection
             const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
