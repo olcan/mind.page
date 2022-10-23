@@ -1331,7 +1331,10 @@
       .forEach((x: HTMLElement) => {
         let height_below = 0
         let elem = x
-        if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement // skip <br> itself
+        // for <br>, we can skip element itself since we know it is only used for spacing
+        // for other elements we have to execute loop to see if they are skipped or not
+        // but even if they are not skipped, we can look into tail <br> inside (see below)
+        if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement
         if (elem)
           do {
             // ignore auto-generated tail divs
@@ -1356,6 +1359,11 @@
             height_below += elem.offsetHeight
           } while ((elem = elem.nextElementSibling as HTMLElement))
         if (height_below == 0) x.style.display = 'none'
+        else if (height_below == x.offsetHeight) {
+          // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
+          while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
+            x.removeChild(x.lastElementChild)
+        }
       })
 
     // trigger execution of script tags by adding/removing them to <head>
