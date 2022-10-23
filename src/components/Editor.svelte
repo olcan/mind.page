@@ -190,7 +190,6 @@
     let closed = 1
     while (closed > 0 && pos >= 0) {
       pos--
-      if (text[pos - 1] == '\\') continue // skip escaped character
       if (text[pos] == open) closed--
       else if (text[pos] == close) closed++
     }
@@ -203,7 +202,6 @@
     let opened = 1
     while (opened > 0 && pos < text.length) {
       pos++
-      if (text[pos - 1] == '\\') continue // skip escaped character
       if (text[pos] == close) opened--
       else if (text[pos] == open) opened++
     }
@@ -212,24 +210,6 @@
 
   function updateTextDivs() {
     let text = textarea.value || placeholder
-
-    // determine matche/unmatched delimiter highlights based on caret position
-    // these are highlighted at the end using highlightPositions (see below)
-    // we handle the most common delimiters used for extended blocks of code that would not be highlighted otherwise
-    // we intentionally exclude <> (used for tags, comparisons, etc) and string quotes (already highlighted)
-    // also watch out for ligatures (e.g. << or >> or [||]) that will change color _together_
-    const matched_positions = []
-    const unmatched_positions = []
-    if (textarea.selectionStart == textarea.selectionEnd && ')]}'.includes(text[textarea.selectionStart])) {
-      let matchpos = findMatchingOpenDelimiter(text, textarea.selectionStart)
-      if (matchpos >= 0) matched_positions.push(matchpos, textarea.selectionStart)
-      else unmatched_positions.push(textarea.selectionStart)
-    } else if (textarea.selectionStart == textarea.selectionEnd && '([{'.includes(text[textarea.selectionStart - 1])) {
-      let matchpos = findMatchingCloseDelimiter(text, textarea.selectionStart - 1)
-      if (matchpos < text.length) matched_positions.push(textarea.selectionStart - 1, matchpos)
-      else unmatched_positions.push(textarea.selectionStart - 1)
-    }
-
     let insideBlock = false
     let language = ''
     let code = ''
@@ -293,10 +273,45 @@
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))
     })
 
+    // determine matched/unmatched delimiter highlights based on caret position
+    // we handle the most common delimiters used for extended blocks of code that would not be highlighted otherwise
+    // we intentionally exclude <> (used for tags, comparisons, etc) and string quotes (already highlighted)
+    // also watch out for ligatures (e.g. << or >> or [||]) that will change color _together_
+    const matched_positions = []
+    const unmatched_positions = []
+    const clean_text = cleanTextForDelimiterMatching(text)
+    if (textarea.selectionStart == textarea.selectionEnd && ')]}'.includes(clean_text[textarea.selectionStart])) {
+      let matchpos = findMatchingOpenDelimiter(clean_text, textarea.selectionStart)
+      if (matchpos >= 0) matched_positions.push(matchpos, textarea.selectionStart)
+      else unmatched_positions.push(textarea.selectionStart)
+    } else if (
+      textarea.selectionStart == textarea.selectionEnd &&
+      '([{'.includes(clean_text[textarea.selectionStart - 1])
+    ) {
+      let matchpos = findMatchingCloseDelimiter(clean_text, textarea.selectionStart - 1)
+      if (matchpos < text.length) matched_positions.push(textarea.selectionStart - 1, matchpos)
+      else unmatched_positions.push(textarea.selectionStart - 1)
+    }
+
     highlightPositions(matched_positions, 'matched')
     highlightPositions(unmatched_positions, 'unmatched')
 
     textarea.style.height = editor.style.height = backdrop.scrollHeight + 'px'
+  }
+
+  function cleanTextForDelimiterMatching(text) {
+    // replace all escaped characters w/ spaces
+    text = text.replace(/\\./g, m => ' '.repeat(m.length))
+    // replace hljs-string and hljs-regexp spans w/ spaces
+    const walker = document.createTreeWalker(highlights, NodeFilter.SHOW_TEXT)
+    let node
+    let offset = 0
+    while ((node = walker.nextNode())) {
+      if (['hljs-string', 'hljs-regexp'].includes(node.parentElement.className))
+        text = text.slice(0, offset) + ' '.repeat(node.length) + text.slice(offset + node.length)
+      offset += node.length
+    }
+    return text
   }
 
   function highlightPositions(pos, type) {
