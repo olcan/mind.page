@@ -1510,6 +1510,7 @@
   let lastFocusedEditElement = null
   let disableScrollingOnLayout = false
   let lastLayoutTime = 0
+  let lastLayoutCount = 0
   let showDotted = false
 
   function updateItemLayout() {
@@ -1535,6 +1536,7 @@
     oldestTimeString = ''
     totalItemHeight = 0
     lastLayoutTime = Date.now()
+    lastLayoutCount++
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
     updateVerticalPadding()
@@ -1658,11 +1660,12 @@
 
     if (disableScrollingOnLayout) return
     const dispatchTime = Date.now()
-    const lastLayoutTimeAtDispatch = lastLayoutTime
+    const lastLayoutCountAtDispatch = lastLayoutCount
     const numItemsAtDispatch = items.length
     update_dom().then(() => {
-      if (lastLayoutTimeAtDispatch != lastLayoutTime) return // layout changed since dispatch
-      if (items.length != numItemsAtDispatch) console.warn('number of items changed unexpectedly')
+      if (lastLayoutCount != lastLayoutCountAtDispatch) return // layout changed since dispatch
+      if (items.length != numItemsAtDispatch)
+        console.warn('number of items changed unexpectedly!', items.length, numItemsAtDispatch)
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
       if (focusedEditElement && activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
         focusedEditElement.focus()
@@ -5968,6 +5971,7 @@
                       false /* keep_time */,
                       true /* remote */
                     )
+                    // console.debug('adding item', item.name)
                     lastEditorChangeTime = 0 // disable debounce even if editor focused
                     // hideIndex++; // show one more item (skip this for remote add)
                     onEditorChange(editorText) // integrate new item at index 0
@@ -5994,6 +5998,7 @@
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
                     if (index === undefined) return // nothing to remove
                     let item = items[index]
+                    // console.debug('removing item', item.name)
                     itemTextChanged(
                       index,
                       '',
