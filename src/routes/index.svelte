@@ -97,7 +97,7 @@
   // logs errors to console.error unless second argument (silent) is true
   // second argument can also be object for more readability
   // additional arguments are for internal use
-  function _item(name: string, silent: any = true, read_only = undefined, default_read_only_id = undefined): any {
+  function _item(name: string, silent: any = false, read_only = undefined, default_read_only_id = undefined): any {
     if (!name) return null
     if (typeof silent == 'object') ({ silent, read_only, default_read_only_id } = silent)
     let item
