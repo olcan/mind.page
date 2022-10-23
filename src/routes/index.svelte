@@ -94,18 +94,21 @@
 
   // returns item with name (unique label)
   // returns null if missing, or if multiple items match label
-  // logs errors to console.error unless log_errors=false
-  function _item(name: string, log_errors = true, read_only = undefined, default_read_only_id = undefined): any {
+  // logs errors to console.error unless second argument (silent) is true
+  // second argument can also be object for more readability
+  // additional arguments are for internal use
+  function _item(name: string, silent: any = true, read_only = undefined, default_read_only_id = undefined): any {
     if (!name) return null
+    if (typeof silent == 'object') ({ silent, read_only, default_read_only_id } = silent)
     let item
     if (name.startsWith('#')) {
       // item is specified by unique label (i.e. name)
       const ids = idsFromLabel.get(name.toLowerCase())
       if (!ids || ids.length == 0) {
-        if (log_errors) console.error(`_item '${name}' not found`)
+        if (!silent) console.error(`_item '${name}' not found`)
         return null
       } else if (ids.length > 1) {
-        if (log_errors) console.error(`_item '${name}' is ambiguous (${ids.length} items)`)
+        if (!silent) console.error(`_item '${name}' is ambiguous (${ids.length} items)`)
         return null
       }
       item = items[indexFromId.get(ids[0])]
@@ -113,13 +116,13 @@
       // item is specified by id, with optional id: prefix to be dropped
       const index = indexFromId.get(name.startsWith('id:') ? name.substring(3) : name)
       if (index === undefined) {
-        if (log_errors) console.error(`_item '${name}' not found`)
+        if (!silent) console.error(`_item '${name}' not found`)
         return null
       }
       item = items[index]
     }
     read_only ??= item.id == default_read_only_id
-    return Object.freeze(new _Item(item.id, read_only)) // defined below
+    return Object.freeze(new _Item(item.id, !read_only /* silent? */)) // defined below
   }
 
   // same as _item, but for existence checks, and allows multiple matches
@@ -202,7 +205,7 @@
     let ids
     if (label) {
       // try label as name (unique label or id)
-      const item = _item(label, false /*log_errors*/)
+      const item = _item(label, { silent: true })
       if (item) return [item]
       // return any ids for non-unique label
       ids = idsFromLabel.get(label.toLowerCase())
@@ -820,7 +823,7 @@
         name = name.slice(0, -1)
         allow_empty_stack = true
       }
-      if (name != 'self' && name != 'any' && !_item(name, false)) {
+      if (name != 'self' && name != 'any' && !_item(name, { silent: true })) {
         console.error(`get_log: unknown source '${name}'`)
         return []
       }
@@ -833,7 +836,7 @@
       }
       let log = []
 
-      const filter_id = name == 'self' ? this.id : name == 'any' ? '' : _item(name, false).id
+      const filter_id = name == 'self' ? this.id : name == 'any' ? '' : _item(name, { silent: true }).id
       for (let i = consoleLog.length - 1; i >= 0; --i) {
         const entry = consoleLog[i]
         if (entry.time < since) break
@@ -1074,7 +1077,7 @@
           "'use strict';undefined;",
           `const _id = '${this.id}';`,
           // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
-          !options['read_only'] ? [] : ['const _item = (n,le,ro) => window._item(n,le,ro,_id);'],
+          !options['read_only'] ? [] : ['const _item = (n,s,ro) => window._item(n,s,ro,_id);'],
           'const _this = _item(_id);',
           evaljs,
         ]
@@ -4553,7 +4556,7 @@
         return
       }
       const run_name = item.name + '/run'
-      let run_item = _item(run_name, false /* do not log errors */)
+      let run_item = _item(run_name, { silent: true })
 
       // copy only input blocks, prepend label and dependency on parent
       const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
