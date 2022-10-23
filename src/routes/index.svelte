@@ -5921,8 +5921,8 @@
                       savedText: savedItem.text,
                     })
                     // update mutable ux properties from item.attr
-                    item.editable = item.attr?.editable ?? true
-                    item.pushable = item.attr?.pushable ?? false
+                    item.editable = (item.attr?.editable ?? true) || fixed
+                    item.pushable = (item.attr?.pushable ?? false) && !fixed
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
@@ -6007,8 +6007,8 @@
                     item.text = item.savedText = savedItem.text
                     item.attr = savedItem.attr
                     // update mutable ux properties from item.attr
-                    item.editable = item.attr?.editable ?? true
-                    item.pushable = item.attr?.pushable ?? false
+                    item.editable = (item.attr?.editable ?? true) || fixed
+                    item.pushable = (item.attr?.pushable ?? false) && !fixed
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
