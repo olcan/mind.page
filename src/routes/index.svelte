@@ -1966,7 +1966,7 @@
         intro = false
     }
 
-    // editor text is considered "modified" and if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
+    // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
     // const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
     // keep history entry 0 updated, reset index on changes
@@ -2135,54 +2135,62 @@
         ? ''
         : context.find(cl => cl.length < item.label.length && item.label.startsWith(cl)) || ''
 
-      // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
-      item.matchingTerms = terms.filter(t => t[0] == '#' && item.tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
+      if (!fixed) {
+        // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
+        item.matchingTerms = terms.filter(t => t[0] == '#' && item.tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
 
-      // match all terms (tag or non-tag) anywhere in text
-      item.matchingTerms = item.matchingTerms.concat(terms.filter(t => item.lctext.includes(t)))
+        // match all terms (tag or non-tag) anywhere in text
+        item.matchingTerms = item.matchingTerms.concat(terms.filter(t => item.lctext.includes(t)))
 
-      // match regex:* terms as regex
-      item.matchingTerms = item.matchingTerms.concat(regexTerms.filter(t => item.lctext.match(t)))
+        // match regex:* terms as regex
+        item.matchingTerms = item.matchingTerms.concat(regexTerms.filter(t => item.lctext.match(t)))
 
-      // match id:* terms against id
-      const id = 'id:' + item.id.toLowerCase()
-      const saved_id = 'id:' + (item.savedId?.toLowerCase() ?? 'unsaved')
-      const idMatchTerms = terms.filter(t => t == id || t == saved_id)
-      item.matchingTerms = item.matchingTerms.concat(idMatchTerms)
-      if (idMatchTerms.length > 0) idMatchItemIndices.push(index)
-      item.matchingTerms = _.uniq(item.matchingTerms) // can have duplicates (e.g. regex:*, id:*, ...)
+        // match id:* terms against id
+        const id = 'id:' + item.id.toLowerCase()
+        const saved_id = 'id:' + (item.savedId?.toLowerCase() ?? 'unsaved')
+        const idMatchTerms = terms.filter(t => t == id || t == saved_id)
+        item.matchingTerms = item.matchingTerms.concat(idMatchTerms)
+        if (idMatchTerms.length > 0) idMatchItemIndices.push(index)
+        item.matchingTerms = _.uniq(item.matchingTerms) // can have duplicates (e.g. regex:*, id:*, ...)
 
-      // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
-      // skip secondary terms (for ranking and highlighting) for listing item
-      // because it just feels like a distraction in that particular case
-      item.matchingTermsSecondary = item.listing
-        ? []
-        : _.uniq(
-            _.concat(
-              termsContext.filter(
-                t =>
-                  item.tagsExpanded.includes(t) ||
-                  item.depsString.toLowerCase().includes(t) ||
-                  item.dependentsString.toLowerCase().includes(t)
-              ),
-              terms.filter(
-                t => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
+        // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
+        // skip secondary terms (for ranking and highlighting) for listing item
+        // because it just feels like a distraction in that particular case
+        item.matchingTermsSecondary = item.listing
+          ? []
+          : _.uniq(
+              _.concat(
+                termsContext.filter(
+                  t =>
+                    item.tagsExpanded.includes(t) ||
+                    item.depsString.toLowerCase().includes(t) ||
+                    item.dependentsString.toLowerCase().includes(t)
+                ),
+                terms.filter(
+                  t => item.depsString.toLowerCase().includes(t) || item.dependentsString.toLowerCase().includes(t)
+                )
               )
             )
-          )
-      // do not duplicate primary matching terms in secondary
-      item.matchingTermsSecondary = _.difference(item.matchingTermsSecondary, item.matchingTerms)
+        // do not duplicate primary matching terms in secondary
+        item.matchingTermsSecondary = _.difference(item.matchingTermsSecondary, item.matchingTerms)
 
-      // item is considered matching if primary terms match
-      // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
-      // (this is consistent with .index.matching in Item.svelte)
-      item.matching = item.matchingTerms.length > 0
-      if (item.matching) matchingItemCount++
+        // item is considered matching if primary terms match
+        // (i.e. secondary terms are used only for ranking and highlighting matching tag prefixes)
+        // (this is consistent with .index.matching in Item.svelte)
+        item.matching = item.matchingTerms.length > 0
+        if (item.matching) matchingItemCount++
 
-      // listing item and id-matching item are considered "target" items
-      item.target = item.listing || idMatchTerms.length > 0
-      item.target_context = !item.target && context.includes(item.uniqueLabel)
-      if (item.target) targetItemCount++
+        // listing item and id-matching item are considered "target" items
+        item.target = item.listing || idMatchTerms.length > 0
+        item.target_context = !item.target && context.includes(item.uniqueLabel)
+        if (item.target) targetItemCount++
+      } else {
+        item.matchingTerms = []
+        item.matchingTermsSecondary = []
+        item.matching = false
+        item.target = false
+        item.target_context = false
+      }
 
       // compute nesting level (-depth) of item name under target name
       item.target_nesting = item.target ? 0 : -Infinity
@@ -2204,19 +2212,15 @@
         }
       }
 
-      // calculate missing tags in non-fixed mode (excluding certain special tags from consideration)
+      // calculate missing tags (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
       // hidden "special" tags are not considered "missing" since they toggle special features
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       // NOTE: tagCounts include prefix tags, deduplicated at item level
-      item.missingTags = fixed
-        ? []
-        : item.tagsVisible
-            .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
-            .concat(
-              item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
-            )
+      item.missingTags = item.tagsVisible
+        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
 
       // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
 
@@ -2501,10 +2505,13 @@
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
           pushState(state)
+          // TODO: remove this once you understand why states in history can sometimes be undefined; seems to be related to going back across page reloads (vs opening a fresh tab) but it is not clear how exactly
           sessionStateHistory.forEach((state, j) => {
             if (!state)
               console.error(
-                `sessionStateHistory has gap at ${j}/${sessionStateHistory.length} (index ${sessionStateHistoryIndex})`
+                `sessionStateHistory has gap at index ${j} (last ${
+                  sessionStateHistory.length - 1
+                }, current ${sessionStateHistoryIndex})`
               )
           })
         } else {
@@ -2609,7 +2616,7 @@
     }
     tag = tag.replace(/^#_/, '#') // ignore hidden tag prefix
 
-    if (editorText.trim().toLowerCase() == tag.toLowerCase()) {
+    if (editorText.trim().toLowerCase() == tag.toLowerCase() && !fixed) {
       if (prefix_click) {
         // assuming trying to go to a parent/ancestor
         if (!confirm(`Tag ${tag} already selected. Clear selection?`)) return
@@ -6295,6 +6302,12 @@
     if (!initialized) return
     if (modal.visible()) return // ignore keys when modal is visible
 
+    // ignore keys (except forward to _on_key) in fixed mode
+    if (fixed) {
+      if (window['_on_key']) window['_on_key'](key, e)
+      return
+    }
+
     // end intro mode (while narrating) on non-modified keydown
     // if (intro && !modified) document.querySelector('.webcam-background.intro')?.dispatchEvent(new MouseEvent('click'))
 
@@ -6982,17 +6995,24 @@
                 {/if}
               {/if}
               {#if items.length > 0}
-                <div class="counts">
-                  {#if fixed}
-                    {hideIndex} item{hideIndex > 1 ? 's' : ''} shared @ {url_params.shared}
-                  {:else if matchingItemCount > 0}
-                    &nbsp;<span class="matching"
-                      >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
-                    >
-                  {:else}
-                    {items.length} item{items.length > 1 ? 's' : ''}
-                  {/if}
-                </div>
+                {#if fixed}
+                  <div class="left">
+                    {items[0].labelText ?? ''}
+                  </div>
+                  <div class="right">
+                    {shared_key}
+                  </div>
+                {:else}
+                  <div class="counts">
+                    {#if matchingItemCount > 0}
+                      &nbsp;<span class="matching"
+                        >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
+                      >
+                    {:else}
+                      {items.length} item{items.length > 1 ? 's' : ''}
+                    {/if}
+                  </div>
+                {/if}
               {/if}
               <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
             </div>
@@ -7182,6 +7202,7 @@
     .column-padding,
     .header .editor,
     .header .history,
+    .header .status .counts,
     .super-container > .time {
       display: none !important;
     }
@@ -7197,22 +7218,43 @@
       min-width: 28px;
       z-index: 1;
     }
-    .header .status .counts {
-      max-width: 65%; /* vs 30% for .console-summary */
+    .header .status :is(.left, .right) {
+      max-width: 30%; /* + 30% for .console-summary in middle */
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      position: absolute;
+      padding-top: 4px;
+      top: 0;
+    }
+    .header .status .left {
+      left: 0;
+      padding-left: 10px;
+    }
+    .header .status .right {
+      right: 0;
+      padding-right: 5px;
     }
     /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
     .header .status {
-      margin-left: 7px; /* inset .console-summary to ~match top inset */
       margin-right: 40px; /* clear .user */
       -webkit-touch-callout: auto !important;
       -webkit-user-select: auto !important;
       user-select: auto !important;
       cursor: auto !important;
     }
+    .header .status .console {
+      left: 50%;
+      transform: translateX(-50%);
+    }
     .header .status .console-summary {
+      top: -10px !important;
+      left: 50% !important;
+      transform: translate(-50%, -8px);
+      padding-left: 0 !important;
+      padding-top: 23px !important;
+      height: 27px !important;
+      text-align: center !important;
       -webkit-touch-callout: none !important;
       -webkit-user-select: none !important;
       user-select: none !important;
@@ -7223,6 +7265,9 @@
     }
     .container > .item-menu,
     .item > div:first-child {
+      display: none !important;
+    }
+    .item > .content mark.label {
       display: none !important;
     }
   </style>
