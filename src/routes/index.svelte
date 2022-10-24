@@ -5840,11 +5840,7 @@
             where('attr.shared.keys', 'array-contains', key)
           )
         } else if (url_params.shared) {
-          _modal(`No shared items found @ ${url_params.shared}.`, {
-            confirm: 'Try Again',
-            background: 'confirm',
-            onConfirm: () => location.reload(),
-          })
+          _modal(`No shared items found on page \`${url_params.shared}\`.`)
           return
         }
 
@@ -5886,11 +5882,7 @@
 
                 // if account is empty in fixed mode, stop & present modal to try again
                 if ((items.length === 0 || hideIndex == 0) && fixed) {
-                  _modal(`No shared items found @ ${url_params.shared}.`, {
-                    confirm: 'Try Again',
-                    background: 'confirm',
-                    onConfirm: () => location.reload(),
-                  })
+                  _modal(`No shared items found on page \`${url_params.shared}\`.`)
                   return
                 }
 
@@ -6139,7 +6131,8 @@
               summaryelem.innerText = '·'
               summaryelem.classList.add('console-' + verb)
               summarydiv.appendChild(summaryelem)
-              summarydiv.title = `${summarydiv.childElementCount} message` + (summarydiv.childElementCount == 1 ? '' : 's')
+              summarydiv.title =
+                `${summarydiv.childElementCount} message` + (summarydiv.childElementCount == 1 ? '' : 's')
 
               // if console is hidden, make sure summary is visible and clickable
               if (consolediv.style.display == 'none') {
@@ -7225,6 +7218,7 @@
       top: 0;
       right: 0;
       margin: 0;
+      margin-right: -1px; /* hit right edge of page */
       height: 40px;
       width: 40px;
       min-width: 28px;
