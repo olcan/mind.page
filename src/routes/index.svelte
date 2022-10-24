@@ -450,8 +450,8 @@
         _item.editable = editable
         items = items // trigger svelte render
       }
-      // also update/save in attr, but async to allow changes to be combined/batched
-      this._save_attr_async('editable')
+      // also update & save in attr, but async to allow changes to be combined/batched
+      this._update_attr_async('editable')
     }
 
     get pushable(): boolean {
@@ -464,8 +464,8 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
-      // also update/save in attr, but async to allow changes to be combined/batched
-      this._save_attr_async('pushable')
+      // also update & save in attr, but async to allow changes to be combined/batched
+      this._update_attr_async('pushable')
     }
 
     get shared(): object {
@@ -488,8 +488,8 @@
         _item.shared.indices ??= {}
         _item.shared.indices[key] = index
       }
-      // also update/save in attr, but async to allow changes to be combined/batched
-      this._save_attr_async('shared')
+      // also update & save in attr, but async to allow changes to be combined/batched
+      this._update_attr_async('shared')
     }
 
     // unshare item under key (unique at user level)
@@ -502,11 +502,11 @@
       delete _item.shared.indices?.[key]
       if (_.isEmpty(_item.shared.indices)) delete _item.shared.indices // for consistency w/ share
       if (!_item.shared.keys.length) _item.shared = null // no longer shared
-      // also update/save in attr, but async to allow changes to be combined/batched
-      this._save_attr_async('shared')
+      // also update & save in attr, but async to allow changes to be combined/batched
+      this._update_attr_async('shared')
     }
 
-    _save_attr_async(prop) {
+    _update_attr_async(prop) {
       this.dispatch(() => {
         if (!_exists(this.id)) return // item deleted, just cancel
         const _item = item(this.id)
