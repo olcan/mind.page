@@ -506,6 +506,9 @@
       this._update_attr_async('shared')
     }
 
+    // dispatch update to this.attr[prop] iff it differs from this[prop]
+    // note dispatch allow changes to be combined, batched, cancel out, etc
+    // note changes can happen in both directions, e.g. remote changes to this.attr[prop] -> this[prop]
     _update_attr_async(prop) {
       this.dispatch(() => {
         if (!_exists(this.id)) return // item deleted, just cancel
