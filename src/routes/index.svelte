@@ -5188,6 +5188,7 @@
   function itemDefinesFunction(item, name, options = {}) {
     if (item.debug) return false // debug item should be excluded from all definition checks (and hook invocations)
     if (!item.text.includes(name)) return false // quick check
+    if (window[name]) throw new Error(`unexpected global window.${name} likely leaked out of intended scope`)
     try {
       return _item(item.id).eval(`(typeof ${name} == 'function')`, {
         include_deps: false,
@@ -5381,7 +5382,8 @@
       const js = extractBlock(item.text, 'js')
       if (!js) continue
       try {
-        const f = eval.call(window, js + ';_special_tag_aliases')
+        // note we need to use a function wrapper to avoid polluting global scope
+        const f = eval.call(window, '(()=>{' + js + '; return _special_tag_aliases })()')
         if (typeof f !== 'function') throw new Error('invalid non-function _special_tag_aliases in item' + item.id)
         specialTagFunctions.push(f)
       } catch (e) {
