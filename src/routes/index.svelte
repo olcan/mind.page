@@ -6121,7 +6121,7 @@
               let text = ''
               if (args.length == 1 && errorMessage(args[0])) text = errorMessage(args[0])
               else text = args.join(' ') + '\n'
-              elem.textContent = prefix + ' ' + text
+              elem.textContent = (prefix + ' ' + text).trim()
               elem.setAttribute('_time', Date.now().toString())
               elem.setAttribute('_level', log_levels.indexOf(verb).toString())
               consolediv.appendChild(elem)
@@ -6139,6 +6139,7 @@
               summaryelem.innerText = '·'
               summaryelem.classList.add('console-' + verb)
               summarydiv.appendChild(summaryelem)
+              summarydiv.title = `${summarydiv.childElementCount} message` + (summarydiv.childElementCount == 1 ? '' : 's')
 
               // if console is hidden, make sure summary is visible and clickable
               if (consolediv.style.display == 'none') {
@@ -6999,9 +7000,14 @@
               {#if items.length > 0}
                 {#if fixed}
                   <div class="left">
-                    {items[0].labelText ?? ''}
+                    {#if items[0].shared.indices?.[shared_key] != 0}
+                      <span class="triangle" on:click={() => window['MindBox'].clear()}>◀</span>
+                    {/if}
+                    <span title={(items[0].labelText ?? '').replace(/^#/, '')}>
+                      {(items[0].labelText ?? '').replace(/^#/, '')}
+                    </span>
                   </div>
-                  <div class="right">
+                  <div class="center" title={shared_key}>
                     {shared_key}
                   </div>
                 {:else}
@@ -7211,56 +7217,84 @@
     .header .header-container {
       justify-content: center;
       background: transparent !important;
-      border: none !important;
+      border: 1px solid transparent !important;
       margin-bottom: -30px;
     }
     .header .header-container .user {
-      height: 28px;
-      width: 28px;
+      position: absolute;
+      top: 0;
+      right: 0;
+      margin: 0;
+      height: 40px;
+      width: 40px;
       min-width: 28px;
+      border-radius: 0;
+      border-bottom-left-radius: 4px;
       z-index: 1;
     }
-    .header .status :is(.left, .right) {
-      max-width: 30%; /* + 30% for .console-summary in middle */
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      position: absolute;
-      padding-top: 4px;
-      top: 0;
-    }
-    .header .status .left {
-      left: 0;
-      padding-left: 10px;
-    }
-    .header .status .right {
-      right: 0;
-      padding-right: 5px;
-    }
-    /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
     .header .status {
-      margin-right: 40px; /* clear .user */
+      position: static !important; /* position children relative to .header/page */
+      height: 40px !important;
+      /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
       -webkit-touch-callout: auto !important;
       -webkit-user-select: auto !important;
       user-select: auto !important;
       cursor: auto !important;
     }
-    .header .status .console {
-      left: 50%;
+    .header .status :is(.left, .center) {
+      position: absolute;
+      top: 0;
+      box-sizing: border-box;
+      max-width: calc(35% - 50px * 0.35); /* compare to .console-summary max-width below */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'Open Sans', sans-serif;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .header .status .left {
+      left: 0;
+      color: black;
+      background: #aaa;
+      padding: 8px;
+      border-bottom-right-radius: 4px;
+      font-size: 16px;
+    }
+    .header .status .left .triangle {
+      color: #666;
+      cursor: pointer;
+      margin: -10px;
+      padding: 10px;
+      margin-right: -5px;
+    }
+    .header .status .center {
+      left: calc(50% - 50px / 2 + 3px) !important; /* +3px aligns better on tiny screen */
       transform: translateX(-50%);
+      padding: 4px;
+      padding-top: 8px; /* align w/ .left and .console-summary */
     }
     .header .status .console-summary {
-      top: -10px !important;
-      left: 50% !important;
-      transform: translate(-50%, -8px);
+      top: 0 !important;
+      right: 50px !important; /* clear .user */
+      left: auto !important;
+      box-sizing: border-box;
+      min-width: min(60px, 30% - 50px * 0.3) !important;
+      max-width: calc(30% - 50px * 0.3) !important;
       padding-left: 0 !important;
-      padding-top: 23px !important;
-      height: 27px !important;
-      text-align: center !important;
+      padding-top: 12px !important; /* centers text (dots) */
+      height: 44px !important; /* touches first item */
+      text-align: right !important;
       -webkit-touch-callout: none !important;
       -webkit-user-select: none !important;
       user-select: none !important;
       cursor: pointer;
+    }
+    .header .status .console {
+      top: 10px;
+      right: 10px;
+      left: auto;
+      max-width: calc(100% - 20px); /* leave 10px on sides */
     }
     .items {
       padding-bottom: 0 !important;
@@ -7563,7 +7597,10 @@
     position: absolute;
     min-height: 20px; /* covers .console-summary (w/ +8px padding) */
     min-width: 60px; /* covers .console-summary */
-    top: 0;
+    width: max-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    top: 2px; /* some spacing from border above */
     left: 0;
     z-index: 10;
     padding: 4px;
@@ -7614,7 +7651,7 @@
     top: 0;
     padding-top: 4px;
     height: 24px; /* matches .status height(+padding) above */
-    min-width: 60px; /* ensure clickability */
+    min-width: min(30%, 60px); /* ensure clickability */
     max-width: 30%; /* try not to cover center (item dots) */
     text-align: left;
     overflow: hidden;
@@ -7629,8 +7666,9 @@
     color: #666;
   }
   .status .counts {
-    font-family: sans-serif;
-    font-size: 14px;
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 400;
+    font-size: 13px;
     position: absolute;
     right: 0;
     top: 0;
