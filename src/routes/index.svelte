@@ -4382,6 +4382,7 @@
     }
 
     encryptItem(itemToSave).then(itemToSave => {
+      // console.debug('saving item', itemToSave)
       updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
         .then(() => onItemSaved(item.id, itemToSave))
         .catch(console.error)
@@ -5020,7 +5021,7 @@
           const resp = await fetch(`/file/${repo}/${path}`)
           if (!resp.ok) throw new Error(`failed to fetch file '${path}': ${resp.statusText}`)
           embed_text[path] = await resp.text()
-          const sha = prev_embeds?.find(e => e.path == path)?.sha // keep remote sha
+          const sha = prev_embeds?.find(e => e.path == path)?.sha ?? null // remote sha if exists, null if new embed
           attr.embeds = (attr.embeds ?? []).concat({ path, sha })
         } catch (e) {
           throw new Error(`failed to embed '${path}': ${e}`)
