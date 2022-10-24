@@ -450,11 +450,8 @@
         _item.editable = editable
         items = items // trigger svelte render
       }
-      // if item has attr (was installed or shared), also update/save in attr
-      if (_item.attr && _item.attr.editable !== editable) {
-        _item.attr.editable = editable
-        this.save()
-      }
+      // also update/save in attr, but async to allow changes to be combined/batched
+      this._save_attr_async('editable')
     }
 
     get pushable(): boolean {
@@ -467,11 +464,8 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
-      // if item has attr (was installed or shared), also update/save in attr
-      if (_item.attr && _item.attr.pushable !== pushable) {
-        _item.attr.pushable = pushable
-        this.save()
-      }
+      // also update/save in attr, but async to allow changes to be combined/batched
+      this._save_attr_async('pushable')
     }
 
     get shared(): object {
@@ -494,14 +488,8 @@
         _item.shared.indices ??= {}
         _item.shared.indices[key] = index
       }
-      // if item has attr (was installed or shared), also update/save in attr
-      // otherwise create new attr just for sharing
-      _item.attr ??= {}
-      if (!_.isEqual(_item.attr.shared, _item.shared)) {
-        _item.attr.shared = _.cloneDeep(_item.shared)
-        this.save()
-      }
-      return _item.shared
+      // also update/save in attr, but async to allow changes to be combined/batched
+      this._save_attr_async('shared')
     }
 
     // unshare item under key (unique at user level)
@@ -514,11 +502,20 @@
       delete _item.shared.indices?.[key]
       if (_.isEmpty(_item.shared.indices)) delete _item.shared.indices // for consistency w/ share
       if (!_item.shared.keys.length) _item.shared = null // no longer shared
-      if (!_.isEqual(_item.attr.shared, _item.shared)) {
-        _item.attr.shared = _.cloneDeep(_item.shared)
-        this.save()
-      }
-      return _item.shared
+      // also update/save in attr, but async to allow changes to be combined/batched
+      this._save_attr_async('shared')
+    }
+
+    _save_attr_async(prop) {
+      this.dispatch(() => {
+        if (!_exists(this.id)) return // item deleted, just cancel
+        const _item = item(this.id)
+        _item.attr ??= {}
+        if (!_.isEqual(_item.attr[prop], this[prop])) {
+          _item.attr[prop] = _.cloneDeep(this[prop])
+          this.save()
+        }
+      })
     }
 
     get elem(): HTMLElement {
