@@ -290,7 +290,11 @@
         }
       }
       text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-      if (!textExpansionError) textExpanded = text // save expansion if no errors
+      // save expansion if no errors
+      if (!textExpansionError) {
+        textExpanded = text
+        textExpansionCount = cacheIndex
+      }
     } else {
       text = textExpanded // use prior expansion
       cacheIndex = textExpansionCount
@@ -2199,12 +2203,14 @@
   }
 
   :global(.item span.highlight) {
-    /* color: black; */
-    /* background: #9f9; */
-    border: 1px solid #9b9;
+    /* note advantage of background highlighting is that border highlights can be cut off by overflow:hidden */
+    /* we also avoid any changes that can shift text, e.g. font-weight changes */
+    color: black;
+    background: #9f9;
+    /* font-weight: 600; */
     border-radius: 4px;
-    /* NOTE: we do not pad highlights as it can overlap non-highlighted text */
-    margin: -1px;
+    /* border: 1px solid #9b9; */
+    /* margin: -1px; */
   }
   :global(.item mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */

@@ -721,6 +721,7 @@
         let cacheIndex = 0
         let macroIndex = 0
         item.textExpanded = null // reset in case re-eval triggered manually via read('', {eval_macros:true})
+        item.textExpandedItem = null
         item.textExpansionError = null
         item.textExpansionCount = 0
         const replaceMacro = (m, js) => {
@@ -1971,8 +1972,8 @@
         intro = false
     }
 
-    // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable hiding (hideIndex decrease)
-    // const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
+    // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable auto-hiding (hideIndex decrease) during onEditorChange
+    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
     // keep history entry 0 updated, reset index on changes
     // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
@@ -2111,54 +2112,63 @@
       textLength += item.text.length
       item.listing = index == listingItemIndex // note index != item.index at this point
 
-      // TODO: use textExpanded for search when available; easiest way to do this may be via callback from toHTML where you create a new item and store it on the original item, and just swap it out here when available; actually code below would be cleaner if you only access item for "writing", and all read-only variables are in the loop scope, so you just do a destructuring assignment to all read-only variables; the callback from toHTML can trigger a debounced onEditorChange to update the results after a batch of renders -- actually it would be cleaner if you have a post-init task automatically triggered after EVERY itemTextChanged, and if toHTML could just use that when available instead of doing its own expansion, so basically the macro expansion happens in async tasks here as much as possible ... actually you _could_ keep the toHTML expansion separate to get an expansion with more predictable timing, but it is not clear that "render-time" counts as a predictable time for macro expansions; to keep the load under control, we probably just need a periodic task that renders macros at a certain target rate (in terms how long it can run given idle time between runs), always prefering higher ranked items (probably linear scan is fine). the periodic task could be started along with the other periodic tasks, and it could also trigger an onEditorChange periodically as well; once you have that working you can revisit this loop, which should be relatively easy to restructure once you separate write variables from read variables
-
-      // const item_text = item.textExpanded || item.text // use macro-expanded text if available
+      // destructure all read-only state (not read-write state) using textExpandedItem when available
+      // some exceptions below (search for item.*) are id, savedId, and deps/dependentsString
+      const {
+        tagsVisibleExpanded,
+        tagsVisible,
+        label,
+        labelPrefixes,
+        header,
+        tagsHidden,
+        labelUnique,
+        tagsAlt,
+        lctext,
+        tagsExpanded,
+        text,
+      } = item.textExpandedItem ?? item
 
       // match query terms against visible tags (+prefixes) in item
-      item.tagMatches = _.intersection(item.tagsVisibleExpanded, terms).length
+      item.tagMatches = _.intersection(tagsVisibleExpanded, terms).length
 
       // match first term tag against visible tags (w/o prefixes)
-      item.firstTagMatch = item.tagsVisible.includes(terms[0])
+      item.firstTagMatch = tagsVisible.includes(terms[0])
 
       // match query terms against item label
-      item.labelMatch = !!item.label && terms.includes(item.label)
+      item.labelMatch = !!label && terms.includes(label)
 
       // prefix-match first query term against item header text
       // (only for non-tags or unique labels, e.g. not #todo prefix once applied to multiple items)
       item.prefixMatch =
-        item.header.startsWith(terms[0]) &&
-        (!terms[0].startsWith('#') || (idsFromLabel.get(terms[0]) || []).length <= 1)
+        header.startsWith(terms[0]) && (!terms[0].startsWith('#') || (idsFromLabel.get(terms[0]) || []).length <= 1)
 
       // find "pinned match" term = hidden tags containing /pin with prefix match on first term
-      item.pinnedMatchTerm = item.tagsHidden.find(t => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)) || ''
+      item.pinnedMatchTerm = tagsHidden.find(t => t.startsWith(terms[0]) && t.match(/\/pin(?:\/|$)/)) || ''
       item.pinnedMatch = item.pinnedMatchTerm.length > 0
 
       // set uniqueLabel for shortening code below
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
-      item.uniqueLabel = item.labelUnique ? item.label : ''
-      // item.uniqueLabelPrefixes = item.labelUnique ? item.labelPrefixes : [];
+      item.uniqueLabel = labelUnique ? label : ''
+      // item.uniqueLabelPrefixes = labelUnique ? labelPrefixes : [];
 
       // compute contextLabel as closest ancestor label from context
-      item.contextLabel = !item.label
-        ? ''
-        : context.find(cl => cl.length < item.label.length && item.label.startsWith(cl)) || ''
+      item.contextLabel = !label ? '' : context.find(cl => cl.length < label.length && label.startsWith(cl)) || ''
 
       if (!fixed) {
         // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
-        item.matchingTerms = terms.filter(t => t[0] == '#' && item.tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
+        item.matchingTerms = terms.filter(t => t[0] == '#' && tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
 
         // match all terms (tag or non-tag) anywhere in text
-        item.matchingTerms = item.matchingTerms.concat(terms.filter(t => item.lctext.includes(t)))
+        item.matchingTerms.push(...terms.filter(t => lctext.includes(t)))
 
         // match regex:* terms as regex
-        item.matchingTerms = item.matchingTerms.concat(regexTerms.filter(t => item.lctext.match(t)))
+        item.matchingTerms.push(...regexTerms.filter(t => lctext.match(t)))
 
         // match id:* terms against id
         const id = 'id:' + item.id.toLowerCase()
         const saved_id = 'id:' + (item.savedId?.toLowerCase() ?? 'unsaved')
         const idMatchTerms = terms.filter(t => t == id || t == saved_id)
-        item.matchingTerms = item.matchingTerms.concat(idMatchTerms)
+        item.matchingTerms.push(...idMatchTerms)
         if (idMatchTerms.length > 0) idMatchItemIndices.push(index)
         item.matchingTerms = _.uniq(item.matchingTerms) // can have duplicates (e.g. regex:*, id:*, ...)
 
@@ -2171,7 +2181,7 @@
               _.concat(
                 termsContext.filter(
                   t =>
-                    item.tagsExpanded.includes(t) ||
+                    tagsExpanded.includes(t) ||
                     item.depsString.toLowerCase().includes(t) ||
                     item.dependentsString.toLowerCase().includes(t)
                 ),
@@ -2213,7 +2223,8 @@
       item.target_prefix_nesting = -Infinity
       if (!item.target && listingItemIndex >= 0) {
         const target_item = items[listingItemIndex]
-        for (const prefix of target_item.labelPrefixes) {
+        const { labelPrefixes } = target_item.textExpandedItem ?? target_item
+        for (const prefix of labelPrefixes) {
           if (!item.uniqueLabel.startsWith(prefix + '/')) continue
           let nesting = -1
           for (let i = prefix.length + 1; i < item.uniqueLabel.length; ++i) if (item.uniqueLabel[i] == '/') nesting--
@@ -2227,15 +2238,15 @@
       // hidden "special" tags are not considered "missing" since they toggle special features
       // NOTE: doing this here is easier than keeping these updated in itemTextChanged
       // NOTE: tagCounts include prefix tags, deduplicated at item level
-      item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
-        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+      item.missingTags = tagsVisible
+        .filter(t => t != label && (tagCounts.get(t) || 0) <= 1)
+        .concat(tagsHidden.filter(t => t != label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
 
-      // if (item.missingTags.length > 0) console.debug(item.missingTags, item.tags);
+      // if (item.missingTags.length > 0) console.debug(item.missingTags, tags);
 
       // mark 'has error' on any logged errors or warnings
       // also mark if item has any failed _tests in its global store (set by #tester)
-      item.hasError = !!item.text.match(/^(?:ERROR|WARNING):/m) || _.values(item.global_store?._tests).some(t => !t.ok)
+      item.hasError = !!text.match(/^(?:ERROR|WARNING):/m) || _.values(item.global_store?._tests).some(t => !t.ok)
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -2455,7 +2466,7 @@
       // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
       const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
       // disallow decrease in hideIndex unless there is a query, to improve focus
-      if (editorText.trim() || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
+      if ((text && editorTextModified) || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
 
       // if ranking while unfocused, retreat to minimal index
       // if (!focused) hideIndex = hideIndexMinimal
@@ -2830,9 +2841,12 @@
     let item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    item.textExpanded = null // computed async in render (toHTML in Item.svelte) or in periodic task
-    item.textExpansionError = null // reset expansion errors
-    item.textExpansionCount = 0 // reset expansion count
+    if (!item.keepExpansionState) {
+      item.textExpanded = null // computed async in render (toHTML in Item.svelte) or in periodic task
+      item.textExpandedItem = null // reset expanded-text item object
+      item.textExpansionError = null // reset expansion errors
+      item.textExpansionCount = 0 // reset expansion count
+    }
     item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
@@ -5287,6 +5301,7 @@
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.textExpanded = null // macro-expanded text, null means pending compute
+    item.textExpandedItem = null // item object w/ macro-expanded text, used for matching/ranking in onEditorChange
     item.textExpansionError = null // error during macro-expansion (if any)
     item.textExpansionCount = 0 // number of macro-expansions
     item.editing = false // otherwise undefined till rendered/bound to svelte object
@@ -5746,6 +5761,7 @@
 
       // periodic macro expansion task ...
       const macroExpansionQuantum = 10
+      let expansionRerankPending = false
       function expandMacros() {
         if (!initialized) return // not initialized yet
         if (Date.now() - focus_time < 1000) return // interacted too recently
@@ -5754,17 +5770,50 @@
         let expansions = 0
         let index = 0
         for (const item of items) {
-          if (item.textExpanded !== null) continue // already expanded
-          if (item.textExpansionError) continue // had errors in last expansion, need manual re-eval (render or read)
-          try {
-            _item(item.id).read('', { eval_macros: true })
-          } catch (e) {} // errors already logged
-          expansions++
-          index = item.index
+          if (item.textExpanded === null) {
+            if (item.textExpansionError) continue // had errors in last expansion, need manual re-eval (render or read)
+            try {
+              _item(item.id).read('', { eval_macros: true })
+            } catch (e) {} // errors already logged
+            expansions++
+            index = item.index
+          }
+          if (item.textExpandedItem === null) {
+            // precompute macro-expanded state used in onEditorChange by temporarily changing text on item
+            item.keepExpansionState = true // prevent reset of expansion state in itemTextChanged
+            itemTextChanged(item.index, item.textExpanded, false /*update_deps*/)
+            item.textExpandedItem = _.pick(item, [
+              // all destructured state from onEditorChange
+              'tagsVisibleExpanded',
+              'tagsVisible',
+              'label',
+              'labelPrefixes',
+              'header',
+              'tagsHidden',
+              'labelUnique',
+              'tagsAlt',
+              'lctext',
+              'tagsExpanded',
+              'text',
+            ])
+            itemTextChanged(item.index, item.text, false /*update_deps*/)
+            item.keepExpansionState = false
+          }
           if (Date.now() - start > macroExpansionQuantum) break // out of time
         }
-        // if (expansions) console.debug(`expanded macros in ${expansions} items `+ 
-        //   `(${index+1}/${items.length} done) in ${Date.now() - start}ms`)
+        if (expansions) {
+          // console.debug(
+          //   `expanded macros in ${expansions} items ` + `(${index + 1}/${items.length} done) in ${Date.now() - start}ms`
+          // )
+          // if there is a query, trigger rerank/rehighlight with 1s debounce
+          if (editorText.trim() && !expansionRerankPending) {
+            expansionRerankPending = true
+            setTimeout(() => {
+              expansionRerankPending = false
+              onEditorChange(editorText)
+            }, 1000)
+          }
+        }
       }
 
       // visual viewport resize/scroll handlers ...
