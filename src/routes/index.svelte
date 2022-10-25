@@ -5755,12 +5755,16 @@
       )
 
       // periodic macro expansion task ...
-      const macroExpansionQuantum = 10
+      const macroExpansionIdleTime = 100 // minimum idle time between expansions
+      const macroExpansionComputeCutoff = 20 // cut off after macros take more than this much time
       let expansionRerankPending = false
       function expandMacros() {
-        if (!initialized) return // not initialized yet
-        if (Date.now() - focus_time < 1000) return // interacted too recently
-        if (Date.now() - lastScrollTime < 250) return // scrolled too recently (even w/o triggering focus)
+        if (
+          !initialized || // not initialized yet
+          Date.now() - focus_time < 1000 || // interacted too recently
+          Date.now() - lastScrollTime < 250 // scrolled too recently (even w/o triggering focus)
+        )
+          return setTimeout(expandMacros, macroExpansionIdleTime)
         const start = Date.now()
         let expansions = 0
         let errors = 0
@@ -5795,12 +5799,12 @@
             itemTextChanged(item.index, item.text, false /*update_deps*/)
             item.expanded = expanded // restore object after reset in itemTextChanged
           }
-          if (Date.now() - start > macroExpansionQuantum) break // out of time
+          if (Date.now() - start > macroExpansionComputeCutoff) break // out of time
         }
         if (expansions) {
-          // console.debug(
-          //   `expanded macros in ${expansions} items ` + `(${index + 1}/${items.length} done) in ${Date.now() - start}ms`
-          // )
+          console.debug(
+            `expanded macros in ${expansions} items ` + `(${index + 1}/${items.length} done) in ${Date.now() - start}ms`
+          )
           // if there is a query, trigger rerank/rehighlight with 1s debounce
           if (editorText.trim() && !expansionRerankPending) {
             expansionRerankPending = true
@@ -5812,6 +5816,7 @@
         } else {
           // console.debug(`found no macros to expand in (${index + 1}/${items.length}) items in ${Date.now() - start}ms`)
         }
+        setTimeout(expandMacros, macroExpansionIdleTime)
       }
 
       // visual viewport resize/scroll handlers ...
@@ -6258,7 +6263,7 @@
           }
           checkFocus()
         }
-        setInterval(expandMacros, 250) // expand macros every 250ms
+        setTimeout(expandMacros, 250) // expand macros every 250ms (+ macro time)
         setInterval(checkLayout, 250) // check layout every 250ms
         setInterval(checkElemCache, 1000) // check elem cache every second
 
