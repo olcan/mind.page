@@ -56,9 +56,7 @@
   export let runnable: boolean
 
   export let text: string
-  export let textExpanded: string
-  export let textExpansionError: object
-  export let textExpansionCount: number
+  export let expanded: any
   export let hash: string
   export let deephash: string
   export let version: number
@@ -263,25 +261,29 @@
       // console.debug("toHTML skipped");
       return window['_html_cache'][id].get(cache_key)
     }
-    // console.debug("toHTML", name, deephash, version);
+    // console.debug("toHTML", name, deephash, version)
 
     let cacheIndex = 0 // counter to distinguish positions of identical cached elements
 
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     // note text can be pre-expanded in a periodic task and we take that if available to speed up rendering
-    // note expansions will NOT be available (null) if there were errors, in which case we re-expand here
-    // re-expanding here also allows us to indicate all errors (not just first) using html with custom styling
-    if (textExpanded === null) {
-      let macroIndex = 0
+    // we re-expand on errors so we can indicate all errors (not just first) using html with custom styling
+    // we also re-expand on forced render via version increments (e.g. in item.invalidate_elem_cache)
+    //   for items that depend on macros accessing the latest state (e.g. global_store) after a triggered update
+    if (expanded?.version == version && !expanded.error) {
+      text = expanded.text // use prior expansion
+      cacheIndex = expanded.count
+    } else {
+      expanded = {} // reset macro expansion state
       const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
         try {
           return window['_item'](id).eval(js, {
-            trigger: 'macro_' + macroIndex++,
-            cid: `${id}-${deephash}-${++cacheIndex}`, // enable replacement of $cid
+            trigger: 'macro_' + cacheIndex++,
+            cid: `${id}-${deephash}-${cacheIndex}`, // enable replacement of $cid
           })
         } catch (e) {
-          textExpansionError ??= e // record first error & continue replacing
+          expanded.error ??= e // record first error & continue replacing
           // display missing dependencies using special style
           if (e.message.startsWith('missing dependencies'))
             return `<span class="macro-missing-deps" title="${_.escape(e.message)}">${js}</span>`
@@ -291,13 +293,11 @@
       }
       text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
       // save expansion if no errors
-      if (!textExpansionError) {
-        textExpanded = text
-        textExpansionCount = cacheIndex
+      if (!expanded.error) {
+        expanded.text = text
+        expanded.version = version
+        expanded.count = cacheIndex
       }
-    } else {
-      text = textExpanded // use prior expansion
-      cacheIndex = textExpansionCount
     }
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
@@ -828,7 +828,7 @@
     text += `<!-- html_cache_key=${cache_key} -->`
 
     // do not cache with macro errors
-    if (textExpansionError) return text
+    if (expanded.error) return text
     window['_html_cache'][id].set(cache_key, text)
     limit_cache_size(window['_html_cache'][id], _html_cache_limit_per_item)
     return text
@@ -1391,7 +1391,7 @@
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
       // since dependencies are not always fully captured in the cache key (even with deephash)
       // a version increment does not make sense since these scripts are considered part of the current version
-      // also version increment can cause a render-error loop since elements are not cached no errors
+      // also version increment can cause a render-error loop since elements are not cached on errors
       invalidateElemCache(id)
       // version++; // ensure re-render even if deephash and html are unchanged
 

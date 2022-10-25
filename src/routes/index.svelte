@@ -718,27 +718,24 @@
 
       // evaluate <<macros>> if requested (logic mirrors that in Item.svelte)
       if (options['eval_macros']) {
+        item.expanded = {} // reset macro expansion state
         let cacheIndex = 0
-        let macroIndex = 0
-        item.textExpanded = null // reset in case re-eval triggered manually via read('', {eval_macros:true})
-        item.textExpandedItem = null
-        item.textExpansionError = null
-        item.textExpansionCount = 0
         const replaceMacro = (m, js) => {
           if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
           try {
             return this.eval(js, {
-              trigger: 'macro_' + macroIndex++,
-              cid: `${this.id}-${this.deephash}-${++cacheIndex}`, // enable replacement of $cid
+              trigger: 'macro_' + cacheIndex++,
+              cid: `${this.id}-${this.deephash}-${cacheIndex}`, // enable replacement of $cid
             })
           } catch (e) {
-            item.textExpansionError = e
+            item.expanded.error = e
             console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
             throw e // stop read and throw error
           }
         }
-        item.textExpanded = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-        item.textExpansionCount = cacheIndex
+        item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+        item.expanded.version = item.version
+        item.expanded.count = cacheIndex
       }
 
       // replace $ids if requested
@@ -1426,7 +1423,8 @@
 
     // invalidates element cache for item
     // often invoked from error handling code
-    // otherwise can force_render to ensure re-render even if deephash/html are unchanged
+    // otherwise can force re-render even if deephash/html are unchanged
+    // note forced re-render also forces re-eval of macros, unlike regular rendering
     // delayed to prevent accidental tight render<->trigger loops that could crash browser
     invalidate_elem_cache({ force_render = false, render_delay = 1000 } = {}) {
       this.dispatch_task(
@@ -2112,7 +2110,7 @@
       textLength += item.text.length
       item.listing = index == listingItemIndex // note index != item.index at this point
 
-      // destructure all read-only state (not read-write state) using textExpandedItem when available
+      // destructure all read-only state (not read-write state) using item.expanded.item when available
       // some exceptions below (search for item.*) are id, savedId, and deps/dependentsString
       const {
         tagsVisibleExpanded,
@@ -2126,7 +2124,7 @@
         lctext,
         tagsExpanded,
         text,
-      } = item.textExpandedItem ?? item
+      } = item.expanded?.item ?? item
 
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(tagsVisibleExpanded, terms).length
@@ -2223,7 +2221,7 @@
       item.target_prefix_nesting = -Infinity
       if (!item.target && listingItemIndex >= 0) {
         const target_item = items[listingItemIndex]
-        const { labelPrefixes } = target_item.textExpandedItem ?? target_item
+        const { labelPrefixes } = target_item.expanded?.item ?? target_item
         for (const prefix of labelPrefixes) {
           if (!item.uniqueLabel.startsWith(prefix + '/')) continue
           let nesting = -1
@@ -2841,12 +2839,7 @@
     let item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    if (!item.keepExpansionState) {
-      item.textExpanded = null // computed async in render (toHTML in Item.svelte) or in periodic task
-      item.textExpandedItem = null // reset expanded-text item object
-      item.textExpansionError = null // reset expansion errors
-      item.textExpansionCount = 0 // reset expansion count
-    }
+    item.expanded = null // reset macro expansion state
     item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
@@ -5300,10 +5293,11 @@
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
-    item.textExpanded = null // macro-expanded text, null means pending compute
-    item.textExpandedItem = null // item object w/ macro-expanded text, used for matching/ranking in onEditorChange
-    item.textExpansionError = null // error during macro-expansion (if any)
-    item.textExpansionCount = 0 // number of macro-expansions
+    item.expanded = null // macro expansion state initialized in expandMacros or during render toHTML in Item.svelte
+    // item.expanded.text = null // macro-expanded text, null means pending compute
+    // item.expanded.item = null // item object w/ macro-expanded text, used for matching/ranking in onEditorChange
+    // item.expanded.error = null // error during macro-expansion (if any)
+    // item.expanded.count = 0 // number of macro-expansions
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.listing = false
@@ -5768,21 +5762,22 @@
         if (Date.now() - lastScrollTime < 250) return // scrolled too recently (even w/o triggering focus)
         const start = Date.now()
         let expansions = 0
+        let errors = 0
         let index = 0
         for (const item of items) {
-          if (item.textExpanded === null) {
-            if (item.textExpansionError) continue // had errors in last expansion, need manual re-eval (render or read)
-            try {
-              _item(item.id).read('', { eval_macros: true })
-            } catch (e) {} // errors already logged
+          if (!item.expanded) {
             expansions++
             index = item.index
+            try {
+              _item(item.id).read('', { eval_macros: true }) // sets item.expanded directly
+            } catch (e) {} // errors already logged
           }
-          if (item.textExpandedItem === null) {
+          if (item.expanded.error) continue // had errors in last expansion, need manual re-eval (render or read)
+          if (!item.expanded.item) {
             // precompute macro-expanded state used in onEditorChange by temporarily changing text on item
-            item.keepExpansionState = true // prevent reset of expansion state in itemTextChanged
-            itemTextChanged(item.index, item.textExpanded, false /*update_deps*/)
-            item.textExpandedItem = _.pick(item, [
+            const expanded = item.expanded // copy since will be reset in itemTextChanged
+            itemTextChanged(item.index, item.expanded.text, false /*update_deps*/)
+            expanded.item = _.pick(item, [
               // all destructured state from onEditorChange
               'tagsVisibleExpanded',
               'tagsVisible',
@@ -5797,7 +5792,7 @@
               'text',
             ])
             itemTextChanged(item.index, item.text, false /*update_deps*/)
-            item.keepExpansionState = false
+            item.expanded = expanded // restore object after reset in itemTextChanged
           }
           if (Date.now() - start > macroExpansionQuantum) break // out of time
         }
@@ -5813,6 +5808,8 @@
               onEditorChange(editorText)
             }, 1000)
           }
+        } else {
+          // console.debug(`found no macros to expand in (${index + 1}/${items.length}) items in ${Date.now() - start}ms`)
         }
       }
 
@@ -5928,7 +5925,7 @@
             where('attr.shared.keys', 'array-contains', key)
           )
         } else if (url_params.shared) {
-          _modal(`No shared items found on page \`${url_params.shared}\`.`)
+          _modal(`No items found on shared page \`${url_params.shared}\`.`)
           return
         }
 
@@ -5970,7 +5967,7 @@
 
                 // if account is empty in fixed mode, stop & present modal to try again
                 if ((items.length === 0 || hideIndex == 0) && fixed) {
-                  _modal(`No shared items found on page \`${url_params.shared}\`.`)
+                  _modal(`No items found on shared page \`${url_params.shared}\`.`)
                   return
                 }
 
@@ -6279,7 +6276,7 @@
         if (readonly && !fixed && !location.hash) {
           welcome = modal.show({
             content:
-              'Welcome to MindPage! This is an **anonymous demo account**. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
+              '**Welcome to MindPage!** This is an _anonymous demo account_. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: 'Stay Anonymous',
             cancel: 'Sign In',
@@ -6291,9 +6288,9 @@
         // note this is done pre-init so e.g. number of items is unknown at this point
         if (fixed) {
           _modal(
-            'Welcome to MindPage! You are currently viewing _shared items_ on a simplified page with limited features. Your edits on shared items will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
+            `**Welcome to MindPage!** This is a _shared page_ with limited features. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.`,
             {
-              confirm: 'View Shared Items',
+              confirm: 'View Shared Page',
               cancel: 'Go to MindPage',
               onCancel: () => (location.href = 'https://' + location.host),
               background: 'confirm',
@@ -7173,9 +7170,7 @@
                 onPrev={onPrevItem}
                 onNext={onNextItem}
                 bind:text={item.text}
-                bind:textExpanded={item.textExpanded}
-                bind:textExpansionError={item.textExpansionError}
-                bind:textExpansionCount={item.textExpansionCount}
+                bind:expanded={item.expanded}
                 bind:editing={item.editing}
                 bind:focused={item.focused}
                 editable={item.editable}
