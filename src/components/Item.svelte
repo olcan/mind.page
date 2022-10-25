@@ -270,6 +270,8 @@
     // we re-expand on errors so we can indicate all errors (not just first) using html with custom styling
     // we also re-expand on deephash changes in case macros depend on dependencies (and not just item text)
     // we also re-expand on version changes in case macros depend on external state (e.g. global_store)
+    // we do NOT re-expand on changes to search/highlight-related state (e.g. matchingTerms, contextLabel, etc)
+    // NOTE: even if we re-expand on ANY change to cache_key (see above), background expansions can still dramatically improve responsiveness when large numbers of previously-unrendered items are brought up based on re-ranking or toggling of items on page, so it is important to support in all cases.
     if (expanded && !expanded.error && expanded.deephash == deephash && expanded.version == version) {
       text = expanded.text // use prior expansion
       cacheIndex = expanded.count
