@@ -720,6 +720,9 @@
       if (options['eval_macros']) {
         let cacheIndex = 0
         let macroIndex = 0
+        item.textExpanded = null // reset in case re-eval triggered manually via read('', {eval_macros:true})
+        item.textExpansionError = null
+        item.textExpansionCount = 0
         const replaceMacro = (m, js) => {
           if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
           try {
@@ -728,11 +731,13 @@
               cid: `${this.id}-${this.deephash}-${++cacheIndex}`, // enable replacement of $cid
             })
           } catch (e) {
+            item.textExpansionError = e
             console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
-            throw e
+            throw e // stop read and throw error
           }
         }
-        text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+        item.textExpanded = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+        item.textExpansionCount = cacheIndex
       }
 
       // replace $ids if requested
@@ -1102,7 +1107,7 @@
           return out
         } catch (e) {
           console.error(`eval_macro error in item ${this.label || 'id:' + this.id}: ${e}`)
-          throw e
+          throw e // stop eval and throw error
         }
       }
       // evaljs = evaljs.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro));
@@ -2106,6 +2111,10 @@
       textLength += item.text.length
       item.listing = index == listingItemIndex // note index != item.index at this point
 
+      // TODO: use textExpanded for search when available; easiest way to do this may be via callback from toHTML where you create a new item and store it on the original item, and just swap it out here when available; actually code below would be cleaner if you only access item for "writing", and all read-only variables are in the loop scope, so you just do a destructuring assignment to all read-only variables; the callback from toHTML can trigger a debounced onEditorChange to update the results after a batch of renders -- actually it would be cleaner if you have a post-init task automatically triggered after EVERY itemTextChanged, and if toHTML could just use that when available instead of doing its own expansion, so basically the macro expansion happens in async tasks here as much as possible ... actually you _could_ keep the toHTML expansion separate to get an expansion with more predictable timing, but it is not clear that "render-time" counts as a predictable time for macro expansions; to keep the load under control, we probably just need a periodic task that renders macros at a certain target rate (in terms how long it can run given idle time between runs), always prefering higher ranked items (probably linear scan is fine). the periodic task could be started along with the other periodic tasks, and it could also trigger an onEditorChange periodically as well; once you have that working you can revisit this loop, which should be relatively easy to restructure once you separate write variables from read variables
+
+      // const item_text = item.textExpanded || item.text // use macro-expanded text if available
+
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(item.tagsVisibleExpanded, terms).length
 
@@ -2821,6 +2830,9 @@
     let item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
+    item.textExpanded = null // computed async in render (toHTML in Item.svelte) or in periodic task
+    item.textExpansionError = null // reset expansion errors
+    item.textExpansionCount = 0 // reset expansion count
     item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
@@ -5274,6 +5286,9 @@
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
+    item.textExpanded = null // macro-expanded text, null means pending compute
+    item.textExpansionError = null // error during macro-expansion (if any)
+    item.textExpansionCount = 0 // number of macro-expansions
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.listing = false
@@ -5729,7 +5744,30 @@
         console.error
       )
 
-      // Visual viewport resize/scroll handlers ...
+      // periodic macro expansion task ...
+      const macroExpansionQuantum = 10
+      function expandMacros() {
+        if (!initialized) return // not initialized yet
+        if (Date.now() - focus_time < 1000) return // interacted too recently
+        if (Date.now() - lastScrollTime < 250) return // scrolled too recently (even w/o triggering focus)
+        const start = Date.now()
+        let expansions = 0
+        let index = 0
+        for (const item of items) {
+          if (item.textExpanded !== null) continue // already expanded
+          if (item.textExpansionError) continue // had errors in last expansion, need manual re-eval (render or read)
+          try {
+            _item(item.id).read('', { eval_macros: true })
+          } catch (e) {} // errors already logged
+          expansions++
+          index = item.index
+          if (Date.now() - start > macroExpansionQuantum) break // out of time
+        }
+        // if (expansions) console.debug(`expanded macros in ${expansions} items `+ 
+        //   `(${index+1}/${items.length} done) in ${Date.now() - start}ms`)
+      }
+
+      // visual viewport resize/scroll handlers ...
       let lastDocumentWidth = 0
       let lastWindowHeight = 0
       let lastFocusElem = null // element that had focus on last recorded width/height
@@ -6173,6 +6211,7 @@
           }
           checkFocus()
         }
+        setInterval(expandMacros, 250) // expand macros every 250ms
         setInterval(checkLayout, 250) // check layout every 250ms
         setInterval(checkElemCache, 1000) // check elem cache every second
 
@@ -7085,6 +7124,9 @@
                 onPrev={onPrevItem}
                 onNext={onNextItem}
                 bind:text={item.text}
+                bind:textExpanded={item.textExpanded}
+                bind:textExpansionError={item.textExpansionError}
+                bind:textExpansionCount={item.textExpansionCount}
                 bind:editing={item.editing}
                 bind:focused={item.focused}
                 editable={item.editable}

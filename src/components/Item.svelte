@@ -56,6 +56,9 @@
   export let runnable: boolean
 
   export let text: string
+  export let textExpanded: string
+  export let textExpansionError: object
+  export let textExpansionCount: number
   export let hash: string
   export let deephash: string
   export let version: number
@@ -262,29 +265,36 @@
     }
     // console.debug("toHTML", name, deephash, version);
 
-    // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     let cacheIndex = 0 // counter to distinguish positions of identical cached elements
-    let hasMacroErrors = false
-    let macroIndex = 0
-    const replaceMacro = (m, js) => {
-      if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
-      try {
-        return window['_item'](id).eval(js, {
-          trigger: 'macro_' + macroIndex++,
-          cid: `${id}-${deephash}-${++cacheIndex}`, // enable replacement of $cid
-        })
-      } catch (e) {
-        hasMacroErrors = true
-        // display missing dependencies using special style
-        if (e.message.startsWith('missing dependencies'))
-          return `<span class="macro-missing-deps" title="${_.escape(e.message)}">${js}</span>`
-        console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
-        return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
+
+    // evaluate inline <<macros>> first to ensure treatment just like non-macro content
+    // note text can be pre-expanded in a periodic task and we take that if available to speed up rendering
+    // note expansions will NOT be available (null) if there were errors, in which case we re-expand here
+    // re-expanding here also allows us to indicate all errors (not just first) using html with custom styling
+    if (textExpanded === null) {
+      let macroIndex = 0
+      const replaceMacro = (m, js) => {
+        if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
+        try {
+          return window['_item'](id).eval(js, {
+            trigger: 'macro_' + macroIndex++,
+            cid: `${id}-${deephash}-${++cacheIndex}`, // enable replacement of $cid
+          })
+        } catch (e) {
+          textExpansionError ??= e // record first error & continue replacing
+          // display missing dependencies using special style
+          if (e.message.startsWith('missing dependencies'))
+            return `<span class="macro-missing-deps" title="${_.escape(e.message)}">${js}</span>`
+          console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
+          return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
+        }
       }
+      text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+      if (!textExpansionError) textExpanded = text // save expansion if no errors
+    } else {
+      text = textExpanded // use prior expansion
+      cacheIndex = textExpansionCount
     }
-    text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-    // reserve @{...} syntax for "eval macros", see _Item.eval() in index.svelte
-    //text = text.replace(/@\{(.*?)\}@/g, skipEscaped(replaceMacro));
 
     // pre-process block types to allow colon-separated parts, taking only last part without a period
     text = text.replace(blockRegExp('\\S+?'), (m, pfx, type, body) => {
@@ -814,7 +824,7 @@
     text += `<!-- html_cache_key=${cache_key} -->`
 
     // do not cache with macro errors
-    if (hasMacroErrors) return text
+    if (textExpansionError) return text
     window['_html_cache'][id].set(cache_key, text)
     limit_cache_size(window['_html_cache'][id], _html_cache_limit_per_item)
     return text
