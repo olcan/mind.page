@@ -268,9 +268,9 @@
     // evaluate inline <<macros>> first to ensure treatment just like non-macro content
     // note text can be pre-expanded in a periodic task and we take that if available to speed up rendering
     // we re-expand on errors so we can indicate all errors (not just first) using html with custom styling
-    // we also re-expand on forced render via version increments (e.g. in item.invalidate_elem_cache)
-    //   for items that depend on macros accessing the latest state (e.g. global_store) after a triggered update
-    if (expanded?.version == version && !expanded.error) {
+    // we also re-expand on deephash changes in case macros depend on dependencies (and not just item text)
+    // we also re-expand on version changes in case macros depend on external state (e.g. global_store)
+    if (expanded && !expanded.error && expanded.deephash == deephash && expanded.version == version) {
       text = expanded.text // use prior expansion
       cacheIndex = expanded.count
     } else {
@@ -295,6 +295,7 @@
       // save expansion if no errors
       if (!expanded.error) {
         expanded.text = text
+        expanded.deephash = deephash
         expanded.version = version
         expanded.count = cacheIndex
       }

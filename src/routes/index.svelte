@@ -734,6 +734,7 @@
           }
         }
         item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+        item.expanded.deephash = item.deephash
         item.expanded.version = item.version
         item.expanded.count = cacheIndex
       }
@@ -1424,7 +1425,7 @@
     // invalidates element cache for item
     // often invoked from error handling code
     // otherwise can force re-render even if deephash/html are unchanged
-    // note forced re-render also forces re-eval of macros, unlike regular rendering
+    // note forced re-render also forces re-eval of macros at re-render time
     // delayed to prevent accidental tight render<->trigger loops that could crash browser
     invalidate_elem_cache({ force_render = false, render_delay = 1000 } = {}) {
       this.dispatch_task(
