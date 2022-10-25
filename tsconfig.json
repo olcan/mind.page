@@ -1,7 +1,7 @@
 {
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
-    "lib": ["DOM", "ES2020", "WebWorker"]
+    "lib": ["DOM", "ES2021", "WebWorker"]
     // if you need additional options, see https://github.com/Axelen123/sapper-ts-template/blob/master/tsconfig.json ...
   },
   "include": ["src/**/*", "src/node_modules/**/*"],
