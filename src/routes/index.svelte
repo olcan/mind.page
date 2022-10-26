@@ -5582,7 +5582,7 @@
       //         (but it is annoying especially on mobile where popups can be blocked outright)
       // return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
       // if (!android()) return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      if (ios) return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      // if (ios) return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
       signInWithPopup(getAuth(firebase), provider)
         .then(() => location.reload())
         .catch(e => {
