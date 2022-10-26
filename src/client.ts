@@ -18,6 +18,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
   setPersistence,
   browserLocalPersistence,
 } from 'firebase/auth'
@@ -27,6 +28,7 @@ Object.assign((firebase['auth'] = {}), {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
   setPersistence,
   browserLocalPersistence,
 }) // ~115K

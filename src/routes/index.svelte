@@ -14,8 +14,9 @@
     getAuth,
     onAuthStateChanged,
     GoogleAuthProvider,
-    signInWithRedirect,
     signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     setPersistence,
     browserLocalPersistence,
   } = firebase?.auth ?? {}
@@ -5577,14 +5578,26 @@
       // NOTE: Both redirect and popup-based login methods work in most cases. Android can fail to login with redirects (perhaps getRedirectResult could work better although should be redundant given onAuthStateChanged) but works ok with popup. iOS looks better with redirect, and firebase docs (https://firebase.google.com/docs/auth/web/google-signin) say redirect is preferred on mobile. Indeed popup feels better on desktop, even though it also requires a reload for now (much easier and cleaner than changing all user/item state). So we currently use popup login except on iOS, where we use a redirect for cleaner same-tab flow.
       // NOTE: switched to redirect on all platforms due to blocked popups on desktop
       // NOTE 2: switched back to popup (on non-ios) as redirect stopped working on Ventura Safari
-      // if (!android()) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      if (ios) signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      // signInWithRedirect(getAuth(firebase), provider).catch(console.error)
-      else {
-        signInWithPopup(getAuth(firebase), provider)
-          .then(() => location.reload())
-          .catch(console.error)
-      }
+      // NOTE 3: actually redirect also does not work on the iPad, so we are back to popup on all platforms
+      //         (but it is annoying especially on mobile where popups can be blocked outright)
+      // return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      // if (!android()) return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      if (ios) return signInWithRedirect(getAuth(firebase), provider).catch(console.error)
+      signInWithPopup(getAuth(firebase), provider)
+        .then(() => location.reload())
+        .catch(e => {
+          console.error(e)
+          _modal(
+            e.code == 'auth/popup-blocked'
+              ? `MindPage could not open a popup required to sign you in to your Google account. Please change your browser settings to allow popups and try again.`
+              : `MindPage could not sign you in to your Google account.`,
+            {
+              confirm: 'Try Again',
+              background: 'confirm',
+              onConfirm: () => location.reload(),
+            }
+          )
+        })
     })
   }
 
@@ -5674,6 +5687,13 @@
         }
       }
 
+      // note this is experimental, to try to debug redirect auth failure in recent iOS and MacOS
+      // getRedirectResult(getAuth(firebase))
+      //   .then(result => {
+      //     console.debug('getRedirectResult', result)
+      //   })
+      //   .catch(console.error)
+
       // start listening for auth changes & initialize firebase on first callback
       // NOTE: we expect a callback in all cases (e.g. even when user is signed out or anonymous)
       //       we use any additional callbacks to trigger an automatic reload ...
@@ -5697,7 +5717,7 @@
           if (!authUser) {
             // if we were expecting signin, then we should let user know that we failed and offer to retry ...
             if (!anonymous) {
-              _modal(`MindPage could not sign into your Google account.`, {
+              _modal(`MindPage could not sign you in to your Google account.`, {
                 confirm: 'Try Again',
                 cancel: 'Cancel',
                 onConfirm: signIn,
@@ -5827,9 +5847,11 @@
         }
         // indicate progress on .counts div in header
         const countsdiv = document.querySelector('.header .counts') as HTMLDivElement
-        const progress = Math.round(((index + 1) / items.length) * 100) + '%'
-        countsdiv.style.background = done ? '#000' : `linear-gradient(90deg, #333 ${progress}, #111 ${progress})`
-        countsdiv.style.opacity = done ? '1' : '.75'
+        if (countsdiv) {
+          const progress = Math.round(((index + 1) / items.length) * 100) + '%'
+          countsdiv.style.background = done ? '#000' : `linear-gradient(90deg, #333 ${progress}, #111 ${progress})`
+          countsdiv.style.opacity = done ? '1' : '.75'
+        }
         setTimeout(expandMacros, macroExpansionIdleTime)
       }
 
