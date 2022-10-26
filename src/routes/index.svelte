@@ -5808,9 +5808,9 @@
           }
         }
         if (expansions) {
-          ;(firstPassExpansionDone ? console.debug : init_log)(
-            `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
-          )
+          // ;(firstPassExpansionDone ? console.debug : init_log)(
+          //   `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
+          // )
           // if there is a query, trigger rerank/rehighlight with 1s debounce
           if (editorText.trim() && !expansionRerankPending) {
             expansionRerankPending = true
@@ -5820,8 +5820,16 @@
             }, 1000)
           }
         }
-        if (index == items.length - 1) firstPassExpansionDone = true
-        // TODO: indicate macro expansion progress on .counts div, using background & opacity (to indicate full vs partial scan)
+        const done = index == items.length - 1
+        if (done && !firstPassExpansionDone) {
+          firstPassExpansionDone = true
+          init_log(`expanded macros in ${items.length} items`)
+        }
+        // indicate progress on .counts div in header
+        const countsdiv = document.querySelector('.header .counts') as HTMLDivElement
+        const progress = Math.round(((index + 1) / items.length) * 100) + '%'
+        countsdiv.style.background = done ? '#000' : `linear-gradient(90deg, #333 ${progress}, #111 ${progress})`
+        countsdiv.style.opacity = done ? '1' : '.75'
         setTimeout(expandMacros, macroExpansionIdleTime)
       }
 
@@ -7765,8 +7773,9 @@
     position: absolute;
     right: 0;
     top: 0;
-    padding-right: 4px; /* matches .corner inset on first item */
-    padding-top: 4px;
+    padding: 0px 4px;
+    margin: 4px 0px;
+    border-radius: 4px;
   }
   :global(.status .counts .unit, .status .counts .comma) {
     color: #666;
