@@ -738,6 +738,7 @@
         item.expanded.deephash = item.deephash
         item.expanded.version = item.version
         item.expanded.count = cacheIndex
+        itemExpansionChanged(item)
       }
 
       // replace $ids if requested
@@ -2828,6 +2829,49 @@
     return tags.map(tag => resolveTag(label, tag)).filter(t => t) // drop unresolved tags
   }
 
+  // callback triggered by (successful) macro expansion during rendering
+  function onMacrosExpanded(index: number, expanded: any) {
+    const item = items[index]
+    item.expanded = expanded
+    itemExpansionChanged(item)
+  }
+
+  let expansionRerankPending = false
+  function itemExpansionChanged(item) {
+    if (item.expanded.item) throw new Error('unexpected expanded item state') // sanity check
+    if (item.expanded.count == 0) return // no macro expansions, so no need for expanded.item
+
+    // precompute macro-expanded item state used for search in onEditorChange and store in item.expanded.item
+    // we reuse itemTextChanged (w/ update_deps:false) to switch temporarily to expanded text and back
+    // this is simpler, ensures consistency, and is also easy to extend to other item state in future
+    itemTextChanged(item.index, item.expanded.text, false /* skip deps */)
+    item.expanded.item = _.pick(item, [
+      // these names should match destructured item state in onEditorChange
+      'tagsVisibleExpanded',
+      'tagsVisible',
+      'label',
+      'labelPrefixes',
+      'header',
+      'tagsHidden',
+      'labelUnique',
+      'tagsAlt',
+      'lctext',
+      'tagsExpanded',
+      'text',
+    ])
+    // note this call may use item.expanded.item.* to update certain global state, e.g. tagCounts
+    itemTextChanged(item.index, item.text, false /* skip deps */)
+
+    // if there is a query, trigger rerank/rehighlight with 1s debounce
+    if (editorText.trim() && !expansionRerankPending) {
+      expansionRerankPending = true
+      setTimeout(() => {
+        expansionRerankPending = false
+        onEditorChange(editorText)
+      }, 1000)
+    }
+  }
+
   let tagCounts = new Map<string, number>()
   function itemTextChanged(
     index: number,
@@ -2838,10 +2882,9 @@
     remote = false
   ) {
     // console.debug("itemTextChanged", index);
-    let item = items[index]
+    const item = items[index]
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    item.expanded = null // reset macro expansion state
     item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
@@ -2932,20 +2975,18 @@
     item.name = item.labelUnique ? item.labelText : 'id:' + item.id
 
     // compute expanded tags including prefixes
-    const prevTagsExpanded = item.tagsExpanded || []
-    item.tagsExpanded = item.tags
-    item.tags.forEach(tag => {
-      item.tagsExpanded = item.tagsExpanded.concat(tagPrefixes(tag))
-    })
-    item.tagsExpanded = _.uniq(item.tagsExpanded)
-    if (!_.isEqual(item.tagsExpanded, prevTagsExpanded)) {
-      prevTagsExpanded.forEach(tag => tagCounts.set(tag, tagCounts.get(tag) - 1))
-      item.tagsExpanded.forEach(tag => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1))
+    item.tagsExpanded = _.uniq(item.tags.concat(item.tags.map(tagPrefixes).flat()))
+    item.tagsVisibleExpanded = _.uniq(item.tagsVisible.concat(item.tagsVisible.map(tagPrefixes).flat()))
+
+    // update tagCounts to include prefixes AND any additional tags from macro expansions
+    const prevTagsExpandedWithMacros = item.tagsExpandedWithMacros || []
+    item.tagsExpandedWithMacros = item.tagsExpanded
+    if (item.expanded?.item?.tagsExpanded) // include macro expansions
+      item.tagsExpandedWithMacros = item.tagsExpandedWithMacros.concat(item.expanded.item.tagsExpanded)
+    if (!_.isEqual(item.tagsExpandedWithMacros, prevTagsExpandedWithMacros)) {
+      prevTagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, tagCounts.get(tag) - 1))
+      item.tagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1))
     }
-    item.tagsVisibleExpanded = item.tagsVisible
-    item.tagsVisible.forEach(tag => {
-      item.tagsVisibleExpanded = item.tagsVisibleExpanded.concat(tagPrefixes(tag))
-    })
 
     if (update_deps) {
       const prevDeps = item.deps || []
@@ -5296,10 +5337,6 @@
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
     item.expanded = null // macro expansion state initialized in expandMacros or during render toHTML in Item.svelte
-    // item.expanded.text = null // macro-expanded text, null means pending compute
-    // item.expanded.item = null // item object w/ macro-expanded text, used for matching/ranking in onEditorChange
-    // item.expanded.error = null // error during macro-expansion (if any)
-    // item.expanded.count = 0 // number of macro-expansions
     item.editing = false // otherwise undefined till rendered/bound to svelte object
     item.matching = false
     item.listing = false
@@ -5779,7 +5816,6 @@
       const macroExpansionQuantum = 25 // time for macros in single quantum (before going idle)
       const slowMacroWarningThreshold = 50 // warn about macros taking longer than this
       let firstPassExpansionDone = false
-      let expansionRerankPending = false
       function expandMacros() {
         if (
           !initialized || // not initialized yet
@@ -5793,7 +5829,11 @@
         let index = 0
         for (const item of items) {
           index = item.index
-          if (!item.expanded) {
+          if (item.expanded?.error) continue // had errors in last expansion, need manual re-eval (render or read)
+
+          // init or reset macro expansion state via item.read w/ eval_macros:true
+          // note the reset conditions here (deephash, version, etc) should match those in toHTML in Item.svelte
+          if (!item.expanded || item.expanded.deephash != item.deephash || item.expanded.version != item.version) {
             if (Date.now() - start > macroExpansionQuantum) break // out of time for another expansion
             try {
               const macro_start = Date.now()
@@ -5804,42 +5844,12 @@
             } catch (e) {} // errors already logged
             expansions++
           }
-          if (item.expanded.error) continue // had errors in last expansion, need manual re-eval (render or read)
-          if (!item.expanded.item) {
-            // precompute macro-expanded state used in onEditorChange by temporarily changing text on item
-            const expanded = item.expanded // copy since will be reset in itemTextChanged
-            itemTextChanged(item.index, item.expanded.text, false /*update_deps*/)
-            expanded.item = _.pick(item, [
-              // all destructured state from onEditorChange
-              'tagsVisibleExpanded',
-              'tagsVisible',
-              'label',
-              'labelPrefixes',
-              'header',
-              'tagsHidden',
-              'labelUnique',
-              'tagsAlt',
-              'lctext',
-              'tagsExpanded',
-              'text',
-            ])
-            itemTextChanged(item.index, item.text, false /*update_deps*/)
-            item.expanded = expanded // restore object after reset in itemTextChanged
-          }
         }
-        if (expansions) {
-          // ;(firstPassExpansionDone ? console.debug : init_log)(
-          //   `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
-          // )
-          // if there is a query, trigger rerank/rehighlight with 1s debounce
-          if (editorText.trim() && !expansionRerankPending) {
-            expansionRerankPending = true
-            setTimeout(() => {
-              expansionRerankPending = false
-              onEditorChange(editorText)
-            }, 1000)
-          }
-        }
+        // if (expansions) {
+        //   ;(firstPassExpansionDone ? console.debug : init_log)(
+        //     `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
+        //   )
+        // }
         const done = index == items.length - 1
         if (done && !firstPassExpansionDone) {
           firstPassExpansionDone = true
@@ -7211,8 +7221,9 @@
                 {onLogSummaryClick}
                 onPrev={onPrevItem}
                 onNext={onNextItem}
+                {onMacrosExpanded}
+                expanded={item.expanded}
                 bind:text={item.text}
-                bind:expanded={item.expanded}
                 bind:editing={item.editing}
                 bind:focused={item.focused}
                 editable={item.editable}

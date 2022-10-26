@@ -90,6 +90,7 @@
     return ''
   }
   export let onImageRendered = (img: HTMLImageElement) => {}
+  export let onMacrosExpanded = (index: number, expanded: any) => {}
   export let onPrev = () => {}
   export let onNext = () => {}
 
@@ -301,6 +302,7 @@
         expanded.deephash = deephash
         expanded.version = version
         expanded.count = cacheIndex
+        onMacrosExpanded(index, expanded)
       }
     }
 
