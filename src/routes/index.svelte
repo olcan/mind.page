@@ -5758,6 +5758,7 @@
       const macroExpansionIdleTime = 100 // minimum idle time between expansions
       const macroExpansionQuantum = 20 // time for macro expansions in single quantum (before going idle)
       const slowMacroWarningThreshold = 50 // warn about macros taking longer than this
+      let firstPassExpansionDone = false
       let expansionRerankPending = false
       function expandMacros() {
         if (
@@ -5773,7 +5774,7 @@
         for (const item of items) {
           index = item.index
           if (!item.expanded) {
-            expansions++
+            if (Date.now() - start > macroExpansionQuantum) break // out of time for another expansion
             try {
               const macro_start = Date.now()
               _item(item.id).read('', { eval_macros: true }) // sets item.expanded directly
@@ -5781,6 +5782,7 @@
               if (macro_time > slowMacroWarningThreshold)
                 console.warn(`slow macros (${macro_time}ms) in item ${item.name}`)
             } catch (e) {} // errors already logged
+            expansions++
           }
           if (item.expanded.error) continue // had errors in last expansion, need manual re-eval (render or read)
           if (!item.expanded.item) {
@@ -5804,10 +5806,9 @@
             itemTextChanged(item.index, item.text, false /*update_deps*/)
             item.expanded = expanded // restore object after reset in itemTextChanged
           }
-          if (Date.now() - start > macroExpansionQuantum) break // out of time
         }
         if (expansions) {
-          init_log(
+          ;(firstPassExpansionDone ? console.debug : init_log)(
             `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
           )
           // if there is a query, trigger rerank/rehighlight with 1s debounce
@@ -5819,6 +5820,7 @@
             }, 1000)
           }
         }
+        if (index == items.length - 1) firstPassExpansionDone = true
         // TODO: indicate macro expansion progress on .counts div, using background & opacity (to indicate full vs partial scan)
         setTimeout(expandMacros, macroExpansionIdleTime)
       }
