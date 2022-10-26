@@ -5775,8 +5775,8 @@
       )
 
       // periodic macro expansion task ...
-      const macroExpansionIdleTime = 100 // minimum idle time between expansions
-      const macroExpansionQuantum = 20 // time for macro expansions in single quantum (before going idle)
+      const macroExpansionIdleTime = 250 // minimum idle time between scans/expansions
+      const macroExpansionQuantum = 25 // time for macros in single quantum (before going idle)
       const slowMacroWarningThreshold = 50 // warn about macros taking longer than this
       let firstPassExpansionDone = false
       let expansionRerankPending = false
