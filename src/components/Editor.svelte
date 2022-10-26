@@ -296,7 +296,7 @@
     highlightPositions(matched_positions, 'matched')
     highlightPositions(unmatched_positions, 'unmatched')
 
-    textarea.style.height = editor.style.height = backdrop.scrollHeight + 2 + 'px' // 2px for border
+    textarea.style.height = backdrop.scrollHeight + 'px'
   }
 
   function cleanTextForDelimiterMatching(text) {
@@ -1009,7 +1009,6 @@
     line-height: 24px;
     caret-color: red;
     overflow: hidden;
-    position: absolute;
   }
   .backdrop {
     /* color: transparent; */
@@ -1031,6 +1030,8 @@
     opacity: 1;
   }
   textarea {
+    position: absolute;
+    top: 0;
     background: transparent;
     color: transparent;
     width: 100%;
