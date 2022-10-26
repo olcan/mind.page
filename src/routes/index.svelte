@@ -5756,7 +5756,8 @@
 
       // periodic macro expansion task ...
       const macroExpansionIdleTime = 100 // minimum idle time between expansions
-      const macroExpansionComputeCutoff = 20 // cut off after macros take more than this much time
+      const macroExpansionQuantum = 20 // time for macro expansions in single quantum (before going idle)
+      const slowMacroWarningThreshold = 50 // warn about macros taking longer than this
       let expansionRerankPending = false
       function expandMacros() {
         if (
@@ -5770,11 +5771,15 @@
         let errors = 0
         let index = 0
         for (const item of items) {
+          index = item.index
           if (!item.expanded) {
             expansions++
-            index = item.index
             try {
+              const macro_start = Date.now()
               _item(item.id).read('', { eval_macros: true }) // sets item.expanded directly
+              const macro_time = Date.now() - macro_start
+              if (macro_time > slowMacroWarningThreshold)
+                console.warn(`slow macros (${macro_time}ms) in item ${item.name}`)
             } catch (e) {} // errors already logged
           }
           if (item.expanded.error) continue // had errors in last expansion, need manual re-eval (render or read)
@@ -5799,11 +5804,11 @@
             itemTextChanged(item.index, item.text, false /*update_deps*/)
             item.expanded = expanded // restore object after reset in itemTextChanged
           }
-          if (Date.now() - start > macroExpansionComputeCutoff) break // out of time
+          if (Date.now() - start > macroExpansionQuantum) break // out of time
         }
         if (expansions) {
-          console.debug(
-            `expanded macros in ${expansions} items ` + `(${index + 1}/${items.length} done) in ${Date.now() - start}ms`
+          init_log(
+            `expanded macros in ${index + 1}/${items.length} items ` + `(+${expansions} in ${Date.now() - start}ms)`
           )
           // if there is a query, trigger rerank/rehighlight with 1s debounce
           if (editorText.trim() && !expansionRerankPending) {
@@ -5813,9 +5818,8 @@
               onEditorChange(editorText)
             }, 1000)
           }
-        } else {
-          // console.debug(`found no macros to expand in (${index + 1}/${items.length}) items in ${Date.now() - start}ms`)
         }
+        // TODO: indicate macro expansion progress on .counts div, using background & opacity (to indicate full vs partial scan)
         setTimeout(expandMacros, macroExpansionIdleTime)
       }
 

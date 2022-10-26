@@ -276,6 +276,7 @@
       text = expanded.text // use prior expansion
       cacheIndex = expanded.count
     } else {
+      // console.debug('expanding macros while rendering', name)
       expanded = {} // reset macro expansion state
       const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
