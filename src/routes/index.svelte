@@ -7352,8 +7352,12 @@
       width: 40px;
       min-width: 28px;
       border-radius: 0;
-      border-bottom-left-radius: 4px;
+      border-bottom-left-radius: 5px;
       z-index: 1;
+    }
+    .column.multi-column .header .header-container .user {
+      right: 1px; /* align w/ item container edge below, see "margin-right: 1px" above */
+      border-bottom-right-radius: 5px; /* round out right side also */
     }
     .header .status {
       position: static !important; /* position children relative to .header/page */
@@ -7381,7 +7385,7 @@
       color: black;
       background: #aaa;
       padding: 8px;
-      border-bottom-right-radius: 4px;
+      border-bottom-right-radius: 5px;
       font-size: 16px;
     }
     .header .status .left .triangle {
