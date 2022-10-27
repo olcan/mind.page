@@ -508,7 +508,7 @@
     }
 
     // dispatch update to this.attr[prop] iff it differs from this[prop]
-    // note dispatch allow changes to be combined, batched, cancel out, etc
+    // note dispatch allows changes to be combined, batched, cancel out, etc
     // note changes can happen in both directions, e.g. remote changes to this.attr[prop] -> this[prop]
     _update_attr_async(prop) {
       this.dispatch(() => {
@@ -517,6 +517,7 @@
         _item.attr ??= {}
         if (!_.isEqual(_item.attr[prop], this[prop])) {
           _item.attr[prop] = _.cloneDeep(this[prop])
+          itemAttrChanged(this.id, false /* remote */) // invoke _on_attr_change on item or listeners
           this.save()
         }
       })
@@ -2881,8 +2882,8 @@
     keep_time = false,
     remote = false
   ) {
-    // console.debug("itemTextChanged", index);
     const item = items[index]
+    // console.debug("itemTextChanged", item.name);
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
     item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
@@ -2981,7 +2982,8 @@
     // update tagCounts to include prefixes AND any additional tags from macro expansions
     const prevTagsExpandedWithMacros = item.tagsExpandedWithMacros || []
     item.tagsExpandedWithMacros = item.tagsExpanded
-    if (item.expanded?.item?.tagsExpanded) // include macro expansions
+    if (item.expanded?.item?.tagsExpanded)
+      // include macro expansions
       item.tagsExpandedWithMacros = item.tagsExpandedWithMacros.concat(item.expanded.item.tagsExpanded)
     if (!_.isEqual(item.tagsExpandedWithMacros, prevTagsExpandedWithMacros)) {
       prevTagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, tagCounts.get(tag) - 1))
@@ -6182,11 +6184,13 @@
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
                     item.attr = savedItem.attr
+                    item.savedAttr = _.cloneDeep(savedItem.attr)
+                    // if attr changed, invoke _on_attr_change on item or listeners
+                    if (!_.isEqual(item.attr, savedItem.attr)) itemAttrChanged(item.id, true /* remote */)
                     // update mutable ux properties from item.attr
                     item.editable = (item.attr?.editable ?? true) || fixed
                     item.pushable = (item.attr?.pushable ?? false) && !fixed
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
-                    item.savedAttr = _.cloneDeep(item.attr)
                     itemTextChanged(
                       index,
                       item.text,
@@ -6958,6 +6962,21 @@
       _item(id).invalidate_elem_cache({ force_render: true })
       return
     }
+  }
+
+  function itemAttrChanged(id, remote) {
+    // invoke _on_attr_change(id, remote) on all listener (or self) items
+    items.forEach(item => {
+      if (!item.listen && item.id != item.id) return // must be listener or self
+      if (!itemDefinesFunction(item, '_on_attr_change')) return
+      Promise.resolve(
+        _item(item.id).eval(`_on_attr_change('${item.id}', ${remote})`, {
+          trigger: item.listen ? 'listen' : 'change',
+          async: item.deepasync, // run async if item is async or has async deps
+          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+        })
+      ).catch(e => {}) // already logged
+    })
   }
 
   function onTouchStart(e) {
