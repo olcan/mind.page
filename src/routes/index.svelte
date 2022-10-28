@@ -6348,10 +6348,10 @@
           _modal(
             `**Welcome to MindPage!** This is a _shared page_ with limited features. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.`,
             {
-              confirm: 'View Shared Page',
-              cancel: 'Go to MindPage',
-              onCancel: () => (location.href = 'https://' + location.host),
-              background: 'confirm',
+              // confirm: 'View Shared Page',
+              // cancel: 'Go to My Page',
+              // onCancel: () => (location.href = 'https://' + location.host),
+              // background: 'confirm',
             }
           )
         }
@@ -7039,6 +7039,7 @@
   }
 
   // convenient _modal-based async replacement for window.alert
+  // note we do not display the 'OK' button and instead allow clicking on background
   function _modal_alert(msg, done = null) {
     return _modal(msg).then(() => done?.())
   }
