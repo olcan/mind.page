@@ -6183,14 +6183,16 @@
                     let item = items[index]
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
+                    const attr_modified = !_.isEqual(item.attr, savedItem.attr)
                     item.attr = savedItem.attr
                     item.savedAttr = _.cloneDeep(savedItem.attr)
-                    // if attr changed, invoke _on_attr_change on item or listeners
-                    if (!_.isEqual(item.attr, savedItem.attr)) itemAttrChanged(item.id, true /* remote */)
                     // update mutable ux properties from item.attr
                     item.editable = (item.attr?.editable ?? true) || fixed
                     item.pushable = (item.attr?.pushable ?? false) && !fixed
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
+                    // if attr is modified, invoke _on_attr_change on item or listeners
+                    // note it is important to do this after updating dependent properties like item.shared
+                    if (attr_modified) itemAttrChanged(item.id, true /* remote */)
                     itemTextChanged(
                       index,
                       item.text,
