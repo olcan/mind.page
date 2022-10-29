@@ -1977,6 +1977,9 @@
   :global(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre) {
     margin: 0;
   }
+  :global(h1, h2, h3, h4, h5, h6) {
+    margin-bottom: 5px;
+  }
   /* :global(h1, h2, h3, h4, h5, h6) {
     clear: both;
   } */
