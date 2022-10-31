@@ -7172,7 +7172,7 @@
                 >
                   <div class="title">{items[0].title || shared_key}</div>
                   {#if sharer_short_name}
-                    <div class="sharer">shared by {sharer_short_name || ''}</div>
+                    <div class="sharer">shared by <span class="sharer-name">{sharer_short_name || ''}</span></div>
                   {/if}
                 </div>
               {/if}
@@ -7433,6 +7433,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      text-align: left;
       font-family: 'Open Sans', sans-serif;
       font-weight: 600;
       font-size: 15px;
@@ -7458,21 +7459,26 @@
       flex-grow: 2;
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      padding: 3px 5px; /* 3px is maximal w/o overlapping .title and .sharer */
-      padding-bottom: 7px; /* exclude 4px padding of first item's .super-container */
+      padding: 4px; /* minimal padding to avoid crowding title and subtitle */
+      padding-left: 10px; /* extra padding to match padding of .left */
     }
     .header .status .center .title {
+      color: #eee;
+      font-weight: 700; /* bold */
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .header .status .center .sharer {
       font-size: 70%;
-      color: #666;
+      color: #777;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .header .status .center .sharer .sharer-name {
+      color: #aaa;
+      font-weight: 700; /* bold */
     }
     .header .status .console-summary {
       flex-grow: .5;
@@ -7510,6 +7516,9 @@
     }
     {#if items[0].title}
       .header + .super-container .item :is(h1,h2,h3,h4,h5,h6):first-of-type {
+        display: none;
+      }
+      .header + .super-container .item :is(h1,h2,h3,h4,h5,h6):first-of-type ~ br {
         display: none;
       }
     {/if}
