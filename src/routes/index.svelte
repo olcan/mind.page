@@ -7310,10 +7310,10 @@
               {#if item.nextColumn >= 0 && item.index < hideIndex}
                 <div class="section-separator">
                   <hr />
-                  {item.index + 2}<span class="arrows">{item.arrows}</span
+                  {fixed ? '' : item.index + 2}<span class="arrows">{item.arrows}</span
                   >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
                     &nbsp;
-                    {item.nextItemInColumn + 1}<span class="arrows">↓</span>
+                    {fixed ? '' : item.nextItemInColumn + 1}<span class="arrows">↓</span>
                   {/if}
                   <hr />
                 </div>
