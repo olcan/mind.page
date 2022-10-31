@@ -2991,7 +2991,7 @@
 
     // extract title, if any found, as the first non-tag non-html non-empty line
     // as with header (see above), we allow some html tag lines and/or hash tag lines before title line
-    item.title = item.text.match(/^(?:\s*<.*>\s*)*(#[^#\s][^\n]*\s*)*?(?:$|\n)(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
+    item.title = item.text.match(/^(?:\s*(?:<|#[^#\s])[^\n]*\n)*?(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
 
     if (update_deps) {
       const prevDeps = item.deps || []
