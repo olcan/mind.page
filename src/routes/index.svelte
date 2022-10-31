@@ -2919,7 +2919,7 @@
     // if item stats with visible #tag, it is taken as a "label" for the item
     // (we allow some html tags/macros to precede the label tag for styling purposes)
     const prevLabel = item.label
-    item.header = item.lctext.match(/^(?:\s*<.*>\s*)?([^\n]*)/s).pop()
+    item.header = item.lctext.match(/^(?:\s*<.*>\s*)*([^\n]*)/).pop()
     item.label = item.header.startsWith(item.tagsVisible[0]) ? item.tagsVisible[0] : ''
     item.labelText = item.label ? item.text.replace(/^<.*>\s+#/, '#').slice(0, item.label.length) : ''
     item.labelUnique ??= false
@@ -2991,7 +2991,7 @@
 
     // extract title, if any found, as the first non-tag non-html non-empty line
     // as with header (see above), we allow some html tag lines and/or hash tag lines before title line
-    item.title = item.text.match(/^(?:\s*<.*>\s*)?(#[^#\s][^\n]*\s*)*?(?:$|\n)(?:\s{0,3}#{1,6}\s+)([^\n]*)/s)?.pop()
+    item.title = item.text.match(/^(?:\s*<.*>\s*)*(#[^#\s][^\n]*\s*)*?(?:$|\n)(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
 
     if (update_deps) {
       const prevDeps = item.deps || []
