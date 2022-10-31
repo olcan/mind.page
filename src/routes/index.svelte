@@ -65,6 +65,8 @@
   let fixed = !!url_params?.shared
   let shared_key = url_params?.shared?.replace(/^\w+\//, '')
   let sharer = url_params?.shared?.match(/^(\w+)\//)?.pop() // may be set to user.uid later
+  let sharer_name // fetched via /user/<uid> once sharer uid is determined
+  let sharer_short_name
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -5247,7 +5249,7 @@
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
-  const statusLogExpiration = 15000
+  const statusLogExpiration = 15000 * 1000
 
   // returns true iff item defines specified function _without_ any dependencies
   // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
@@ -5681,6 +5683,15 @@
         return // stop loading on server errors
       }
 
+      // if sharer is known (on shared page, via shared=... param), fetch name immediately
+      if (sharer)
+        fetch('/user/' + sharer)
+          .then(r => r.text())
+          .then(name => {
+            sharer_name = name
+            sharer_short_name = sharer_name.match(/\S+/)?.pop()
+          })
+
       // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
       // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
       if (!user && localStorage.getItem('mindpage_user')) {
@@ -5774,7 +5785,12 @@
             // NOTE: we now allow readonly signin for 'fixed' mode
             signedin = true
             instance.user = user.uid
-            sharer ??= user.uid // if not already set by &shared=<user>/<key>
+            // set sharer to self if not already set via shared=... param
+            if (!sharer) {
+              sharer = user.uid
+              sharer_name = user.mindpageDisplayName || user.displayName
+              sharer_short_name = sharer_name.match(/\S+/)?.pop()
+            }
             readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
 
             // update user info (email, name, etc) in users collection
@@ -7141,6 +7157,25 @@
               {/if}
             </div>
             <div class="status" class:hasDots={dotCount > 0} on:click={onStatusClick}>
+              {#if fixed && items.length > 0}
+                <div class="left">
+                  {#if items[0].shared.indices?.[shared_key] != 0}
+                    <span class="triangle" on:click={() => window['MindBox'].clear()}>◀</span>
+                  {/if}
+                  <span title={(items[0].labelText ?? '').replace(/^#/, '')}>
+                    {(items[0].labelText ?? '').replace(/^#/, '')}
+                  </span>
+                </div>
+                <div
+                  class="center"
+                  title={(items[0].title || shared_key) + (sharer_short_name ? ', shared by ' + sharer_short_name : '')}
+                >
+                  <div class="title">{items[0].title || shared_key}</div>
+                  {#if sharer_short_name}
+                    <div class="sharer">shared by {sharer_short_name || ''}</div>
+                  {/if}
+                </div>
+              {/if}
               <span class="console-summary" bind:this={summarydiv} on:click={onConsoleSummaryClick} />
               {#if dotCount > 0}
                 {#if showDotted}
@@ -7151,30 +7186,16 @@
                   </div>
                 {/if}
               {/if}
-              {#if items.length > 0}
-                {#if fixed}
-                  <div class="left">
-                    {#if items[0].shared.indices?.[shared_key] != 0}
-                      <span class="triangle" on:click={() => window['MindBox'].clear()}>◀</span>
-                    {/if}
-                    <span title={(items[0].labelText ?? '').replace(/^#/, '')}>
-                      {(items[0].labelText ?? '').replace(/^#/, '')}
-                    </span>
-                  </div>
-                  <div class="center" title={items[0].title || shared_key}>
-                    {items[0].title || shared_key}
-                  </div>
-                {:else}
-                  <div class="counts">
-                    {#if matchingItemCount > 0}
-                      &nbsp;<span class="matching"
-                        >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
-                      >
-                    {:else}
-                      {items.length} item{items.length > 1 ? 's' : ''}
-                    {/if}
-                  </div>
-                {/if}
+              {#if !fixed && items.length > 0}
+                <div class="counts">
+                  {#if matchingItemCount > 0}
+                    &nbsp;<span class="matching"
+                      >{matchingItemCount} matching item{matchingItemCount > 1 ? 's' : ''}</span
+                    >
+                  {:else}
+                    {items.length} item{items.length > 1 ? 's' : ''}
+                  {/if}
+                </div>
               {/if}
               <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
             </div>
@@ -7373,8 +7394,8 @@
     .header .header-container {
       justify-content: center;
       background: transparent !important;
-      border: 1px solid transparent !important;
-      margin-bottom: -30px;
+      border: none !important;
+      padding: 0 !important;
     }
     .header .header-container .user {
       position: absolute;
@@ -7394,8 +7415,13 @@
       border-bottom-right-radius: 5px; /* round out right side also */
     }
     .header .status {
-      position: static !important; /* position children relative to .header/page */
-      height: 40px !important;
+      position: static !important; /* position absolute children relative to .header instead */
+      display: flex; /* allow flexible sizing of lable, title, etc */
+      justify-content: right; /* in case .left/.center are hidden due to no items */
+      margin-right: 48px !important; /* clear .user */
+      padding: 0 !important;
+      height: 44px !important; /* .user + 4px margin below */
+      margin-bottom: -4px !important; /* eat into top padding of first item's .super-container */
       /* to allow selection in .counts, we are forced to undo styles on parent, then redo on console-summary */
       -webkit-touch-callout: auto !important;
       -webkit-user-select: auto !important;
@@ -7403,10 +7429,7 @@
       cursor: auto !important;
     }
     .header .status :is(.left, .center) {
-      position: absolute;
-      top: 0;
       box-sizing: border-box;
-      max-width: calc(35% - 50px * 0.35); /* compare to .console-summary max-width below */
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -7415,7 +7438,9 @@
       font-size: 15px;
     }
     .header .status .left {
-      left: 0;
+      flex-grow: 1;
+      max-width: fit-content;
+      height: fit-content;
       color: black;
       background: #aaa;
       padding: 8px;
@@ -7430,21 +7455,37 @@
       margin-right: -5px;
     }
     .header .status .center {
-      left: calc(50% - 50px / 2 + 3px) !important; /* +3px aligns better on tiny screen */
-      transform: translateX(-50%);
-      padding: 4px;
-      padding-top: 8px; /* align w/ .left and .console-summary */
+      flex-grow: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 3px 5px; /* 3px is maximal w/o overlapping .title and .sharer */
+      padding-bottom: 7px; /* exclude 4px padding of first item's .super-container */
+    }
+    .header .status .center .title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header .status .center .sharer {
+      font-size: 70%;
+      color: #666;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .header .status .console-summary {
-      top: 0 !important;
-      right: 50px !important; /* clear .user */
-      left: auto !important;
-      box-sizing: border-box;
-      min-width: min(60px, 30% - 50px * 0.3) !important;
-      max-width: calc(30% - 50px * 0.3) !important;
-      padding-left: 0 !important;
-      padding-top: 12px !important; /* centers text (dots) */
-      height: 44px !important; /* touches first item */
+      flex-grow: .5;
+      /* display: flex;
+      justify-content: right;
+      align-items: center; */
+      line-height: 40px; /* align dots to middle of .user */
+      min-width: min(20%, 40px) !important; /* ensure clickability */
+      max-width: 20% !important;
+      height: 100% !important;
+      box-sizing: border-box !important;
+      position: static !important; /* position inside flex */
+      padding: 0 !important;
       text-align: right !important;
       -webkit-touch-callout: none !important;
       -webkit-user-select: none !important;

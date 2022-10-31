@@ -167,6 +167,21 @@ const sapper_server = express().use(
     } else if (hostname == 'localhost' && req.path == '/preview') {
       const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title><script>document.open('text/html');document.write(localStorage.getItem('mindpage_preview_html') ?? 'missing html');document.close()</script></head></html>`
       res.status(200).contentType('text/html').send(html)
+    } else if (req.path.startsWith('/user/')) {
+      const uid = req.path.match(/^\/user\/(\w+?)$/)?.pop()
+      if (!uid) return res.status(400).send('invalid user path ' + req.path)
+      firebase_admin
+        .firestore()
+        .collection('users')
+        .doc(uid)
+        .get()
+        .then(doc => {
+          const name = doc.data().mindpageDisplayName || doc.data().displayName
+          res.status(200).contentType('text/plain').send(name)
+        })
+        .catch(e => {
+          return res.status(400).send('could not retrieve user path ' + req.path)
+        })
     } else {
       next()
     }
