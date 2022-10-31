@@ -1138,7 +1138,7 @@
   :global(.editor > .backdrop .block-delimiter) {
     color: #666;
   }
-  :global(.editor > .backdrop .code, .editor .math) {
+  :global(.editor > .backdrop span.code, .editor .math) {
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 0; /* no overhang since delimited anyway */
     margin: -2px 0;
@@ -1152,7 +1152,7 @@
     color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
   }
   :global(.editor > .backdrop span.title) {
-    padding: 2px 4px;
+    padding: 2px 4px; /* overhang is fine since titles are on their own lines */
     margin: -2px -4px;
     background: rgba(255, 255, 255, 0.1);
     /* background: rgba(0, 0, 0, 0.9); */
@@ -1160,8 +1160,8 @@
     font-weight: 700;
   }
   :global(.editor > .backdrop span.link) {
-    padding: 0 4px;
-    margin: 0 -4px;
+    padding: 2px 0; /* same as span.code, no overhang to avoid overlapping adjacent text */
+    margin: -2px 0;
     /* background: #222; */
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
