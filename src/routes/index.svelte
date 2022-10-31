@@ -5249,7 +5249,7 @@
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
-  const statusLogExpiration = 15000 * 1000
+  const statusLogExpiration = 15000
 
   // returns true iff item defines specified function _without_ any dependencies
   // needed to avoid invoking callback functions (e.g. _on_item_change) on dependents that only mention the function name in comments or strings, forcing confusing checks (e.g. of _this.id or _this.name) in implementations
@@ -7514,11 +7514,14 @@
     .item > .content mark.label {
       display: none !important;
     }
+    .item > .content > p:last-of-type > mark {
+      display: none;
+    }
     {#if items[0].title}
-      .header + .super-container .item :is(h1,h2,h3,h4,h5,h6):first-of-type {
+      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
         display: none;
       }
-      .header + .super-container .item :is(h1,h2,h3,h4,h5,h6):first-of-type ~ br {
+      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type ~ br {
         display: none;
       }
     {/if}
