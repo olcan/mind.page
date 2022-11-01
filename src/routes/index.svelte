@@ -6351,7 +6351,7 @@
         if (readonly && !fixed && !location.hash) {
           welcome = modal.show({
             content:
-              '**Welcome to MindPage!** This is an _anonymous demo account_. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.',
+              '**Welcome to MindPage!** This is an _anonymous demo account_. Your edits will be discarded when you close or reload this page, and are _never sent or stored anywhere_.',
             // content: `Welcome ${window["_user"].name}! Your personal account requires activation. Please email support@mind.page from ${user.email} and include account identifier \`${user.uid}\` in the email.`,
             confirm: 'Stay Anonymous',
             cancel: 'Sign In',
@@ -6363,7 +6363,7 @@
         // note this is done pre-init so e.g. number of items is unknown at this point
         if (fixed) {
           _modal(
-            `**Welcome to MindPage!** This is a _shared page_ with limited features. Your edits will be discarded when you close (or reload) this page, and are _never sent or stored anywhere_.`,
+            `**Welcome to MindPage!** This is a _shared page_ with limited functionality. Your edits will be discarded when you close or reload this page, and are _never sent or stored anywhere_.`,
             {
               // confirm: 'View Shared Page',
               // cancel: 'Go to My Page',
