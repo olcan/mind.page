@@ -203,12 +203,12 @@ export function isBalanced(expr) {
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
 export function invalidateElemCache(id) {
-  // console.warn("invalidateElemCache for ", id);
+  // console.warn('invalidateElemCache for ', id)
   window['_elem_cache']?.[id]?.forEach(elem => {
     const key = elem.getAttribute('_cache_key')
     // we allow some items to skip invalidation, e.g. to be intentionally reused across runs
     if (elem.hasAttribute('_skip_invalidation')) return
-    // console.warn("deleting from _elem_cache", key);
+    // console.warn('deleting from _elem_cache', key)
     window['_elem_cache'][id].delete(key)
     // destroy all children and SELF w/ _destroy attribute (and property)
     elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())

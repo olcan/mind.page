@@ -1378,7 +1378,9 @@
               continue
             height_below += elem.offsetHeight
           } while ((elem = elem.nextElementSibling as HTMLElement))
-        if (height_below == 0) x.style.display = 'none'
+        // even if height_below is 0, we do not hide if there are any absolute-positioned descendants
+        if (height_below == 0 && !_.some(x.querySelectorAll('*'), c => getComputedStyle(c).position == 'absolute'))
+          x.style.display = 'none'
         else if (height_below == x.offsetHeight) {
           // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
           while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
@@ -1484,7 +1486,7 @@
         dot.querySelectorAll('.node > text > .MathJax > svg > *').forEach(elem => {
           if (!item.elem?.contains(elem)) {
             // console.error("detached _graph elem in item", item.name)
-            item.invalidate_elem_cache()
+            invalidateElemCache(id)
             return
           }
           let math = elem as SVGGraphicsElement
