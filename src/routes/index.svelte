@@ -6047,7 +6047,10 @@
                 updateInstance()
 
                 // if account is empty, copy the welcome item from the anonymous account, which should also trigger a request for the secret phrase in order to encrypt the new welcome item
-                if (items.length == 0) onEditorDone('/_welcome')
+                if (items.length == 0) {
+                  onEditorDone('/_welcome')
+                  hideIndex = 1 // show first item
+                }
 
                 // if necessary, init secret by triggering a test encryption/decryption
                 if (!secret && !fixed) {
