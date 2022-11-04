@@ -1658,8 +1658,9 @@
     // indicate if we are still rendering any visible items (index < hideIndex)
     // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
     // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
-    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
-    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered, hideIndex - 1) >= 0
+    // finally note we allow editing items in all cases since those items are not really visible on page
+    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
+    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
 
     // as soon as header is available, scroll down to header and set flag
     if (headerdiv && !headerScrolled) {
@@ -2530,8 +2531,9 @@
     // indicate if we are still rendering any visible items (index < hideIndex)
     // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
     // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
-    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
-    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered, hideIndex - 1) >= 0
+    // finally note we allow editing items in all cases since those items are not really visible on page
+    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
+    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
