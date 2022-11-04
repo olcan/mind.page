@@ -1654,6 +1654,10 @@
       columnLastItem[item.column] = index
     })
 
+    // indicate if we are still rendering (height == 0) any visible items (index < hideIndex)
+    // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
+    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
+
     // as soon as header is available, scroll down to header and set flag
     if (headerdiv && !headerScrolled) {
       scrollTo(headerdiv.offsetTop)
@@ -2518,7 +2522,8 @@
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
-    // check if we are still rendering (height == 0) any visible items (index < hideIndex)
+    // indicate if we are still rendering (height == 0) any visible items (index < hideIndex)
+    // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
     renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
 
     if (!ignoreStateOnEditorChange) {
