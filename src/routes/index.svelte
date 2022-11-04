@@ -7349,7 +7349,7 @@
 {/if}
 
 {#if !user || !initialized || !headerScrolled || renderingVisibleItems || signingIn || signingOut}
-  <div class="loading">
+  <div class="loading" class:translucent={renderingVisibleItems}>
     <Circle2 size="60" unit="px" />
   </div>
 {/if}
@@ -7780,6 +7780,9 @@
     align-items: center;
     /* NOTE: if you add transparency, initial zero-height layout and unscrolled header will be visible */
     background: rgba(17, 17, 17, 1);
+  }
+  .loading.translucent {
+    background: rgba(17, 17, 17, .75);
   }
   .header {
     max-width: 100%;
