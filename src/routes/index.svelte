@@ -1979,6 +1979,12 @@
     // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable auto-hiding (hideIndex decrease) during onEditorChange
     const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
+    // if editor text is cleared while a target is selected, we force new state just as in onTagClick
+    if (!text.trim() && document.querySelector('.container.target')) {
+      forceNewStateOnEditorChange = true // force new state
+      finalizeStateOnEditorChange = true // finalize state
+    }
+
     // keep history entry 0 updated, reset index on changes
     // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
     if (text != sessionHistory[sessionHistoryIndex]) {
