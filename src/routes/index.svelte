@@ -38,7 +38,7 @@
   const { getStorage, ref, getDownloadURL, uploadBytes } = firebase?.storage ?? {}
 
   const _ = globalThis['_'] // imported in client.ts
-  import { Circle2 } from 'svelte-loading-spinners'
+  import { Jumper } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
@@ -67,6 +67,7 @@
   let sharer = url_params?.shared?.match(/^(\w+)\//)?.pop() // may be set to user.uid later
   let sharer_name // fetched via /user/<uid> once sharer uid is determined
   let sharer_short_name
+  // let spinnerSize = isClient ? Math.max(60, Math.min(innerWidth, innerHeight) * 0.2) : 0 // resized in checkLayout
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
   let inverted = isClient && localStorage.getItem('mindpage_inverted') == 'true'
   let narrating = isClient && localStorage.getItem('mindpage_narrating') != null
@@ -1609,7 +1610,7 @@
           columnHeights[lastColumn] += 40 // .section-separator height including margins
         }
       }
-      // mark item as aboveTheFold if it is pinned or item is visible on first screen
+      // mark item as aboveTheFold if it is pinned or item is visible (at least partially) on first screen
       // if item heights are not available, then we use item index in column and assume top 5 are above fold
       item.aboveTheFold =
         item.pinned || (item.height ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5)
@@ -1654,9 +1655,11 @@
       columnLastItem[item.column] = index
     })
 
-    // indicate if we are still rendering (height == 0) any visible items (index < hideIndex)
+    // indicate if we are still rendering any visible items (index < hideIndex)
     // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
+    // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
     renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
+    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered, hideIndex - 1) >= 0
 
     // as soon as header is available, scroll down to header and set flag
     if (headerdiv && !headerScrolled) {
@@ -2433,8 +2436,10 @@
 
       // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
       // we include target + everything included above in hideIndexFromRanking to ensure prominence
+      // we also consider special cutoffs for last unpinned item, and first below-fold item
       let unpinnedIndex = _.findLastIndex(items, item => item.pinned || needs_prominence(item)) + 1
-      let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
+      // let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
+      let belowFoldIndex = _.findIndex(items, item => !item.aboveTheFold && !needs_prominence(item)) + 1
       if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
         toggles.push({
           start: unpinnedIndex,
@@ -2522,9 +2527,11 @@
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
-    // indicate if we are still rendering (height == 0) any visible items (index < hideIndex)
+    // indicate if we are still rendering any visible items (index < hideIndex)
     // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
+    // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
     renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
+    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered, hideIndex - 1) >= 0
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -4316,13 +4323,17 @@
       }
     }
     // count number of elements that will trigger additional resizes
-    // if height>0 and no more resizes are expected, invoke resolve_render (if set up)
+    // if height>0 and no more resizes are expected, set rendered=true & invoke resolve_render (if set up)
+    // otherwise reset rendered=false, typically due to re-render w/ pendingElems>0 (height=0 would trigger warning)
     item.pendingElems = container.querySelectorAll(
       ['script', 'img:not([_loaded])', ':is(span.math,span.math-display):not([_rendered])'].join()
     ).length
     if (height > 0 && item.pendingElems == 0) {
+      item.rendered = true
       item.resolve_render?.(container.closest('.super-container'))
       item.resolve_render = null
+    } else if (item.rendered) {
+      item.rendered = false
     }
 
     if (height == prevHeight) return // nothing has changed
@@ -5389,6 +5400,7 @@
     item.timeString = ''
     item.timeOutOfOrder = false
     item.height = 0
+    item.rendered = false
     item.resolve_height = null // invoked from onItemResized on first resize during render
     item.resolve_render = null // invoked from onItemResized when rendering is complete
     item.column = 0
@@ -5906,6 +5918,9 @@
       let lastWindowHeight = 0
       let lastFocusElem = null // element that had focus on last recorded width/height
       function checkLayout() {
+        // set loader spinner size dynamically (since spinners otherwise require fixed pixel sizing)
+        // spinnerSize = Math.max(60, Math.min(innerWidth, innerHeight) * 0.2)
+
         // on android, if window height grows enough, assume keyboard is closed and blur active element
         // (otherwise e.g. tapping of tags with editor focused will scroll back up)
         if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur()
@@ -7348,11 +7363,13 @@
   <!-- <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/swift.min.js"></script> -->
 {/if}
 
-{#if !user || !initialized || !headerScrolled || renderingVisibleItems || signingIn || signingOut}
-  <div class="loading" class:translucent={renderingVisibleItems}>
-    <Circle2 size="60" unit="px" />
-  </div>
-{/if}
+<div
+  class="loading"
+  class:translucent={renderingVisibleItems}
+  class:visible={!user || !initialized || !headerScrolled || renderingVisibleItems || signingIn || signingOut}
+>
+  <Jumper size="20" unit="vw" color="#48f" duration="1.2s" />
+</div>
 
 <Modal bind:this={modal} {onPastedImage} />
 
@@ -7770,10 +7787,10 @@
   }
 
   .loading {
+    display: none; /* set in .visible */
     position: absolute;
     top: 0;
     left: 0;
-    display: flex;
     width: 100%;
     height: 100%;
     justify-content: center;
@@ -7781,8 +7798,15 @@
     /* NOTE: if you add transparency, initial zero-height layout and unscrolled header will be visible */
     background: rgba(17, 17, 17, 1);
   }
+  .loading.visible {
+    display: flex;
+  }
   .loading.translucent {
-    background: rgba(17, 17, 17, .75);
+    background: rgba(17, 17, 17, 0.75);
+  }
+  /* note this also applies to .loading div in Item.svelte */
+  :global(.loading > div) {
+    opacity: 0.75;
   }
   .header {
     max-width: 100%;
