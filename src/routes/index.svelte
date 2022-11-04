@@ -1524,7 +1524,10 @@
   let showDotted = false
 
   function updateItemLayout() {
-    // console.debug("updateItemLayout");
+    // NOTE: first layout is via checkLayout w/ 0 items, 0 height
+    //       second is via initialize -> onEditorChange w/ >0 items, 0 height
+    //       subsequent layouts are via onItemResized -> tryLayout w/ >0 items, >0 height
+    // console.debug('updateItemLayout', items.length, _.sum(items.map(item => item.height)))
     editingItems = []
     focusedItem = -1
     indexFromId = new Map<string, number>()
@@ -1550,13 +1553,6 @@
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
     updateVerticalPadding()
-
-    // as soon as header is available, scroll down to header
-    // also store header offset for all other scrollTo calculation
-    if (headerdiv && !headerScrolled) {
-      scrollTo(headerdiv.offsetTop)
-      headerScrolled = true
-    }
 
     items.forEach((item, index) => {
       item.index = index
@@ -1657,6 +1653,12 @@
       }
       columnLastItem[item.column] = index
     })
+
+    // as soon as header is available, scroll down to header and set flag
+    if (headerdiv && !headerScrolled) {
+      scrollTo(headerdiv.offsetTop)
+      headerScrolled = true
+    }
 
     // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
     // OR scroll up to top mover (if not narrating, since then we prefer manual scroll)
@@ -1945,10 +1947,12 @@
   let hideIndexMinimal = 0
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
+  let renderingVisibleItems = false
   let editorChangesWithTimeKept = new Set()
   let ignoreEditorChanges = false
 
   function onEditorChange(text: string, keep_times = false) {
+    // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
@@ -2063,7 +2067,7 @@
     let termsContext = _.flatten(tags.all.map(tagPrefixes))
 
     matchingItemCount = 0
-    let targetItemCount = 0
+    let target
     textLength = 0
     let listing = []
     let context = []
@@ -2212,7 +2216,7 @@
         // listing item and id-matching item are considered "target" items
         item.target = item.listing || idMatchTerms.length > 0
         item.target_context = !item.target && context.includes(item.uniqueLabel)
-        if (item.target) targetItemCount++
+        if (item.target) target = item
       } else {
         item.matchingTerms = []
         item.matchingTermsSecondary = []
@@ -2461,8 +2465,7 @@
       // calculate "minimal" hide index used in certain situations, e.g. when window is defocused
       // minimal index is either the first time-ranked item, or the first position-based hidden item
       // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
-      hideIndexMinimal =
-        toggles.length == 0 ? hideIndexFromRanking : targetItemCount > 0 ? toggles[0].start : toggles[0].end
+      hideIndexMinimal = toggles.length == 0 ? hideIndexFromRanking : target ? toggles[0].start : toggles[0].end
 
       // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
       // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
@@ -2514,6 +2517,9 @@
       }
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
+
+    // check if we are still rendering (height == 0) any visible items (index < hideIndex)
+    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0, hideIndex - 1) >= 0
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -7027,7 +7033,7 @@
     let msg = errorMessage(e)
     console.error(msg)
     // if spinner is active (condition mirrors svelte {#if ...} block below), show error using alert
-    if (!user || !initialized || !headerScrolled || signingIn || signingOut) _modal(msg)
+    if (!user || !initialized || !headerScrolled || renderingVisibleItems || signingIn || signingOut) _modal(msg)
   }
   // wrap fetch to throw exceptions on HTTP errors, since they (unlike XMLHTTPRequest) do not throw exceptions or even log to console using console.error (since they also do not show up in mindpage console)
   if (isClient) {
@@ -7337,7 +7343,7 @@
   <!-- <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.2.0/build/languages/swift.min.js"></script> -->
 {/if}
 
-{#if !user || !initialized || !headerScrolled || signingIn || signingOut}
+{#if !user || !initialized || !headerScrolled || renderingVisibleItems || signingIn || signingOut}
   <div class="loading">
     <Circle2 size="60" unit="px" />
   </div>
