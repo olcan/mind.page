@@ -2440,7 +2440,7 @@
           start: unpinnedIndex,
           end: Math.min(nonmatchingIndex, belowFoldIndex, hideIndexFromRanking),
           positionBased: true,
-          type: 'first unpinned',
+          type: 'unpinned',
         })
       }
       if (nonmatchingIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
@@ -2448,23 +2448,25 @@
           start: nonmatchingIndex,
           end: Math.min(belowFoldIndex, hideIndexFromRanking),
           positionBased: true,
-          type: 'first non-matching',
+          type: 'non-matching',
         })
       }
       if (belowFoldIndex < hideIndexFromRanking) {
         let lastToggleIndex = belowFoldIndex
-        const indices = [10, 30, 50] // + every 50 until past hideIndexFromRanking
+        const blocks = [10, 30, 50] // + every 50 until past hideIndexFromRanking
         do {
-          indices.push(_.last(indices) + 50)
-        } while (belowFoldIndex + _.last(indices) < hideIndexFromRanking)
-        for (const toggleIndex of indices) {
-          toggles.push({
-            start: lastToggleIndex,
-            end: Math.min(belowFoldIndex + toggleIndex, hideIndexFromRanking),
-            positionBased: true,
-            type: 'below fold',
-          })
-          lastToggleIndex = belowFoldIndex + toggleIndex
+          blocks.push(_.last(blocks) + 50)
+        } while (belowFoldIndex + _.last(blocks) < hideIndexFromRanking)
+        for (const size of blocks) {
+          const start = lastToggleIndex
+          const end = Math.min(belowFoldIndex + size, hideIndexFromRanking)
+          // split toggle if it crosses first non-matching item
+          if (start < nonmatchingIndex && end > nonmatchingIndex) {
+            toggles.push({ start, end: nonmatchingIndex, positionBased: true, type: 'below fold, matching' })
+            toggles.push({ start: nonmatchingIndex, end, positionBased: true, type: 'below fold, non-matching' })
+          } else toggles.push({ start, end, positionBased: true, type: 'below fold' })
+          // split toggle if it crosses nonmatchingIndex
+          lastToggleIndex = belowFoldIndex + size
           if (lastToggleIndex >= hideIndexFromRanking) break
         }
       }
@@ -2472,9 +2474,9 @@
       // ensure contiguity of position-based toggles up to hideIndexFromRanking
       if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking
 
-      // merge position-based toggles smaller than 10 indices, starting at belowFoldIndex
+      // merge position-based toggles smaller than 10 indices, starting at non-matching index
       for (let i = 1; i < toggles.length; i++) {
-        if (toggles[i - 1].start < belowFoldIndex) continue
+        if (toggles[i].start == nonmatchingIndex) continue // do not merge toggle at first non-matching item
         if (toggles[i - 1].end - toggles[i - 1].start < 10 || toggles[i].end - toggles[i].start < 10) {
           toggles[i - 1].end = toggles[i].end
           toggles.splice(i--, 1) // merged into last
@@ -2503,16 +2505,6 @@
       // if ranking while unfocused, retreat to minimal index
       // if (!focused) hideIndex = hideIndexMinimal
 
-      // console.debug(
-      //   'hideIndex',
-      //   hideIndex,
-      //   hideIndexFromRanking,
-      //   hideIndexForSession,
-      //   hideIndexMinimal,
-      //   belowFoldIndex,
-      //   toggles
-      // )
-
       if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
         toggles.push({
           start: hideIndexFromRanking,
@@ -2523,28 +2515,30 @@
       }
 
       // add toggle points for "extended tail times"
-      // NOTE: we do this by time to help avoid big gaps in time (that cross these thresholds)
-      // TODO: do this by BOTH position & time!
-      ;[1, 3, 7, 14, 30].forEach(daysAgo => {
-        const extendedTailTime = Date.now() - daysAgo * 24 * 3600 * 1000
-        if (extendedTailTime > tailTime) return
-        const extendedTailIndex =
-          tailIndex + items.slice(tailIndex).filter(item => item.time >= extendedTailTime).length
-        if (extendedTailIndex <= tailIndex || extendedTailIndex >= items.length) return
+      // we do this by time to have more intuitive toggles, but split further every 50 items as needed
+      const blocks = [1, 3, 7, 14, 30] // + every 30d until past oldest item
+      do {
+        blocks.push(_.last(blocks) + 30)
+      } while (Date.now() - _.last(blocks) * 24 * 3600 * 1000 >= oldestTime)
+      for (let j=0; j < blocks.length; ++j) {
+        const extendedTailTime = Date.now() - blocks[j] * 24 * 3600 * 1000
+        if (extendedTailTime >= tailTime) continue
+        let extendedTailIndex = _.findIndex(items, item => item.time < extendedTailTime, tailIndex)
+        // restrict each toggle to 50 items max
+        if (extendedTailIndex - tailIndex > 50) {
+          extendedTailIndex = tailIndex + 50
+          j-- // stay in current block
+        }
+        if (extendedTailIndex < 0) extendedTailIndex = items.length
         toggles.push({
           start: tailIndex,
           end: extendedTailIndex,
         })
         tailIndex = extendedTailIndex
-        tailTime = items[extendedTailIndex].time
-      })
-      // add final toggle point for all remaining items
-      if (tailIndex < items.length) {
-        toggles.push({
-          start: tailIndex,
-          end: items.length,
-        })
+        tailTime = items[extendedTailIndex]?.time || oldestTime
+        if (tailIndex == items.length) break
       }
+
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
