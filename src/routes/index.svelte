@@ -5688,7 +5688,7 @@
             {
               confirm: 'Try Again',
               background: 'confirm',
-              onConfirm: () => location.reload(),
+              onConfirm: signIn
             }
           )
         })
