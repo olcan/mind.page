@@ -297,7 +297,8 @@
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
-    window['__item'] = item // for debugging only
+    window['__item'] = item // internal item (for debugging only)
+    window['__items'] = () => items // internal items (for debugging only)
     window['_items'] = _items
     window['_exists'] = _exists
     window['_create'] = _create
@@ -1610,20 +1611,20 @@
           columnHeights[lastColumn] += 40 // .section-separator height including margins
         }
       }
-      // mark item as aboveTheFold if it is pinned or item is visible (at least partially) on first screen
+      // mark item as aboveFold if it is pinned or item is visible (at least partially) on first screen
       // if item heights are not available, then we use item index in column and assume top 5 are above fold
-      item.aboveTheFold =
+      item.aboveFold =
         item.pinned || (item.height ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5)
-      // if (item.aboveTheFold)
+      // if (item.aboveFold)
       //   console.debug(
-      //     'aboveTheFold',
+      //     'aboveFold',
       //     index,
       //     item.height,
       //     columnHeights[item.column],
       //     outerHeight,
       //     columnItemCount[item.column]
       //   )
-      // // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveTheFold
+      // // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveFold
       // item.prominence = item.pinned
       //   ? 0
       //   : totalItemHeight > 0
@@ -1655,12 +1656,7 @@
       columnLastItem[item.column] = index
     })
 
-    // indicate if we are still rendering any visible items (index < hideIndex)
-    // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
-    // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
-    // finally note we allow editing items in all cases since those items are not really visible on page
-    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
-    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
+    checkIfRenderingVisibleItems()
 
     // as soon as header is available, scroll down to header and set flag
     if (headerdiv && !headerScrolled) {
@@ -2194,9 +2190,8 @@
         if (idMatchTerms.length > 0) idMatchItemIndices.push(index)
         item.matchingTerms = _.uniq(item.matchingTerms) // can have duplicates (e.g. regex:*, id:*, ...)
 
-        // match "secondary terms" ("context terms" against expanded tags, non-tags against item deps/dependents)
-        // skip secondary terms (for ranking and highlighting) for listing item
-        // because it just feels like a distraction in that particular case
+        // match "secondary terms" ("context terms" against expanded tags, terms against item deps/dependents)
+        // skip secondary terms (for ranking and highlighting) for listing item to avoid distraction
         item.matchingTermsSecondary = item.listing
           ? []
           : _.uniq(
@@ -2300,9 +2295,7 @@
       }
       updateItemLayout()
     } else {
-      // insert dummy item to determine "tail" of items that can be hidden behind a toggle by default
-      // tail is defined as any items ranked below dummy item, where id == null and time == now
-      // tail includes items ranked purely by time and any other criteria below item.dummy (see below)
+      // insert dummy item to determine "tail" of items ranked _purely_ by time, i.e. below dummy w/ time==now
       // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
       items.push({
         dotted: false,
@@ -2325,10 +2318,10 @@
         labelMatch: false,
         prefixMatch: false,
         matchingTerms: [],
-        id: null, // indicates dummy
         matchingTermsSecondary: [],
         missingTags: [],
-        time: now + 1000 /* dominate any offsets used above */,
+        time: now + 1000, // +1000 to dominate any time offsets used above
+        id: null, // used below to find dummy after ranking
       })
 
       // returns position of minimum non-negative number, or -1 if none found
@@ -2400,11 +2393,9 @@
           b.prefixMatch - a.prefixMatch ||
           // # of matching words/tags from query
           b.matchingTerms.length - a.matchingTerms.length ||
-          // dummy item, below which is considered "tail" (see above)
-          Number(b.id === null) - Number(a.id === null) ||
           // # of matching secondary words from query
           b.matchingTermsSecondary.length - a.matchingTermsSecondary.length ||
-          // missing tag prefixes
+          // # of missing tags
           b.missingTags.length - a.missingTags.length ||
           // time (most recent first)
           b.time - a.time
@@ -2426,9 +2417,11 @@
       items.splice(tailIndex, 1)
       tailIndex = Math.max(tailIndex, _.findLastIndex(items, needs_prominence) + 1)
       let tailTime = items[tailIndex]?.time || 0
+      if (_.findIndex(items, (item, i) => item.time < (items[i + 1]?.time || 0), tailIndex) >= 0)
+        console.error('items are not ordered by time above tail index', tailIndex)
       hideIndexFromRanking = tailIndex
 
-      // update layout (used below, e.g. aboveTheFold, editingItems, etc)
+      // update layout (used below, e.g. aboveFold, editingItems, etc)
       updateItemLayout()
       lastEditorChangeTime = Infinity // force minimum wait for next change
 
@@ -2437,35 +2430,51 @@
 
       // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
       // we include target + everything included above in hideIndexFromRanking to ensure prominence
-      // we also consider special cutoffs for last unpinned item, and first below-fold item
-      let unpinnedIndex = _.findLastIndex(items, item => item.pinned || needs_prominence(item)) + 1
-      // let belowFoldIndex = _.findLastIndex(items, item => item.aboveTheFold || needs_prominence(item)) + 1
-      let belowFoldIndex = _.findIndex(items, item => !item.aboveTheFold && !needs_prominence(item)) + 1
-      if (unpinnedIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
+      // we also consider special cutoffs for first unpinned item, first non-matching item, and first below-fold item
+      let unpinnedIndex = _.findIndex(items, item => !item.pinned && !needs_prominence(item))
+      let nonmatchingIndex = _.findIndex(items, item => !item.pinned && !item.matching && !needs_prominence(item))
+      // let belowFoldIndex = _.findLastIndex(items, item => item.aboveFold || needs_prominence(item)) + 1
+      let belowFoldIndex = _.findIndex(items, item => !item.aboveFold && !needs_prominence(item))
+      if (unpinnedIndex < Math.min(nonmatchingIndex, belowFoldIndex, hideIndexFromRanking)) {
         toggles.push({
           start: unpinnedIndex,
+          end: Math.min(nonmatchingIndex, belowFoldIndex, hideIndexFromRanking),
+          positionBased: true,
+          type: 'first unpinned',
+        })
+      }
+      if (nonmatchingIndex < Math.min(belowFoldIndex, hideIndexFromRanking)) {
+        toggles.push({
+          start: nonmatchingIndex,
           end: Math.min(belowFoldIndex, hideIndexFromRanking),
           positionBased: true,
+          type: 'first non-matching',
         })
       }
       if (belowFoldIndex < hideIndexFromRanking) {
         let lastToggleIndex = belowFoldIndex
-        ;[10, 30, 50, 100, 200, 500, 1000].forEach(toggleIndex => {
-          if (lastToggleIndex >= hideIndexFromRanking) return
+        const indices = [10, 30, 50] // + every 50 until past hideIndexFromRanking
+        do {
+          indices.push(_.last(indices) + 50)
+        } while (belowFoldIndex + _.last(indices) < hideIndexFromRanking)
+        for (const toggleIndex of indices) {
           toggles.push({
             start: lastToggleIndex,
             end: Math.min(belowFoldIndex + toggleIndex, hideIndexFromRanking),
             positionBased: true,
+            type: 'below fold',
           })
           lastToggleIndex = belowFoldIndex + toggleIndex
-        })
+          if (lastToggleIndex >= hideIndexFromRanking) break
+        }
       }
 
       // ensure contiguity of position-based toggles up to hideIndexFromRanking
       if (toggles.length > 0) toggles[toggles.length - 1].end = hideIndexFromRanking
 
-      // merge position-based toggles smaller than 10 indices
+      // merge position-based toggles smaller than 10 indices, starting at belowFoldIndex
       for (let i = 1; i < toggles.length; i++) {
+        if (toggles[i - 1].start < belowFoldIndex) continue
         if (toggles[i - 1].end - toggles[i - 1].start < 10 || toggles[i].end - toggles[i].start < 10) {
           toggles[i - 1].end = toggles[i].end
           toggles.splice(i--, 1) // merged into last
@@ -2494,6 +2503,16 @@
       // if ranking while unfocused, retreat to minimal index
       // if (!focused) hideIndex = hideIndexMinimal
 
+      // console.debug(
+      //   'hideIndex',
+      //   hideIndex,
+      //   hideIndexFromRanking,
+      //   hideIndexForSession,
+      //   hideIndexMinimal,
+      //   belowFoldIndex,
+      //   toggles
+      // )
+
       if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
         toggles.push({
           start: hideIndexFromRanking,
@@ -2505,6 +2524,7 @@
 
       // add toggle points for "extended tail times"
       // NOTE: we do this by time to help avoid big gaps in time (that cross these thresholds)
+      // TODO: do this by BOTH position & time!
       ;[1, 3, 7, 14, 30].forEach(daysAgo => {
         const extendedTailTime = Date.now() - daysAgo * 24 * 3600 * 1000
         if (extendedTailTime > tailTime) return
@@ -2518,7 +2538,7 @@
         tailIndex = extendedTailIndex
         tailTime = items[extendedTailIndex].time
       })
-      // add final toggle point for all items
+      // add final toggle point for all remaining items
       if (tailIndex < items.length) {
         toggles.push({
           start: tailIndex,
@@ -2528,12 +2548,9 @@
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
-    // indicate if we are still rendering any visible items (index < hideIndex)
-    // note this needs to be done in both updateItemLayout and onEditorChange where hideIndex is updated
-    // also note if we test for height==0, then pending elems (math, img, script) can still cause shifting
-    // finally note we allow editing items in all cases since those items are not really visible on page
-    renderingVisibleItems = _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
-    // renderingVisibleItems = _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
+    // note this check is already done in updateItemLayout but is also necessary here in case hideIndex was increased
+    // to avoid displaying .loading overlay multiple times, we only allow a one-way change unless query has changed
+    if (renderingVisibleItems || (text && editorTextModified)) checkIfRenderingVisibleItems()
 
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
@@ -2597,8 +2614,18 @@
     }
   }
 
+  function checkIfRenderingVisibleItems() {
+    // this needs to be done wherever either item layout OR hideIndex is updated
+    // we test for height==0 (vs item.rendering) so that loading overlay does not wait for images/scripts/math/etc
+    // we allow editing items since the rendered item (item.elem) is not visible on page
+    // we would also allow below-fold items, but unfortunately that is not reliable when heights are unknown
+    renderingVisibleItems =
+      hideIndex > 0 && _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
+  }
+
   function toggleItems(index: number) {
     hideIndex = index
+    checkIfRenderingVisibleItems()
     replaceState(Object.assign(history.state, { hideIndex }))
   }
 
@@ -5395,7 +5422,7 @@
     // state from updateItemLayout
     item.index = index
     item.lastIndex = index
-    item.aboveTheFold = false
+    item.aboveFold = false
     // item.prominence = 0;
     item.leader = false
     item.mover = false
@@ -5864,7 +5891,7 @@
       // periodic macro expansion task ...
       const macroExpansionIdleTime = 250 // minimum idle time between scans/expansions
       const macroExpansionQuantum = 25 // time for macros in single quantum (before going idle)
-      const slowMacroWarningThreshold = 50 // warn about macros taking longer than this
+      const slowMacroWarningThreshold = 250 // warn about macros taking longer than this
       let firstPassExpansionDone = false
       function expandMacros() {
         if (
@@ -7340,17 +7367,17 @@
                 timeOutOfOrder={item.timeOutOfOrder}
                 depsString={item.depsString}
                 dependentsString={item.dependentsString}
-                aboveTheFold={item.aboveTheFold}
+                aboveFold={item.aboveFold}
                 leader={item.leader}
                 runnable={item.runnable}
               />
               {#if item.nextColumn >= 0 && item.index < hideIndex}
                 <div class="section-separator">
                   <hr />
-                  {fixed ? '' : item.index + 2}<span class="arrows">{item.arrows}</span
-                  >{#if item.nextItemInColumn >= 0 && item.nextItemInColumn < hideIndex}
+                  <span class="arrows">{item.arrows}</span>{fixed ? '' : item.index + 2}
+                  {#if item.nextItemInColumn >= 0 && item.nextItemInColumn <= hideIndex}
                     &nbsp;
-                    {fixed ? '' : item.nextItemInColumn + 1}<span class="arrows">↓</span>
+                    <span class="arrows">↓</span>{fixed ? '' : item.nextItemInColumn + 1}
                   {/if}
                   <hr />
                 </div>
@@ -8063,7 +8090,8 @@
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
-    font-family: 'JetBrains Mono', monospace;
+    /* font-family: 'JetBrains Mono', monospace; */
+    font-family: monospace; /* down arrow looks too large w/ JetBrains Mono */
     font-weight: 300;
     font-size: 20px;
   }

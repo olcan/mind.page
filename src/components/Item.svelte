@@ -51,7 +51,7 @@
   export let timeOutOfOrder: boolean
   export let depsString: string
   export let dependentsString: string
-  export let aboveTheFold: boolean
+  export let aboveFold: boolean
   export let leader: boolean
   export let runnable: boolean
 
@@ -966,7 +966,7 @@
     const mindboxModifiedAtDispatch = window['_mindboxLastModified']
     const highlightDispatchIndex = highlightDispatchCount++
     // NOTE: because highlights can be out-of-order, we always highlight priority items
-    const maxHighlightsPerTerm = aboveTheFold ? Infinity : Infinity // no limit for now
+    const maxHighlightsPerTerm = aboveFold ? Infinity : Infinity // no limit for now
 
     // remove previous highlights or related elements
     itemdiv.querySelectorAll('span.highlight').forEach((span: HTMLElement) => {
@@ -1168,7 +1168,7 @@
         node.nodeValue = text
       }
     }
-    // if (aboveTheFold) highlightClosure();
+    // if (aboveFold) highlightClosure();
     // else setTimeout(highlightClosure);
     setTimeout(highlightClosure)
 
