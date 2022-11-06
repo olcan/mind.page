@@ -2431,10 +2431,11 @@
       // when hideIndexFromRanking is large, we use position-based toggle points to reduce unnecessary computation
       // we include target + everything included above in hideIndexFromRanking to ensure prominence
       // we also consider special cutoffs for first unpinned item, first non-matching item, and first below-fold item
-      let unpinnedIndex = _.findIndex(items, item => !item.pinned && !needs_prominence(item))
-      let nonmatchingIndex = _.findIndex(items, item => !item.pinned && !item.matching && !needs_prominence(item))
+      const find_index = (pred, start = 0) => (i => (i >= 0 ? i : items.length))(_.findIndex(items, pred, start))
+      let unpinnedIndex = find_index(item => !item.pinned && !needs_prominence(item))
+      let nonmatchingIndex = find_index(item => !item.pinned && !item.matching && !needs_prominence(item))
       // let belowFoldIndex = _.findLastIndex(items, item => item.aboveFold || needs_prominence(item)) + 1
-      let belowFoldIndex = _.findIndex(items, item => !item.aboveFold && !needs_prominence(item))
+      let belowFoldIndex = find_index(item => !item.aboveFold && !needs_prominence(item))
       if (unpinnedIndex < Math.min(nonmatchingIndex, belowFoldIndex, hideIndexFromRanking)) {
         toggles.push({
           start: unpinnedIndex,
@@ -2492,10 +2493,7 @@
       // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
       // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
       // otherwise touched items could be arbitrarily low in ranking and we would have to show many untouched items
-      hideIndexForSession = Math.max(
-        hideIndexFromRanking, // in case findIndex returns -1
-        _.findIndex(items, item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
-      )
+      hideIndexForSession = find_index(item => !item.pinned && item.time < sessionTime, hideIndexFromRanking)
 
       // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
       const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
@@ -2520,7 +2518,7 @@
       do {
         blocks.push(_.last(blocks) + 30)
       } while (Date.now() - _.last(blocks) * 24 * 3600 * 1000 >= oldestTime)
-      for (let j=0; j < blocks.length; ++j) {
+      for (let j = 0; j < blocks.length; ++j) {
         const extendedTailTime = Date.now() - blocks[j] * 24 * 3600 * 1000
         if (extendedTailTime >= tailTime) continue
         let extendedTailIndex = _.findIndex(items, item => item.time < extendedTailTime, tailIndex)
@@ -5688,7 +5686,7 @@
             {
               confirm: 'Try Again',
               background: 'confirm',
-              onConfirm: signIn
+              onConfirm: signIn,
             }
           )
         })
