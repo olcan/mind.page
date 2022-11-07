@@ -1336,21 +1336,24 @@
 
     // return array of uploaded private image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
     // returns promise for urls or blobs as they require download and decryption
+    // can be restricted to specified srcs if options.srcs is provided
     images(options = {}) {
-      let srcs = _.uniq(
-        Array.from(
-          (
-            this.text
-              .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
-              // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
-              .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-              .replace(/`.*?`/g, skipEscaped('')) as any
-          ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
-          m => m[1]
-        ).map(src =>
-          src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
-        )
-      ).filter(src => src.match(new RegExp('^(?:' + user.uid + '\\/images\\/)?[0-9a-fA-F]+$')))
+      const srcs =
+        options['srcs'] ??
+        _.uniq(
+          Array.from(
+            (
+              this.text
+                .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
+                // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
+                .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
+                .replace(/`.*?`/g, skipEscaped('')) as any
+            ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
+            m => m[1]
+          ).map(src =>
+            src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
+          )
+        ).filter(src => src.match(new RegExp('^(?:' + user.uid + '\\/images\\/)?[0-9a-fA-F]+$')))
       const output = options['output'] || 'src'
       if (!['src', 'url', 'blob'].includes(output)) {
         console.error(`images: invalid output '${output}', should be src, url, or blob`)
