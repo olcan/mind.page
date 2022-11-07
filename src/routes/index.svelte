@@ -1359,7 +1359,7 @@
       if (output == 'src') return srcs
       return Promise.all(
         srcs.map(src => {
-          // prefix {uid}/images/ automatically for hex src
+          // prefix <uid>/images/ automatically for hex src
           if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
           return new Promise((resolve, reject) => {
             if (images[src]) {
@@ -1773,9 +1773,17 @@
     })
   }
   function onImageRendering(src: string): string {
-    // prefix {uid}/images/ automatically for hex src
-    if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
-    if (!src.startsWith(user.uid + '/images/') && !src.startsWith('anonymous/images/')) return src // external image
+    // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
+    if (src.match(/^[0-9a-fA-F]+$/)) {
+      if (fixed) src = `${sharer}/uploads/public/images/${src}`
+      else src = `${user.uid}/images/${src}`
+    }
+    if (
+      !src.startsWith(`${user.uid}/images`) &&
+      !src.startsWith('anonymous/images/') &&
+      !src.startsWith(`${sharer}/uploads/public/images/`)
+    )
+      return src // external image
     if (images[src]) return images[src] // image ready
     return '/loading.gif' // image must be loaded
   }
@@ -1784,18 +1792,21 @@
     // console.debug("image rendered", img.src);
     if (!img.hasAttribute('_src')) return Promise.resolve() // nothing to do
     let src = img.getAttribute('_src')
-    // prefix {uid}/images/ automatically for hex src
-    if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
+    // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
+    if (src.match(/^[0-9a-fA-F]+$/)) {
+      if (fixed) src = `${sharer}/uploads/public/images/${src}`
+      else src = `${user.uid}/images/${src}`
+    }
     if (images[src]) {
       if (img.src != images[src]) img.src = images[src]
       img.removeAttribute('_loading')
       return Promise.resolve()
     }
     return new Promise((resolve, reject) => {
-      // image must be downloaded and decrypted if user is not anonymous
+      // image must be downloaded & decrypted if user is not anonymous and image is not public
       getDownloadURL(ref(getStorage(firebase), src))
         .then(url => {
-          if (src.startsWith('anonymous/')) {
+          if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
             img.src = url
             img.removeAttribute('_loading')
             images[src] = img.src // add to cache
@@ -1803,7 +1814,7 @@
           } else {
             // download data
             const start = Date.now()
-            // console.debug(`downloading encrypted image ${src} ...`);
+            // console.debug(`downloading encrypted image ${src} from url ${url} ...`)
             let xhr = new XMLHttpRequest()
             xhr.responseType = 'blob'
             xhr.onload = event => {
