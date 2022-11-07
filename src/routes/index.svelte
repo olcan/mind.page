@@ -1350,7 +1350,7 @@
         ).map(src =>
           src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
         )
-      ).filter(src => src.match(/^\d+$/) || src.startsWith(user.uid + '/images/'))
+      ).filter(src => src.match(/^[0-9a-fA-F]+$/) || src.startsWith(user.uid + '/images/'))
       const output = options['output'] || 'src'
       if (!['src', 'url', 'blob'].includes(output)) {
         console.error(`images: invalid output '${output}', should be src, url, or blob`)
