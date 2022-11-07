@@ -2409,6 +2409,7 @@
       // note for editing items, log items which are edited "in place" and can be quite far down
       const needs_prominence = item =>
         item.target ||
+        item.target_context ||
         item.editing ||
         item.hasError ||
         item.missingTags.length ||
@@ -2541,7 +2542,7 @@
         if (tailIndex == items.length) break
       }
 
-      // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
+      console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
     // note this check is already done in updateItemLayout but is also necessary here in case hideIndex was increased
