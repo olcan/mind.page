@@ -515,11 +515,11 @@
       this._update_attr_async('shared')
     }
 
-    // dispatch update to this.attr[prop] iff it differs from this[prop]
+    // dispatch task to update to this.attr[prop] iff it differs from this[prop]
     // note dispatch allows changes to be combined, batched, cancel out, etc
     // note changes can happen in both directions, e.g. remote changes to this.attr[prop] -> this[prop]
     _update_attr_async(prop) {
-      this.dispatch(() => {
+      this.dispatch_task('_update_attr_async.' + prop, () => {
         if (!_exists(this.id)) return // item deleted, just cancel
         const _item = item(this.id)
         _item.attr ??= {}
@@ -582,7 +582,7 @@
     // e.g. item.local_store.hello = "hello world" // saved automatically
     // asynchronous changes must be saved manually via save_local_store
     get local_store(): object {
-      setTimeout(() => this.save_local_store())
+      this.save_local_store()
       return this._local_store
     }
 
@@ -600,33 +600,40 @@
     // saves item.local_store to localStorage
     // removes from localStorage if item or item.local_store is missing, or if object is empty
     // saving changes to local_store triggers re-render in case rendering is affected
-    save_local_store({ invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
-      let __item = item(this.id)
-      // retry every second until item is saved
-      if (!__item.savedId) {
-        setTimeout(() => this.save_local_store(), 1000)
-        return
-      }
-      const key = 'mindpage_item_store_' + __item.savedId
-      const modified = !_.isEqual(__item.local_store, JSON.parse(localStorage.getItem(key)) || {})
-      if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-      if (_.isEmpty(__item.local_store)) localStorage.removeItem(key)
-      else if (modified) localStorage.setItem(key, JSON.stringify(__item.local_store))
+    // always dispatched as a task with configurable delay (default 0)
+    save_local_store({ delay = 0, invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
+      this.dispatch_task(
+        'save_local_store',
+        () => {
+          let __item = item(this.id)
+          // retry every second until item is saved
+          if (!__item.savedId) {
+            this.save_local_store({ delay: 1000, invalidate_elem_cache, force_render, render_delay })
+            return
+          }
+          const key = 'mindpage_item_store_' + __item.savedId
+          const modified = !_.isEqual(__item.local_store, JSON.parse(localStorage.getItem(key)) || {})
+          if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
+          if (_.isEmpty(__item.local_store)) localStorage.removeItem(key)
+          else if (modified) localStorage.setItem(key, JSON.stringify(__item.local_store))
 
-      // if modified, invoke _on_local_store_change(id) on all listener (or self) items
-      if (modified) {
-        items.forEach(item => {
-          if (!item.listen && item.id != this.id) return // must be listener or self
-          if (!itemDefinesFunction(item, '_on_local_store_change')) return
-          Promise.resolve(
-            _item(item.id).eval(`_on_local_store_change('${this.id}')`, {
-              trigger: item.listen ? 'listen' : 'change',
-              async: item.deepasync, // run async if item is async or has async deps
-              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          // if modified, invoke _on_local_store_change(id) on all listener (or self) items
+          if (modified) {
+            items.forEach(item => {
+              if (!item.listen && item.id != this.id) return // must be listener or self
+              if (!itemDefinesFunction(item, '_on_local_store_change')) return
+              Promise.resolve(
+                _item(item.id).eval(`_on_local_store_change('${this.id}')`, {
+                  trigger: item.listen ? 'listen' : 'change',
+                  async: item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                })
+              ).catch(e => {}) // already logged
             })
-          ).catch(e => {}) // already logged
-        })
-      }
+          }
+        },
+        delay
+      )
     }
 
     // "global" key-value store backed by firebase via hidden items named "global_store_<id>"
@@ -635,7 +642,7 @@
     // asynchronous changes must be saved manually via save_local_store
     // redirects to local_store._anonymous_global_store for anonymous user
     get global_store(): object {
-      setTimeout(() => this.save_global_store())
+      this.save_global_store()
       return this._global_store
     }
 
@@ -657,43 +664,50 @@
     // saves item.global_store to firebase
     // deletes from firebase if item or item.global_store is missing, or if object is empty
     // saving changes to global_store triggers re-render in case rendering is affected
+    // always dispatched as a task with configurable delay (default 0)
     // redirects to save_local_store() for anonymous user
-    save_global_store({ invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
-      let __item = item(this.id)
-      // retry every second until item is saved
-      if (!__item.savedId) {
-        setTimeout(() => this.save_global_store(), 1000)
-        return
-      }
-      let modified = false
-      if (anonymous) {
-        // emulate global store using local store
-        modified = !_.isEqual(__item.global_store, this.local_store['_anonymous_global_store'] || {})
-        if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-        if (_.isEmpty(__item.global_store)) delete this.local_store['_anonymous_global_store']
-        else if (modified) this.local_store['_anonymous_global_store'] = _.cloneDeep(__item.global_store)
-      } else {
-        const name = 'global_store_' + __item.savedId
-        modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
-        if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-        if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
-        else if (modified) saveHiddenItem(name, _.cloneDeep(__item.global_store))
-      }
+    save_global_store({ delay = 0, invalidate_elem_cache = true, force_render = true, render_delay = 1000 } = {}) {
+      this.dispatch_task(
+        'save_global_store',
+        () => {
+          let __item = item(this.id)
+          // retry every second until item is saved
+          if (!__item.savedId) {
+            this.save_global_store({ delay: 1000, invalidate_elem_cache, force_render, render_delay })
+            return
+          }
+          let modified = false
+          if (anonymous) {
+            // emulate global store using local store
+            modified = !_.isEqual(__item.global_store, this.local_store['_anonymous_global_store'] || {})
+            if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
+            if (_.isEmpty(__item.global_store)) delete this.local_store['_anonymous_global_store']
+            else if (modified) this.local_store['_anonymous_global_store'] = _.cloneDeep(__item.global_store)
+          } else {
+            const name = 'global_store_' + __item.savedId
+            modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
+            if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
+            if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
+            else if (modified) saveHiddenItem(name, _.cloneDeep(__item.global_store))
+          }
 
-      // if modified, invoke _on_global_store_change(id, false) on all listener (or self) items
-      if (modified) {
-        items.forEach(item => {
-          if (!item.listen && item.id != this.id) return // must be listener or self
-          if (!itemDefinesFunction(item, '_on_global_store_change')) return
-          Promise.resolve(
-            _item(item.id).eval(`_on_global_store_change('${this.id}',false)`, {
-              trigger: item.listen ? 'listen' : 'change',
-              async: item.deepasync, // run async if item is async or has async deps
-              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          // if modified, invoke _on_global_store_change(id, false) on all listener (or self) items
+          if (modified) {
+            items.forEach(item => {
+              if (!item.listen && item.id != this.id) return // must be listener or self
+              if (!itemDefinesFunction(item, '_on_global_store_change')) return
+              Promise.resolve(
+                _item(item.id).eval(`_on_global_store_change('${this.id}',false)`, {
+                  trigger: item.listen ? 'listen' : 'change',
+                  async: item.deepasync, // run async if item is async or has async deps
+                  async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                })
+              ).catch(e => {}) // already logged
             })
-          ).catch(e => {}) // already logged
-        })
-      }
+          }
+        },
+        delay
+      )
     }
 
     // separate store used for debugging
