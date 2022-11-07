@@ -119,7 +119,9 @@
       item = items[indexFromId.get(ids[0])]
     } else {
       // item is specified by id, with optional id: prefix to be dropped
-      const index = indexFromId.get(name.startsWith('id:') ? name.substring(3) : name)
+      let id = name.startsWith('id:') ? name.substring(3) : name
+      id = tempIdFromSavedId.get(id) ?? id // convert temporary id
+      const index = indexFromId.get(id)
       if (index === undefined) {
         if (!silent) console.error(`_item '${name}' not found`)
         return null
@@ -134,12 +136,14 @@
   function _exists(name: string, allow_multiple = true): any {
     if (!name) return false
     if (name.startsWith('#')) {
-      // label
+      // item is specified by unique label (i.e. name)
       const ids = idsFromLabel.get(name.toLowerCase())
       return allow_multiple ? ids?.length > 0 : ids?.length == 1
     } else {
-      // id
-      const index = indexFromId.get(name.startsWith('id:') ? name.substring(3) : name)
+      // item is specified by id, with optional id: prefix to be dropped
+      let id = name.startsWith('id:') ? name.substring(3) : name
+      id = tempIdFromSavedId.get(id) ?? id // convert temporary id
+      const index = indexFromId.get(id)
       return index !== undefined
     }
   }
@@ -6208,7 +6212,7 @@
                     }
                     // NOTE: remote remove is similar to deleteItem
                     // NOTE: document may be under temporary id if it was added locally
-                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
                     if (index === undefined) return // nothing to remove
                     let item = items[index]
                     // console.debug('removing item', item.name)
@@ -6251,7 +6255,7 @@
                     }
                     // NOTE: remote modify is similar to _write without saving
                     // NOTE: document may be under temporary id if it was added locally
-                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) || doc.id)
+                    let index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
                     if (index === undefined) return // nothing to modify
                     let item = items[index]
                     item.time = item.savedTime = savedItem.time
@@ -7011,7 +7015,7 @@
       // warn if owner <id> (always saved_id for global_store) is missing locally
       // note owner item (not the hidden item itself) can be under temp id locally
       // also item should exist before its global_store does
-      id = tempIdFromSavedId.get(id) || id
+      id = tempIdFromSavedId.get(id) ?? id
       if (!_exists(id)) {
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
         return
