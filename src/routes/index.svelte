@@ -2542,7 +2542,7 @@
         if (tailIndex == items.length) break
       }
 
-      console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
+      // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
     }
 
     // note this check is already done in updateItemLayout but is also necessary here in case hideIndex was increased
