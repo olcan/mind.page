@@ -1334,7 +1334,7 @@
       return this.promise(resolve => this.dispatch(resolve, ms))
     }
 
-    // return array of uploaded image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
+    // return array of uploaded private image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
     // returns promise for urls or blobs as they require download and decryption
     images(options = {}) {
       let srcs = _.uniq(
@@ -1350,7 +1350,7 @@
         ).map(src =>
           src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
         )
-      ).filter(src => src.match(/^[0-9a-fA-F]+$/) || src.startsWith(user.uid + '/images/'))
+      ).filter(src => src.match(new RegExp('^(?:' + user.uid + '\\/images\\/)?[0-9a-fA-F]+$')))
       const output = options['output'] || 'src'
       if (!['src', 'url', 'blob'].includes(output)) {
         console.error(`images: invalid output '${output}', should be src, url, or blob`)
@@ -1739,6 +1739,7 @@
   }
   function onImageRendering(src: string): string {
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
+    src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1') // drop existing prefix
     if (src.match(/^[0-9a-fA-F]+$/)) {
       if (fixed) src = `${sharer}/uploads/public/images/${src}`
       else src = `${user.uid}/images/${src}`
@@ -1758,6 +1759,7 @@
     if (!img.hasAttribute('_src')) return Promise.resolve() // nothing to do
     let src = img.getAttribute('_src')
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
+    src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1') // drop existing prefix
     if (src.match(/^[0-9a-fA-F]+$/)) {
       if (fixed) src = `${sharer}/uploads/public/images/${src}`
       else src = `${user.uid}/images/${src}`
