@@ -2074,7 +2074,7 @@
     border-spacing: 0;
   }
   :global(.item table :is(td, th)) {
-    padding: 0 5px;
+    padding: 1px 5px;
   }
   :global(.item table :is(td, th)) {
     vertical-align: top;
