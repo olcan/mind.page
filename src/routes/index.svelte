@@ -35,7 +35,7 @@
     orderBy,
     onSnapshot,
   } = firebase?.firestore ?? {}
-  const { getStorage, ref, getDownloadURL, uploadBytes } = firebase?.storage ?? {}
+  const { getStorage, ref, uploadBytes, getBlob } = firebase?.storage ?? {}
 
   const _ = globalThis['_'] // imported in client.ts
   import { Jumper } from 'svelte-loading-spinners'
@@ -1361,73 +1361,38 @@
         srcs.map(src => {
           // prefix <uid>/images/ automatically for hex src
           if (src.match(/^[0-9a-fA-F]+$/)) src = user.uid + '/images/' + src
-          return new Promise((resolve, reject) => {
-            if (images[src]) {
-              // already available locally, convert to blob
-              const url = images[src]
-              if (output == 'url') {
-                resolve(url)
-                return
-              }
-              let start = Date.now()
-              let xhr = new XMLHttpRequest()
-              xhr.responseType = 'blob'
-              xhr.onload = event => {
-                const blob = xhr.response
-                console.debug(`retrieved image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`)
-                resolve(blob)
-              }
-              xhr.onerror = console.error
-              xhr.open('GET', url)
-              xhr.send()
-              return
+          const start = Date.now()
+          if (images[src]) {
+            const url = images[src]
+            return output == 'url' ? url : fetch(url).then(r => r.blob()) // local fetch should be fast
+          }
+          return getBlob(ref(getStorage(firebase), src)).then(blob => {
+            if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
+              // user is anonymous OR image is public, so we can use blob as is ...
+              console.debug(
+                `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
+              )
+              return output == 'blob' ? blob : (images[src] = URL.createObjectURL(blob))
+            } else {
+              // we need to decrypt the image blob using personal secret ...
+              return blob.arrayBuffer().then(buffer => {
+                const decrypt_start = Date.now()
+                return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
+                  let type = blob.type
+                  if (type == 'application/octet-stream') {
+                    // image type is prefixed (older images only)
+                    type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                    array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+                  }
+                  blob = new Blob([array], { type }) // decrypted blob
+                  console.debug(
+                    `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
+                      `(decryption took ${Date.now() - decrypt_start}ms)`
+                  )
+                  return output == 'blob' ? blob : (images[src] = URL.createObjectURL(blob))
+                })
+              })
             }
-            getDownloadURL(ref(getStorage(firebase), src))
-              .then(url => {
-                let start = Date.now()
-                let xhr = new XMLHttpRequest()
-                xhr.responseType = 'blob'
-                xhr.onload = event => {
-                  let blob = xhr.response
-                  console.debug(`downloaded image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`)
-                  if (src.startsWith('anonymous/')) {
-                    resolve(output == 'blob' ? blob : URL.createObjectURL(blob))
-                    return
-                  }
-                  start = Date.now()
-                  const reader = new FileReader()
-                  reader.readAsArrayBuffer(blob)
-                  reader.onload = e => {
-                    const cipher = new Uint8Array(e.target.result as ArrayBuffer)
-                    decrypt_bytes(cipher)
-                      .then((array: Uint8Array) => {
-                        let type = blob.type
-                        if (type == 'application/octet-stream') {
-                          // image type is prefixed (older images only)
-                          type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
-                          array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
-                        }
-                        blob = new Blob([array], { type }) // decrypted blob
-                        console.debug(
-                          `decrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms`
-                        )
-                        resolve(output == 'blob' ? blob : URL.createObjectURL(blob))
-                      })
-                      .catch(e => {
-                        console.error(e)
-                        reject(e)
-                      })
-                  }
-                  reader.onerror = console.error
-                }
-                xhr.onerror = console.error
-                xhr.open('GET', url)
-                xhr.send()
-              })
-              .catch(e => {
-                console.error(e)
-                reject(e)
-              })
           })
         })
       )
@@ -1800,64 +1765,42 @@
     if (images[src]) {
       if (img.src != images[src]) img.src = images[src]
       img.removeAttribute('_loading')
-      return Promise.resolve()
+      return img.src // return url directly, no need to wrap in a promise
     }
-    return new Promise((resolve, reject) => {
-      // image must be downloaded & decrypted if user is not anonymous and image is not public
-      getDownloadURL(ref(getStorage(firebase), src))
-        .then(url => {
-          if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
-            img.src = url
+    const start = Date.now()
+    return getBlob(ref(getStorage(firebase), src)).then(blob => {
+      if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
+        // user is anonymous OR image is public, so we can use blob as is ...
+        console.debug(
+          `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
+        )
+        img.src = URL.createObjectURL(blob)
+        img.removeAttribute('_loading')
+        images[src] = img.src // add to cache
+        return img.src
+      } else {
+        // we need to decrypt the image blob using personal secret ...
+        return blob.arrayBuffer().then(buffer => {
+          const decrypt_start = Date.now()
+          return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
+            let type = blob.type
+            if (type == 'application/octet-stream') {
+              // image type is prefixed (older images only)
+              type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+              array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+            }
+            blob = new Blob([array], { type }) // decrypted blob
+            console.debug(
+              `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
+                `(decryption took ${Date.now() - decrypt_start}ms)`
+            )
+            img.src = URL.createObjectURL(blob)
             img.removeAttribute('_loading')
             images[src] = img.src // add to cache
-            resolve(img.src)
-          } else {
-            // download data
-            const start = Date.now()
-            // console.debug(`downloading encrypted image ${src} from url ${url} ...`)
-            let xhr = new XMLHttpRequest()
-            xhr.responseType = 'blob'
-            xhr.onload = event => {
-              let blob = xhr.response
-              const reader = new FileReader()
-              reader.readAsArrayBuffer(blob) // returns code points <= 255
-              reader.onload = e => {
-                const cipher = new Uint8Array(e.target.result as ArrayBuffer)
-                const decrypt_start = Date.now()
-                decrypt_bytes(cipher)
-                  .then((array: Uint8Array) => {
-                    let type = blob.type
-                    if (type == 'application/octet-stream') {
-                      // image type is prefixed (older images only)
-                      type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
-                      array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
-                    }
-                    blob = new Blob([array], { type }) // decrypted blob
-                    console.debug(
-                      `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
-                        `(decryption took ${Date.now() - decrypt_start}ms)`
-                    )
-                    img.src = URL.createObjectURL(blob)
-                    img.removeAttribute('_loading')
-                    images[src] = img.src // add to cache
-                    resolve(img.src)
-                  })
-                  .catch(e => {
-                    console.error(e)
-                    reject(e)
-                  })
-              }
-              reader.onerror = console.error
-            }
-            xhr.onerror = console.error
-            xhr.open('GET', url)
-            xhr.send()
-          }
+            return img.src
+          })
         })
-        .catch(e => {
-          console.error(e)
-          reject(e)
-        })
+      }
     })
   }
   if (isClient) window['_onImageRendered'] = onImageRendered
