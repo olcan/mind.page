@@ -113,12 +113,12 @@
     if (Date.now() - mouseDownTime > 250) return
     // ignore clicks on loading div
     if ((e.target as HTMLElement).closest('.loading')) return
-    // ignore clicks on inputs
-    if (e.target.closest('input')) return
+    // ignore clicks on inputs or buttons
+    if (e.target.closest('input, button')) return
     // console.debug(e.target);
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest('[_clickable]')
-    if (clickable && clickable['_clickable'](e)) return true
+    if (clickable && (!clickable['_clickable'] || clickable['_clickable'](e))) return true
     if (window.getSelection().type == 'Range') return // ignore click if text is selected
     if (editing) return // already editing
     // if item is previewable, then preview instead of edit
@@ -1412,7 +1412,7 @@
           !script.hasAttribute('_cache_key') &&
           !script.parentElement.hasAttribute('_cache_key')
         ) {
-          console.warn('script will execute at every render due to uncached parent (missing _cache_key)')
+          console.warn('script will execute at every render due to uncached element or parent (missing _cache_key)')
         }
 
         // NOTE: we do not support .src yet, when we do we need to fetch the script using AJAX, prefix w/ __id, and ensure proper completion/error handling via script.onerror assuming that works.
