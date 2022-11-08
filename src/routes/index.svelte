@@ -1769,7 +1769,12 @@
     )
       return src // external image, leave as is
     if (images[src]) return { src: images[src] } // image ready, replace src immediately
-    return { src: '/loading.gif', _src: src, _pending: Date.now() } // image pending download from _src via onImageRendered
+    return {
+      /* transparent pixel suitable for css animation */
+      src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII',
+      _src: src,
+      _pending: Date.now(),
+    } // image pending download from _src via onImageRendered
   }
 
   function onImageRendered(img: HTMLImageElement) {

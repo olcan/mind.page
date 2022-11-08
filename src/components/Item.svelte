@@ -1370,6 +1370,7 @@
             // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
             // these are sometimes used to prevent styling in markdown editors/previews/etc
             if (
+              (elem.childElementCount > 0 || elem.innerText) &&
               !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
               _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
             )
@@ -2269,10 +2270,22 @@
   }
   /* set default size/padding of pending images */
   :global(.item img[_pending]) {
-    width: 32px;
-    height: 32px;
-    border: 1px dashed #999;
-    border-radius: 50%;
+    width: 128px;
+    height: 48px;
+    border-radius: 4px;
+    /* background: linear-gradient(150deg, #999 0%, #171717 100%); */
+    /* shimmer animation */
+    animation: shimmer 14s linear infinite;
+    background: linear-gradient(-70deg, #171717 10%, #999 50%, #171717 90%);
+    background-size: 1000% 100%;
+  }
+  @keyframes shimmer {
+    0% {
+      background-position: 500% 0;
+    }
+    100% {
+      background-position: -500% 0;
+    }
   }
   :global(.item :first-child) {
     margin-top: 0;
