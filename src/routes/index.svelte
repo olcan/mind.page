@@ -292,6 +292,7 @@
               oldest_item_time_string: oldestTimeString,
             },
     })
+    Object.defineProperty(window, '_readonly', { get: () => readonly })
     Object.defineProperty(window, '_stack', { get: () => evalStack.slice() }) // return copy not reference
     Object.defineProperty(window, '_this', { get: () => _item(evalStack[evalStack.length - 1]) })
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
