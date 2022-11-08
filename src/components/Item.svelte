@@ -444,9 +444,9 @@
     let insideBlock = false
     let lastLine = ''
     let wrapMath = m =>
-      `<span class="${
-        m.startsWith('$$') || !m.startsWith('$') ? 'math-display' : 'math'
-      }" _cache_key="${m}-${id}-${cacheIndex++}">${m}</span>`
+      `<span class="${m.startsWith('$$') || !m.startsWith('$') ? 'math-display' : 'math'}" _cache_key="${id}-${_hash(
+        m
+      )}-${cacheIndex++}">${m}</span>`
     text = text
       .split('\n')
       .map(line => {
