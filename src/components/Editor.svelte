@@ -51,7 +51,12 @@
         .map(
           lang => (
             (lang = window['hljs'].getLanguage(lang)),
-            lang.contains.find(c => c.scope == 'comment' && begins.includes(String(c.begin)))
+            lang.contains.find(
+              c =>
+                (c.scope == 'comment' && begins.includes(String(c.begin))) ||
+                // note variants may or may not have been flattened out based on language highlighting on page
+                c.variants?.find(c => c.scope == 'comment' && begins.includes(String(c.begin)))
+            )
               ? [...lang.name.split(/[\s,]+/), ...(lang.aliases ?? [])]
               : []
           )
