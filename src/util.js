@@ -40,7 +40,7 @@ export function highlight(code, language) {
   if (!window.hljs) return code
   // https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
   //if (language=="") return hljs.highlightAuto(code).value;
-  language = language.replace(/(?:_removed|_hidden)$/, '')
+  language = language.replace(/(?:_removed|_hidden|_tmp)$/, '')
   const link_urls = text =>
     text.replace(
       // url scheme regex from https://stackoverflow.com/a/190405
@@ -65,7 +65,7 @@ export function highlight(code, language) {
     return link_urls(code)
   }
   // drop any _suffix if language does not start with _ (_lang is editor-only)
-  if (!language.startsWith('_')) language = language.replace(/(^\w+?)_.+$/, '$1')
+  if (!language.startsWith('_')) language = language.replace(/_.*$/, '')
   // highlight json as javascript so e.g. quotes are not required for keys
   if (language == 'json') language = 'js'
   language = window.hljs.getLanguage(language) ? language : 'plaintext'

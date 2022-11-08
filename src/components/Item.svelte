@@ -311,7 +311,7 @@
     })
 
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
-    text = text.replace(blockRegExp('(?:_markdown|_md)\\S* *'), (m, pfx, type, body) => {
+    text = text.replace(blockRegExp('(?:_markdown|_md)(?:_\\S*)? *'), (m, pfx, type, body) => {
       if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
       // remove trailing newline in body (as in extractBlock) to avoid extra lines between blocks
       // for tables/blockquotes, we instead append an escape to force breaking across blocks w/o forcing spacing

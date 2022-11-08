@@ -216,9 +216,10 @@
     let html = ''
     const tags = parseTags(_.unescape(text)).raw
     text.split('\n').map(line => {
-      if (!insideBlock && line.match(/^\s*```(\S*)$/)) {
+      // note marked seems to allow anything after block delimiter, so we do the same
+      if (!insideBlock && line.match(/^\s*```/)) {
         insideBlock = true
-        language = line.match(/^\s*```(\S*)(?:_removed|_hidden|_tmp)?$/)[1]
+        language = line.match(/^\s*```(\S*)(?:_removed|_hidden|_tmp)?/).pop()
         // if language spec contains colon separators, take last part without a period
         if (language.includes(':')) language = _.findLast(language.split(':'), s => !s.includes('.')) ?? ''
         code = ''

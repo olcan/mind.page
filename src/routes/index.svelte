@@ -1359,10 +1359,14 @@
           Array.from(
             (
               this.text
-                .replace(/(?:^|\n) *```.*?\n *```/gs, '') // remove multi-line blocks
+                .replace(/(?:^|\n) *```(\S*).*?\n *```/gs, (m, type)=>{
+                  if (type.match(/^(?:_html|_md|_markdown)(?:_|$)/)) return m // keep embeds
+                  return ''
+                }) // remove multi-line blocks (except embedded _html|_md|_markdown blocks)
                 // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
                 .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-                .replace(/`.*?`/g, skipEscaped('')) as any
+                .replace(/`.*?`/g, skipEscaped('') // remove inline code spans
+              ) as any
             ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
             m => m[1]
           ).map(src =>
