@@ -86,9 +86,7 @@
   export let onPush = (index: number) => {}
   export let onPreview = (index: number) => {}
   export let onResized = (id, container, trigger: string) => {}
-  export let onImageRendering = (src: string): string => {
-    return ''
-  }
+  export let onImageRendering = (src: string): any => ({})
   export let onImageRendered = (img: HTMLImageElement) => {}
   export let onMacrosExpanded = (index: number, expanded: any) => {}
   export let onPrev = () => {}
@@ -760,11 +758,12 @@
       // convert dropbox image src urls to direct download
       src = src.replace(/^https?:\/\/www\.dropbox\.com/, 'https://dl.dropboxusercontent.com').replace(/\?dl=0$/, '')
       m = m.replace(/src\s*=\s*"[^"]*"/, '') // drop src (must be consistent w/ pattern above)
-      // allow onImageRendering() to change src, and if so, put original as _src and add loading class
-      const _src = src
-      src = onImageRendering(src)
-      if (src != _src) m = m.substring(0, m.length - 1) + ` _src="${_src}" _loading>`
-      return m.substring(0, m.length - 1) + ` src="${src}" _cached>`
+      // allow onImageRendering() to change src and add other attributes as needed
+      let attrs = _.assign({ src }, onImageRendering(src))
+      attrs = _.entries(attrs)
+        .map(([k, v]) => `${k}="${v}"`)
+        .join(' ')
+      return m.substring(0, m.length - 1) + ` ${attrs} _cached>`
     })
 
     // process any tags with item-unique id to add _cached attribute (skip if caching managed manually)
@@ -1250,7 +1249,7 @@
 
     // set up img tags to enable caching and invoke onResized onload
     itemdiv.querySelectorAll('img').forEach(img => {
-      if (img.hasAttribute('_loaded')) return // already loaded (and presumably restored from cache)
+      if (img.hasAttribute('_rendered')) return // already marked rendered (presumably restored from cache)
       if (!img.hasAttribute('src')) {
         console.warn('img missing src')
         return
@@ -1259,12 +1258,11 @@
         console.warn('img missing _cache_key (should be automatically added)')
         return
       }
-      if (img.hasAttribute('_loading')) img.classList.add('loading')
-      onImageRendered(img)
+      if (img.hasAttribute('_pending')) onImageRendered(img) // trigger pending download of _src
       img.onload = () => {
         onResized(id, container, 'img.onload')
-        img.setAttribute('_loaded', Date.now().toString())
-        if (!img.hasAttribute('_loading')) img.classList.remove('loading')
+        // note image is not _rendered until _pending attribute is removed by onImageRendered
+        if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
       }
     })
 
@@ -2269,9 +2267,8 @@
     max-height: 100%;
     vertical-align: middle;
   }
-  /* set default size/padding of loading images */
-  :global(.item img.loading),
-  :global(.item img[_loading]) {
+  /* set default size/padding of pending images */
+  :global(.item img[_pending]) {
     width: 32px;
     height: 32px;
     border: 1px dashed #999;

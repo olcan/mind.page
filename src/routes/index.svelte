@@ -1754,7 +1754,7 @@
       }
     })
   }
-  function onImageRendering(src: string): string {
+  function onImageRendering(src: string): any {
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
     src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1') // drop existing prefix
     if (src.match(/^[0-9a-fA-F]+$/)) {
@@ -1766,14 +1766,14 @@
       !src.startsWith('anonymous/images/') &&
       !src.startsWith(`${sharer}/uploads/public/images/`)
     )
-      return src // external image
-    if (images[src]) return images[src] // image ready
-    return '/loading.gif' // image must be loaded
+      return src // external image, leave as is
+    if (images[src]) return { src: images[src] } // image ready, replace src immediately
+    return { src: '/loading.gif', _src: src, _pending: Date.now() } // image pending download from _src via onImageRendered
   }
 
   function onImageRendered(img: HTMLImageElement) {
     // console.debug("image rendered", img.src);
-    if (!img.hasAttribute('_src')) return Promise.resolve() // nothing to do
+    if (!img.hasAttribute('_pending')) return // nothing to do
     let src = img.getAttribute('_src')
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
     src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1') // drop existing prefix
@@ -1782,47 +1782,56 @@
       else src = `${user.uid}/images/${src}`
     }
     if (images[src]) {
-      if (img.src != images[src]) img.src = images[src]
-      img.removeAttribute('_loading')
+      img.src = images[src]
+      img.removeAttribute('_pending') // done loading alternate _src
       return img.src // return url directly, no need to wrap in a promise
     }
+    console.debug(`downloading image ${src} ...`)
     const start = Date.now()
-    return getBlob(ref(getStorage(firebase), src)).then(blob => {
-      if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
-        // user is anonymous OR image is public, so we can use blob as is ...
-        console.debug(
-          `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
-        )
-        img.src = URL.createObjectURL(blob)
-        img.removeAttribute('_loading')
-        images[src] = img.src // add to cache
-        return img.src
-      } else {
-        // we need to decrypt the image blob using personal secret ...
-        return blob.arrayBuffer().then(buffer => {
-          const decrypt_start = Date.now()
-          return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
-            let type = blob.type
-            if (type == 'application/octet-stream') {
-              // image type is prefixed (older images only)
-              type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
-              array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
-            }
-            blob = new Blob([array], { type }) // decrypted blob
-            console.debug(
-              `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
-                `(decryption took ${Date.now() - decrypt_start}ms)`
-            )
-            img.src = URL.createObjectURL(blob)
-            img.removeAttribute('_loading')
-            images[src] = img.src // add to cache
-            return img.src
+    return getBlob(ref(getStorage(firebase), src))
+      .then(blob => {
+        if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
+          // user is anonymous OR image is public, so we can use blob as is ...
+          console.debug(
+            `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
+          )
+          img.src = URL.createObjectURL(blob)
+          img.removeAttribute('_pending') // done loading alternate _src
+          images[src] = img.src // add to cache
+          return img.src
+        } else {
+          // we need to decrypt the image blob using personal secret ...
+          return blob.arrayBuffer().then(buffer => {
+            const decrypt_start = Date.now()
+            return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
+              let type = blob.type
+              if (type == 'application/octet-stream') {
+                // image type is prefixed (older images only)
+                type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
+                array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
+              }
+              blob = new Blob([array], { type }) // decrypted blob
+              console.debug(
+                `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
+                  `(decryption took ${Date.now() - decrypt_start}ms)`
+              )
+              img.src = URL.createObjectURL(blob)
+              img.removeAttribute('_pending') // done loading alternate _src
+              images[src] = img.src // add to cache
+              return img.src
+            })
           })
-        })
-      }
-    })
+        }
+      })
+      .catch(e => {
+        // if still pending, retry after 1x time since pending (exponential backoff w/ factor >~2x)
+        if (img.hasAttribute('_pending')) {
+          const delay = Date.now() - parseInt(img.getAttribute('_pending'))
+          console.debug(`retrying downloading image ${src} after ${delay}ms ...`)
+          setTimeout(() => onImageRendered(img), delay)
+        }
+      })
   }
-  if (isClient) window['_onImageRendered'] = onImageRendered
 
   function onEditorFocused(focused: boolean) {
     // NOTE: this does not capture cmd-tilde switching, and in fact none of the window/document focus events seem to fire in that case (e.g. see http://output.jsbin.com/rinece), and indeed document.activeElement and document.hasFocus() remain unchanged; a workaround is to hit a modifier key such as Shift or Alt post-switch to be detected by editor keydown handlers below
@@ -4325,7 +4334,7 @@
     // if height>0 and no more resizes are expected, set rendered=true & invoke resolve_render (if set up)
     // otherwise reset rendered=false, typically due to re-render w/ pendingElems>0 (height=0 would trigger warning)
     item.pendingElems = container.querySelectorAll(
-      ['script', 'img:not([_loaded])', ':is(span.math,span.math-display):not([_rendered])'].join()
+      ['script', 'img:not([_rendered])', ':is(span.math,span.math-display):not([_rendered])'].join()
     ).length
     if (height > 0 && item.pendingElems == 0) {
       item.rendered = true
