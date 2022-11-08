@@ -93,17 +93,17 @@
     return (
       text
         .replace(
-          // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
-          /&lt;(?=[/\w]).*(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)/g,
+          /&lt;!--.*--&gt;(?:(?!&gt;)|$)/g,
           skipEscaped(m => {
-            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
             return highlight(_.unescape(m), 'html')
           })
         )
         .replace(
-          /&lt;!--.*--&gt;(?:(?!&gt;)|$)/g,
+          // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
+          /&lt;(?=[/\w]).*(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)/g,
           skipEscaped(m => {
-            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
+            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
             return highlight(_.unescape(m), 'html')
           })
         )
