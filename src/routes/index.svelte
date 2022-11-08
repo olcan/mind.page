@@ -7271,7 +7271,7 @@
             {#if column < columnCount}
               {#if item.index == hideIndex}
                 {#each toggles as toggle}
-                  {#if hideIndex < toggle.end}
+                  {#if toggle.start == hideIndex}
                     <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
                       ▼ {toggle.positionBased
                         ? ''
