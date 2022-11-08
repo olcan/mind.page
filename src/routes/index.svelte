@@ -1693,7 +1693,11 @@
   }
 
   let images // permanent fname to temporary url map
-  if (isClient) images = window['_images'] = {}
+  let images_loading // images being loaded
+  if (isClient) {
+    images = window['_images'] = {}
+    images_loading = window['_images_loading'] = {}
+  }
 
   function onPastedImage(url: string, file: File, size_handler = null) {
     // note inserted images also trigger this function via Modal.svelte
@@ -1792,9 +1796,28 @@
       img.removeAttribute('_pending') // done loading alternate _src
       return img.src // return url directly, no need to wrap in a promise
     }
+    function retryIfStillPending(e) {
+      // if still pending, retry after 1x time since pending (exponential backoff w/ factor >~2x)
+      if (img.hasAttribute('_pending')) {
+        const delay = Date.now() - parseInt(img.getAttribute('_pending'))
+        console.debug(`retrying downloading image ${src} after ${delay}ms ...`)
+        setTimeout(() => onImageRendered(img), delay)
+      }
+    }
+    // if another image is loading same source, just wait for that to be done and use the same url
+    if (images_loading[src]) {
+      return Promise.resolve(images_loading[src])
+        .then(url => {
+          console.debug(`reusing loaded image ${src}`)
+          img.src = url
+          img.removeAttribute('_pending') // done loading alternate _src
+          return img.src
+        })
+        .catch(retryIfStillPending) // if other load failed, we need to retry this image also
+    }
     console.debug(`downloading image ${src} ...`)
     const start = Date.now()
-    return getBlob(ref(getStorage(firebase), src))
+    return (images_loading[src] = getBlob(ref(getStorage(firebase), src))
       .then(blob => {
         if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
           // user is anonymous OR image is public, so we can use blob as is ...
@@ -1829,14 +1852,10 @@
           })
         }
       })
-      .catch(e => {
-        // if still pending, retry after 1x time since pending (exponential backoff w/ factor >~2x)
-        if (img.hasAttribute('_pending')) {
-          const delay = Date.now() - parseInt(img.getAttribute('_pending'))
-          console.debug(`retrying downloading image ${src} after ${delay}ms ...`)
-          setTimeout(() => onImageRendered(img), delay)
-        }
-      })
+      .catch(retryIfStillPending)
+      .finally(() => {
+        delete images_loading[src] // no longer loading (though may retry if still pending)
+      }))
   }
 
   function onEditorFocused(focused: boolean) {

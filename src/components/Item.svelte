@@ -901,6 +901,27 @@
       .catch(console.error)
   }
 
+  function renderImages(elems) {
+    // set up img elements to trigger downloading (if _pending) and invoke onResized upon loading
+    elems.forEach(img => {
+      if (img.hasAttribute('_rendered')) return // already rendered
+      if (!img.hasAttribute('src')) {
+        console.warn('img missing src')
+        return
+      }
+      if (!img.hasAttribute('_cache_key')) {
+        console.warn('img missing _cache_key (should be automatically added)')
+        return
+      }
+      if (img.hasAttribute('_pending')) onImageRendered(img) // trigger pending download of _src
+      img.onload = () => {
+        onResized(id, container, 'img.onload')
+        // note image is not _rendered until _pending attribute is removed by onImageRendered
+        if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
+      }
+    })
+  }
+
   let highlightDispatchCount = 0
 
   afterUpdate(() => {
@@ -1247,24 +1268,8 @@
       })
     }
 
-    // set up img tags to enable caching and invoke onResized onload
-    itemdiv.querySelectorAll('img').forEach(img => {
-      if (img.hasAttribute('_rendered')) return // already marked rendered (presumably restored from cache)
-      if (!img.hasAttribute('src')) {
-        console.warn('img missing src')
-        return
-      }
-      if (!img.hasAttribute('_cache_key')) {
-        console.warn('img missing _cache_key (should be automatically added)')
-        return
-      }
-      if (img.hasAttribute('_pending')) onImageRendered(img) // trigger pending download of _src
-      img.onload = () => {
-        onResized(id, container, 'img.onload')
-        // note image is not _rendered until _pending attribute is removed by onImageRendered
-        if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
-      }
-    })
+    // render images currently on item (dynamically added images may be rendered via _render_images)
+    renderImages(itemdiv.querySelectorAll('img'))
 
     // turn un-typed inputs into multiple file inputs
     itemdiv.querySelectorAll('input:not([type])').forEach((input: HTMLInputElement) => {
@@ -1447,7 +1452,8 @@
         // if no errors, cache elems with _cache_key that had scripts in them
         if (scriptErrors.length == 0) cacheElems()
 
-        // if element contains dot graphs, they may trigger window._dot_rendered, defined below
+        // scripts that render dot graphs should invoke window._dot_rendered, defined below
+        // scripts that dynamically add/manipulate images should invoke window._render_images, defined below
       })
     })
   })
@@ -1457,57 +1463,56 @@
     window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
-  if (!window['_dot_rendered']) {
-    window['_dot_rendered'] = function (item, dot) {
-      // render "stack" clusters (subgraphs)
-      dot.querySelectorAll('.cluster.stack').forEach(cluster => {
-        let path = cluster.children[1] // first child is title
-        ;(path as HTMLElement).setAttribute('fill', '#111')
-        let path2 = path.cloneNode()
-        ;(path2 as HTMLElement).setAttribute('transform', 'translate(-3,3)')
-        ;(path2 as HTMLElement).setAttribute('opacity', '0.75')
-        cluster.insertBefore(path2, path)
-        let path3 = path.cloneNode()
-        ;(path3 as HTMLElement).setAttribute('transform', 'translate(-6,6)')
-        ;(path3 as HTMLElement).setAttribute('opacity', '0.5')
-        cluster.insertBefore(path3, path2)
-      })
+  window['_render_images'] ??= item => renderImages(item.elem?.querySelectorAll('.item > .content img') ?? [])
+  window['_dot_rendered'] ??= function (item, dot) {
+    // render "stack" clusters (subgraphs)
+    dot.querySelectorAll('.cluster.stack').forEach(cluster => {
+      let path = cluster.children[1] // first child is title
+      ;(path as HTMLElement).setAttribute('fill', '#111')
+      let path2 = path.cloneNode()
+      ;(path2 as HTMLElement).setAttribute('transform', 'translate(-3,3)')
+      ;(path2 as HTMLElement).setAttribute('opacity', '0.75')
+      cluster.insertBefore(path2, path)
+      let path3 = path.cloneNode()
+      ;(path3 as HTMLElement).setAttribute('transform', 'translate(-6,6)')
+      ;(path3 as HTMLElement).setAttribute('opacity', '0.5')
+      cluster.insertBefore(path3, path2)
+    })
 
-      // render math in text nodes
-      let math = []
-      dot.querySelectorAll('text').forEach(text => {
-        if (text.textContent.match(/^\$.+\$$/)) {
-          text['_bbox'] = (text as SVGGraphicsElement).getBBox() // needed below
-          math.push(text)
+    // render math in text nodes
+    let math = []
+    dot.querySelectorAll('text').forEach(text => {
+      if (text.textContent.match(/^\$.+\$$/)) {
+        text['_bbox'] = (text as SVGGraphicsElement).getBBox() // needed below
+        math.push(text)
+      }
+    })
+    renderMath(math, function () {
+      dot.querySelectorAll('.node > text > .MathJax > svg > *').forEach(elem => {
+        if (!item.elem?.contains(elem)) {
+          // console.error("detached _graph elem in item", item.name)
+          invalidateElemCache(id)
+          return
         }
+        let math = elem as SVGGraphicsElement
+        let dot = elem.parentNode.parentNode.parentNode.parentNode
+        // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
+        let shape = dot.children[1] as SVGGraphicsElement // shape (e.g. ellipse) is second child
+        let text = dot.children[dot.children.length - 1] // text is last child
+        let shaperect = shape.getBBox()
+        let textrect = text['_bbox'] // recover text bbox pre-mathjax
+        let textscale = textrect.height / shaperect.height // fontsize-based scaling factor
+        elem.parentElement.parentElement.parentElement.remove() // remove text node
+        dot.appendChild(elem)
+        let mathrect = math.getBBox()
+        let scale = (0.6 * textscale * shaperect.height) / mathrect.height
+        let xt0 = -mathrect.x
+        let yt0 = -mathrect.y
+        let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2
+        let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
+        elem.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
       })
-      renderMath(math, function () {
-        dot.querySelectorAll('.node > text > .MathJax > svg > *').forEach(elem => {
-          if (!item.elem?.contains(elem)) {
-            // console.error("detached _graph elem in item", item.name)
-            invalidateElemCache(id)
-            return
-          }
-          let math = elem as SVGGraphicsElement
-          let dot = elem.parentNode.parentNode.parentNode.parentNode
-          // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
-          let shape = dot.children[1] as SVGGraphicsElement // shape (e.g. ellipse) is second child
-          let text = dot.children[dot.children.length - 1] // text is last child
-          let shaperect = shape.getBBox()
-          let textrect = text['_bbox'] // recover text bbox pre-mathjax
-          let textscale = textrect.height / shaperect.height // fontsize-based scaling factor
-          elem.parentElement.parentElement.parentElement.remove() // remove text node
-          dot.appendChild(elem)
-          let mathrect = math.getBBox()
-          let scale = (0.6 * textscale * shaperect.height) / mathrect.height
-          let xt0 = -mathrect.x
-          let yt0 = -mathrect.y
-          let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2
-          let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
-          elem.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
-        })
-      })
-    }
+    })
   }
 </script>
 
