@@ -1392,6 +1392,20 @@
         }
       })
 
+    // if fixed/shared mode, hide the last tag (<mark>) inside last visible <p> if followed only by spacers (<br>) and if the tag refers to another visible shared item on the page
+    if (fixed) {
+      const last_tag = _.findLast(
+        itemdiv.querySelectorAll('p'),
+        p => getComputedStyle(p).display != 'none'
+      )?.querySelector(':scope > mark:last-of-type') as HTMLElement
+      if (last_tag && window['_item'](last_tag.title, { silent: true })?.shared?.indices) {
+        let siblings = []
+        let elem = last_tag
+        while ((elem = elem.nextSibling as HTMLElement)) siblings.push(elem)
+        if (siblings.every(s => s.tagName == 'BR')) last_tag.style.display = 'none'
+      }
+    }
+
     // trigger execution of script tags by adding/removing them to <head>
     // NOTE: this is slow, so we do it asyc, and we warn if the parent element is not cached
     setTimeout(() => {

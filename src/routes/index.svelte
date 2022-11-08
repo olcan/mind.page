@@ -7589,9 +7589,6 @@
     .item > .content mark.label {
       display: none !important;
     }
-    .item > .content > p:last-of-type > mark {
-      display: none;
-    }
     {#if items[0].title}
       .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
         display: none;
