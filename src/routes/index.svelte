@@ -1808,6 +1808,7 @@
     if (images_loading[src]) {
       return Promise.resolve(images_loading[src])
         .then(url => {
+          if (!url) throw new Error(`load failed for ${src}`)
           console.debug(`reusing loaded image ${src}`)
           img.src = url
           img.removeAttribute('_pending') // done loading alternate _src
