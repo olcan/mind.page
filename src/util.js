@@ -87,6 +87,30 @@ export function skipEscaped(f) {
   }
 }
 
+// string replacement helper to skip "exclusions" specified as alternatives exc1|exc2|...|regex
+// exclusion regex must be constructed using exclusionRegExp(...) below
+export function skipExclusions(f) {
+  return function (m, pfx, ...args) {
+    if (pfx === undefined) return m // skip exclusions
+    return f(m, ...args) // apply replacer
+  }
+}
+// exclusion regex constructor
+// exclusions and regex can be RegExp or string
+// exclusions can not contain capture groups, and regex can not contain top-level alternation
+export function exclusionRegExp(exclusions, regex, flags) {
+  if (typeof exclusions == 'string' || exclusions instanceof RegExp) exclusions = [exclusions]
+  if (!Array.isArray(exclusions)) throw new Error('invalid exclusions')
+  if (exclusions.length == 0) throw new Error('missing exclusions')
+  if (!exclusions.every(ex => typeof ex == 'string' || ex instanceof RegExp)) throw new Error('invalid exclusions')
+  exclusions = exclusions.map(ex => ex?.source ?? ex)
+  if (typeof regex != 'string' && !(regex instanceof RegExp)) throw new Error(`invalid regex`)
+  flags ??= regex.flags ?? 'g' // get flags from regex if specified as RegExp
+  regex = regex.source ?? regex // get string representation of regex
+  regex = exclusions.join('|') + '|()' + regex
+  return RegExp(regex, flags)
+}
+
 // single tag regex
 // allowed characters are extensive, well outside of [\p{L}\d/_-]
 // some examples of characters found useful in tags are: ⇧⏎²… and θμσ…
@@ -137,10 +161,7 @@ export function replaceTags(text, tagRegex, replacer, escaped) {
     '|()' + // used to filter out exclusions in wrapper function below
     tagRegex +
     (escaped ? tagRegexDelimiterEscaped : tagRegexDelimiter)
-  return text.replace(new RegExp(tagRegex, 'gs'), function (m, pfx, ...args) {
-    if (pfx === undefined) return m // skip exclusions
-    return replacer(m, ...args) // apply replacer
-  })
+  return text.replace(new RegExp(tagRegex, 'gs'), skipExclusions(replacer))
 }
 
 export function parseTags(text) {
