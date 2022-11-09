@@ -1352,13 +1352,14 @@
     // return array of uploaded private image srcs, urls ({output:"url"}), or blobs ({output:"blob"})
     // returns promise for urls or blobs as they require download and decryption
     // can be restricted to specified srcs if options.srcs is provided
+    // other options are passed to this.read('', options)
     images(options = {}) {
       const srcs =
         options['srcs'] ??
         _.uniq(
           Array.from(
             (
-              this.text
+              this.read('', options)
                 .replace(/(?:^|\n) *```(\S*).*?\n *```/gs, (m, type)=>{
                   if (type.match(/^(?:_html|_md|_markdown)(?:_|$)/)) return m // keep embeds
                   return ''
