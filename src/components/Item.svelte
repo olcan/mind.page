@@ -740,9 +740,23 @@
 
     // wrap item content in .content div, adding .menu class for #menu items
     // note this wrapper div excludes deps-and-dependents, deps-summary, and menu-<id> divs (created in afterUpdate)
+    // also drop tail of <br> and <p> tags that contain only hidden tags (<mark>) to reduce flicker in afterUpdate
     text =
       `<div class="content${isMenu ? ' menu' : ''}">` +
-      text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, '$1</div>$2')
+      text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, (m, content, sfx) => {
+        const hidden_tags = []
+        for (let i = 0; i < 3; ++i) {
+          content = content
+            .replace(/(?:\s*<br>\s*)*$/, '')
+            .replace(/\s*<p>((?:\s*<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>\s*)*)<\/p>\s*$/, (m, tags) => {
+              hidden_tags.push(tags)
+              return ''
+            })
+            .replace(/(?:\s*<br>\s*)*$/, '')
+        }
+        if (hidden_tags.length) content += '\n' + hidden_tags.join('') + '\n'
+        return content + '</div>' + sfx
+      })
 
     // wrap list items in span to control spacing from bullets
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, '</span></li>')
