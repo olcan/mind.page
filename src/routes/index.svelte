@@ -743,26 +743,36 @@
 
       // evaluate <<macros>> if requested (logic mirrors that in Item.svelte)
       if (options['eval_macros']) {
-        item.expanded = {} // reset macro expansion state
-        let cacheIndex = 0
-        const replaceMacro = (m, js) => {
-          if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
-          try {
-            return this.eval(js, {
-              trigger: 'macro_' + cacheIndex++,
-              cid: `${this.id}-${this.deephash}-${cacheIndex}`, // enable replacement of $cid
-            })
-          } catch (e) {
-            item.expanded.error = e
-            console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
-            throw e // stop read and throw error
+        // note the reset conditions here (deephash, version, etc) should match those in toHTML in Item.svelte
+        if (
+          item.expanded &&
+          !item.expanded.error &&
+          item.expanded.deephash == item.deephash &&
+          item.expanded.version == item.version
+        ) {
+          text = item.expanded.text // use prior expansion
+        } else {
+          item.expanded = {} // reset macro expansion state
+          let cacheIndex = 0
+          const replaceMacro = (m, js) => {
+            if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
+            try {
+              return this.eval(js, {
+                trigger: 'macro_' + cacheIndex++,
+                cid: `${this.id}-${this.deephash}-${cacheIndex}`, // enable replacement of $cid
+              })
+            } catch (e) {
+              item.expanded.error = e
+              console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
+              throw e // stop read and throw error
+            }
           }
+          item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+          item.expanded.deephash = item.deephash
+          item.expanded.version = item.version
+          item.expanded.count = cacheIndex
+          itemExpansionChanged(item)
         }
-        item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-        item.expanded.deephash = item.deephash
-        item.expanded.version = item.version
-        item.expanded.count = cacheIndex
-        itemExpansionChanged(item)
       }
 
       // replace $ids if requested
@@ -1360,14 +1370,16 @@
           Array.from(
             (
               this.read('', options)
-                .replace(/(?:^|\n) *```(\S*).*?\n *```/gs, (m, type)=>{
+                .replace(/(?:^|\n) *```(\S*).*?\n *```/gs, (m, type) => {
                   if (type.match(/^(?:_html|_md|_markdown)(?:_|$)/)) return m // keep embeds
                   return ''
                 }) // remove multi-line blocks (except embedded _html|_md|_markdown blocks)
                 // NOTE: currently we miss indented blocks that start with bullets (since it requires context)
                 .replace(/(?:^|\n)     *[^-*+ ].*(?:$|\n)/g, '') // remove 4-space indented blocks
-                .replace(/`.*?`/g, skipEscaped('') // remove inline code spans
-              ) as any
+                .replace(
+                  /`.*?`/g,
+                  skipEscaped('') // remove inline code spans
+                ) as any
             ).matchAll(/<img\s(?:"[^"]*"|[^>"])*?src\s*=\s*"([^"]*)"(?:"[^"]*"|[^>"])*>/gi),
             m => m[1]
           ).map(src =>
