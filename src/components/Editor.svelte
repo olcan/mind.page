@@ -98,6 +98,17 @@
     return (
       text
         .replace(
+          /&lt;&lt;(.*)&gt;&gt;/g,
+          skipEscaped((m, content) => {
+            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
+            return (
+              '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
+              highlight(_.unescape(content), 'js') +
+              '<span class="macro-delimiter">&gt;&gt;</span></span>'
+            )
+          })
+        )
+        .replace(
           /&lt;!--.*--&gt;(?:(?!&gt;)|$)/g,
           skipEscaped(m => {
             m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
@@ -110,17 +121,6 @@
           skipEscaped(m => {
             m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
             return highlight(_.unescape(m), 'html')
-          })
-        )
-        .replace(
-          /&lt;&lt;(.*)&gt;&gt;/g,
-          skipEscaped((m, content) => {
-            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return (
-              '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
-              highlight(_.unescape(content), 'js') +
-              '<span class="macro-delimiter">&gt;&gt;</span></span>'
-            )
           })
         )
         .replace(
