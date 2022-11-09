@@ -1363,48 +1363,48 @@
     // hide any top-level <br> or <p> preceding or leading 0-height tail, including hidden tags, hidden blocks, etc
     // process matching tags in reverse order to handle arbitrarily long series of tags
     // allows useful visual spacing in editor of item tail w/ hidden code, tags, etc
-    Array.from(itemdiv.querySelectorAll('.item > .content > :is(br,p)'))
-      .reverse()
-      .forEach((x: HTMLElement) => {
-        let height_below = 0
-        let elem = x
-        // for <br>, we can skip element itself since we know it is only used for spacing
-        // for other elements we have to execute loop to see if they are skipped or not
-        // but even if they are not skipped, we can look into tail <br> inside (see below)
-        if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement
-        if (elem)
-          do {
-            // ignore auto-generated tail divs
-            if (
-              elem.className == 'deps-and-dependents' ||
-              elem.className == 'deps-summary' ||
-              elem.className == 'dependents-summary' ||
-              elem.className == 'log-summary'
-            )
-              continue
-            // ignore _log blocks that are toggled via .showLogs class
-            if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
-            // ignore hidden tags, even if visible (e.g. when missing)
-            if (elem.classList.contains('hidden')) continue
-            // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
-            // these are sometimes used to prevent styling in markdown editors/previews/etc
-            if (
-              (elem.childElementCount > 0 || elem.innerText) &&
-              !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
-              _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
-            )
-              continue
-            height_below += elem.offsetHeight
-          } while ((elem = elem.nextElementSibling as HTMLElement))
-        // even if height_below is 0, we do not hide if there are any absolute-positioned descendants
-        if (height_below == 0 && !_.some(x.querySelectorAll('*'), c => getComputedStyle(c).position == 'absolute'))
-          x.style.display = 'none'
-        else if (height_below == x.offsetHeight) {
-          // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
-          while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
-            x.removeChild(x.lastElementChild)
-        }
-      })
+    // Array.from(itemdiv.querySelectorAll('.item > .content > :is(br,p)'))
+    //   .reverse()
+    //   .forEach((x: HTMLElement) => {
+    //     let height_below = 0
+    //     let elem = x
+    //     // for <br>, we can skip element itself since we know it is only used for spacing
+    //     // for other elements we have to execute loop to see if they are skipped or not
+    //     // but even if they are not skipped, we can look into tail <br> inside (see below)
+    //     if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement
+    //     if (elem)
+    //       do {
+    //         // ignore auto-generated tail divs
+    //         if (
+    //           elem.className == 'deps-and-dependents' ||
+    //           elem.className == 'deps-summary' ||
+    //           elem.className == 'dependents-summary' ||
+    //           elem.className == 'log-summary'
+    //         )
+    //           continue
+    //         // ignore _log blocks that are toggled via .showLogs class
+    //         if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
+    //         // ignore hidden tags, even if visible (e.g. when missing)
+    //         if (elem.classList.contains('hidden')) continue
+    //         // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
+    //         // these are sometimes used to prevent styling in markdown editors/previews/etc
+    //         if (
+    //           (elem.childElementCount > 0 || elem.innerText) &&
+    //           !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
+    //           _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
+    //         )
+    //           continue
+    //         height_below += elem.offsetHeight
+    //       } while ((elem = elem.nextElementSibling as HTMLElement))
+    //     // even if height_below is 0, we do not hide if there are any absolute-positioned descendants
+    //     if (height_below == 0 && !_.some(x.querySelectorAll('*'), c => getComputedStyle(c).position == 'absolute'))
+    //       x.style.display = 'none'
+    //     else if (height_below == x.offsetHeight) {
+    //       // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
+    //       while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
+    //         x.removeChild(x.lastElementChild)
+    //     }
+    //   })
 
     // if fixed/shared mode, hide the last tag (<mark>) inside last visible <p> if followed only by spacers (<br>) and if the tag refers to another visible shared item on the page
     if (fixed) {
@@ -2008,41 +2008,38 @@
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
-  :global(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre) {
+  :global(.item > .content :is(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre)) {
     margin: 0;
   }
-  :global(h1, h2, h3, h4, h5, h6) {
+  :global(.item > .content :is(h1, h2, h3, h4, h5, h6)) {
     margin-bottom: 5px;
   }
-  /* :global(h1, h2, h3, h4, h5, h6) {
-    clear: both;
-  } */
-  :global(.item ul, .item ol) {
+  :global(.item > .content :is(ul, ol)) {
     padding-left: 20px;
     color: #999;
   }
   /* :global(.item ul > *, .item ol > *) {
     margin-left: 20px;
   } */
-  :global(.item span.list-item) {
+  :global(.item > .content span.list-item) {
     display: block;
     padding-left: 0.3em; /* some internal padding (in case list-item given background/border/etc), undone via margin */
     margin-left: -0.5em; /* includes negated padding to shift outside; em scales relative to font size */
     color: #ddd;
   }
   /* additional space between list items */
-  :global(.item ul > li:not(:last-of-type)),
-  :global(.item ol > li:not(:last-of-type)) {
+  :global(.item > .content ul > li:not(:last-of-type)),
+  :global(.item > .content ol > li:not(:last-of-type)) {
     padding-bottom: 2px;
   }
   /* reduced space between nested list items */
-  :global(.item ul > li ul > li:not(:last-of-type)),
-  :global(.item ol > li ol > li:not(:last-of-type)) {
+  :global(.item > .content ul > li ul > li:not(:last-of-type)),
+  :global(.item > .content ol > li ol > li:not(:last-of-type)) {
     padding-bottom: 1px;
   }
   /* additional space below nested lists for inner list items */
-  :global(.item li:not(:last-of-type) > ul),
-  :global(.item li:not(:last-of-type) > ol) {
+  :global(.item > .content li:not(:last-of-type) > ul),
+  :global(.item > .content li:not(:last-of-type) > ol) {
     padding-bottom: 2px;
   }
   /* add some space before/after lists for more even spacing with surrounding text */
@@ -2062,25 +2059,25 @@
 
   /* style markdown-generated checkboxes */
   /* custom styling css adapted from https://www.sliderrevolution.com/resources/css-checkbox/ */
-  :global(.item span.list-item input[type='checkbox']) {
+  :global(.item > .content span.list-item input[type='checkbox']) {
     vertical-align: middle;
     /* pointer-events: none; */
   }
-  :global(.item li.checkbox.checked, .item li.checkbox.checked li) {
+  :global(.item > .content li.checkbox.checked, .item li.checkbox.checked li) {
     /* text-decoration: line-through; */
     opacity: 0.5;
     /* display: none; */
   }
-  :global(.item ul.checkbox) {
+  :global(.item > .content ul.checkbox) {
     list-style: none;
   }
-  :global(.item ul.checkbox > li > span.list-item > p > input[type='checkbox']) {
+  :global(.item > .content ul.checkbox > li > span.list-item > p > input[type='checkbox']) {
     margin-left: -15px;
   }
-  :global(.item ul.checkbox > li > span.list-item > input[type='checkbox']) {
+  :global(.item > .content ul.checkbox > li > span.list-item > input[type='checkbox']) {
     margin-left: -15px;
   }
-  :global(input[type='checkbox']) {
+  :global(.item > .content input[type='checkbox']) {
     -webkit-appearance: none;
     appearance: none;
     border: 1px solid #aaa;
@@ -2092,34 +2089,34 @@
     align-items: center;
     justify-content: center;
   }
-  :global(input[type='checkbox']:checked) {
+  :global(.item > .content input[type='checkbox']:checked) {
     color: white;
     /* border-color: #4af; */
     /* background: #4af; */
   }
-  :global(input[type='checkbox']:checked:after) {
+  :global(.item > .content input[type='checkbox']:checked:after) {
     content: '✔︎'; /* could be: ✔︎✓ */
   }
 
   /* use default top-alignment & column-spacing and for tables */
-  :global(.item table) {
+  :global(.item > .content table) {
     border-spacing: 0;
   }
-  :global(.item table :is(td, th)) {
+  :global(.item > .content table :is(td, th)) {
     padding: 1px 5px;
   }
-  :global(.item table :is(td, th)) {
+  :global(.item > .content table :is(td, th)) {
     vertical-align: top;
   }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
-  :global(.item blockquote) {
+  :global(.item > .content blockquote) {
     padding-left: 5px;
     margin-top: 5px;
     border-left: 1px solid #333;
   }
   /* NOTE: these font sizes should match those in Editor */
-  :global(.item pre) {
+  :global(.item > .content pre) {
     /* padding-left: 5px; */
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
@@ -2127,10 +2124,10 @@
     line-height: 24px;
     margin-top: 4px;
   }
-  :global(.item pre:first-child) {
+  :global(.item > .content pre:first-child) {
     margin-top: 0;
   }
-  :global(.item code) {
+  :global(.item > .content code) {
     font-size: 14px;
     line-height: 24px;
     font-family: 'JetBrains Mono', monospace;
@@ -2140,10 +2137,10 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
-  :global(.item a code) {
+  :global(.item > .content a code) {
     background: none;
   }
-  :global(.item pre > code) {
+  :global(.item > .content pre > code) {
     background: none;
     border-radius: 0;
     display: block;
@@ -2153,7 +2150,7 @@
     margin: -2px -5px;
     border-left: 1px solid #333;
   }
-  :global(.item a) {
+  :global(.item > .content a) {
     color: #79e;
     background: #222;
     /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
@@ -2163,7 +2160,7 @@
     text-decoration: none;
     line-height: 24px;
   }
-  :global(.item mark) {
+  :global(.item > .content mark) {
     color: black;
     background: #999;
     font-weight: 600;
@@ -2199,29 +2196,29 @@
     vertical-align: middle;
   }
 
-  :global(.item mark.label) {
+  :global(.item > .content mark.label) {
     background: #ddd;
   }
-  :global(.item mark.label.unique) {
+  :global(.item > .content mark.label.unique) {
     font-weight: 700;
   }
-  :global(.item mark.missing) {
+  :global(.item > .content mark.missing) {
     background: #f88;
   }
-  :global(.item mark.selected) {
+  :global(.item > .content mark.selected) {
     background: #9f9;
   }
-  :global(.item mark.secondary-selected) {
+  :global(.item > .content mark.secondary-selected) {
     background: #9b9;
   }
 
-  :global(.item mark.hidden) {
+  :global(.item > .content mark.hidden) {
     color: #ddd;
     background: #222;
     border: 1px dashed #ddd;
   }
   /* :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) { */
-  :global(.item mark.hidden:not(.missing)) {
+  :global(.item > .content mark.hidden:not(.missing)) {
     display: none;
   }
   /* hide tags more aggressively in menu items */
@@ -2234,17 +2231,17 @@
     display: none;
   }
 
-  :global(.item mark.hidden.missing) {
+  :global(.item > .content mark.hidden.missing) {
     border-color: #f88;
   }
-  :global(.item mark.hidden.selected) {
+  :global(.item > .content mark.hidden.selected) {
     border-color: #9f9;
   }
-  :global(.item mark.hidden.secondary-selected) {
+  :global(.item > .content mark.hidden.secondary-selected) {
     border-color: #9b9;
   }
 
-  :global(.item span.highlight) {
+  :global(.item > .content span.highlight) {
     /* note advantage of background highlighting is that border highlights can be cut off by overflow:hidden */
     /* we also avoid any changes that can shift text, e.g. font-weight changes */
     color: black;
@@ -2254,21 +2251,21 @@
     /* border: 1px solid #9b9; */
     /* margin: -1px; */
   }
-  :global(.item mark.label.unique span.highlight) {
+  :global(.item > .content mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */
   }
 
-  :global(.item mark span.highlight) {
+  :global(.item > .content mark span.highlight) {
     color: black;
     background: #9b9;
     border: 0;
     margin: 0;
   }
-  :global(.item mark.label span.highlight) {
+  :global(.item > .content mark.label span.highlight) {
     background: #9f9;
   }
 
-  :global(.item mark .spacer) {
+  :global(.item > .content mark .spacer) {
     flex-grow: 1;
   }
   /* disable spacers inside .menu highlights when prefix and suffix matches coincide */
@@ -2277,17 +2274,17 @@
     display: none;
   }
 
-  :global(.item .vertical-bar) {
+  :global(.item > .content .vertical-bar) {
     color: #444;
   }
-  :global(.item span.math, .item span.math-display) {
+  :global(.item > .content span.math, .item span.math-display) {
     display: inline-block;
   }
   /* display top-level .math-display as block */
   /* :global(.item > .content > span.math-display) {
     display: block;
   } */
-  :global(.item hr) {
+  :global(.item > .content hr) {
     background: transparent;
     border: 0;
     border-top: 1px dashed #333;
@@ -2296,13 +2293,13 @@
     margin-bottom: 9px; /* 1px less to center top border */
     clear: both; /* clear floats on both sides by default */
   }
-  :global(.item img) {
+  :global(.item > .content img) {
     max-width: 100%;
     max-height: 100%;
     vertical-align: middle;
   }
   /* set default size/padding of pending images */
-  :global(.item img[_pending]) {
+  :global(.item > .content img[_pending]) {
     width: 128px;
     height: 48px;
     border-radius: 4px;
@@ -2320,10 +2317,10 @@
       background-position: -500% 0;
     }
   }
-  :global(.item :first-child) {
+  :global(.item > .content :first-child) {
     margin-top: 0;
   }
-  :global(.item :last-child) {
+  :global(.item > .content :last-child) {
     margin-bottom: 0;
   }
 
@@ -2539,7 +2536,7 @@
     padding-bottom: 0;
   }
 
-  :global(.item blockquote .MathJax) {
+  :global(.item > .content blockquote .MathJax) {
     display: block;
   }
 
@@ -2553,11 +2550,11 @@
       line-height: 24px;
       min-height: 45px; /* single line height */
     }
-    :global(.item a) {
+    :global(.item > .content a) {
       line-height: 20px;
     }
     /* NOTE: these font sizes should match those in Editor */
-    :global(.item pre, .item code) {
+    :global(.item > .content :is(pre, code)) {
       font-size: 11px;
       line-height: 20px;
     }
