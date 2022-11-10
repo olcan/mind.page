@@ -757,7 +757,7 @@
                 return sfx
               }
             )
-            .replace(/<p><\/p>$/, '')
+            .replace(/<p>(?:<\/p>)?$/, '') // drop empty <p> tag, allowing unclosed <p> as well
             // note <> should be escaped in code blocks, so we can use that to avoid matching across blocks
             .replace(/<pre><code class="_log">([^<>]*?)<\/code><\/pre>$/s, m => (keep.push(m), ''))
         } while (content.length < length) // keep trying until content length is unchanged
