@@ -26,15 +26,7 @@
   const _ = globalThis['_'] // imported in client.ts
 
   // import he from "he";
-  import {
-    highlight,
-    replaceTags,
-    parseTags,
-    numberWithCommas,
-    skipEscaped,
-    skipExclusions,
-    exclusionRegExp,
-  } from '../util.js'
+  import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped } from '../util.js'
 
   const placeholder = ' '
   let spellcheck = false
@@ -101,83 +93,33 @@
   }
   function highlightOther(text) {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
-    // https://www.w3schools.com/jsref/jsref_obj_regexp.asp
-    // NOTE: we use exclusion regexes (w/o capture groups) to avoid nested highlighting
-    const comments = /&lt;!--.*--&gt;(?:(?!&gt;)|$)/g
-    const macros = /&lt;&lt;.*&gt;&gt;/g
+    // NOTE: to prevent any nested highlights, we use a single regex w/ alternatives where each alternative contains exactly one capture group (content) that can be used to detect which alternative matched
+    const comment = /&lt;!--(.*)--&gt;(?:(?!&gt;)|$)/g
+    const macro = /&lt;&lt;(.*)&gt;&gt;/g
     // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
-    const html_tags = /&lt;(?=[/\w]).*(?:[/\w]|&#39;|&quot;)&gt;(?:(?!&gt;)|$)/g
-    const maths1 = /\$\$`.*`\$\$/g
-    const maths2 = /\$`.*`\$/g
-    const code1 = /``.*?``/g
-    const code2 = /`.*?`/g
-    // TODO: should we be excluding everything else? is nested highlighting ever ok?
-    return text
-      .replace(
-        comments,
-        skipEscaped(m => {
-          m = m.replace(/<mark>(.*?)<\/mark>/g, '$1')
-          return highlight(_.unescape(m), 'html')
-        })
-      )
-      .replace(
-        exclusionRegExp([comments, html_tags], /&lt;&lt;(.*)&gt;&gt;/g), // same as 'macros', just w/ capture of contents
-        skipExclusions(
-          skipEscaped((m, content) => {
-            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return (
-              '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
-              highlight(_.unescape(content), 'js') +
-              '<span class="macro-delimiter">&gt;&gt;</span></span>'
-            )
-          })
-        )
-      )
-      .replace(
-        exclusionRegExp([comments, macros], html_tags),
-        skipExclusions(
-          skipEscaped(m => {
-            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return highlight(_.unescape(m), 'html')
-          })
-        )
-      )
-      .replace(
-        exclusionRegExp([comments, macros, html_tags], maths1),
-        skipExclusions(
-          skipEscaped(m => {
-            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
-          })
-        )
-      )
-      .replace(
-        exclusionRegExp([comments, macros, html_tags, maths1], maths2),
-        skipExclusions(
-          skipEscaped(m => {
-            m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
-          })
-        )
-      )
-      .replace(
-        exclusionRegExp([comments, macros, html_tags, maths1, maths2], /(``)(.*?)``/g),
-        skipExclusions(
-          skipEscaped((m, delim, content) => {
-            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return `<span class="code">${delim + content + delim}</span>`
-          })
-        )
-      )
-      .replace(
-        exclusionRegExp([comments, macros, html_tags, maths1, maths2, code1], /(`)(.*?)`/g),
-        skipExclusions(
-          skipEscaped((m, delim, content) => {
-            content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
-            return `<span class="code">${delim + content + delim}</span>`
-          })
-        )
-      )
+    const html = /&lt;((?=[/\w]).*(?:[/\w]|&#39;|&quot;))&gt;(?:(?!&gt;)|$)/g
+    const math1 = /\$\$`(.*)`\$\$/g
+    const math2 = /\$`(.*)`\$/g
+    const code1 = /``(.*?)``/g
+    const code2 = /`(.*?)`/g
+    const combine = (...regexes) => regexes.map(r => r.source).join('|')
+    return text.replace(
+      new RegExp(combine(macro, comment, html, math1, math2, code1, code2), 'g'),
+      skipEscaped((m, macro, comment, html, math1, math2, code1, code2) => {
+        m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
+        if (macro != undefined)
+          return (
+            '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
+            highlight(_.unescape(macro), 'js') +
+            '<span class="macro-delimiter">&gt;&gt;</span></span>'
+          )
+        if (comment != undefined || html != undefined) return highlight(_.unescape(m), 'html')
+        if (math1 != undefined || math2 != undefined)
+          return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
+        if (code1 != undefined) return `<span class="code">\`\`${code1}\`\`</span>`
+        if (code2 != undefined) return `<span class="code">\`${code2}\`</span>`
+      })
+    )
   }
   function highlightTitles(text) {
     return text.replace(/^(\s{0,3}#{1,6}\s+)(.+)$/, (_, pfx, title) => pfx + `<span class="title">${title}</span>`)
