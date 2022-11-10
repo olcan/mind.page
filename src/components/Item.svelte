@@ -1968,6 +1968,9 @@
     user-select: none;
     /* pointer-events: none; */
   }
+  .loading > div {
+    opacity: 0.75;
+  }
   .running .loading,
   .saving .loading {
     visibility: visible;
@@ -2321,6 +2324,27 @@
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
+  }
+  /* style logs highlighted in util.js, matching console colors in Index.svelte */
+  .item > :global(.content code._log .console-debug),
+  .item > :global(.log-summary .console-debug) {
+    color: #666;
+  }
+  .item > :global(.content code._log .console-info),
+  .item > :global(.log-summary .console-info) {
+    color: #777;
+  }
+  .item > :global(.content code._log .console-log),
+  .item > :global(.log-summary .console-log) {
+    color: #999;
+  }
+  .item > :global(.content code._log .console-warn),
+  .item > :global(.log-summary .console-warn) {
+    color: yellow;
+  }
+  .item > :global(.content code._log .console-error),
+  .item > :global(.log-summary .console-error) {
+    color: #f55;
   }
   /* simplify linkified urls in log messages (e.g. in stack traces) and code comments */
   .item > :global(.content code._log a),

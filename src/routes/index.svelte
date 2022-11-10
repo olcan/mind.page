@@ -7853,8 +7853,7 @@
   .loading.translucent {
     background: rgba(17, 17, 17, 0.75);
   }
-  /* note this also applies to .loading div in Item.svelte */
-  :global(.loading > div) {
+  .loading > :global(div) {
     opacity: 0.75;
   }
   .header {
@@ -7882,11 +7881,11 @@
     margin-right: 5px;
   }
   /* remove dashed border when top editor is unfocused */
-  :global(.header .editor .backdrop:not(.focused)) {
+  .header .editor :global(.backdrop:not(.focused)) {
     border: 1px solid transparent;
   }
   /* lighten solid border when top editor is focused */
-  :global(.header .editor .backdrop.focused) {
+  .header .editor :global(.backdrop.focused) {
     border: 1px solid #333;
     /* border: 1px solid transparent; */
   }
@@ -7931,19 +7930,19 @@
     user-select: auto;
     white-space: pre-wrap;
   }
-  :global(.console-debug) {
+  :is(.console, .console-summary) :global(.console-debug) {
     color: #666;
   }
-  :global(.console-info) {
+  :is(.console, .console-summary) :global(.console-info) {
     color: #777;
   }
-  :global(.console-log) {
+  :is(.console, .console-summary) :global(.console-log) {
     color: #999;
   }
-  :global(.console-warn) {
+  :is(.console, .console-summary) :global(.console-warn) {
     color: yellow;
   }
-  :global(.console-error) {
+  :is(.console, .console-summary) :global(.console-error) {
     color: #f55;
   }
   .status {
@@ -7991,7 +7990,7 @@
     margin: 4px 0px;
     border-radius: 4px;
   }
-  :global(.status .counts .unit, .status .counts .comma) {
+  .status .counts :global(:is(.unit, .comma)) {
     color: #666;
     font-size: 80%;
   }
@@ -8064,28 +8063,28 @@
     margin-right: 1px; /* consistent w/ 1px padding-left of .super-container */
   }
 
-  :global(.items:not(.focused) .item-menu),
-  :global(.items:not(.focused) .log-summary),
-  :global(.items:not(.focused) .deps-summary),
-  :global(.items:not(.focused) .dependents-summary),
-  :global(.items:not(.focused) .deps-and-dependents) {
+  .items:not(.focused) :global(.item-menu),
+  .items:not(.focused) :global(.log-summary),
+  .items:not(.focused) :global(.deps-summary),
+  .items:not(.focused) :global(.dependents-summary),
+  .items:not(.focused) :global(.deps-and-dependents) {
     opacity: 0.5 !important;
   }
-  :global(.items:not(.focused) .column-padding),
-  :global(.items:not(.focused) .header) {
+  .items:not(.focused) :global(.column-padding),
+  .items:not(.focused) :global(.header) {
     opacity: 0.5;
   }
-  :global(.items:not(.focused) .header .buttons) {
+  .items:not(.focused) .header :global(.buttons) {
     opacity: 0;
   }
-  :global(.items:not(.focused) .super-container),
-  :global(.items:not(.focused) .toggle) {
+  .items:not(.focused) :global(.super-container),
+  .items:not(.focused) :global(.toggle) {
     opacity: 0.75;
   }
-  :global(.items:not(.focused) .super-container.target_context) {
+  .items:not(.focused) :global(.super-container.target_context) {
     opacity: 0.85;
   }
-  :global(.items:not(.focused) .super-container:is(.target, .editing, .pushable, .previewable)) {
+  .items:not(.focused) :global(.super-container:is(.target, .editing, .pushable, .previewable)) {
     opacity: 0.95;
   }
 
@@ -8127,12 +8126,12 @@
   }
 
   /* allow time strings to overlap preceding section separators */
-  :global(.section-separator + .super-container.timed) {
+  .section-separator + :global(.super-container.timed) {
     margin-top: -24px;
   }
 
   /* allow time strings to overlap preceding .toggle */
-  :global(.toggle + .super-container.timed) {
+  .toggle + :global(.super-container.timed) {
     margin-top: -24px;
   }
   .toggle {
