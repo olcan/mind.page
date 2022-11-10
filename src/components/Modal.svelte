@@ -18,6 +18,7 @@
   let selected_images = [] // used internally for file input
   let ready_image_count = 0
   let _visible = false
+  let lastActiveElement = null // element last active when _visible=true (triggering blur and input focus)
   let enabled = false
   $: enabled =
     canConfirm(input) && (!images || (selected_images.length > 0 && ready_image_count == selected_images.length))
@@ -60,6 +61,8 @@
             promise_visible = null
             resolve_visible = null
             _visible = false
+            lastActiveElement?.focus()
+            lastActiveElement = null
             return
           }
           ;({
@@ -80,6 +83,7 @@
           selected_images = []
           ready_image_count = 0
           _visible = true
+          lastActiveElement ??= document.activeElement
 
           // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
           // chrome fails to trigger onchange and enable confirm button despite autofill
@@ -178,6 +182,8 @@
       promise_visible = null
       resolve_visible = null
       _visible = false
+      lastActiveElement?.focus()
+      lastActiveElement = null
     }
     return promise
   }
@@ -200,6 +206,8 @@
       promise_visible = null
       resolve_visible = null
       _visible = false
+      lastActiveElement?.focus()
+      lastActiveElement = null
     }
   }
 
@@ -214,6 +222,8 @@
     promise_visible = null
     resolve_visible = null
     _visible = false
+    lastActiveElement?.focus()
+    lastActiveElement = null
   }
 
   function onBackgroundClick(e = null) {
