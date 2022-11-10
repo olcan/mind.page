@@ -1363,7 +1363,8 @@
     })
 
     // hide/remove all whitespace in tail of .content that may be interleaved with other hidden elements
-    // note this is a dynamic fallback for the static removal in toHTML, which is always preferred when possible since dynamic adjustments can cause flickering when item is updated
+    // note this is a dynamic fallback for the static removal in toHTML
+    // TODO: allow interleaving of _log in static removal, consider removing this (or keep as fallback/reference only)
     for (const node of Array.from(itemdiv.querySelector('.content').childNodes).reverse()) {
       if (node.nodeType == Node.TEXT_NODE && !node.textContent.trim()) node.remove()
       else if (node.nodeType == Node.ELEMENT_NODE) {
