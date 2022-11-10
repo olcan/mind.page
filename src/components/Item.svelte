@@ -2003,13 +2003,13 @@
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */
-  :global(.item > .content :is(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre)) {
+  .item > :global(.content :is(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre)) {
     margin: 0;
   }
   :global(.item > .content :is(h1, h2, h3, h4, h5, h6)) {
     margin-bottom: 5px;
   }
-  :global(.item > .content :is(ul, ol)) {
+  .item > :global(.content :is(ul, ol)) {
     padding-left: 20px;
     color: #999;
   }
@@ -2043,7 +2043,7 @@
     padding-top: 2px;
   }
   :global(.item > .content > ul:not(:last-child)),
-  :global(.item > .content > ol:not(:first-child)) {
+  :global(.item > .content > ol:not(:last-child)) {
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
@@ -2155,7 +2155,7 @@
     text-decoration: none;
     line-height: 24px;
   }
-  :global(.item > .content mark) {
+  .item > :global(.content mark) {
     color: black;
     background: #999;
     font-weight: 600;
