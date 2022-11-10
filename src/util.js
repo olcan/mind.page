@@ -237,7 +237,7 @@ export function invalidateElemCache(id) {
     // remove unless still live on item (then should be removed on svelte update)
     // element removal also prevents any pending (via setTimeout) chart renders
     // ensuring svelte update may require a version increment to invalidate svelte content cache
-    if (!elem.closest('.item')) elem.remove()
+    if (elem.closest('.item')?.id != 'item-' + id) elem.remove()
   })
 }
 
