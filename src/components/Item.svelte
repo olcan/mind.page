@@ -1978,26 +1978,26 @@
   /* style progress bars for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
   /* background */
-  :global(.container .loading progress) {
+  .container .loading :global(progress) {
     background-color: #171717;
     border-radius: 4px;
     width: 100px;
     height: 10px;
   }
-  :global(.container .loading progress::-webkit-progress-bar) {
+  .container .loading :global(progress::-webkit-progress-bar) {
     background-color: #171717;
     border-radius: 4px;
   }
   /* value/foreground */
-  :global(.container .loading progress::-webkit-progress-value) {
+  .container .loading :global(progress::-webkit-progress-value) {
     background-color: #4af;
     border-radius: 4px;
   }
-  :global(.container .loading progress::-moz-progress-bar) {
+  .container .loading :global(progress::-moz-progress-bar) {
     background-color: #4af;
     border-radius: 4px;
   }
-  :global(.container .loading progress) {
+  .container .loading :global(progress) {
     color: #4af;
     border-radius: 4px;
   }
@@ -2013,7 +2013,7 @@
     padding-left: 20px;
     color: #999;
   }
-  /* :global(.item ul > *, .item ol > *) {
+  /* .item > :global(.content :is(ul,ol) > *) {
     margin-left: 20px;
   } */
   .item > :global(.content span.list-item) {
@@ -2023,32 +2023,27 @@
     color: #ddd;
   }
   /* additional space between list items */
-  .item > :global(.content ul > li:not(:last-of-type)),
-  .item > :global(.content ol > li:not(:last-of-type)) {
+  .item > :global(.content :is(ul, ol) > li:not(:last-of-type)) {
     padding-bottom: 2px;
   }
   /* reduced space between nested list items */
-  .item > :global(.content ul > li ul > li:not(:last-of-type)),
-  .item > :global(.content ol > li ol > li:not(:last-of-type)) {
+  .item > :global(.content :is(ul, ol) > li :is(ul, ol) > li:not(:last-of-type)) {
     padding-bottom: 1px;
   }
   /* additional space below nested lists for inner list items */
-  .item > :global(.content li:not(:last-of-type) > ul),
-  .item > :global(.content li:not(:last-of-type) > ol) {
+  .item > :global(.content li:not(:last-of-type) > :is(ul, ol)) {
     padding-bottom: 2px;
   }
   /* add some space before/after lists for more even spacing with surrounding text */
-  .item > :global(.content > ul:not(:first-child)),
-  .item > :global(.content > ol:not(:first-child)) {
+  .item > :global(.content > :is(ul, ol):not(:first-child)) {
     padding-top: 2px;
   }
-  .item > :global(.content > ul:not(:last-child)),
-  .item > :global(.content > ol:not(:last-child)) {
+  .item > :global(.content > :is(ul, ol):not(:last-child)) {
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
   /* NOTE: this turns out to be too performance-intensive and can make columns difficult to balance out */
-  /* :global(.item li) {
+  /* .item > :global(.content li) {
     break-inside: avoid;
   } */
 
