@@ -15,6 +15,7 @@
   let onConfirm = (input = null) => {}
   let onCancel = () => {}
   let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR close if no confirm/cancel buttons
+  let passthrough = false // pass clicks on non-input/button/_clickable elements to background?
   let selected_images = [] // used internally for file input
   let ready_image_count = 0
   let _visible = false
@@ -36,6 +37,7 @@
     onConfirm,
     onCancel,
     background,
+    passthrough,
   }
 
   let inputelem: HTMLInputElement
@@ -78,6 +80,7 @@
             onConfirm,
             onCancel,
             background,
+            passthrough,
           } = Object.assign({ ...defaults }, options))
           // console.debug(options, confirm, cancel);
           selected_images = []
@@ -136,6 +139,7 @@
       onConfirm,
       onCancel,
       background,
+      passthrough,
     } = Object.assign(
       {
         content,
@@ -150,6 +154,7 @@
         onConfirm,
         onCancel,
         background,
+        passthrough,
       },
       options
     ))
@@ -227,7 +232,8 @@
   }
 
   function onBackgroundClick(e = null) {
-    if (e && (e.target as HTMLElement).closest('.modal')) return // ignore click on modal
+    // ignore clicks on modal unless we are in passthrough mode and not clicking on an input/button/_clickable element
+    if (e?.target.closest('.modal') && (!passthrough || e?.target.closest('input, button, [_clickable]'))) return
     e?.stopPropagation()
     e?.preventDefault()
     if (!confirm && !cancel && background.toLowerCase() != 'block') close(promise_visible)
