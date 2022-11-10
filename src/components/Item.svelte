@@ -740,23 +740,28 @@
 
     // wrap item content in .content div, adding .menu class for #menu items
     // note this wrapper div excludes deps-and-dependents, deps-summary, and menu-<id> divs (created in afterUpdate)
-    // also drop tail of <br> and <p> tags that contain only hidden tags (<mark>) to reduce flicker in afterUpdate
+    // also perform _static_ (vs dynamic in afterUpdate) removal of tail whitespace
     text =
       `<div class="content${isMenu ? ' menu' : ''}">` +
       text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, (m, content, sfx) => {
-        const hidden_tags = []
-        for (let i = 0; i < 3; ++i) {
+        const keep = []
+        let length = 0
+        do {
+          length = content.length
           content = content
-            .replace(/(?:\s*<br>\s*)*$/, '')
-            .replace(/\s*<p>(?:<br>|\s|&nbsp;)*<\/p>\s*$/, '')
-            .replace(/(?:<br>|\s|&nbsp;)*<\/p>\s*$/, '</p>') // clear tail of last <p>
-            .replace(/\s*<p>((?:\s*<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>\s*)*)<\/p>\s*$/, (m, tags) => {
-              hidden_tags.push(tags)
-              return ''
-            })
-            .replace(/(?:\s*<br>\s*)*$/, '')
-        }
-        if (hidden_tags.length) content += '\n' + hidden_tags.join('') + '\n'
+            .replace(/(?:\s|<br>)*$/, '')
+            .replace(
+              /(?:<br>|&nbsp;|\s|<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>)*((?:<\/p>)?)$/,
+              (m, sfx) => {
+                keep.push(...(m.match(/<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>/g) ?? []))
+                return sfx
+              }
+            )
+            .replace(/<p><\/p>$/, '')
+            // note <> should be escaped in code blocks, so we can use that to avoid matching across blocks
+            .replace(/<pre><code class="_log">([^<>]*?)<\/code><\/pre>$/s, m => (keep.push(m), ''))
+        } while (content.length < length) // keep trying until content length is unchanged
+        if (keep.length) content += '\n' + keep.join(' ') + '\n'
         return content + '</div>' + sfx
       })
 
@@ -1362,30 +1367,30 @@
       }
     })
 
-    // hide/remove all whitespace in tail of .content that may be interleaved with other hidden elements
+    // hide/remove all whitespace in tail of .content
     // note this is a dynamic fallback for the static removal in toHTML
-    // TODO: allow interleaving of _log in static removal, consider removing this (or keep as fallback/reference only)
-    for (const node of Array.from(itemdiv.querySelector('.content').childNodes).reverse()) {
-      if (node.nodeType == Node.TEXT_NODE && !node.textContent.trim()) node.remove()
-      else if (node.nodeType == Node.ELEMENT_NODE) {
-        const elem = node as HTMLElement
-        if (elem.tagName == 'BR') elem.remove()
-        else if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue // hidden/toggled logs
-        else if (elem.tagName == 'MARK' && elem.classList.contains('hidden')) continue // hidden tag
-        else if (_.every(elem.childNodes, (c:any) =>
-            (c.nodeType == Node.TEXT_NODE && !c.textContent.trim()) || c.tagName == 'BR' || (c.tagName == 'MARK' && c.classList.contains('hidden'))
-          )) elem.style.display = 'none'
-        else {
-          // remove all whitespace in tail of last element
-          while (elem.lastChild &&
-            ((elem.lastChild.nodeType == Node.TEXT_NODE && !elem.lastChild.textContent.trim()) ||
-             (elem.lastChild.nodeType == Node.ELEMENT_NODE && (elem.lastChild as HTMLElement).tagName == 'BR')))
-            elem.removeChild(elem.lastChild)
-          break
-        }
-      }
-      else break
-    }
+    // static is preferred since dynamic changes can cause flicker when item is updated
+    // for (const node of Array.from(itemdiv.querySelector('.content').childNodes).reverse()) {
+    //   if (node.nodeType == Node.TEXT_NODE && !node.textContent.trim()) node.remove()
+    //   else if (node.nodeType == Node.ELEMENT_NODE) {
+    //     const elem = node as HTMLElement
+    //     if (elem.tagName == 'BR') elem.remove()
+    //     else if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue // hidden/toggled logs
+    //     else if (elem.tagName == 'MARK' && elem.classList.contains('hidden')) continue // hidden tag
+    //     else if (_.every(elem.childNodes, (c:any) =>
+    //         (c.nodeType == Node.TEXT_NODE && !c.textContent.trim()) || c.tagName == 'BR' || (c.tagName == 'MARK' && c.classList.contains('hidden'))
+    //       )) elem.style.display = 'none'
+    //     else {
+    //       // remove all whitespace in tail of last element
+    //       while (elem.lastChild &&
+    //         ((elem.lastChild.nodeType == Node.TEXT_NODE && !elem.lastChild.textContent.trim()) ||
+    //          (elem.lastChild.nodeType == Node.ELEMENT_NODE && (elem.lastChild as HTMLElement).tagName == 'BR')))
+    //         elem.removeChild(elem.lastChild)
+    //       break
+    //     }
+    //   }
+    //   else break
+    // }
 
     // in fixed/shared mode, hide the last visible tag (<mark>) inside last visible <p> if followed by only whitespace or hidden tags and if the tag refers to another visible shared item on the page
     if (fixed) {
