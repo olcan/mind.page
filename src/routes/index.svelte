@@ -7537,7 +7537,8 @@
       font-size: 16px;
     }
     .header .status .left .triangle {
-      color: #666;
+      /* color: #666; */
+      color: black;
       cursor: pointer;
       margin: -10px;
       padding: 10px;
