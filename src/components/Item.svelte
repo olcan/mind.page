@@ -1363,48 +1363,49 @@
     // hide any top-level <br> or <p> preceding or leading 0-height tail, including hidden tags, hidden blocks, etc
     // process matching tags in reverse order to handle arbitrarily long series of tags
     // allows useful visual spacing in editor of item tail w/ hidden code, tags, etc
-    // Array.from(itemdiv.querySelectorAll('.item > .content > :is(br,p)'))
-    //   .reverse()
-    //   .forEach((x: HTMLElement) => {
-    //     let height_below = 0
-    //     let elem = x
-    //     // for <br>, we can skip element itself since we know it is only used for spacing
-    //     // for other elements we have to execute loop to see if they are skipped or not
-    //     // but even if they are not skipped, we can look into tail <br> inside (see below)
-    //     if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement
-    //     if (elem)
-    //       do {
-    //         // ignore auto-generated tail divs
-    //         if (
-    //           elem.className == 'deps-and-dependents' ||
-    //           elem.className == 'deps-summary' ||
-    //           elem.className == 'dependents-summary' ||
-    //           elem.className == 'log-summary'
-    //         )
-    //           continue
-    //         // ignore _log blocks that are toggled via .showLogs class
-    //         if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
-    //         // ignore hidden tags, even if visible (e.g. when missing)
-    //         if (elem.classList.contains('hidden')) continue
-    //         // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
-    //         // these are sometimes used to prevent styling in markdown editors/previews/etc
-    //         if (
-    //           (elem.childElementCount > 0 || elem.innerText) &&
-    //           !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
-    //           _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
-    //         )
-    //           continue
-    //         height_below += elem.offsetHeight
-    //       } while ((elem = elem.nextElementSibling as HTMLElement))
-    //     // even if height_below is 0, we do not hide if there are any absolute-positioned descendants
-    //     if (height_below == 0 && !_.some(x.querySelectorAll('*'), c => getComputedStyle(c).position == 'absolute'))
-    //       x.style.display = 'none'
-    //     else if (height_below == x.offsetHeight) {
-    //       // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
-    //       while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
-    //         x.removeChild(x.lastElementChild)
-    //     }
-    //   })
+    Array.from(itemdiv.querySelectorAll('.item > .content > :is(br,p)'))
+      .reverse()
+      .forEach((x: HTMLElement) => {
+        let height_below = 0
+        let elem = x
+        // for <br>, we can skip element itself since we know it is only used for spacing
+        // for other elements we have to execute loop to see if they are skipped or not
+        // but even if they are not skipped, we can look into tail <br> inside (see below)
+        if (x.tagName == 'BR') elem = elem.nextElementSibling as HTMLElement
+        if (elem)
+          do {
+            // ignore auto-generated tail divs
+            if (
+              elem.className == 'deps-and-dependents' ||
+              elem.className == 'deps-summary' ||
+              elem.className == 'dependents-summary' ||
+              elem.className == 'log-summary'
+            )
+              continue
+            // ignore _log blocks that are toggled via .showLogs class
+            if (elem.tagName == 'PRE' && elem.children[0]?.className == '_log') continue
+            // ignore hidden tags, even if visible (e.g. when missing)
+            if (elem.classList.contains('hidden')) continue
+            // ignore container elements (div, p, etc) that only contain hidden tags, <br>, or whitespace
+            // these are sometimes used to prevent styling in markdown editors/previews/etc
+            if (
+              (elem.childElementCount > 0 || elem.innerText) &&
+              !elem.innerText?.replace(/&nbsp;/g, '').trim() &&
+              _.every(elem.children, c => c.tagName == 'BR' || c.classList.contains('hidden'))
+            )
+              continue
+            // note we no longer use offsetHeight as it can be unreliable for dynamic items
+            height_below += 1 // elem.offsetHeight
+          } while ((elem = elem.nextElementSibling as HTMLElement))
+        // even if height_below is 0, we do not hide if there are any absolute-positioned descendants
+        if (height_below == 0 && !_.some(x.querySelectorAll('*'), c => getComputedStyle(c).position == 'absolute'))
+          x.style.display = 'none'
+        else if (height_below == 1) {
+          // drop <br> from the tail as long as nothing else (e.g. text or comment nodes) below
+          while (x.lastElementChild?.tagName == 'BR' && x.lastElementChild == x.lastChild)
+            x.removeChild(x.lastElementChild)
+        }
+      })
 
     // if fixed/shared mode, hide the last tag (<mark>) inside last visible <p> if followed only by spacers (<br>) and if the tag refers to another visible shared item on the page
     if (fixed) {
@@ -2324,28 +2325,28 @@
     margin-bottom: 0;
   }
 
-  :global(.item ._log) {
+  :global(.item > .content ._log) {
     display: none; /* toggled via .showLogs class */
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
   }
   /* simplify linkified urls in log messages (e.g. in stack traces) and code comments */
-  :global(.item ._log a),
-  :global(.item .hljs-comment a) {
+  :global(.item > .content ._log a),
+  :global(.item > .content .hljs-comment a) {
     color: #468;
     background: transparent;
     padding: 0;
     line-height: 100%;
   }
-  :global(.container.showLogs .item ._log),
-  :global(.container.showLogs .item .log-triangle) {
+  :global(.container.showLogs .item > .content ._log),
+  :global(.container.showLogs .item > .content .log-triangle) {
     display: block;
   }
-  :global(.container.showLogs .item .log-dot) {
+  :global(.container.showLogs .item > .content .log-dot) {
     display: none;
   }
-  :global(.item code:empty) {
+  :global(.item > .content code:empty) {
     display: block;
     border: 1px dashed #444;
     color: #444;
@@ -2353,7 +2354,7 @@
     border-radius: 4px;
   }
 
-  :global(.item code:empty:before) {
+  :global(.item > .content code:empty:before) {
     content: 'empty ' attr(class);
   }
 
@@ -2501,7 +2502,7 @@
     cursor: pointer;
   }
 
-  :global(.item span.macro-error) {
+  :global(.item > .content span.macro-error) {
     color: black;
     background: #f55;
     border-radius: 4px;
@@ -2511,7 +2512,7 @@
     padding: 2px 4px;
   }
 
-  :global(.item span.macro-missing-deps) {
+  :global(.item > .content span.macro-missing-deps) {
     color: #f55;
     border: 1px dashed #f55;
     font-family: 'JetBrains Mono', monospace;
@@ -2521,11 +2522,11 @@
     padding: 2px 4px;
   }
 
-  :global(.item .MathJax) {
+  :global(.item > .content .MathJax) {
     margin-top: 0 !important; /* override some highly specific css */
     margin-bottom: 0 !important;
   }
-  :global(.item .math-display) {
+  :global(.item > .content .math-display) {
     padding-top: 4px;
     padding-bottom: 4px;
   }
