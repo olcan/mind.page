@@ -2006,7 +2006,7 @@
   .item > :global(.content :is(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre)) {
     margin: 0;
   }
-  :global(.item > .content :is(h1, h2, h3, h4, h5, h6)) {
+  .item > :global(.content :is(h1, h2, h3, h4, h5, h6)) {
     margin-bottom: 5px;
   }
   .item > :global(.content :is(ul, ol)) {
@@ -2016,34 +2016,34 @@
   /* :global(.item ul > *, .item ol > *) {
     margin-left: 20px;
   } */
-  :global(.item > .content span.list-item) {
+  .item > :global(.content span.list-item) {
     display: block;
     padding-left: 0.3em; /* some internal padding (in case list-item given background/border/etc), undone via margin */
     margin-left: -0.5em; /* includes negated padding to shift outside; em scales relative to font size */
     color: #ddd;
   }
   /* additional space between list items */
-  :global(.item > .content ul > li:not(:last-of-type)),
-  :global(.item > .content ol > li:not(:last-of-type)) {
+  .item > :global(.content ul > li:not(:last-of-type)),
+  .item > :global(.content ol > li:not(:last-of-type)) {
     padding-bottom: 2px;
   }
   /* reduced space between nested list items */
-  :global(.item > .content ul > li ul > li:not(:last-of-type)),
-  :global(.item > .content ol > li ol > li:not(:last-of-type)) {
+  .item > :global(.content ul > li ul > li:not(:last-of-type)),
+  .item > :global(.content ol > li ol > li:not(:last-of-type)) {
     padding-bottom: 1px;
   }
   /* additional space below nested lists for inner list items */
-  :global(.item > .content li:not(:last-of-type) > ul),
-  :global(.item > .content li:not(:last-of-type) > ol) {
+  .item > :global(.content li:not(:last-of-type) > ul),
+  .item > :global(.content li:not(:last-of-type) > ol) {
     padding-bottom: 2px;
   }
   /* add some space before/after lists for more even spacing with surrounding text */
-  :global(.item > .content > ul:not(:first-child)),
-  :global(.item > .content > ol:not(:first-child)) {
+  .item > :global(.content > ul:not(:first-child)),
+  .item > :global(.content > ol:not(:first-child)) {
     padding-top: 2px;
   }
-  :global(.item > .content > ul:not(:last-child)),
-  :global(.item > .content > ol:not(:last-child)) {
+  .item > :global(.content > ul:not(:last-child)),
+  .item > :global(.content > ol:not(:last-child)) {
     padding-bottom: 2px;
   }
   /* avoid breaking list items in multi-column items */
@@ -2054,25 +2054,25 @@
 
   /* style markdown-generated checkboxes */
   /* custom styling css adapted from https://www.sliderrevolution.com/resources/css-checkbox/ */
-  :global(.item > .content span.list-item input[type='checkbox']) {
+  .item > :global(.content span.list-item input[type='checkbox']) {
     vertical-align: middle;
     /* pointer-events: none; */
   }
-  :global(.item > .content li.checkbox.checked, .item li.checkbox.checked li) {
+  .item > :global(.content :is(li.checkbox.checked, li.checkbox.checked li)) {
     /* text-decoration: line-through; */
     opacity: 0.5;
     /* display: none; */
   }
-  :global(.item > .content ul.checkbox) {
+  .item > :global(.content ul.checkbox) {
     list-style: none;
   }
-  :global(.item > .content ul.checkbox > li > span.list-item > p > input[type='checkbox']) {
+  .item > :global(.content ul.checkbox > li > span.list-item > p > input[type='checkbox']) {
     margin-left: -15px;
   }
-  :global(.item > .content ul.checkbox > li > span.list-item > input[type='checkbox']) {
+  .item > :global(.content ul.checkbox > li > span.list-item > input[type='checkbox']) {
     margin-left: -15px;
   }
-  :global(.item > .content input[type='checkbox']) {
+  .item > :global(.content input[type='checkbox']) {
     -webkit-appearance: none;
     appearance: none;
     border: 1px solid #aaa;
@@ -2084,34 +2084,34 @@
     align-items: center;
     justify-content: center;
   }
-  :global(.item > .content input[type='checkbox']:checked) {
+  .item > :global(.content input[type='checkbox']:checked) {
     color: white;
     /* border-color: #4af; */
     /* background: #4af; */
   }
-  :global(.item > .content input[type='checkbox']:checked:after) {
+  .item > :global(.content input[type='checkbox']:checked:after) {
     content: '✔︎'; /* could be: ✔︎✓ */
   }
 
   /* use default top-alignment & column-spacing and for tables */
-  :global(.item > .content table) {
+  .item > :global(.content table) {
     border-spacing: 0;
   }
-  :global(.item > .content table :is(td, th)) {
+  .item > :global(.content table :is(td, th)) {
     padding: 1px 5px;
   }
-  :global(.item > .content table :is(td, th)) {
+  .item > :global(.content table :is(td, th)) {
     vertical-align: top;
   }
 
   /* NOTE: blockquotes (>...) are not monospaced and can keep .item font*/
-  :global(.item > .content blockquote) {
+  .item > :global(.content blockquote) {
     padding-left: 5px;
     margin-top: 5px;
     border-left: 1px solid #333;
   }
   /* NOTE: these font sizes should match those in Editor */
-  :global(.item > .content pre) {
+  .item > :global(.content pre) {
     /* padding-left: 5px; */
     /* margin-top: 5px; */
     /* border-left: 1px solid #333; */
@@ -2119,10 +2119,10 @@
     line-height: 24px;
     margin-top: 4px;
   }
-  :global(.item > .content pre:first-child) {
+  .item > :global(.content pre:first-child) {
     margin-top: 0;
   }
-  :global(.item > .content code) {
+  .item > :global(.content code) {
     font-size: 14px;
     line-height: 24px;
     font-family: 'JetBrains Mono', monospace;
@@ -2132,10 +2132,10 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
-  :global(.item > .content a code) {
+  .item > :global(.content a code) {
     background: none;
   }
-  :global(.item > .content pre > code) {
+  .item > :global(.content pre > code) {
     background: none;
     border-radius: 0;
     display: block;
@@ -2145,7 +2145,7 @@
     margin: -2px -5px;
     border-left: 1px solid #333;
   }
-  :global(.item > .content a) {
+  .item > :global(.content a) {
     color: #79e;
     background: #222;
     /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
@@ -2166,77 +2166,78 @@
   }
 
   /* .menu styling: paragraphs become flex boxes */
-  :global(.item > .menu p) {
+  .item > :global(.menu p) {
     display: flex;
     line-height: 24px; /* same as .menu img below */
     width: 96%; /* align right side while leaving space for item number and tapping for editing */
   }
-  :global(.item > .menu a),
-  :global(.item > .menu mark:not(.hidden)) {
+  .item > :global(.menu a),
+  .item > :global(.menu mark:not(.hidden)) {
     padding: 4px;
     font-size: 110%;
     font-weight: 600;
   }
-  :global(.item > .menu p a, .item > .menu p mark:not(.hidden)) {
+  .item > :global(.menu p a),
+  .item > :global(.menu p mark:not(.hidden)) {
     flex: 1 1 auto;
     display: flex;
     justify-content: center;
     align-items: center;
     margin: 2px;
   }
-  :global(.item > .menu img) {
+  .item > :global(.menu img) {
     width: 24px;
     height: 24px;
     min-width: 24px; /* necessary on smaller device */
     vertical-align: middle;
   }
 
-  :global(.item > .content mark.label) {
+  .item > :global(.content mark.label) {
     background: #ddd;
   }
-  :global(.item > .content mark.label.unique) {
+  .item > :global(.content mark.label.unique) {
     font-weight: 700;
   }
-  :global(.item > .content mark.missing) {
+  .item > :global(.content mark.missing) {
     background: #f88;
   }
-  :global(.item > .content mark.selected) {
+  .item > :global(.content mark.selected) {
     background: #9f9;
   }
-  :global(.item > .content mark.secondary-selected) {
+  .item > :global(.content mark.secondary-selected) {
     background: #9b9;
   }
 
-  :global(.item > .content mark.hidden) {
+  .item > :global(.content mark.hidden) {
     color: #ddd;
     background: #222;
     border: 1px dashed #ddd;
   }
   /* :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) { */
-  :global(.item > .content mark.hidden:not(.missing)) {
+  .item > :global(.content mark.hidden:not(.missing)) {
     display: none;
   }
   /* hide tags more aggressively in menu items */
-  :global(.item > .menu mark.hidden:not(.missing/*, .selected*/)) {
+  .item > :global(.menu mark.hidden:not(.missing/*, .selected*/)) {
     display: none;
   }
 
   /* disable <br> added by marked as last child under <p> in menu items */
-  :global(.item > .menu p > br:last-child) {
+  .item > :global(.menu p > br:last-child) {
     display: none;
   }
 
-  :global(.item > .content mark.hidden.missing) {
+  .item > :global(.content mark.hidden.missing) {
     border-color: #f88;
   }
-  :global(.item > .content mark.hidden.selected) {
+  .item > :global(.content mark.hidden.selected) {
     border-color: #9f9;
   }
-  :global(.item > .content mark.hidden.secondary-selected) {
+  .item > :global(.content mark.hidden.secondary-selected) {
     border-color: #9b9;
   }
 
-  :global(.item > .content span.highlight) {
+  .item > :global(.content span.highlight) {
     /* note advantage of background highlighting is that border highlights can be cut off by overflow:hidden */
     /* we also avoid any changes that can shift text, e.g. font-weight changes */
     color: black;
@@ -2246,40 +2247,40 @@
     /* border: 1px solid #9b9; */
     /* margin: -1px; */
   }
-  :global(.item > .content mark.label.unique span.highlight) {
+  .item > :global(.content mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */
   }
 
-  :global(.item > .content mark span.highlight) {
+  .item > :global(.content mark span.highlight) {
     color: black;
     background: #9b9;
     border: 0;
     margin: 0;
   }
-  :global(.item > .content mark.label span.highlight) {
+  .item > :global(.content mark.label span.highlight) {
     background: #9f9;
   }
 
-  :global(.item > .content mark .spacer) {
+  .item > :global(.content mark .spacer) {
     flex-grow: 1;
   }
   /* disable spacers inside .menu highlights when prefix and suffix matches coincide */
-  :global(.item > .menu mark .spacer:nth-last-of-type(4)),
-  :global(.item > .menu mark .spacer:nth-last-child(2)) {
+  .item > :global(.menu mark .spacer:nth-last-of-type(4)),
+  .item > :global(.menu mark .spacer:nth-last-child(2)) {
     display: none;
   }
 
-  :global(.item > .content .vertical-bar) {
+  .item > :global(.content .vertical-bar) {
     color: #444;
   }
-  :global(.item > .content span.math, .item span.math-display) {
+  .item > :global(.content :is(span.math, span.math-display)) {
     display: inline-block;
   }
   /* display top-level .math-display as block */
-  /* :global(.item > .content > span.math-display) {
+  /* .item > :global(.content > span.math-display) {
     display: block;
   } */
-  :global(.item > .content hr) {
+  .item > :global(.content hr) {
     background: transparent;
     border: 0;
     border-top: 1px dashed #333;
@@ -2288,13 +2289,13 @@
     margin-bottom: 9px; /* 1px less to center top border */
     clear: both; /* clear floats on both sides by default */
   }
-  :global(.item > .content img) {
+  .item > :global(.content img) {
     max-width: 100%;
     max-height: 100%;
     vertical-align: middle;
   }
   /* set default size/padding of pending images */
-  :global(.item > .content img[_pending]) {
+  .item > :global(.content img[_pending]) {
     width: 128px;
     height: 48px;
     border-radius: 4px;
@@ -2312,22 +2313,22 @@
       background-position: -500% 0;
     }
   }
-  :global(.item > .content :first-child) {
+  .item > :global(.content :first-child) {
     margin-top: 0;
   }
-  :global(.item > .content :last-child) {
+  .item > :global(.content :last-child) {
     margin-bottom: 0;
   }
 
-  :global(.item > .content ._log) {
+  .item > :global(.content ._log) {
     display: none; /* toggled via .showLogs class */
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
   }
   /* simplify linkified urls in log messages (e.g. in stack traces) and code comments */
-  :global(.item > .content ._log a),
-  :global(.item > .content .hljs-comment a) {
+  .item > :global(.content ._log a),
+  .item > :global(.content .hljs-comment a) {
     color: #468;
     background: transparent;
     padding: 0;
@@ -2340,7 +2341,7 @@
   :global(.container.showLogs .item > .content .log-dot) {
     display: none;
   }
-  :global(.item > .content code:empty) {
+  .item > :global(.content code:empty) {
     display: block;
     border: 1px dashed #444;
     color: #444;
@@ -2348,7 +2349,7 @@
     border-radius: 4px;
   }
 
-  :global(.item > .content code:empty:before) {
+  .item > :global(.content code:empty:before) {
     content: 'empty ' attr(class);
   }
 
@@ -2447,7 +2448,7 @@
     padding-bottom: 7px; /* avoid overlap with summaries */
   }
   /* we apply negative margin only when direct child, e.g. for when a multi-column macro is left open */
-  :global(.item > .deps-and-dependents) {
+  .item > :global(.deps-and-dependents) {
     margin-left: -6px;
   }
   :global(.container.showDeps .item .deps-and-dependents),
@@ -2496,7 +2497,7 @@
     cursor: pointer;
   }
 
-  :global(.item > .content span.macro-error) {
+  .item > :global(.content span.macro-error) {
     color: black;
     background: #f55;
     border-radius: 4px;
@@ -2506,7 +2507,7 @@
     padding: 2px 4px;
   }
 
-  :global(.item > .content span.macro-missing-deps) {
+  .item > :global(.content span.macro-missing-deps) {
     color: #f55;
     border: 1px dashed #f55;
     font-family: 'JetBrains Mono', monospace;
@@ -2516,22 +2517,22 @@
     padding: 2px 4px;
   }
 
-  :global(.item > .content .MathJax) {
+  .item > :global(.content .MathJax) {
     margin-top: 0 !important; /* override some highly specific css */
     margin-bottom: 0 !important;
   }
-  :global(.item > .content .math-display) {
+  .item > :global(.content .math-display) {
     padding-top: 4px;
     padding-bottom: 4px;
   }
-  :global(.item > .content > .math-display:first-child) {
+  .item > :global(.content > .math-display:first-child) {
     padding-top: 0;
   }
-  :global(.item > .content > .math-display:last-child) {
+  .item > :global(.content > .math-display:last-child) {
     padding-bottom: 0;
   }
 
-  :global(.item > .content blockquote .MathJax) {
+  .item > :global(.content blockquote .MathJax) {
     display: block;
   }
 
@@ -2545,11 +2546,11 @@
       line-height: 24px;
       min-height: 45px; /* single line height */
     }
-    :global(.item > .content a) {
+    .item > :global(.content a) {
       line-height: 20px;
     }
     /* NOTE: these font sizes should match those in Editor */
-    :global(.item > .content :is(pre, code)) {
+    .item > :global(.content :is(pre, code)) {
       font-size: 11px;
       line-height: 20px;
     }
@@ -2565,8 +2566,8 @@
     }
 
     /* smaller menu fonts can take a little more weight */
-    /* :global(.item > .menu a),
-    :global(.item > .menu mark) {
+    /* .item > :global(.menu a),
+    .item > :global(.menu mark) {
       font-weight: 700;
     } */
   }
