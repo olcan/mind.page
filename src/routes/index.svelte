@@ -7600,7 +7600,7 @@
     .item > div:first-child {
       display: none !important;
     }
-    .item > .content mark.label {
+    .item > :is(.content, .deps-and-dependents) mark.label {
       display: none !important;
     }
     {#if items[0].title}

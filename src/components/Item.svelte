@@ -351,10 +351,11 @@
       return str
         .split(' ')
         .map(dep => {
-          const spanclass = dep.match(/\((.*?)\)$/)?.pop() || ''
+          let spanclass = dep.match(/\((.*?)\)$/)?.pop() || ''
+          if (spanclass) spanclass = 'class="' + spanclass + '"'
           dep = dep.replace(/\(.*?\)$/, '')
           const depjs = `javascript:MindBox.toggle('${dep}')`
-          return `<span class="${spanclass}"> ${
+          return `<span ${spanclass}> ${
             dep.startsWith('#')
               ? dep
               : `<mark onclick="MindBox.toggle('${dep}');_handleLinkClick('${id}','${_.escape(
@@ -2150,7 +2151,7 @@
     text-decoration: none;
     line-height: 24px;
   }
-  .item > :global(.content mark) {
+  .item > :global(:is(.content, .deps-and-dependents) mark) {
     color: black;
     background: #999;
     font-weight: 600;
@@ -2187,29 +2188,29 @@
     vertical-align: middle;
   }
 
-  .item > :global(.content mark.label) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.label) {
     background: #ddd;
   }
-  .item > :global(.content mark.label.unique) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.label.unique) {
     font-weight: 700;
   }
-  .item > :global(.content mark.missing) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.missing) {
     background: #f88;
   }
-  .item > :global(.content mark.selected) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.selected) {
     background: #9f9;
   }
-  .item > :global(.content mark.secondary-selected) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.secondary-selected) {
     background: #9b9;
   }
 
-  .item > :global(.content mark.hidden) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.hidden) {
     color: #ddd;
     background: #222;
     border: 1px dashed #ddd;
   }
-  /* :global(.item mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) { */
-  .item > :global(.content mark.hidden:not(.missing)) {
+  /* .item > :global(:is(.content, .deps-and-dependents) mark.hidden:not(.matching, .missing, .selected, .secondary-selected)) { */
+  .item > :global(:is(.content, .deps-and-dependents) mark.hidden:not(.missing)) {
     display: none;
   }
   /* hide tags more aggressively in menu items */
@@ -2222,13 +2223,13 @@
     display: none;
   }
 
-  .item > :global(.content mark.hidden.missing) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.hidden.missing) {
     border-color: #f88;
   }
-  .item > :global(.content mark.hidden.selected) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.hidden.selected) {
     border-color: #9f9;
   }
-  .item > :global(.content mark.hidden.secondary-selected) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.hidden.secondary-selected) {
     border-color: #9b9;
   }
 
@@ -2242,21 +2243,21 @@
     /* border: 1px solid #9b9; */
     /* margin: -1px; */
   }
-  .item > :global(.content mark.label.unique span.highlight) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.label.unique span.highlight) {
     font-weight: 700; /* match weight of mark.label.unique */
   }
 
-  .item > :global(.content mark span.highlight) {
+  .item > :global(:is(.content, .deps-and-dependents) mark span.highlight) {
     color: black;
     background: #9b9;
     border: 0;
     margin: 0;
   }
-  .item > :global(.content mark.label span.highlight) {
+  .item > :global(:is(.content, .deps-and-dependents) mark.label span.highlight) {
     background: #9f9;
   }
 
-  .item > :global(.content mark .spacer) {
+  .item > :global(:is(.content, .deps-and-dependents) mark .spacer) {
     flex-grow: 1;
   }
   /* disable spacers inside .menu highlights when prefix and suffix matches coincide */
@@ -2315,25 +2316,25 @@
     margin-bottom: 0;
   }
 
-  .item > :global(.content ._log) {
+  .item > :global(.content code._log) {
     display: none; /* toggled via .showLogs class */
     opacity: 0.75;
     font-size: 80%;
     line-height: 160%;
   }
   /* simplify linkified urls in log messages (e.g. in stack traces) and code comments */
-  .item > :global(.content ._log a),
+  .item > :global(.content code._log a),
   .item > :global(.content .hljs-comment a) {
     color: #468;
     background: transparent;
     padding: 0;
     line-height: 100%;
   }
-  :global(.container.showLogs .item > .content ._log),
-  :global(.container.showLogs .item > .content .log-triangle) {
+  .container.showLogs .item > :global(.content code._log),
+  .container.showLogs .item > :global(.log-summary > .log-triangle) {
     display: block;
   }
-  :global(.container.showLogs .item > .content .log-dot) {
+  .container.showLogs .item > :global(.log-summary > .log-dot) {
     display: none;
   }
   .item > :global(.content code:empty) {
@@ -2348,9 +2349,7 @@
     content: 'empty ' attr(class);
   }
 
-  :global(.item .log-summary),
-  :global(.item .deps-summary),
-  :global(.item .dependents-summary) {
+  .item > :global(:is(.log-summary, .deps-summary, .dependents-summary)) {
     display: flex;
     font-size: 12px;
     font-family: 'JetBrains Mono', monospace;
@@ -2378,7 +2377,7 @@
     user-select: none;
   }
 
-  :global(.item .log-summary) {
+  .item > :global(.log-summary) {
     display: flex;
     justify-content: flex-start;
     max-width: 25%;
@@ -2386,7 +2385,7 @@
     padding-right: 0;
     margin: 0;
   }
-  :global(.item .dependents-summary) {
+  .item > :global(.dependents-summary) {
     display: flex;
     justify-content: flex-end;
     max-width: 25%;
@@ -2395,21 +2394,21 @@
     margin: 0;
   }
 
-  :global(.item .deps-dot) {
+  .item > :global(.deps-summary > .deps-dot) {
     color: #666;
   }
-  :global(.item .deps-dot.async) {
+  .item > :global(.deps-summary > .deps-dot.async) {
     color: #999;
   }
-  :global(.item .dependents-dot) {
+  .item > :global(.dependents-summary > .dependents-dot) {
     color: #555;
   }
-  :global(.item .dependents-dot.visible) {
+  .item > :global(.dependents-summary > .dependents-dot.visible) {
     color: #999;
   }
-  :global(.item .log-triangle),
-  :global(.item .deps-triangle),
-  :global(.item .dependents-triangle) {
+  .item > :global(.log-summary > .log-triangle),
+  .item > :global(.deps-summary > .deps-triangle),
+  .item > :global(.dependents-summary > .dependents-triangle) {
     display: none;
     font-size: 10px;
     color: #999;
@@ -2417,24 +2416,24 @@
     bottom: 2px; /* triangle can use 2px extra space below */
   }
 
-  :global(.item .deps-dot) {
+  .item > :global(.deps-summary > .deps-dot) {
     margin-right: 1px;
   }
 
   /* increase dot margins on non-iOS due to ~1px less padding of monospace characters */
   @supports not (-webkit-touch-callout: none) {
-    :global(.item .log-dot) {
+    .item > :global(.log-summary > .log-dot) {
       margin-right: 2px;
     }
-    :global(.item .deps-dot) {
+    .item > :global(.deps-summary > .deps-dot) {
       margin: 0 1px;
     }
-    :global(.item .dependents-dot) {
+    .item > :global(.dependents-summary > .dependents-dot) {
       margin-left: 1px;
     }
   }
 
-  :global(.item .deps-and-dependents) {
+  .item > :global(.deps-and-dependents) {
     display: none;
     font-size: 80%;
     line-height: 160%;
@@ -2446,41 +2445,41 @@
   .item > :global(.deps-and-dependents) {
     margin-left: -6px;
   }
-  :global(.container.showDeps .item .deps-and-dependents),
-  :global(.container.showDependents .item .deps-and-dependents) {
+  .container:global(.showDeps) .item > :global(.deps-and-dependents),
+  .container:global(.showDependents) .item > :global(.deps-and-dependents) {
     display: block;
   }
-  :global(.item .deps-and-dependents .deps),
-  :global(.item .deps-and-dependents .dependents) {
+  .item > :global(.deps-and-dependents > .deps),
+  .item > :global(.deps-and-dependents > .dependents) {
     display: none;
   }
-  :global(.container.showDeps .item .deps-and-dependents .deps),
-  :global(.container.showDeps .item .deps-triangle),
-  :global(.container.showDependents .item .deps-and-dependents .dependents),
-  :global(.container.showDependents .item .dependents-triangle) {
+  .container:global(.showDeps) .item > :global(.deps-and-dependents > .deps),
+  .container:global(.showDeps) .item > :global(.deps-summary > .deps-triangle),
+  .container:global(.showDependents) .item > :global(.deps-and-dependents > .dependents),
+  .container:global(.showDependents) .item > :global(.dependents-summary > .dependents-triangle) {
     display: inline;
   }
 
-  :global(.container.showDeps .item .deps-dot),
-  :global(.container.showDependents .item .dependents-dot) {
+  .container:global(.showDeps) .item > :global(.deps-summary > .deps-dot),
+  .container:global(.showDependents) .item > :global(.dependents-summary > .dependents-dot) {
     display: none;
   }
 
-  :global(.item .deps-and-dependents mark),
-  :global(.item .deps-and-dependents a) {
+  .item > :global(.deps-and-dependents mark),
+  .item > :global(.deps-and-dependents a) {
     opacity: 0.75;
   }
-  :global(.item .deps-and-dependents span.visible mark),
-  :global(.item .deps-and-dependents span.async mark) {
+  .item > :global(.deps-and-dependents span.visible mark),
+  .item > :global(.deps-and-dependents span.async mark) {
     opacity: 1;
   }
-  :global(.item .deps-and-dependents span.visible a),
-  :global(.item .deps-and-dependents span.async a) {
+  .item > :global(.deps-and-dependents span.visible a),
+  .item > :global(.deps-and-dependents span.async a) {
     opacity: 1;
   }
 
-  :global(.item .deps-and-dependents .deps-title),
-  :global(.item .deps-and-dependents .dependents-title) {
+  .item > :global(.deps-and-dependents .deps-title),
+  .item > :global(.deps-and-dependents .dependents-title) {
     color: black;
     background: #bbb;
     font-weight: 700;
@@ -2549,9 +2548,7 @@
       font-size: 11px;
       line-height: 20px;
     }
-    :global(.item .log-summary),
-    :global(.item .deps-summary),
-    :global(.item .dependents-summary) {
+    .item > :global(:is(.log-summary, .deps-summary, .dependents-summary)) {
       bottom: -9px; /* works better with fonts on iPhone */
     }
 
@@ -2573,7 +2570,7 @@
       line-height: 23px;
       min-height: 45px; /* single line height */
     }
-    :global(.item a) {
+    .item > :global(.content a) {
       line-height: 19px;
     }
   }
