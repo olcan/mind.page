@@ -111,6 +111,7 @@
     const maths2 = /\$`.*`\$/g
     const code1 = /``.*?``/g
     const code2 = /`.*?`/g
+    // TODO: should we be excluding everything else? is nested highlighting ever ok?
     return text
       .replace(
         comments,
@@ -120,7 +121,7 @@
         })
       )
       .replace(
-        exclusionRegExp(comments, /&lt;&lt;(.*)&gt;&gt;/g), // same as 'macros', just w/ capture of contents
+        exclusionRegExp([comments, html_tags], /&lt;&lt;(.*)&gt;&gt;/g), // same as 'macros', just w/ capture of contents
         skipExclusions(
           skipEscaped((m, content) => {
             content = content.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo tag highlights
@@ -1081,24 +1082,15 @@
     cursor: auto; /* better for selection */
   }
 
-  /* NOTE: transparent selection text in textarea allows backdrop highlights to show through but then selection background is on top of the text, which does not look great, and moving the backdrop to the front does not work because the caret and selection lives in the textarea */
-  /* :global(textarea::selection) {
+  /* NOTE: increase selection transparency to allow backdrop highlights to show through */
+  textarea::selection {
     color: transparent;
-    background: rgb(180, 20, 20, 0.25);
+    background: rgb(255, 0, 0, 0.25);
   }
-  :global(textarea::-moz-selection) {
+  textarea::-moz-selection {
     color: transparent;
-    background: rgb(180, 20, 20, 0.25);
-  } */
-  /* :global(textarea::selection) {
-    color: white;
-    background: rgb(180, 20, 20);
+    background: rgb(255, 0, 0, 0.25);
   }
-  :global(textarea::-moz-selection) {
-    color: white;
-    background: rgb(180, 20, 20);
-  }
-   */
   .buttons {
     position: absolute;
     top: -30px; /* -15px (touches browser bar), -15 for additional padding */
@@ -1145,7 +1137,7 @@
     display: none;
   }
 
-  :global(.editor > .backdrop mark) {
+  .editor > .backdrop :global(mark) {
     /* color: transparent; */
     background: #999;
     font-weight: 600; /* 500 looks light for Menlo w/ white background */
@@ -1154,32 +1146,32 @@
     margin: 0 -2px;
     cursor: pointer;
   }
-  :global(.editor > .backdrop a) {
+  .editor > .backdrop :global(a) {
     color: #468;
   }
-  :global(.editor > .backdrop .block) {
+  .editor > .backdrop :global(.block) {
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
     padding: 1px;
     margin: -1px;
   }
-  :global(.editor > .backdrop .block-delimiter) {
+  .editor > .backdrop :global(.block-delimiter) {
     color: #666;
   }
-  :global(.editor > .backdrop span.code, .editor .math) {
+  .editor > .backdrop :global(:is(span.code, span.math)) {
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 0; /* no overhang since delimited anyway */
     margin: -2px 0;
     border-radius: 4px;
   }
-  :global(.editor > .backdrop .macro) {
+  .editor > .backdrop :global(.macro) {
     background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
   }
-  :global(.editor > .backdrop .macro .macro-delimiter) {
+  .editor > .backdrop :global(.macro .macro-delimiter) {
     color: #89bdff; /* same as hljs-tag and also indicative of macroed/scripted/run/etc (blue) */
   }
-  :global(.editor > .backdrop span.title) {
+  .editor > .backdrop :global(span.title) {
     padding: 2px 4px; /* overhang is fine since titles are on their own lines */
     margin: -2px -4px;
     background: rgba(255, 255, 255, 0.1);
@@ -1187,7 +1179,7 @@
     border-radius: 4px;
     font-weight: 700;
   }
-  :global(.editor > .backdrop span.link) {
+  .editor > .backdrop :global(span.link) {
     padding: 2px 0; /* same as span.code, no overhang to avoid overlapping adjacent text */
     margin: -2px 0;
     /* background: #222; */
@@ -1195,26 +1187,26 @@
     border-radius: 4px;
     color: #57b;
   }
-  :global(.editor > .backdrop span.link > span.link) {
+  .editor > .backdrop :global(span.link > span.link) {
     color: #888;
     background: transparent;
   }
-  :global(.editor > .backdrop .section) {
+  .editor > .backdrop :global(.section) {
     border: 1px dashed #444;
     margin: -1px -5px;
     padding: 0 4px;
   }
-  :global(.editor > .backdrop .section-delimiter) {
+  .editor > .backdrop :global(.section-delimiter) {
     color: #666;
   }
-  :global(.editor.focused > .backdrop span.highlight.matched) {
+  .editor.focused > .backdrop :global(span.highlight.matched) {
     color: black;
     background: #9f9;
     /* border: 1px solid #9f9; */
     box-sizing: border-box;
     border-radius: 4px;
   }
-  :global(.editor.focused > .backdrop span.highlight.unmatched) {
+  .editor.focused > .backdrop :global(span.highlight.unmatched) {
     color: black;
     background: #f99;
     /* border: 1px solid #f99; */
@@ -1222,7 +1214,7 @@
     border-radius: 4px;
   }
 
-  :global(.editor > .backdrop .hljs-comment a) {
+  .editor > .backdrop :global(.hljs-comment a) {
     color: #666; /* since not clickable in editor */
   }
 
