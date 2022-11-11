@@ -231,9 +231,18 @@
     lastActiveElement = null
   }
 
+  let modaldiv
   function onBackgroundClick(e = null) {
-    // ignore clicks on modal unless we are in passthrough mode and not clicking on an input/button/_clickable element
-    if (e?.target.closest('.modal') && (!passthrough || e?.target.closest('input, button, [_clickable]'))) return
+    if (modaldiv.contains(e?.target)) {
+      if (!passthrough) return // ignore click on modal w/o passthrough mode
+      if (e.target.closest('input, button, [_clickable]')) return // ignore click on interactive element
+      if (
+        window.getSelection().type == 'Range' &&
+        (e.target.contains(window.getSelection().anchorNode) || e.target.contains(window.getSelection().focusNode))
+      )
+        return // ignore click when text is selected in target element
+      // otherwise pass through to background ...
+    }
     e?.stopPropagation()
     e?.preventDefault()
     if (!confirm && !cancel && background.toLowerCase() != 'block') close(promise_visible)
@@ -313,7 +322,7 @@
 </script>
 
 <div class="background" class:visible={_visible} on:click={onBackgroundClick}>
-  <div class="modal">
+  <div class="modal" bind:this={modaldiv}>
     {#if content}{@html replaceNakedURLs(marked.parse(content))}{/if}
     {#if input != null}
       <!-- for Chrome warnings, we wrap in form and add username of type "text" -->

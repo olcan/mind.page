@@ -119,7 +119,12 @@
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest('[_clickable]')
     if (clickable && (!clickable['_clickable'] || clickable['_clickable'](e))) return true
-    if (window.getSelection().type == 'Range') return // ignore click if text is selected
+    if (
+      window.getSelection().type == 'Range' &&
+      (e.target.contains(window.getSelection().anchorNode) || e.target.contains(window.getSelection().focusNode))
+    )
+      return // ignore click when text is selected in target element
+
     if (editing) return // already editing
     // if item is previewable, then preview instead of edit
     if (previewable) onPreview(index)
