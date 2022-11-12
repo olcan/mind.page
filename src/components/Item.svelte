@@ -941,7 +941,7 @@
         console.warn('uncached image (missing _cache_key on/above element)')
       // invoke onImageRendering for image, allowing it to change src and add _pending attribute
       // note this happens in toHTML for static images already on item at render time
-      console.debug('rendering image', img.getAttribute('src'))
+      // console.debug('rendering image', img.getAttribute('src'))
       const src = img.getAttribute('src')
       const attrs = _.assign({ src }, onImageRendering(src))
       _.entries(attrs).forEach(([k, v]) => img.setAttribute(k, v))
