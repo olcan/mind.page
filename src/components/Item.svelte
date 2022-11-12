@@ -891,8 +891,8 @@
         elem = cached
         // resize all children and SELF w/ _resize attribute (and property)
         try {
-          elem.querySelectorAll('[_resize]').forEach(e => e['_resize']())
-          if (elem['_resize']) elem['_resize']()
+          elem.querySelectorAll('[_resize]').forEach(e => e['_resize']?.())
+          elem['_resize']?.()
         } catch (e) {
           console.error('_resize error', e)
         }
@@ -929,6 +929,7 @@
   }
 
   function renderImages(elems) {
+    cacheElems() // cache/restore any new cached elements
     // set up img elements to trigger downloading (if _pending) and invoke onResized upon loading
     elems.forEach(img => {
       if (img.hasAttribute('_rendered')) return // already rendered
@@ -936,15 +937,20 @@
         console.warn('img missing src')
         return
       }
-      if (!img.hasAttribute('_cache_key')) {
-        console.warn('img missing _cache_key (should be automatically added)')
-        return
-      }
+      if (!img.hasAttribute('_uncached') && !img.closest('[_cache_key]'))
+        console.warn('uncached image (missing _cache_key on/above element)')
+      // invoke onImageRendering for image, allowing it to change src and add _pending attribute
+      // note this happens in toHTML for static images already on item at render time
+      console.debug('rendering image', img.getAttribute('src'))
+      const src = img.getAttribute('src')
+      const attrs = _.assign({ src }, onImageRendering(src))
+      _.entries(attrs).forEach(([k, v]) => img.setAttribute(k, v))
       if (img.hasAttribute('_pending')) onImageRendered(img) // trigger pending download of _src
       img.onload = () => {
         onResized(id, container, 'img.onload')
         // note image is not _rendered until _pending attribute is removed by onImageRendered
         if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
+        img['_resize']?.()
       }
     })
   }
@@ -996,7 +1002,7 @@
     itemdiv.firstElementChild.setAttribute('_highlightTerms', highlightTerms)
     // console.debug("afterUpdate", name);
 
-    // cache any elements with _cache_key (invoked again later for elements with scripts)
+    // cache/restore any cached elements with _cache_key (invoked again later for elements with scripts)
     cacheElems()
 
     // highlight matching tags using selected/secondary-selected classes
@@ -1441,12 +1447,8 @@
       // console.debug(`executing ${pendingScripts} scripts in item ${name} ...`);
       scripts.forEach(async (script, scriptIndex) => {
         // console.debug(script.parentElement);
-        if (
-          !script.hasAttribute('_uncached') &&
-          !script.hasAttribute('_cache_key') &&
-          !script.parentElement.hasAttribute('_cache_key')
-        ) {
-          console.warn('script will execute at every render due to uncached element or parent (missing _cache_key)')
+        if (!script.hasAttribute('_uncached') && !script.closest('[_cache_key]')) {
+          console.warn('uncached script will execute at every render (missing _cache_key on/above element)')
         }
 
         // NOTE: we do not support .src yet, when we do we need to fetch the script using AJAX, prefix w/ __id, and ensure proper completion/error handling via script.onerror assuming that works.

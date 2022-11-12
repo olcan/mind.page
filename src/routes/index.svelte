@@ -1777,8 +1777,11 @@
     })
   }
   function onImageRendering(src: string): any {
+    // drop any protocol/hostname that may have been added by browser for relative names
+    src = src.replace(location.protocol + '//' + location.host + '/', '')
+    // drop existing <uid|sharer>/images/ prefix if any
+    src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1')
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
-    src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1') // drop existing prefix
     if (src.match(/^[0-9a-fA-F]+$/)) {
       if (fixed) src = `${sharer}/uploads/public/images/${src}`
       else src = `${user.uid}/images/${src}`
@@ -1788,7 +1791,7 @@
       !src.startsWith('anonymous/images/') &&
       !src.startsWith(`${sharer}/uploads/public/images/`)
     )
-      return src // external image, leave as is
+      return { src } // external image, leave as is
     if (images[src]) return { src: images[src] } // image ready, replace src immediately
     return {
       /* transparent pixel suitable for css animation */
