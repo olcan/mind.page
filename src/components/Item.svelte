@@ -872,7 +872,7 @@
   let itemdiv: HTMLDivElement
 
   function cacheElems() {
-    // cache (restore) elements with attribute _cache_key to (from) window[_cache][_cache_key]
+    // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
     itemdiv?.querySelectorAll('[_cache_key]').forEach(elem => {
       window['_elem_cache'][id] ??= new Map()
       if (elem.hasAttribute('_cached')) return // already cached/restored

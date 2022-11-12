@@ -1778,7 +1778,8 @@
   }
   function onImageRendering(src: string): any {
     // drop any protocol/hostname that may have been added by browser for relative names
-    src = src.replace(location.protocol + '//' + location.host + '/', '')
+    const url_base = location.protocol + '//' + location.host + '/'
+    if (src.startsWith(url_base)) src = src.replace(url_base, '')
     // drop existing <uid|sharer>/images/ prefix if any
     src = src.replace(new RegExp('^(?:' + user.uid + '|' + sharer + ')\\/images\\/([0-9a-fA-F]+)$'), '$1')
     // prefix <uid>/images/ automatically for hex src or (<sharer>/uploads/public/images/ in fixed/shared mode)
