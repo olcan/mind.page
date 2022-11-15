@@ -2643,11 +2643,11 @@
 
   function checkIfRenderingVisibleItems() {
     // this needs to be done wherever either item layout OR hideIndex is updated
-    // we test for height==0 (vs item.rendering) so that loading overlay does not wait for images/scripts/math/etc
+    // we can check for height==0 or !item.rendered if we want to also wait for images/scripts/math/etc
     // we allow editing items since the rendered item (item.elem) is not visible on page
     // we would also allow below-fold items, but unfortunately that is not reliable when heights are unknown
     renderingVisibleItems =
-      hideIndex > 0 && _.findLastIndex(items, item => item.height == 0 && !item.editing, hideIndex - 1) >= 0
+      hideIndex > 0 && _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
   }
 
   function toggleItems(index: number) {
