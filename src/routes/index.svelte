@@ -1528,6 +1528,7 @@
   let lastLayoutTime = 0
   let lastLayoutCount = 0
   let showDotted = false
+  const separatorHeight = 80
 
   function updateItemLayout() {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
@@ -1601,7 +1602,7 @@
         const minColumnHeight = Math.min(...columnHeights)
         if (
           columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
-          columnHeights[lastColumn] + item.outerHeight + 40 <= minColumnHeight + 0.9 * outerHeight
+          columnHeights[lastColumn] + item.outerHeight + separatorHeight <= minColumnHeight + 0.9 * outerHeight
         )
           item.column = lastColumn
         else item.column = columnHeights.indexOf(minColumnHeight)
@@ -1612,7 +1613,7 @@
             lastItem.arrows += item.column < lastColumn ? '←' : '→'
           lastItem.arrows += item.column < lastColumn ? '' : '↗'
           // NOTE: we include .section-separator height but ignore show which is dynamic (like dotted items)
-          columnHeights[lastColumn] += 40 // .section-separator height including margins
+          columnHeights[lastColumn] += separatorHeight // .section-separator height including margins
         }
       }
       // mark item as aboveFold if it is pinned or item is visible (at least partially) on first screen
@@ -7400,10 +7401,10 @@
               {#if item.nextColumn >= 0 && item.index < hideIndex}
                 <div class="section-separator">
                   <hr />
-                  <span class="arrows">{item.arrows}</span>{fixed ? '' : item.index + 2}
+                  <span class="arrows">{item.arrows}</span>{item.index + 2}
                   {#if item.nextItemInColumn >= 0 && item.nextItemInColumn <= hideIndex}
                     &nbsp;
-                    <span class="arrows">↓</span>{fixed ? '' : item.nextItemInColumn + 1}
+                    <span class="arrows">↓</span>{item.nextItemInColumn + 1}
                   {/if}
                   <hr />
                 </div>
@@ -7600,10 +7601,10 @@
     .items {
       padding-bottom: 0 !important;
     }
-    .container > .item-menu,
+    /* .container > .item-menu,
     .item > div:first-child {
       display: none !important;
-    }
+    } */
     .item > :is(.content, .deps-and-dependents) mark.label {
       display: none !important;
     }
@@ -8107,23 +8108,27 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 40px; /* 40px offset height assumed by column layout */
+    height: 80px; /* = separatorHeight used in updateItemLayout */
     color: #444; /* same as time indicators */
+    /* background: #171717; */
+    background: repeating-linear-gradient(45deg, #171717, #171717 10px, #000 10px, #000 20px);
     font-size: 16px;
+    font-weight: 600;
   }
   .section-separator .arrows {
     margin-bottom: 5px; /* aligns better w/ surrounding text */
     /* font-family: 'JetBrains Mono', monospace; */
     font-family: monospace; /* down arrow looks too large w/ JetBrains Mono */
     font-weight: 300;
-    font-size: 20px;
+    font-size: 40px;
   }
   .section-separator hr {
-    display: inline-block;
+    display: none;
+    /* display: inline-block; */
     vertical-align: middle;
     background: transparent;
     border: 0;
-    border-top: 2px solid #444;
+    border-top: 3px dashed #444;
     height: 0; /* disappears if both height and border are 0 */
     width: 25%;
     margin: 0 15px;
