@@ -4384,7 +4384,9 @@
     item.pendingElems = container.querySelectorAll(
       ['script', 'img:not([_rendered])', ':is(span.math,span.math-display):not([_rendered])'].join()
     ).length
+    let just_rendered = false
     if (height > 0 && item.pendingElems == 0) {
+      just_rendered = !item.rendered
       item.rendered = true
       item.resolve_render?.(container.closest('.super-container'))
       item.resolve_render = null
@@ -4392,7 +4394,7 @@
       item.rendered = false
     }
 
-    if (height == prevHeight) return // nothing has changed
+    if (height == prevHeight && !just_rendered) return // nothing has changed
     if (height <= 0 && prevHeight > 0) {
       console.warn(`ignoring invalid height ${height} (was ${prevHeight}) for item ${item.name} at index ${index}`)
       return
@@ -4404,6 +4406,7 @@
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
     if (
+      just_rendered ||
       height == 0 ||
       prevHeight == 0 ||
       Math.abs(height - prevHeight) > 300
