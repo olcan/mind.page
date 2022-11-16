@@ -302,8 +302,10 @@
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
-    window['__item'] = item // internal item (for debugging only)
-    window['__items'] = () => items // internal items (for debugging only)
+    window['__item'] = item // internal item(...) function (for debugging only)
+    // internal item array and hide index (for debugging only)
+    Object.defineProperty(window, '__items', { get: () => items })
+    Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     window['_items'] = _items
     window['_exists'] = _exists
     window['_create'] = _create
@@ -2519,6 +2521,8 @@
         }
       }
 
+      // console.debug(toggles.slice(), unpinnedIndex, nonmatchingIndex, belowFoldIndex, hideIndexFromRanking)
+
       // calculate "minimal" hide index used in certain situations, e.g. when window is defocused
       // minimal index is either the first time-ranked item, or the first position-based hidden item
       // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
@@ -2556,7 +2560,7 @@
       for (let j = 0; j < blocks.length; ++j) {
         const extendedTailTime = Date.now() - blocks[j] * 24 * 3600 * 1000
         if (extendedTailTime >= tailTime) continue
-        let extendedTailIndex = _.findIndex(items, item => item.time < extendedTailTime, tailIndex)
+        let extendedTailIndex = _.findIndex(items, item => item.time < extendedTailTime, tailIndex + 1)
         // restrict each toggle to 50 items max
         if (extendedTailIndex - tailIndex > 50) {
           extendedTailIndex = tailIndex + 50
@@ -2570,6 +2574,30 @@
         tailIndex = extendedTailIndex
         tailTime = items[extendedTailIndex]?.time || oldestTime
         if (tailIndex == items.length) break
+      }
+
+      // sanity check toggles are non-empty, contiguous, and complete
+      for (let i = 0; i < toggles.length - 1; i++) {
+        if (toggles[i].end <= toggles[i].start) console.error('toggles are not non-empty', toggles)
+        if (toggles[i].end !== toggles[i + 1].start) console.error('toggles are not contiguous', toggles)
+      }
+      if (toggles.length && _.last(toggles).end != items.length) console.error('toggles are incomplete', toggles)
+
+      // align hideIndex to next toggle.start (could be misaligned e.g. if there are no position-based toggles)
+      // hideIndex = toggles.find(toggle => toggle.start >= hideIndex)?.start ?? items.length
+
+      // insert toggle at hideIndex if needed
+      if (hideIndex < items.length) {
+        const hideToggleIndex = toggles.findIndex(toggle => toggle.start >= hideIndex)
+        if (hideToggleIndex < 0) {
+          if (toggles.length > 0) console.error('invalid toggles', toggles) // should not happen given checks above
+          toggles = [{ start: hideIndex, end: items.length }]
+        } else if (toggles[hideToggleIndex].start > hideIndex) {
+          toggles.splice(hideToggleIndex, 0, { start: hideIndex, end: toggles[hideToggleIndex].start })
+          if (hideToggleIndex > 0) toggles[hideToggleIndex - 1].end = hideIndex
+        }
+      } else if (hideIndex > items.length) {
+        console.error('invalid hideIndex', hideIndex, items.length)
       }
 
       // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
@@ -4402,7 +4430,6 @@
     // console.debug(`item ${item.name} height changed from ${prevHeight}} to ${height}`);
 
     item.height = height
-    if (item.hidden) return // skip layout update for hidden item
 
     // NOTE: Heights can fluctuate due to async scripts that generate div contents (e.g. charts), especially where the height of the output is not known and can not be specified via CSS, e.g. as an inline style on the div. We tolerate these changes for now, but if this becomes problematic we can skip or delay some layout updates, especially when the height is decreasing, postponing layout update to other events, e.g. reordering of items.
     if (

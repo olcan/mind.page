@@ -952,6 +952,18 @@
         if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
         img['_resize']?.()
       }
+      // also handle onerror/onabort as if image was loaded, but with a warning _failed/_aborted attribute
+      // these are invoked w/ uninformative 'error' events, see https://developer.mozilla.org/en-US/docs/Web/API/Element/error_event
+      img.onerror = e => {
+        console.error('image load failed', img.getAttribute('src'), img.getAttribute('_src'), img, e)
+        img.setAttribute('_failed', Date.now().toString())
+        img.onload()
+      }
+      img.onabort = e => {
+        console.warn('image load aborted', img.getAttribute('src'), img.getAttribute('_src'), img, e)
+        img.setAttribute('_aborted', Date.now().toString())
+        img.onload()
+      }
     })
   }
 
