@@ -7615,7 +7615,7 @@
       .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
         display: none;
       }
-      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type ~ br {
+      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type + br {
         display: none;
       }
     {/if}
