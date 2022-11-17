@@ -303,8 +303,9 @@
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
     window['__item'] = item // internal item(...) function (for debugging only)
-    // internal item array and hide index (for debugging only)
+    // internal item array and other state (for debugging only)
     Object.defineProperty(window, '__items', { get: () => items })
+    Object.defineProperty(window, '__toggles', { get: () => toggles })
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     window['_items'] = _items
     window['_exists'] = _exists
@@ -7428,7 +7429,7 @@
                 leader={item.leader}
                 runnable={item.runnable}
               />
-              {#if item.nextColumn >= 0 && item.index < hideIndex}
+              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
                 <div class="section-separator">
                   <hr />
                   <span class="arrows">{item.arrows}</span>{item.index + 2}
