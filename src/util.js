@@ -52,9 +52,10 @@ export function highlight(code, language) {
       (m, pfx, href) =>
         `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )
+  // NOTE: if we return without running the code through hljs, we need to ensure html-escaping
   if (language == '_log') {
     // link urls and highlight log levels in _log blocks
-    return link_urls(code)
+    return link_urls(_.escape(code))
       .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')
       .replace(/^(WARNING:.*)$/gm, '<span class="console-warn">$1</span>')
       .replace(/^(INFO:.*)$/gm, '<span class="console-info">$1</span>')
@@ -62,7 +63,7 @@ export function highlight(code, language) {
       .replace(/(; STACK:.+)$/gm, '<span class="console-debug">$1</span>')
   } else if (language == '_output') {
     // link urls in standard _output blocks
-    return link_urls(code)
+    return link_urls(_.escape(code))
   }
   // drop any _suffix if language does not start with _ (_lang is editor-only)
   if (!language.startsWith('_')) language = language.replace(/_.*$/, '')
