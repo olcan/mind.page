@@ -8146,7 +8146,7 @@
     height: 72px; /* + margins = separatorHeight used in updateItemLayout */
     color: #444; /* same as time indicators */
     /* background: #171717; */
-    background: repeating-linear-gradient(45deg, #171717, #171717 10px, #000 10px, #000 20px);
+    background: repeating-linear-gradient(45deg, #171717, #171717 8px, #000 8px, #000 16px);
     font-size: 16px;
     font-weight: 600;
   }
