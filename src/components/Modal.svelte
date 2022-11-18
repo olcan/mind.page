@@ -323,7 +323,7 @@
 
 <div class="background" class:visible={_visible} on:click={onBackgroundClick}>
   <div class="modal" bind:this={modaldiv}>
-    {#if content}{@html replaceNakedURLs(marked.parse(content))}{/if}
+    {#if content}{@html replaceNakedURLs(marked.parse(content, { breaks: true }))}{/if}
     {#if input != null}
       <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
       <form>
