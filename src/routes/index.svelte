@@ -7572,6 +7572,10 @@
       border-bottom-right-radius: 5px;
       font-size: 16px;
     }
+    .column.multi-column .header .status .left {
+      margin-left: 1px; /* align w/ item container edge below, see "margin-right: 1px" above */
+      border-bottom-left-radius: 5px; /* round out left side also */
+    }
     .header .status .left .triangle {
       /* color: #666; */
       color: black;
@@ -8088,15 +8092,14 @@
     background: #222; /* matches .header-container focused background */
   }
 
-  /* .column:last-child {
-    margin-right: 0;
-  } */
-  /* .column:last-child {
-    margin-right: 0;
-  } */
   /* single-column layout can remove margin since there is no concern of having columns w/ same width */
   .column:not(.multi-column) {
     margin-right: 1px; /* consistent w/ 1px padding-left of .super-container */
+  }
+  /* multi-column layout can add padding on left for symmetry */
+  .items.multi-column {
+    padding-left: 8px;
+    box-sizing: border-box; /* include added padding */
   }
 
   .items:not(.focused) :global(.item-menu),
