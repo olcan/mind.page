@@ -325,6 +325,7 @@
         textarea.focus()
       },
       onConfirm: images => {
+        // NOTE: devicePixelRatio is fixed in Safari but varies in Chrome based on page zoom level, which is not possible to detect reliably (e.g. the ratio outerWidth/innerWidth works only when console is not open)
         const zoom = Math.round(1000 / window.devicePixelRatio) / 1000
         const tags = images
           .map(image => {
@@ -785,7 +786,7 @@
       } else if (item.type.startsWith('image/') || item.type == 'application/pdf') {
         const file = item.getAsFile()
         const url = URL.createObjectURL(file)
-        const zoom = Math.round(1000 / window.devicePixelRatio) / 1000
+        const zoom = Math.round(1000 / window.devicePixelRatio) / 1000 // see note above about devicePixelRatio
         const modal = window['_modal']('Inserting pasted image ...')
         Promise.resolve(
           onPastedImage(url, file, size => {
