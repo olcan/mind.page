@@ -8142,7 +8142,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 80px; /* = separatorHeight used in updateItemLayout */
+    margin: 4px 0;
+    height: 72px; /* + margins = separatorHeight used in updateItemLayout */
     color: #444; /* same as time indicators */
     /* background: #171717; */
     background: repeating-linear-gradient(45deg, #171717, #171717 10px, #000 10px, #000 20px);
