@@ -7294,7 +7294,7 @@
                 >
                   <div class="title">{items[0].title || shared_key}</div>
                   {#if sharer_short_name}
-                    <div class="sharer">shared by <span class="sharer-name">{sharer_short_name || ''}</span></div>
+                    <div class="subtitle">shared by <span class="sharer-name">{sharer_short_name || ''}</span></div>
                   {/if}
                 </div>
               {/if}
@@ -7583,6 +7583,11 @@
       margin: -10px;
       padding: 10px;
       margin-right: -5px;
+      font-family: 'JetBrains Mono', monospace; /* consistent on iPhone */
+      /* these improve vertical centering */
+      display: inline-block;
+      vertical-align: middle;
+      margin-top: -17px;
     }
     .header .status .center {
       flex-grow: 2;
@@ -7598,14 +7603,14 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .header .status .center .sharer {
+    .header .status .center .subtitle {
       font-size: 70%;
       color: #777;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .header .status .center .sharer .sharer-name {
+    .header .status .center .subtitle .sharer-name {
       color: #aaa;
       font-weight: 700; /* bold */
     }
@@ -7651,6 +7656,9 @@
         display: none;
       }
     {/if}
+    .item > :is(.deps-summary, .dependents-summary) {
+      display: none !important;
+    }
   </style>
 {/if}
 
