@@ -8188,7 +8188,10 @@
     font-size: 40px;
   }
   .section-separator .arrows:first-of-type {
-    margin-right: 3px; /* extra spacing for diagonal/sideways arrows pointing at other columns */
+    margin-right: 2px; /* extra spacing for diagonal/sideways arrows pointing at other columns */
+  }
+  .section-separator .arrows:not(:first-of-type) {
+    margin-right: -2px; /* remove some spacing next to down arrow */
   }
   .section-separator hr {
     display: none;
