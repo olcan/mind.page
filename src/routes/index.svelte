@@ -1985,6 +1985,7 @@
   let replaceStateOnEditorChange = false
   let ignoreStateOnEditorChange = false
   let hideIndex = 0
+  let hideIndexFixed = 0
   let hideIndexMinimal = 0
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
@@ -2325,10 +2326,13 @@
       const target = items.find(item => item.name == text)
       if (target) {
         items = [target, ..._.without(items, target)]
-        hideIndexMinimal = hideIndex = 1
+        hideIndexMinimal = hideIndexFixed = hideIndex = 1
       } else {
         items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
-        hideIndexMinimal = hideIndex = _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
+        hideIndexMinimal =
+          hideIndexFixed =
+          hideIndex =
+            _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
       }
       updateItemLayout()
     } else {
@@ -5619,6 +5623,7 @@
       items = _.sortBy(items, item => item.attr.shared.indices?.[shared_key] ?? Infinity)
       maxRenderedAtInit =
         hideIndexMinimal =
+        hideIndexFixed =
         hideIndex =
           _.sumBy(items, item => (item.shared.indices?.[shared_key] >= 0 ? 1 : 0))
     }
@@ -7429,7 +7434,7 @@
                 leader={item.leader}
                 runnable={item.runnable}
               />
-              {#if item.nextColumn >= 0 && item.index < Math.min(hideIndex, items.length - 1)}
+              {#if item.nextColumn >= 0 && item.index < hideIndex && (!fixed || item.index < hideIndexFixed - 1)}
                 <div class="section-separator">
                   <hr />
                   <span class="arrows">{item.arrows}</span>{item.index + 2}
