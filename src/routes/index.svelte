@@ -8201,7 +8201,13 @@
 
   /* allow time strings to overlap preceding section separators */
   .section-separator + :global(.super-container.timed) {
-    margin-top: -24px;
+    margin-top: -29px; /* align bottom of .time w/ bottom edge of separator */
+  }
+  .section-separator + :global(.super-container.timed .time) {
+    margin-left: -1px; /* align w/ left edge of separator */
+    margin-bottom: 9px; /* 4px + 5px compensation for .super-container margin-top */
+    background: black;
+    border-top-right-radius: 5px;
   }
 
   /* allow time strings to overlap preceding .toggle */
