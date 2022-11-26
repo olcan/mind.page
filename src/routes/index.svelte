@@ -7429,7 +7429,7 @@
                 leader={item.leader}
                 runnable={item.runnable}
               />
-              {#if item.nextColumn >= 0 && item.index < hideIndex - 1}
+              {#if item.nextColumn >= 0 && item.index < Math.min(hideIndex, items.length - 1)}
                 <div class="section-separator">
                   <hr />
                   <span class="arrows">{item.arrows}</span>{item.index + 2}
