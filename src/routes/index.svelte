@@ -7439,7 +7439,7 @@
                   <hr />
                   <span class="arrows">{item.arrows}</span>{item.index + 2}
                   {#if item.nextItemInColumn >= 0 && item.nextItemInColumn <= hideIndex}
-                    &nbsp;
+                    &nbsp; &nbsp; &nbsp;
                     <span class="arrows">↓</span>{item.nextItemInColumn + 1}
                   {/if}
                   <hr />
@@ -8186,6 +8186,9 @@
     font-family: monospace; /* down arrow looks too large w/ JetBrains Mono */
     font-weight: 300;
     font-size: 40px;
+  }
+  .section-separator .arrows:first-of-type {
+    margin-right: 3px; /* extra spacing for diagonal/sideways arrows pointing at other columns */
   }
   .section-separator hr {
     display: none;
