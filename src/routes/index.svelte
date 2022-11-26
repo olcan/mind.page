@@ -7849,6 +7849,23 @@
   <!-- see https://stackoverflow.com/a/25041921 about custom apple-touch-icon location -->
   <link rel="apple-touch-icon" type="image/png" href="{hostdir}/apple-touch-icon.png?v={favicon_version}" />
   <link rel="manifest" href="manifest.json?v={favicon_version}" />
+  {#if signedin}
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-1069242463"></script>
+    <script>
+      window.dataLayer = window.dataLayer || []
+      function gtag() {
+        dataLayer.push(arguments)
+      }
+      gtag('js', new Date())
+      gtag('config', 'AW-1069242463')
+    </script>
+    <!-- Event snippet for Website traffic conversion page -->
+    <script>
+      gtag('event', 'conversion', { send_to: 'AW-1069242463/XXZACI6YsIMYEN-w7f0D' })
+      console._debug('triggered conversion event')
+    </script>
+  {/if}
 </svelte:head>
 
 <style>
