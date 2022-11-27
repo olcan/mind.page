@@ -1987,7 +1987,7 @@
     user-select: none;
     /* pointer-events: none; */
   }
-  .loading > div {
+  .loading > div:not(.message) {
     opacity: 0.75;
   }
   .running .loading,
@@ -1997,6 +1997,14 @@
   /* remove .message div when empty */
   .loading .message:empty {
     display: none;
+  }
+  .loading .message {
+    padding: 5px 10px;
+    margin-top: 10px;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    background: #171717;
+    border-radius: 5px;
   }
   /* style progress bars for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
