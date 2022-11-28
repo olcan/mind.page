@@ -553,6 +553,12 @@
       return (_item.store ??= {})
     }
 
+    set store(obj:object) {
+      if (Object.getPrototypeOf(obj) != Object.prototype)
+        throw new Error('attempt to set item.store to non-plain-object')
+      item(this.id).store = obj
+    }
+
     // general-purpose cache object, cleared automatically if deephash has changed
     // NOTE: automated clearing is only during access via item.cache
     get cache(): object {
