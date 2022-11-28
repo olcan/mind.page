@@ -7177,7 +7177,8 @@
         try {
           body = await resp.text()
         } catch {}
-        throw new Error(`fetch failed: ${resp.status} (${resp.statusText}); ` + body)
+        // note we attach resp and body to thrown error
+        throw _.assign(new Error(`fetch failed: ${resp.status} (${resp.statusText}); ` + body), {resp, body})
       }
       return resp
     }
