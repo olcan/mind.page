@@ -596,12 +596,18 @@
       return this._local_store
     }
 
+    set local_store(obj:object) {
+      if (Object.getPrototypeOf(obj) != Object.prototype)
+        throw new Error('attempt to set item.local_store to non-plain-object')
+      item(this.id).local_store = obj
+    }
+
     // direct local_store accessor w/o auto-save for sync changes
     // any changes must be saved manually via save_local_store
     get _local_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.local_store || (_item.local_store = {})
+      if (!_item.savedId) return _item.local_store ??= {}
       const key = 'mindpage_item_store_' + _item.savedId
       _item.local_store ??= JSON.parse(localStorage.getItem(key)) || {}
       return _item.local_store
@@ -656,12 +662,18 @@
       return this._global_store
     }
 
+    set global_store(obj:object) {
+      if (Object.getPrototypeOf(obj) != Object.prototype)
+        throw new Error('attempt to set item.global_store to non-plain-object')
+      item(this.id).global_store = obj
+    }
+
     // direct global_store accessor w/o auto-save for sync changes
     // any changes must be saved manually via save_global_store
     get _global_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.global_store || (_item.global_store = {})
+      if (!_item.savedId) return _item.global_store ??= {}
       if (anonymous) {
         _item.global_store ??= _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
       } else {
