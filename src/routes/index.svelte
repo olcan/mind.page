@@ -599,6 +599,7 @@
     set local_store(obj:object) {
       if (Object.getPrototypeOf(obj) != Object.prototype)
         throw new Error('attempt to set item.local_store to non-plain-object')
+      this.save_local_store()
       item(this.id).local_store = obj
     }
 
@@ -665,6 +666,7 @@
     set global_store(obj:object) {
       if (Object.getPrototypeOf(obj) != Object.prototype)
         throw new Error('attempt to set item.global_store to non-plain-object')
+      this.save_global_store()
       item(this.id).global_store = obj
     }
 
