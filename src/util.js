@@ -303,11 +303,22 @@ export function byteStringToArray(str) {
   return array
 }
 
-// concatenate Uint8Arrays
+function castArgToByteArray(x) {
+  if (x.constructor.name == 'Uint8Array') return x
+  else if (x.constructor.name == 'ArrayBuffer') return new Uint8Array(x)
+  else if (ArrayBuffer.isView(x)) {
+    if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
+    return new Uint8Array(x.buffer)
+  } else throw new Error('argument is not an ArrayBuffer or view')
+}
+
+// concatenate Uint8Arrays or ArrayBuffers/views that can be cast to Uint8Arrays
 export function concatByteArrays(...parts) {
-  if (!parts.every(a => a.constructor.name == 'Uint8Array')) throw new Error('invalid arguments, expected Uint8Arrays')
-  let length = 0
-  for (const part of parts) length += part.length
+  let length = 0 // total byte length
+  for (let j = 0; j < parts.length; j++) {
+    parts[j] = castArgToByteArray(parts[j])
+    length += parts[j].length
+  }
   const array = new Uint8Array(length)
   let offset = 0
   for (const part of parts) {
@@ -338,12 +349,7 @@ export function stringify(x) {
 
 // converts ArrayBuffer & views to byte string (code points <=255) via byteArrayToString
 export function byte_stringify(x) {
-  if (x.constructor.name == 'ArrayBuffer') return byteArrayToString(new Uint8Array(x))
-  if (ArrayBuffer.isView(x)) {
-    if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
-    return byteArrayToString(new Uint8Array(x.buffer))
-  }
-  throw new Error('invalid argument, expected ArrayBuffer or view (e.g. Uint8Array)')
+  return byteArrayToString(castArgToByteArray(x))
 }
 
 function _stringify_object(x) {
