@@ -553,7 +553,7 @@
       return (_item.store ??= {})
     }
 
-    set store(obj:object) {
+    set store(obj: object) {
       if (Object.getPrototypeOf(obj) != Object.prototype)
         throw new Error('attempt to set item.store to non-plain-object')
       item(this.id).store = obj
@@ -596,7 +596,7 @@
       return this._local_store
     }
 
-    set local_store(obj:object) {
+    set local_store(obj: object) {
       if (Object.getPrototypeOf(obj) != Object.prototype)
         throw new Error('attempt to set item.local_store to non-plain-object')
       this.save_local_store()
@@ -608,7 +608,7 @@
     get _local_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.local_store ??= {}
+      if (!_item.savedId) return (_item.local_store ??= {})
       const key = 'mindpage_item_store_' + _item.savedId
       _item.local_store ??= JSON.parse(localStorage.getItem(key)) || {}
       return _item.local_store
@@ -663,7 +663,7 @@
       return this._global_store
     }
 
-    set global_store(obj:object) {
+    set global_store(obj: object) {
       if (Object.getPrototypeOf(obj) != Object.prototype)
         throw new Error('attempt to set item.global_store to non-plain-object')
       this.save_global_store()
@@ -675,7 +675,7 @@
     get _global_store(): object {
       let _item = item(this.id)
       // until item is saved, we can only initialize and return in-memory store
-      if (!_item.savedId) return _item.global_store ??= {}
+      if (!_item.savedId) return (_item.global_store ??= {})
       if (anonymous) {
         _item.global_store ??= _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
       } else {
@@ -1498,6 +1498,7 @@
     //       otherwise causes scrolling to be off by up to virtual keyboard height
     //       this delta seems to be zero on other devices (including android)
     document.body.scrollTo(0, y + innerHeight * visualViewport.scale - document.body.offsetHeight)
+    // console.trace()
   }
 
   let padding = 0
@@ -1550,6 +1551,7 @@
   let disableScrollingOnLayout = false
   let lastLayoutTime = 0
   let lastLayoutCount = 0
+  let layoutScrollDispatchTime = 0
   let showDotted = false
   const separatorHeight = 80
 
@@ -1704,17 +1706,20 @@
 
     if (disableScrollingOnLayout) return
     const dispatchTime = Date.now()
+    layoutScrollDispatchTime ||= dispatchTime // keep scroll dispatch time until cleared below
     const lastLayoutCountAtDispatch = lastLayoutCount
     const numItemsAtDispatch = items.length
     update_dom().then(() => {
       if (lastLayoutCount != lastLayoutCountAtDispatch) return // layout changed since dispatch
       if (items.length != numItemsAtDispatch)
         console.warn('number of items changed unexpectedly!', items.length, numItemsAtDispatch)
+
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
       if (focusedEditElement && activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
         focusedEditElement.focus()
-        if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
+        if (lastScrollTime < layoutScrollDispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
         lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
+
       } else if (_.min(topMovers) < items.length && !narrating) {
         const itemTop = _.min(
           topMovers.map(index => {
@@ -1726,9 +1731,11 @@
         )
         // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop < document.body.scrollTop)
+        if (itemTop < document.body.scrollTop && lastScrollTime < layoutScrollDispatchTime)
           scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
         topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
+
+        layoutScrollDispatchTime = 0 // reset scroll dispatch time used to gate scrolling above
       }
     })
   }
@@ -7178,7 +7185,7 @@
           body = await resp.text()
         } catch {}
         // note we attach resp and body to thrown error
-        throw _.assign(new Error(`fetch failed: ${resp.status} (${resp.statusText}); ` + body), {resp, body})
+        throw _.assign(new Error(`fetch failed: ${resp.status} (${resp.statusText}); ` + body), { resp, body })
       }
       return resp
     }
