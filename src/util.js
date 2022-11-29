@@ -303,13 +303,17 @@ export function byteStringToArray(str) {
   return array
 }
 
-// concatenate pair of Uint8Arrays
-export function concatByteArrays(arr1, arr2) {
-  if (arr1.constructor.name != 'Uint8Array' || arr2.constructor.name != 'Uint8Array')
-    throw new Error('invalid arguments, expected pair of Uint8Arrays')
-  const array = new Uint8Array(arr1.length + arr2.length)
-  array.set(arr1)
-  array.set(arr2, arr1.length)
+// concatenate Uint8Arrays
+export function concatByteArrays(...parts) {
+  if (!parts.every(a => a.constructor.name == 'Uint8Array')) throw new Error('invalid arguments, expected Uint8Arrays')
+  let length = 0
+  for (const part of parts) length += part.length
+  const array = new Uint8Array(length)
+  let offset = 0
+  for (const part of parts) {
+    array.set(part, offset)
+    offset += part.length
+  }
   return array
 }
 
