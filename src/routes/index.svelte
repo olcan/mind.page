@@ -1020,6 +1020,15 @@
       itemShowLogs(this.id, autohide_after)
     }
 
+    display_message(msg, progress, percent_decimals = 2) {
+      const msgdiv = this.elem?.querySelector('.container > .loading > .message') as HTMLDivElement
+      if (msgdiv) msgdiv.innerHTML = msg
+      if (progress >= 0 && progress <= 1) {
+        const percentage = (progress * 100).toFixed(percent_decimals) + '%'
+        msgdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
+      }
+    }
+
     // "touches" item by updating its time
     // if save=false, change is not saved, a.k.a. "soft touch"
     // NOTE: this does not respect #log items, so any relevant checks must be done externally
