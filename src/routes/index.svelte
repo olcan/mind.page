@@ -1372,8 +1372,8 @@
       const stack = new Error().stack.split('\n').join(' <- ').replace(/\s+/g, ' ') // normalize whitespace
       // also log error directly to console for better stack traces (esp. in Safari, Chrome handles traces better)
       // disable this extra log message if we are testing for throws, indicated via window._testing_throws flag
-      // also use _error to log only the browser console and not to mindpage console or items
-      if (!window['_testing_throws']) console['_error'](`${args.join(' ')} @ ${this.name}`)
+      // also use _error (w/ ...args) to log only the browser console and not to mindpage console or items
+      if (!window['_testing_throws']) console['_error']('[error @' + this.name + ']', ...args)
       throw new Error(`${args.join(' ')} @ ${this.name}; STACK: ${stack}`)
     }
 
@@ -1719,7 +1719,6 @@
         focusedEditElement.focus()
         if (lastScrollTime < layoutScrollDispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
         lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
-
       } else if (_.min(topMovers) < items.length && !narrating) {
         const itemTop = _.min(
           topMovers.map(index => {
