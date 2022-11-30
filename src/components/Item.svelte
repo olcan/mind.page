@@ -1694,7 +1694,7 @@
     {#if running}
       <div class="loading">
         <Circle2 size="40" unit="px" />
-        <div class="message" />
+        <div class="status" />
       </div>
     {:else if saving}
       <div class="loading">
@@ -1987,18 +1987,18 @@
     user-select: none;
     /* pointer-events: none; */
   }
-  .loading > div:not(.message) {
+  .loading > div:not(.status) {
     opacity: 0.75;
   }
   .running .loading,
   .saving .loading {
     visibility: visible;
   }
-  /* remove .message div when empty */
-  .loading .message:empty {
+  /* remove .status div when empty */
+  .loading .status:empty {
     display: none;
   }
-  .loading .message {
+  .loading .status {
     padding: 5px 10px;
     margin-top: 10px;
     font-size: 14px;

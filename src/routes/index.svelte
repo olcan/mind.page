@@ -440,6 +440,9 @@
     get dependents(): Array<string> {
       return item(this.id).dependents
     }
+    get running(): boolean {
+      return !!item(this.id).running
+    }
     get saving(): boolean {
       return !!item(this.id).saving
     }
@@ -1020,12 +1023,13 @@
       itemShowLogs(this.id, autohide_after)
     }
 
-    display_message(msg, progress, percent_decimals = 2) {
-      const msgdiv = this.elem?.querySelector('.container > .loading > .message') as HTMLDivElement
-      if (msgdiv) msgdiv.innerHTML = msg
+    show_status(status, progress, percent_decimals = 2) {
+      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status') as HTMLDivElement
+      if (!statusdiv) return // item not running or message div is not visible
+      statusdiv.innerHTML = status
       if (progress >= 0 && progress <= 1) {
         const percentage = (progress * 100).toFixed(percent_decimals) + '%'
-        msgdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
+        statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
       }
     }
 
