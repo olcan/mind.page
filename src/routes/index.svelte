@@ -1045,7 +1045,7 @@
       if (statusdiv) {
         const percentage = (progress * 100).toFixed(3) + '%'
         statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
-        statusdiv.setAttribute('data-progress', progress)
+        statusdiv.setAttribute('data-progress', progress.toString())
       }
     }
 
