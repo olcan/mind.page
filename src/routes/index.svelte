@@ -7891,19 +7891,18 @@
   <link rel="manifest" href="manifest.json?v={favicon_version}" />
   {#if signedin}
     <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-1069242463"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-11036499923"></script>
     <script>
-      window.dataLayer = window.dataLayer || []
-      function gtag() {
-        dataLayer.push(arguments)
-      }
-      gtag('js', new Date())
-      gtag('config', 'AW-1069242463')
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'AW-11036499923');
     </script>
-    <!-- Event snippet for Website traffic conversion page -->
+    <!-- Event snippet for Signed-in Page view conversion page -->
     <script>
-      gtag('event', 'conversion', { send_to: 'AW-1069242463/XXZACI6YsIMYEN-w7f0D' })
-      console._debug('triggered conversion event')
+      gtag('event', 'conversion', {'send_to': 'AW-11036499923/lqVECIn6goQYENO_zo4p'});
+      console._debug('triggered signed-in pageview event')
     </script>
   {/if}
 </svelte:head>
