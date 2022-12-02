@@ -1023,12 +1023,12 @@
       itemShowLogs(this.id, autohide_after)
     }
 
-    show_status(status, progress, percent_decimals = 2) {
+    show_status(status, progress) {
       const statusdiv = this.elem?.querySelector('.container.running > .loading > .status') as HTMLDivElement
       if (!statusdiv) return // item not running or message div is not visible
-      statusdiv.innerHTML = status
+      if (status) statusdiv.innerHTML = status
       if (progress >= 0 && progress <= 1) {
-        const percentage = (progress * 100).toFixed(percent_decimals) + '%'
+        const percentage = (progress * 100).toFixed(3) + '%'
         statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
       }
     }
@@ -7893,15 +7893,17 @@
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-11036499923"></script>
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
+      window.dataLayer = window.dataLayer || []
+      function gtag() {
+        dataLayer.push(arguments)
+      }
+      gtag('js', new Date())
 
-      gtag('config', 'AW-11036499923');
+      gtag('config', 'AW-11036499923')
     </script>
     <!-- Event snippet for Signed-in Page view conversion page -->
     <script>
-      gtag('event', 'conversion', {'send_to': 'AW-11036499923/lqVECIn6goQYENO_zo4p'});
+      gtag('event', 'conversion', { send_to: 'AW-11036499923/lqVECIn6goQYENO_zo4p' })
       console._debug('triggered signed-in pageview event')
     </script>
   {/if}
