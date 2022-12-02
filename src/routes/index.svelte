@@ -1023,14 +1023,35 @@
       itemShowLogs(this.id, autohide_after)
     }
 
-    show_status(status, progress) {
+    get status(): string {
+      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+      return statusdiv?.innerHTML ?? null
+    }
+
+    set status(status: string) {
+      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+      if (statusdiv) statusdiv.innerHTML = status
+    }
+
+    get progress(): number {
+      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+      const progress = statusdiv?.getAttribute('data-progress')
+      return !progress ? null : parseFloat(progress)
+    }
+
+    set progress(progress: number) {
+      if (progress < 0 || progress > 1) throw new Error('invalid progress ' + progress)
       const statusdiv = this.elem?.querySelector('.container.running > .loading > .status') as HTMLDivElement
-      if (!statusdiv) return // item not running or message div is not visible
-      if (status) statusdiv.innerHTML = status
-      if (progress >= 0 && progress <= 1) {
+      if (statusdiv) {
         const percentage = (progress * 100).toFixed(3) + '%'
         statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
+        statusdiv.setAttribute('data-progress', progress)
       }
+    }
+
+    show_status(status, progress) {
+      this.status = status
+      this.progress = progress
     }
 
     // "touches" item by updating its time
