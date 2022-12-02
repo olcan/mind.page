@@ -1050,8 +1050,8 @@
     }
 
     show_status(status, progress) {
-      this.status = status
-      this.progress = progress
+      if (status) this.status = status
+      if (progress) this.progress = progress
     }
 
     // "touches" item by updating its time
