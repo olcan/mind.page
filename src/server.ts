@@ -208,22 +208,15 @@ const sapper_server = express().use(
       // console.debug('proxying to', backend)
       return backend
     },
-    // we try our own error handler since the built-in error-response plugin seems to fail to respond for occasional ENOTFOUND (DNS) errors, which then blocks the client indefinitely
-    // note the 'on:' option is from proxyEventsPlugin, see:
-    // https://github.com/chimurai/http-proxy-middleware#ejectplugins-boolean-default-false
-    // https://github.com/chimurai/http-proxy-middleware/blob/24cf84c1ef6f08e93aa4e48040b6d3dc9b1c462e/src/get-plugins.ts
-    // https://github.com/chimurai/http-proxy-middleware/blob/24cf84c1ef6f08e93aa4e48040b6d3dc9b1c462e/src/plugins/default/proxy-events.ts
-    // also see the built-in error response plugin at:
-    // https://github.com/chimurai/http-proxy-middleware/blob/24cf84c1ef6f08e93aa4e48040b6d3dc9b1c462e/src/plugins/default/error-response-plugin.ts
-    on: {
-      error: (err, req, res) => {
-        console.error('proxy error', err)
-        res.status(500).send('proxy error: ' + err)
-      },
+    // error handler to ensure response (and avoid blocking client) for occasional ENOTFOUND (DNS) errors
+    // note this is only needed for proxy-server-middleware v2, v3 has plugins that handle responses
+    onError: (err, req, res) => {
+      console.error('proxy error', err)
+      res.status(500).send('proxy error: ' + err)
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
-  } as any),
+  }),
 
   // parse cookies
   cookieParser(),
