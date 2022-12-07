@@ -192,8 +192,9 @@ const sapper_server = express().use(
   // redirects are followed instead of exposed to server for robust CORS bypass
   // note // in https?:// can be rewritted to / by browser or intemediaries
   // websockets can also be proxied
-  createProxyMiddleware(path => /^\/proxy\/https?:\/\/?.+$/.test(path), {
+  createProxyMiddleware({
     changeOrigin: true,
+    pathFilter: path => /^\/proxy\/https?:\/\/?.+$/.test(path),
     pathRewrite: (path, req) => {
       path = path.replace(/^\/proxy\/https?:\/\/?[^/?#]+/, '')
       if (!path.startsWith('/')) path = '/' + path
@@ -207,12 +208,6 @@ const sapper_server = express().use(
         .replace(/(https?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
       // console.debug('proxying to', backend)
       return backend
-    },
-    // error handler to ensure response (and avoid blocking client) for occasional ENOTFOUND (DNS) errors
-    // note this is only needed for proxy-server-middleware v2, v3 has plugins that handle responses
-    onError: (err, req, res) => {
-      console.error('proxy error', err)
-      res.status(500).send('proxy error: ' + err)
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
