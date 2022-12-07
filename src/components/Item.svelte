@@ -2005,6 +2005,7 @@
     font-family: 'JetBrains Mono', monospace;
     background: #124; /* progress gradient uses #136 and #013 */
     border-radius: 5px;
+    max-width: 90%; /* avoid touching edges of item */
   }
   /* style progress bars for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
