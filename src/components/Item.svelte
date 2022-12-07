@@ -2006,6 +2006,7 @@
     background: #124; /* progress gradient uses #136 and #013 */
     border-radius: 5px;
     max-width: 90%; /* avoid touching edges of item */
+    text-align: center; /* for multi-line status */
   }
   /* style progress bars for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
