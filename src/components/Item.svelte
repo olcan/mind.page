@@ -2002,6 +2002,7 @@
     padding: 5px 10px;
     margin-top: 10px;
     font-size: 14px;
+    line-height: 24px;
     font-family: 'JetBrains Mono', monospace;
     background: #124; /* progress gradient uses #136 and #013 */
     border-radius: 5px;
