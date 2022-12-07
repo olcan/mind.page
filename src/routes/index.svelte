@@ -1029,8 +1029,17 @@
     }
 
     set status(status: string) {
-      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
-      if (statusdiv) statusdiv.innerHTML = status
+      this.dispatch_task('set_status', () => {
+        const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+        if (!statusdiv) return
+        // retry later if there is a selection
+        if (
+          getSelection().type == 'Range' &&
+          (statusdiv.contains(getSelection().anchorNode) || statusdiv.contains(getSelection().focusNode))
+        )
+          return 1000 // retry in 1s
+        statusdiv.innerHTML = status
+      })
     }
 
     get progress(): number {
@@ -1042,11 +1051,10 @@
     set progress(progress: number) {
       if (progress < 0 || progress > 1) throw new Error('invalid progress ' + progress)
       const statusdiv = this.elem?.querySelector('.container.running > .loading > .status') as HTMLDivElement
-      if (statusdiv) {
-        const percentage = (progress * 100).toFixed(3) + '%'
-        statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
-        statusdiv.setAttribute('data-progress', progress.toString())
-      }
+      if (!statusdiv) return
+      const percentage = (progress * 100).toFixed(3) + '%'
+      statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
+      statusdiv.setAttribute('data-progress', progress.toString())
     }
 
     show_status(status, progress) {

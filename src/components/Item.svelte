@@ -120,8 +120,8 @@
     let clickable = e.target.closest('[_clickable]')
     if (clickable && (!clickable['_clickable'] || clickable['_clickable'](e))) return true
     if (
-      window.getSelection().type == 'Range' &&
-      (e.target.contains(window.getSelection().anchorNode) || e.target.contains(window.getSelection().focusNode))
+      getSelection().type == 'Range' &&
+      (e.target.contains(getSelection().anchorNode) || e.target.contains(getSelection().focusNode))
     )
       return // ignore click when text is selected in target element
 
@@ -900,7 +900,7 @@
         if (elem.querySelector('script')) return // contains script; must be cached after script is executed
         elem.setAttribute('_cached', Date.now().toString())
         // console.debug("caching element", key, elem.tagName);
-        // (elem as HTMLElement).style.width = window.getComputedStyle(elem).width;
+        // (elem as HTMLElement).style.width = getComputedStyle(elem).width;
         window['_elem_cache'][id].set(key, elem) //.cloneNode(true);
         limit_cache_size(window['_elem_cache'][id], _elem_cache_limit_per_item, elem => {
           if (itemdiv.contains(elem)) return null // cancel deletions since oldest elem is on item
@@ -1153,7 +1153,7 @@
             // NOTE: this becomes stale when the match goes away
             // node.parentElement.style.background = "white";
             // adjust margin/padding and border radius for in-tag (in-mark) matches
-            const tagStyle = window.getComputedStyle(node.parentElement)
+            const tagStyle = getComputedStyle(node.parentElement)
             word.style.borderRadius = '0'
 
             // NOTE: marks (i.e. tags) can have varying vertical padding (e.g. under .menu class)
@@ -1376,7 +1376,7 @@
         )
           .then((fnames: any) => {
             setTimeout(() => window['_modal_close'](modal), 0) // increase delay for testing
-            const zoom = Math.round(1000 / window.devicePixelRatio) / 1000
+            const zoom = Math.round(1000 / devicePixelRatio) / 1000
             const images = fnames
               .map(fname => {
                 return zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`
@@ -1982,10 +1982,7 @@
     justify-content: center;
     align-items: center;
     background: rgba(0, 0, 0, 0.5);
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    /* pointer-events: none; */
+    pointer-events: none; /* passthrough */
   }
   .loading > div:not(.status) {
     opacity: 0.75;
@@ -2008,6 +2005,7 @@
     border-radius: 5px;
     max-width: 90%; /* avoid touching edges of item */
     text-align: center; /* for multi-line status */
+    pointer-events: all;
   }
   /* style progress bars for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
