@@ -955,12 +955,15 @@
       // also handle onerror/onabort as if image was loaded, but with a warning _failed/_aborted attribute
       // these are invoked w/ uninformative 'error' events, see https://developer.mozilla.org/en-US/docs/Web/API/Element/error_event
       img.onerror = e => {
-        console.error('image load failed', img.getAttribute('src'), img.getAttribute('_src'), img, e)
+        // note PDFs currently fail in chrome (and presumably some other browsers) so we emit a warning in that case
+        if (img.getAttribute('_type') == 'application/pdf')
+          console.warn('pdf image load failed (as expected in some browsers like chrome)', img, e)
+        else console.error('image load failed', img, e)
         img.setAttribute('_failed', Date.now().toString())
         img.onload()
       }
       img.onabort = e => {
-        console.warn('image load aborted', img.getAttribute('src'), img.getAttribute('_src'), img, e)
+        console.warn('image load aborted', img, e)
         img.setAttribute('_aborted', Date.now().toString())
         img.onload()
       }

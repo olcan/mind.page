@@ -1919,6 +1919,7 @@
             `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
           )
           img.src = URL.createObjectURL(blob)
+          img.setAttribute('_type', blob.type)
           img.removeAttribute('_pending') // done loading alternate _src
           images[src] = img.src // add to cache
           return img.src
@@ -1939,6 +1940,7 @@
                   `(decryption took ${Date.now() - decrypt_start}ms)`
               )
               img.src = URL.createObjectURL(blob)
+              img.setAttribute('_type', blob.type)
               img.removeAttribute('_pending') // done loading alternate _src
               images[src] = img.src // add to cache
               return img.src
