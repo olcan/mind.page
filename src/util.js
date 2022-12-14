@@ -342,7 +342,14 @@ export function stringify(x) {
   if (typeof x == 'object' && x.constructor.name != 'Object' && !Array.isArray(x)) return _stringify_object(x)
   if (typeof x == 'function')
     return _unindent(x.toString().replace(/^\(\)\s*=>\s*/, '')) + (_.keys(x).length ? ' ' + _stringify_object(x) : '')
-  const json = JSON.stringify(x)
+  let json
+  try {
+    json = JSON.stringify(x)
+  } catch (e) {
+    // return `[${typeof x} ${x.constructor.name}] JSON.stringify failed: ${e}`
+    console.warn(`JSON.stringify failed: ${e}`)
+    return `<${typeof x} ${x.constructor.name}>` // <...> indicates JSON.stringify error, see console
+  }
   if (json) return json
   return `[${typeof x} ${x.constructor.name} ${x}]` // ultimate fallback
 }
