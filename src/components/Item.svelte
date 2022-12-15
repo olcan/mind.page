@@ -2271,7 +2271,8 @@
     /* note advantage of background highlighting is that border highlights can be cut off by overflow:hidden */
     /* we also avoid any changes that can shift text, e.g. font-weight changes */
     color: black;
-    background: #9f9;
+    /* background: #9f9; */
+    background: rgba(153, 255, 153, 0.5);
     /* font-weight: 600; */
     border-radius: 4px;
     /* border: 1px solid #9b9; */
