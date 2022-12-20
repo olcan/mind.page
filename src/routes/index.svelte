@@ -6565,7 +6565,7 @@
               confirm: 'View Shared Page',
               // cancel: 'Go to My Page',
               // onCancel: () => (location.href = 'https://' + location.host),
-              // background: 'confirm',
+              background: 'confirm',
               passthrough: true,
             }
           )
