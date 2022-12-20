@@ -6562,10 +6562,11 @@
           _modal(
             `**Welcome to MindPage!** This is a _shared page_ with limited functionality. Your edits will be discarded when you close or reload this page, and are _never sent or stored anywhere_.`,
             {
-              // confirm: 'View Shared Page',
+              confirm: 'View Shared Page',
               // cancel: 'Go to My Page',
               // onCancel: () => (location.href = 'https://' + location.host),
               // background: 'confirm',
+              passthrough: true,
             }
           )
         }
