@@ -2722,20 +2722,22 @@
     replaceStateOnEditorChange = false // processed above
     ignoreStateOnEditorChange = false // processed above
 
-    // invoke _on_search on all _listen items
-    setTimeout(() => {
-      items.forEach(item => {
-        if (!item.listen) return
-        if (!itemDefinesFunction(item, '_on_search')) return
-        Promise.resolve(
-          _item(item.id).eval(`_on_search(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
-            trigger: 'listen',
-            async: item.deepasync, // run async if item is async or has async deps
-            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-          })
-        ).catch(e => {}) // already logged
+    // invoke _on_search on all _listen items, but only if editor text was modified (i.e. not for ranking changes)
+    if (editorTextModified) {
+      setTimeout(() => {
+        items.forEach(item => {
+          if (!item.listen) return
+          if (!itemDefinesFunction(item, '_on_search')) return
+          Promise.resolve(
+            _item(item.id).eval(`_on_search(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
+              trigger: 'listen',
+              async: item.deepasync, // run async if item is async or has async deps
+              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+            })
+          ).catch(e => {}) // already logged
+        })
       })
-    })
+    }
 
     const elapsed = Date.now() - start
     if (elapsed > 250) {
