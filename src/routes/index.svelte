@@ -2096,7 +2096,8 @@
     const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
     // if editor text is cleared while a target is selected, we force new state just as in onTagClick
-    if (!text.trim() && document.querySelector('.container.target')) {
+    // only exception is when replaceStateOnEditorChange is set, e.g. to clear query for deleted items in deleteItem
+    if (!text.trim() && document.querySelector('.container.target') && !replaceStateOnEditorChange) {
       forceNewStateOnEditorChange = true // force new state
       finalizeStateOnEditorChange = true // finalize state
     }
@@ -2699,6 +2700,11 @@
         }
         // console.debug(history.state.final ? "push" : "replace", state);
         if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
+          // console.debug({
+          //   forceNewStateOnEditorChange,
+          //   replaceStateOnEditorChange,
+          //   historyStateFinal: history.state.final,
+          // })
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
           pushState(state)
@@ -4293,6 +4299,20 @@
       return
     }
 
+    // if item text matches an existing _unique_ label, then we append '/new ' to avoid conflict w/ target item
+    // this also ensures the new item is created _below_ target item (and easily navigated via arrow keys etc)
+    // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
+    // we also make sure a new history state is created so user can always go back if needed
+    if (
+      e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
+      !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
+      idsFromLabel.get(text.trimEnd().toLowerCase())?.length == 1
+    ) {
+      forceNewStateOnEditorChange = true // force new state on onEditorChange (invoked below w/ new item added)
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      editorText = text = text.trimEnd() + '/new '
+    }
+
     let itemToSave = { user: user.uid, time, attr, text }
     let item = initItemState(_.clone(itemToSave), 0, {
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
@@ -4310,15 +4330,12 @@
     items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     itemTextChanged(0, text)
 
-    // if text is not synthetic and starts with a tag, keep if non-unique label
-    // (useful for adding labeled items, e.g. todo items, without losing context)
+    // if editor text starts with a label (tag), keep it to maintain context for new item
     editorText =
-      e /* e == null for synthetic calls, e.g. from commands */ &&
-      !clearLabel &&
-      items[0].label &&
-      !items[0].labelUnique &&
+      e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
+      !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
       items[0].labelText &&
-      editorText.startsWith(items[0].labelText + ' ')
+      (editorText + ' ').startsWith(items[0].labelText + ' ')
         ? items[0].labelText + ' '
         : ''
 
@@ -4339,13 +4356,17 @@
       text = itemToSave.text = item.text // no need to update editorText
     }
 
-    // maintain selection on created textarea if editing
+    // maintain selection on created textarea if editing, to help maintain active editing context
     if (editing) {
       let textarea = textArea(-1)
       let selectionStart = textarea.selectionStart
       let selectionEnd = textarea.selectionEnd
+
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
-      if (text != origText) selectionStart = selectionEnd = 0
+      // note we allow both item text and editor text to be modified together (e.g. see above for appending /new)
+      // if (text != origText) selectionStart = selectionEnd = 0
+      if (text != editorText) selectionStart = selectionEnd = 0
+
       // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
         const index = indexFromId.get(item.id)
@@ -6594,12 +6615,12 @@
                 unique = true
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange(items[index].name)
+                onEditorChange(items[index].name + ' ')
               } else if (idsFromLabel.get(url_hash.toLowerCase())?.length) {
                 unique = idsFromLabel.get(url_hash.toLowerCase())?.length == 1
                 replaceStateOnEditorChange = true // replace state
                 lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange(url_hash)
+                onEditorChange(url_hash + ' ')
               } else {
                 _modal(`url fragment ${url_hash} does not match any items`)
               }
@@ -6832,7 +6853,7 @@
           if (childLabel) {
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
-            onEditorChange(childLabel, true /* keep_times */) // keep_times for consistency w/ mousedown w/ altKey:true
+            onEditorChange(childLabel + ' ', true /* keep_times */) // keep_times for consistency w/ mousedown w/ altKey:true
             // note since we are using onEditorChange, we need to handle scrolling as needed
             update_dom().then(scrollToTarget)
             return
@@ -6956,6 +6977,7 @@
       ) {
         onEditorDone(editorText, e, false, e.metaKey || e.ctrlKey /*run*/)
       }
+
       // create new image item on image shortcut
       if (key == 'KeyI' && e.metaKey && e.shiftKey) {
         editor.insertImages(true)
