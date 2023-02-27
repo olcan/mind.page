@@ -1748,7 +1748,6 @@
 
     if (disableScrollingOnLayout) return
     const dispatchTime = Date.now()
-    layoutScrollDispatchTime ||= dispatchTime // keep scroll dispatch time until cleared below
     const lastLayoutCountAtDispatch = lastLayoutCount
     const numItemsAtDispatch = items.length
     update_dom().then(() => {
@@ -1756,15 +1755,22 @@
       if (items.length != numItemsAtDispatch)
         console.warn('number of items changed unexpectedly!', items.length, numItemsAtDispatch)
 
+      // if focused/active edit element changes, or if the item moves, scroll-to-caret (but cancel on other scroll)
+      // otherwise scroll to the top mover item across all columns
+      // if actively editing, ignore other movers
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
-      if (focusedEditElement && activeEditItem && !focusedEditElement.isSameNode(lastFocusedEditElement)) {
+      if (
+        focusedEditElement &&
+        (!focusedEditElement.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)
+      ) {
         focusedEditElement.focus()
-        if (lastScrollTime < layoutScrollDispatchTime) restoreItemEditor(activeEditItem) // scroll to caret
-        lastFocusedEditElement = focusedEditElement // prevent scroll on next layout
+        if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret (but cancel on scroll)
+        lastFocusedEditElement = focusedEditElement // prevent scroll-to-caret on next layout
       } else if (_.min(topMovers) < items.length && !narrating) {
         const itemTop = _.min(
           topMovers.map(index => {
             if (index == items.length) return Infinity // nothing in this column
+            if (activeEditItem && items[index].id != activeEditItem) return Infinity // ignore non-active-edit items
             const div = document.querySelector('#super-container-' + items[index].id)
             if (!div) return Infinity // item hidden, have to ignore
             return (div as HTMLElement).offsetTop
@@ -1772,11 +1778,9 @@
         )
         // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
         // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop < document.body.scrollTop && lastScrollTime < layoutScrollDispatchTime)
+        if (itemTop < document.body.scrollTop)
           scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
         topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
-
-        layoutScrollDispatchTime = 0 // reset scroll dispatch time used to gate scrolling above
       }
     })
   }
