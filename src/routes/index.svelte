@@ -1617,6 +1617,7 @@
     let columnItemCount = new Array(columnCount).fill(0)
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight // first column includes header
     let topMovers = new Array(columnCount).fill(items.length)
+    let target = null
     let lastTimeString = ''
     newestTime = 0
     oldestTime = Infinity
@@ -1635,6 +1636,7 @@
       if (item.editing) editingItems.push(index)
       if (item.dotted && item.editing) showDotted = true
       if (item.focused) focusedItem = index
+      if (item.target) target = item
 
       let lastItem = items[index - 1]
       let timeString = itemTimeString(item.time)
@@ -1755,11 +1757,13 @@
       if (items.length != numItemsAtDispatch)
         console.warn('number of items changed unexpectedly!', items.length, numItemsAtDispatch)
 
-      // if focused/active edit element changes, or if the item moves, scroll-to-caret (but cancel on other scroll)
-      // otherwise scroll to the top mover item across all columns
-      // if actively editing, ignore other movers
+      // if not editing and there is a target item that has moved, scroll to target
+      // if editing & focused/active edit element changes or moves, scroll-to-caret (but cancel on other scroll)
+      // otherwise scroll to the top mover item across all columns (if actively editing, ignore other movers)
       const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
-      if (
+      if (!focusedEditElement && target?.mover) {
+        scrollToTarget()
+      } else if (
         focusedEditElement &&
         (!focusedEditElement.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)
       ) {
@@ -3124,7 +3128,6 @@
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
     item.autorun = item.tagsRaw.includes('#_autorun')
-    item.autodep = item.tagsRaw.includes('#_autodep') // also inherited from ancestors based on label (see below)
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
     item.pinTerm = pintags[0] || ''
@@ -3180,13 +3183,6 @@
       while ((pos = label.lastIndexOf('/')) >= 0) item.labelPrefixes.push((label = label.slice(0, pos)))
     }
 
-    // inherit autodep flag from (uniquely named) ancestors based on label prefixes
-    // autodep affects itemDeps (invoked below if update_deps) to treat parent as first dependency
-    item.autodep ||= item.labelPrefixes.some(pfx => {
-      const ids = idsFromLabel.get(pfx)
-      return ids?.length == 1 && __item(ids[0]).autodep
-    })
-
     // #log label designates log items and is never considered unique
     if (item.label == '#log') {
       item.log = true
@@ -3216,6 +3212,31 @@
     item.title = item.text.match(/^(?:\s*(?:<|#[^#\s])[^\n]*\n)*?(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
 
     if (update_deps) {
+      // compute autodep flag, inheriting from (uniquely named) ancestors based on label prefixes
+      // autodep affects itemDeps (used below) to treat parent as first dependency
+      const prev_autodep = item.autodep // for change propagation to descendants
+      item.autodep =
+        item.tagsRaw.includes('#_autodep') ||
+        item.labelPrefixes.some(pfx => {
+          const ids = idsFromLabel.get(pfx)
+          return ids?.length == 1 && __item(ids[0]).autodep
+        })
+      // propagate changes in autodep OR label to descendants
+      if (item.autodep != prev_autodep || item.label != prevLabel) {
+        const prefix = item.label + '/'
+        for (let descendant of items) {
+          if (!descendant.label || descendant.label.length <= prefix.length || !descendant.label.startsWith(prefix))
+            continue // skip non-descendant
+          descendant.autodep =
+            item.autodep ||
+            descendant.tagsRaw.includes('#_autodep') ||
+            descendant.labelPrefixes.some(pfx => {
+              const ids = idsFromLabel.get(pfx)
+              return ids?.length == 1 && __item(ids[0]).autodep
+            })
+        }
+      }
+
       const prevDeps = item.deps || []
       const prevDependents = item.dependents || []
       item.deps = itemDeps(index)
@@ -5730,7 +5751,16 @@
     finalizeStateOnEditorChange = true // make initial empty state final
     onEditorChange('') // initial sorting
     items.forEach((item, index) => {
+      // initialize autodep based on labels & tags (initialized above)
+      // changes are handled in itemTextChanged (w/ update_deps==true)
+      item.autodep =
+        item.tagsRaw.includes('#_autodep') ||
+        item.labelPrefixes.some(pfx => {
+          const ids = idsFromLabel.get(pfx)
+          return ids?.length == 1 && __item(ids[0]).tagsRaw.includes('#_autodep')
+        })
       // initialize deps, deephash, missing tags/labels
+      // changes are handled in itemTextChanged (w/ update_deps==true)
       item.deps = itemDeps(index)
       item.deephash = hash(
         item.deps
