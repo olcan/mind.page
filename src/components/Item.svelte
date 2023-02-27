@@ -80,7 +80,7 @@
   export let onEditorKeyDown = (e: KeyboardEvent) => {}
   export let onEscape = e => true // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
-  export let onRun = (index: number = -1) => {}
+  export let onRun = (index: number = -1, e: MouseEvent = null) => {}
   export let onTouch = (index: number, e: MouseEvent = null) => {}
   export let onUpdate = (index: number) => {}
   export let onPush = (index: number) => {}
@@ -138,7 +138,7 @@
     e.preventDefault()
     invalidateElemCache(id)
     version++ // ensure re-render even if deephash and html are unchanged
-    onRun(index)
+    onRun(index, e)
   }
 
   function onIndexClick(e) {

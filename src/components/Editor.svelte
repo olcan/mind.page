@@ -592,6 +592,7 @@
       }
 
       // run item with Alt/Option+Enter
+      // not to be confused w/ alt-modified "run" click (or backquote keydown) handled in index.svelte
       if (key == 'Enter' && e.altKey && !(e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         let selectionStart = textarea.selectionStart

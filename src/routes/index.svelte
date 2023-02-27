@@ -3300,7 +3300,8 @@
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
               setTimeout(() => {
-                if (depitem.index == indexFromId.get(depitem.id)) onItemRun(depitem.index, false /* touch_first */)
+                if (depitem.index == indexFromId.get(depitem.id))
+                  onItemRun(depitem.index, null, false /* touch_first */)
               })
           }
           if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id)
@@ -4615,7 +4616,7 @@
     return text
   }
 
-  function appendJSOutput(index: number): string {
+  function appendJSOutput(index: number) {
     let item = items[index]
     if (!item.runnable) return item.text // item not runnable, ignore
     // check js_input
@@ -4636,15 +4637,16 @@
     try {
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/ })
     } catch (e) {} // already logged, just continue
-    // ignore output if Promise
-    if (jsout instanceof Promise) jsout = undefined
-    // stringify output
-    if (jsout !== undefined && typeof jsout != 'string') jsout = '' + stringify(jsout)
-    const outputConfirmLength = 256 * 1024
-    if (jsout !== undefined && jsout.length >= outputConfirmLength)
-      if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
-    // append _output and _log and update for changes
-    if (jsout !== undefined) item.text = appendBlock(item.text, '_output', jsout)
+    // append _output and _log and update item for changes (via itemTextChanged below)
+    // ignore promise output for appending _output
+    if (!(jsout instanceof Promise)) {
+      // stringify output
+      if (jsout !== undefined && typeof jsout != 'string') jsout = '' + stringify(jsout)
+      const outputConfirmLength = 256 * 1024
+      if (jsout !== undefined && jsout.length >= outputConfirmLength)
+        if (!confirm(`Write ${jsout.length} bytes (_output) into ${item.name}?`)) jsout = undefined
+      if (jsout !== undefined) item.text = appendBlock(item.text, '_output', jsout)
+    }
     // instead of write_log we can appendBlock to avoid triggering an extra save
     // _item(item.id).write_log() // auto-write log
     const log = _item(item.id).get_log({ since: start }).join('\n')
@@ -4654,7 +4656,7 @@
     }
     // NOTE: index can change during JS eval due to _writes
     itemTextChanged(indexFromId.get(item.id), item.text)
-    return item.text
+    return jsout
   }
 
   function saveItem(id: string) {
@@ -4886,15 +4888,23 @@
     lastEditTime = Date.now()
   }
 
-  function onItemRun(index: number = -1, touch_first = true) {
+  function onItemRun(index: number = -1, e: MouseEvent = null, touch_first = true) {
     if (index < 0) index = focusedItem
     let item = items[index]
+
+    // if alt-modified, run all runnable dependencies (sequentially) before running this item
+    if (e?.altKey) {
+      return (async () => {
+        const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
+        for (let dep of runnable_deps) await onItemRun(__item(dep).index, null /* no alt-runs */, touch_first)
+        return onItemRun(index, null /* no alt-run */, touch_first)
+      })()
+    }
 
     // preview all previewable items before running
     const pending_previews = items.filter(item => item.previewable).map(previewItem)
     if (pending_previews.length) {
-      Promise.all(pending_previews).then(() => onItemRun(item.index, touch_first))
-      return
+      return Promise.all(pending_previews).then(() => onItemRun(item.index, e, touch_first))
     }
 
     // create separate "run item" for installed items
@@ -4938,7 +4948,7 @@
         )
           return
         run_item.write(run_text, '' /* replace whole item */)
-        onItemRun(run_item.index, touch_first)
+        onItemRun(run_item.index, e, touch_first)
       }
       // store hash of js_input to detect changes to js_input block in run item
       _item(item.id).global_store.run_hash = hash(run_item.read('js_input'))
@@ -4965,20 +4975,21 @@
       // remove *_log blocks so errors do not leave empty blocks
       item.text = removeBlock(item.text, '\\w*?_log')
       itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
-      appendJSOutput(index)
+      const jsout = appendJSOutput(index) // can return promise
       item.time = Date.now()
       // we now save even if editing, for consistency with write() saving during edit
       // if (!item.editing) saveItem(item.id);
       saveItem(item.id)
       lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
       onEditorChange(editorText) // item time/text has changed
+      return jsout // can be promise
     }
     // run immediately if touch_first == false OR if item is editing (so touch is redundant)
-    if (!touch_first || item.editing) runItem()
+    if (!touch_first || item.editing) return runItem()
     else {
       // touch first to avoid delayed scroll-to-top on cpu-intensive runs
       onItemTouch(index)
-      update_dom().then(runItem)
+      return update_dom().then(runItem) // return promise to allow pending dependents for alt-modified runs (see above)
     }
   }
 
@@ -6787,9 +6798,9 @@
       }
       return
     }
-    // let unmodified Backquote run target item
-    if (key == 'Backquote' && !modified && target) {
-      target.querySelector('.run')?.dispatchEvent(new Event('click'))
+    // let unmodified or alt-modified Backquote run target item
+    if (key == 'Backquote' && (!modified || e.altKey) && target) {
+      target.querySelector('.run')?.dispatchEvent(_.set(new Event('click'), 'altKey', e.altKey))
       return
     }
     // let Shift+Backquote toggle logs on target item
