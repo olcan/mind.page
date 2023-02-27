@@ -1978,6 +1978,7 @@
       tag == '#async' ||
       tag == '#debug' ||
       tag == '#autorun' ||
+      tag == '#autodep' ||
       tag == '#spell' ||
       tag == '#nospell' ||
       !!tag.match(/^#pin(?:\/|$)/) ||
@@ -1998,6 +1999,7 @@
     else if (tag == '#async') return ['#features/_async']
     else if (tag == '#debug') return ['#features/_debug']
     else if (tag == '#autorun') return ['#features/_autorun']
+    else if (tag == '#autodep') return ['#features/_autodep']
     else if (tag == '#spell') return ['#features/_spell']
     else if (tag == '#nospell') return ['#features/_nospell']
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ['#features/_pin']
@@ -2958,19 +2960,33 @@
   function itemDeps(index, deps = [], missing_deps = undefined) {
     let item = items[index]
     if (deps.includes(item.id)) return deps
+
+    // append item.id temporarily to avoid cycles (moved to back below for non-root item)
     // NOTE: dependency order matters for hashing and potentially for code import
-    deps = [item.id].concat(deps) // prepend temporarily to avoid cycles, moved to back below
-    const root = deps.length == 1
+    const orig_deps_length = deps.length // used below for moving item.id to back
+    deps.push(item.id)
+
+    // for autodep item, append parent item (if unique) as dependency
+    // note autodep flag is inherited (see itemTextChanged)
+    if (item.autodep) {
+      if (item.labelPrefixes.length) {
+        const tag = item.labelPrefixes[0]
+        const ids = idsFromLabel.get(tag)
+        if (ids?.length == 1) {
+          const id = ids[0]
+          const dep_index = indexFromId.get(id)
+          if (dep_index === undefined) throw new Error(`idsFromLabel.get(${tag}) returned deleted id ${id}`)
+          deps = itemDeps(dep_index, deps, missing_deps)
+        }
+      }
+    }
+
+    // append hidden tags (that correspond to unique labels) as dependencies
     item.tagsHiddenAlt.forEach(tag => {
       // NOTE: we allow special tags as dependents if corresponding uniquely named items exist
-      // if (isSpecialTag(tag)) return;
-      if (!idsFromLabel.has(tag)) {
-        // record tag as missing if not special or an "alt" of a special tag
-        if (!isSpecialTag(tag) && item.tagsHidden.includes(tag)) missing_deps?.push(tag)
-        return
-      }
+      // if (isSpecialTag(tag)) return
       const ids = idsFromLabel.get(tag)
-      if (ids.length == 0 || ids.length > 1) {
+      if (!ids || ids.length == 0 || ids.length > 1) {
         // record tag as missing if not special or an "alt" of a special tag
         if (!isSpecialTag(tag) && item.tagsHidden.includes(tag)) missing_deps?.push(tag)
         return
@@ -2982,7 +2998,10 @@
         deps = itemDeps(dep_index, deps, missing_deps)
       })
     })
-    return root ? deps.slice(1) : deps.slice(1).concat(item.id)
+
+    deps.splice(orig_deps_length, 1) // remove item.id added temporarily above
+    if (orig_deps_length > 0) deps.push(item.id) // append item.id to back if non-root
+    return deps
   }
 
   function itemDepsString(item) {
@@ -3101,6 +3120,7 @@
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
     item.autorun = item.tagsRaw.includes('#_autorun')
+    item.autodep = item.tagsRaw.includes('#_autodep') // also inherited from ancestors based on label (see below)
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
     item.pinTerm = pintags[0] || ''
@@ -3155,6 +3175,13 @@
       let pos
       while ((pos = label.lastIndexOf('/')) >= 0) item.labelPrefixes.push((label = label.slice(0, pos)))
     }
+
+    // inherit autodep flag from (uniquely named) ancestors based on label prefixes
+    // autodep affects itemDeps (invoked below if update_deps) to treat parent as first dependency
+    item.autodep ||= item.labelPrefixes.some(pfx => {
+      const ids = idsFromLabel.get(pfx)
+      return ids?.length == 1 && __item(ids[0]).autodep
+    })
 
     // #log label designates log items and is never considered unique
     if (item.label == '#log') {
