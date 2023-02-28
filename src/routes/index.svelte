@@ -4367,18 +4367,20 @@
       return
     }
 
-    // if item text matches an existing _unique_ label, then we append '/new ' to avoid conflict w/ target item
+    // if item text matches an existing _unique_ label, then we append '/# ' to avoid conflict w/ target item
     // this also ensures the new item is created _below_ target item (and easily navigated via arrow keys etc)
     // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
     // we also make sure a new history state is created so user can always go back if needed
     if (
       e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
       !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
-      idsFromLabel.get(text.trimEnd().toLowerCase())?.length == 1
+      idsFromLabel.get(text.trim().toLowerCase())?.length == 1
     ) {
       forceNewStateOnEditorChange = true // force new state on onEditorChange (invoked below w/ new item added)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
-      editorText = text = text.trimEnd() + '/new '
+      let suffix = 0 // incremented to avoid conflict
+      while (_exists(text.trim() + `/${suffix}`)) suffix++
+      editorText = text = text.trim() + `/${suffix} `
     }
 
     let itemToSave = { user: user.uid, time, attr, text }
@@ -4431,7 +4433,7 @@
       let selectionEnd = textarea.selectionEnd
 
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
-      // note we allow both item text and editor text to be modified together (e.g. see above for appending /new)
+      // note we allow both item text and editor text to be modified together (e.g. see above for appending /#)
       // if (text != origText) selectionStart = selectionEnd = 0
       if (text != editorText) selectionStart = selectionEnd = 0
 
@@ -6876,12 +6878,10 @@
       // if no context/target but query is a tag, then take it as target and its parent as context
       // note this allows keyboard navigation to children w/ non-unique labels
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
-        const targetLabel = editorText.trim()
+        const targetLabel = editorText.trim().toLowerCase()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
-        if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
+        if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */))
           lastContext = _item(parentLabel).elem?.querySelector('.container')
-          if (!lastContext?.querySelector('mark.selected')) lastContext = null
-        }
       }
       if (lastContext) {
         let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
@@ -6890,33 +6890,52 @@
         // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
         const parsedVisibleTags = item(lastContext.getAttribute('data-item-id')).tagsVisible
         visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
-        let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected'))
+        let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected')) ?? -1
+
         // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
-        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title
+        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
         // context labels can be non-unique, so we have to use item(lastContext.getAttribute("data-item-id"))
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
-        if (
-          selectedIndex >= 0 &&
-          contextBasedOnNesting &&
-          visibleTags[selectedIndex]['title']?.startsWith(contextLabel + '/')
-        ) {
-          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
-          selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
+        if (contextBasedOnNesting) {
+          if (selectedIndex >= 0 && visibleTags[selectedIndex]['title']?.toLowerCase().startsWith(contextLabel + '/')) {
+            visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
+            selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
+          } else if (selectedIndex < 0) {
+            // if selected tag is nested but NOT visible on item, then we navigate among all non-visible siblings
+            // (note we do not switch to visible siblings as the navigation would then be restricted to those)
+            const targetLabel = editorText.trim().toLowerCase()
+            if (targetLabel.startsWith(contextLabel + '/')) {
+              const prefix = contextLabel + '/'
+              let labels = _labels(label => label.length > prefix.length && label.startsWith(prefix))
+              labels = labels.filter(label => !visibleTags?.find(e => e['title']?.toLowerCase() == label))
+              selectedIndex = labels.indexOf(targetLabel)
+              if (selectedIndex >= 0 && labels.length > 1) {
+                const mod = (n, m) => ((n % m) + m) % m
+                if (key == 'ArrowRight') selectedIndex = mod(selectedIndex + 1, labels.length)
+                else if (key == 'ArrowLeft') selectedIndex = mod(selectedIndex - 1, labels.length)
+                const childLabel = labels[selectedIndex]
+                lastEditorChangeTime = 0 // force immediate update
+                forceNewStateOnEditorChange = true // add to history like click-based nav
+                onEditorChange(childLabel + ' ', true) // keep_times for consistency w/ mousedown w/ altKey:true
+                // note since we are using onEditorChange, we need to handle scrolling as needed
+                update_dom().then(scrollToTarget)
+                return
+              }
+            }
+          }
         }
         if (selectedIndex >= 0) {
-          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1) {
+          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1)
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-            return
-          } else if (key == 'ArrowLeft' && selectedIndex > 0) {
+          else if (key == 'ArrowLeft' && selectedIndex > 0)
             visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-            return
-          }
+          return
         }
       }
     }
     // let unmodified ArrowDown select first visible non-label non-secondary-selected "child" tag in target item; we avoid secondary-selected context tags since we are trying to navigate "down"
     if (key == 'ArrowDown' && !modified) {
-      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title
+      let targetLabel = (document.querySelector('.container.target mark.label') as any)?.title.toLowerCase()
       if (!_exists(targetLabel, false /* allow_multiple */)) targetLabel = null // avoid id-matching or multiple targets
       let nextTargetId
       if (targetLabel) {
@@ -6949,7 +6968,7 @@
           if (childLabel) {
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
-            onEditorChange(childLabel + ' ', true /* keep_times */) // keep_times for consistency w/ mousedown w/ altKey:true
+            onEditorChange(childLabel + ' ', true) // keep_times for consistency w/ mousedown w/ altKey:true
             // note since we are using onEditorChange, we need to handle scrolling as needed
             update_dom().then(scrollToTarget)
             return
@@ -6999,7 +7018,7 @@
         .filter(e => e.querySelector('mark.selected'))
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
-        const targetLabel = editorText.trim()
+        const targetLabel = editorText.trim().toLowerCase()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
         if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')
