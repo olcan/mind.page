@@ -442,12 +442,7 @@
       if (textarea.selectionEnd > textarea.selectionStart && textarea.value[textarea.selectionEnd - 1] == '\n')
         textarea.selectionEnd--
       let lastLineStart = textarea.value.substring(0, textarea.selectionEnd).replace(/[^\n]*$/, '').length
-      let lineEnd =
-        lastLineStart +
-        textarea.value
-          .substring(lastLineStart)
-          .match(/^[^\n]*/)[0]
-          .trimEnd().length
+      let lineEnd = lastLineStart + textarea.value.substring(lastLineStart).match(/^[^\n]*/)[0].length
       textarea.selectionEnd = lineEnd
 
       // NOTE: execCommand maintains undo/redo history
