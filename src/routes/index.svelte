@@ -4872,6 +4872,7 @@
         // delete empty item w/o confirmation
         deleteItem(index, false /* confirm_delete */)
       } else {
+        const prev_name = item.name
         itemTextChanged(index, item.text)
         // clear _output and execute javascript unless cancelled
         if (run && !cancelled && item.runnable /* just updated */) {
@@ -4892,6 +4893,13 @@
           (item.time != item.savedTime || item.text != item.savedText || !_.isEqual(item.attr, item.savedAttr))
         )
           saveItem(item.id)
+
+        // if item was renamed while being targeted (navigated), update query to new name
+        if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
+          replaceStateOnEditorChange = true // do not create new entry
+          editorText = item.name
+        }
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // item time and/or text may have changed
       }
 
