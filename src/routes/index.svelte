@@ -1616,7 +1616,7 @@
     let columnLastItem = new Array(columnCount).fill(-1)
     let columnItemCount = new Array(columnCount).fill(0)
     columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight // first column includes header
-    let topMovers = new Array(columnCount).fill(items.length)
+    let topMovers = new Array(columnCount).fill(items.length) // see definition of "mover" below
     let target = null
     let lastTimeString = ''
     newestTime = 0
@@ -1706,12 +1706,6 @@
       //   : columnItemCount[item.column] / 5;
       columnItemCount[item.column]++
 
-      // mark item as "mover" if it changes index and/or column
-      item.mover = item.index != item.lastIndex || item.column != item.lastColumn
-      if (item.mover && index < topMovers[item.column]) topMovers[item.column] = index
-      item.lastIndex = item.index
-      item.lastColumn = item.column
-
       // if non-pinned item is first in its column or section and missing time string, add it now
       // also mark it as a "leader" for styling its index number
       item.leader = !item.pinned && (columnLastItem[item.column] < 0 || item.column != lastItem.column)
@@ -1721,6 +1715,7 @@
         // add time string height now, assuming we are not ignoring item height
         if (item.outerHeight > 0) item.outerHeight += 24
       }
+      item.pos = columnHeights[item.column] // position in column
       columnHeights[item.column] += item.outerHeight
       if (columnLastItem[item.column] >= 0) {
         items[columnLastItem[item.column]].nextItemInColumn = index
@@ -1728,18 +1723,32 @@
         if (columnLastItem[item.column] != index - 1 && item.timeString) columnHeights[item.column] -= 24
       }
       columnLastItem[item.column] = index
+
+      // mark item as "mover" if it changes column or position (within column), and is currently visible on page
+      // note visibility (hideIndex) can change between layouts, but we use mover flags only for immediately scrolling
+      item.mover = index < hideIndex && (item.column != item.lastColumn || item.pos != item.lastPos)
+      if (item.mover && index < topMovers[item.column]) topMovers[item.column] = index
+      item.lastColumn = item.column
+      item.lastPos = item.pos
     })
 
     checkIfRenderingVisibleItems()
 
-    // as soon as header is available, scroll down to header and set flag
+    // as soon as header is available, scroll down to header and set flag gating page visibility
     if (headerdiv && !headerScrolled) {
       scrollTo(headerdiv.offsetTop)
       headerScrolled = true
     }
 
-    // maintain focus and scroll to caret if edit element (textarea) changes (due to new focus or switched column)
-    // OR scroll up to top mover (if not narrating, since then we prefer manual scroll)
+    // from this point we try to auto-scroll for layout changes
+    // we need to be careful as layout updates are often triggered in the background
+    if (disableScrollingOnLayout) return // scrolling disabled explicitly
+
+    // first question for scrolling is whether we are actively editing an item
+    // this should be focusedItem, but we check for consistency with document.activeElement as well
+    // note the editing element (textarea) can change due to layout changes, esp. when items switch columns
+    // we scroll to caret when the textarea changes (since last layout) OR when editing item moves
+    // we cancel if there is any other scrolling during dispatch
     let activeEditItem
     if (focusedItem >= 0) {
       const div = document.querySelector('#super-container-' + items[focusedItem].id) as HTMLElement
@@ -1747,46 +1756,52 @@
       else if (!div.contains(document.activeElement)) console.warn('focusedItem does not contain activeElement')
       else activeEditItem = items[focusedItem].id
     }
-
-    if (disableScrollingOnLayout) return
-    const dispatchTime = Date.now()
-    const lastLayoutCountAtDispatch = lastLayoutCount
-    const numItemsAtDispatch = items.length
-    update_dom().then(() => {
-      if (lastLayoutCount != lastLayoutCountAtDispatch) return // layout changed since dispatch
-      if (items.length != numItemsAtDispatch)
-        console.warn('number of items changed unexpectedly!', items.length, numItemsAtDispatch)
-
-      // if not editing and there is a target item that has moved, scroll to target
-      // if editing & focused/active edit element changes or moves, scroll-to-caret (but cancel on other scroll)
-      // otherwise scroll to the top mover item across all columns (if actively editing, ignore other movers)
-      const focusedEditElement = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
-      if (!focusedEditElement && target?.mover) {
-        scrollToTarget()
-      } else if (
-        focusedEditElement &&
-        (!focusedEditElement.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)
-      ) {
-        focusedEditElement.focus()
-        if (lastScrollTime < dispatchTime) restoreItemEditor(activeEditItem) // scroll to caret (but cancel on scroll)
-        lastFocusedEditElement = focusedEditElement // prevent scroll-to-caret on next layout
-      } else if (_.min(topMovers) < items.length && !narrating) {
-        const itemTop = _.min(
-          topMovers.map(index => {
-            if (index == items.length) return Infinity // nothing in this column
-            if (activeEditItem && items[index].id != activeEditItem) return Infinity // ignore non-active-edit items
-            const div = document.querySelector('#super-container-' + items[index].id)
-            if (!div) return Infinity // item hidden, have to ignore
-            return (div as HTMLElement).offsetTop
-          })
-        )
-        // console.debug("scrolling to itemTop", itemTop, document.body.scrollTop, topMovers.toString());
-        // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
-        if (itemTop < document.body.scrollTop)
-          scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
-        topMovers = new Array(columnCount).fill(items.length) // reset topMovers after scroll
+    if (activeEditItem) {
+      // console.debug('detected edit item')
+      const dispatchTime = Date.now()
+      update_dom().then(() => {
+        if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+        const textarea = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
+        if (textarea && (!textarea.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)) {
+          // console.debug('scrolling to edit item')
+          textarea.focus() // ensure focus on textarea
+          restoreItemEditor(activeEditItem)
+        }
+        lastFocusedEditElement = textarea // prevent scroll-to-caret on next layout
+      })
+    } else {
+      // at this point we know we are not actively editing any item
+      // if target (highlighted) item exists and has moved OR if TODO, we scroll it back into view if needed
+      // if no target & no narration, we scroll to the top (upper-most) mover across all columns
+      // we do NOT cancel for other scrolling during dispatch as multiple layouts/scrolls are common, e.g. in page init
+      if (target?.mover) {
+        // console.debug('target moved')
+        const dispatchTime = Date.now()
+        update_dom().then(() => {
+          // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+          // console.debug('scrolling to target')
+          scrollToTarget()
+        })
+      } else if (!target && !narrating && _.min(topMovers) < items.length) {
+        // console.debug('detected movers', !!target)
+        const dispatchTime = Date.now()
+        update_dom().then(() => {
+          // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+          const itemTop = _.min(
+            topMovers.map(index => {
+              if (index == items.length) return Infinity // nothing in this column
+              const div = document.querySelector('#super-container-' + items[index].id)
+              if (!div) return Infinity // item hidden, have to ignore
+              return (div as HTMLElement).offsetTop
+            })
+          )
+          // console.debug('scrolling to top mover', itemTop, document.body.scrollTop, topMovers.toString(), !!target)
+          // scroll up to item if needed, bringing it to ~upper-middle, snapping to header (if above mid-screen)
+          if (itemTop < document.body.scrollTop)
+            scrollTo(Math.max(headerdiv.offsetTop, itemTop - visualViewport.height / 4))
+        })
       }
-    })
+    }
   }
 
   let images // permanent fname to temporary url map
@@ -5639,7 +5654,6 @@
     item.hasError = false
     // state from updateItemLayout
     item.index = index
-    item.lastIndex = index
     item.aboveFold = false
     // item.prominence = 0;
     item.leader = false
@@ -5655,6 +5669,8 @@
     item.nextColumn = -1
     item.nextItemInColumn = -1
     item.outerHeight = 0
+    item.pos = -1 // layout position in column
+    item.lastPos = -1
     // dependents (filled below)
     item.dependents = []
     item.dependentsString = ''
