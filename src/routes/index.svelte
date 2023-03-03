@@ -6906,7 +6906,10 @@
             const targetLabel = editorText.trim().toLowerCase()
             if (targetLabel.startsWith(contextLabel + '/')) {
               const prefix = contextLabel + '/'
-              let labels = _labels(label => label.length > prefix.length && label.startsWith(prefix))
+              let labels = _labels(
+                label =>
+                  label.length > prefix.length && label.startsWith(prefix) && label.indexOf('/', prefix.length) < 0
+              )
               labels = labels.filter(label => !visibleTags?.find(e => e['title']?.toLowerCase() == label))
               selectedIndex = labels.indexOf(targetLabel)
               if (selectedIndex >= 0 && labels.length > 1) {
