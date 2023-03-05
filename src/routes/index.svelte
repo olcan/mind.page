@@ -5024,12 +5024,18 @@
       item.text = clearBlock(item.text, '\\w*?_output')
       // remove *_log blocks so errors do not leave empty blocks
       item.text = removeBlock(item.text, '\\w*?_log')
+      const prev_name = item.name // to detect renaming below
       itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
       const jsout = appendJSOutput(index) // can return promise
       item.time = Date.now()
       // we now save even if editing, for consistency with write() saving during edit
       // if (!item.editing) saveItem(item.id);
       saveItem(item.id)
+      // if item was renamed while being targeted (navigated), update query to new name
+      if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
+        replaceStateOnEditorChange = true // do not create new entry
+        editorText = item.name
+      }
       lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
       onEditorChange(editorText) // item time/text has changed
       return jsout // can be promise
