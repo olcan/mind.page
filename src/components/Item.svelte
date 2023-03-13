@@ -690,6 +690,7 @@
           return (
             code
               .replace(/\$id/g, skipEscaped(id))
+              .replace(/\$name/g, skipEscaped(name))
               .replace(/\$hash/g, skipEscaped(hash))
               .replace(/\$deephash/g, skipEscaped(deephash))
               .replace(/\$cid/g, skipEscaped(`${id}-${deephash}-${++cacheIndex}`)) + '<!--/_html-->'
@@ -2000,7 +2001,7 @@
   }
   .loading .status {
     padding: 5px 10px;
-    margin-top: 10px;
+    margin-top: 5px;
     font-size: 14px;
     line-height: 24px;
     font-family: 'JetBrains Mono', monospace;
