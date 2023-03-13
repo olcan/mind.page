@@ -94,12 +94,12 @@
   function highlightOther(text) {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
     // NOTE: to prevent any nested highlights, we use a single regex w/ alternatives where each alternative contains exactly one capture group (content) that can be used to detect which alternative matched
-    const comment = /&lt;!--(.*)--&gt;(?:(?!&gt;)|$)/g
-    const macro = /&lt;&lt;(.*)&gt;&gt;/g
+    const comment = /&lt;!--(.*?)--&gt;(?:(?!&gt;)|$)/g
+    const macro = /&lt;&lt;(.*?)&gt;&gt;/g
     // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
-    const html = /&lt;((?=[/\w]).*(?:[/\w]|&#39;|&quot;))&gt;(?:(?!&gt;)|$)/g
-    const math1 = /\$\$`(.*)`\$\$/g
-    const math2 = /\$`(.*)`\$/g
+    const html = /&lt;((?=[/\w]).*?(?:[/\w]|&#39;|&quot;))&gt;(?:(?!&gt;)|$)/g
+    const math1 = /\$\$`(.*?)`\$\$/g
+    const math2 = /\$`(.*?)`\$/g
     const code1 = /``(.*?)``/g
     const code2 = /`(.*?)`/g
     const combine = (...regexes) => regexes.map(r => r.source).join('|')
