@@ -210,11 +210,11 @@ export function countUnescaped(str, substr) {
 
 export function isBalanced(expr) {
   if (countUnescaped(expr, '`') % 2 || countUnescaped(expr, "'") % 2 || countUnescaped(expr, '"') % 2) return false
-  expr = expr.replace(/`.*?`|'[^\n]*?'|"[^\n]*?"/gs, '') // avoid matching inside strings
-  // NOTE: */ can be confused w/ ending of regex so we allow mismatch if / are even (not fool-proof but should be good enough for now)
-  if (countUnescaped(expr, '/*') != countUnescaped(expr, '*/') && countUnescaped(expr, '/') % 2) return false
-  expr = expr.replace(/\/\/[^\n]*|\/\*.*?\*\//gs, '') // avoid matching inside comments
+  expr = expr.replace(/`.*?`|'[^\n]*?'|"[^\n]*?"/gs, '') // remove strings
+  expr = expr.replace(/([^\s\w])\s*?\/.*?[^\\]\//, '$1') // remove regexes
+  expr = expr.replace(/\/\/[^\n]*|\/\*.*?\*\//gs, '') // remove comments
   if (
+    countUnescaped(expr, '/*') != countUnescaped(expr, '*/') ||
     countUnescaped(expr, '{') != countUnescaped(expr, '}') ||
     countUnescaped(expr, '[') != countUnescaped(expr, ']') ||
     countUnescaped(expr, '(') != countUnescaped(expr, ')')
