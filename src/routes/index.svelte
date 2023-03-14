@@ -764,8 +764,8 @@
       // exclude async content (and return early) if requested
       if (options['exclude_async'] && item.deepasync) return content.filter(s => s).join('\n')
 
-      // read text from specified block type (or whole item if type is blank)
-      let text = type ? extractBlock(item.text, type, options['remove_empty_lines']) : item.text
+      // copy item text for potential macro expansion
+      let text = item.text
 
       // evaluate <<macros>> if requested (logic mirrors that in Item.svelte)
       if (options['eval_macros']) {
@@ -800,6 +800,8 @@
           itemExpansionChanged(item)
         }
       }
+      // extract specified block type (if any)
+      if (type) text = extractBlock(text, type, options['remove_empty_lines'])
 
       // replace $ids if requested
       if (options['replace_ids']) text = text.replace(/\$id/g, skipEscaped(item.id))
