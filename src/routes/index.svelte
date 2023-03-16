@@ -1592,10 +1592,9 @@
   let defaultItemHeight = 0 // if zero, initial layout will be single-column
   let totalItemHeight = 0
   let lastFocusedEditElement = null
+  let lastScrolledTarget
   let disableScrollingOnLayout = false
   let lastLayoutTime = 0
-  let lastLayoutCount = 0
-  let layoutScrollDispatchTime = 0
   let showDotted = false
   const separatorHeight = 80
 
@@ -1626,7 +1625,6 @@
     oldestTimeString = ''
     totalItemHeight = 0
     lastLayoutTime = Date.now()
-    lastLayoutCount++
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
     updateVerticalPadding()
@@ -1773,16 +1771,18 @@
       })
     } else {
       // at this point we know we are not actively editing any item
-      // if target (highlighted) item exists and has moved OR if TODO, we scroll it back into view if needed
+      // if target (highlighted) item exists and has moved, we scroll it back into view if needed
+      // we do not scroll to unchanged target except while still rendering visible items (e.g. page init)
       // if no target & no narration, we scroll to the top (upper-most) mover across all columns
-      // we do NOT cancel for other scrolling during dispatch as multiple layouts/scrolls are common, e.g. in page init
-      if (target?.mover) {
+      // we do NOT cancel for other scrolling during dispatch as multiple layouts/scrolls are common (e.g. page init)
+      if (target?.mover && (target.id != lastScrolledTarget || renderingVisibleItems)) {
         // console.debug('target moved')
         const dispatchTime = Date.now()
         update_dom().then(() => {
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
           // console.debug('scrolling to target')
           scrollToTarget()
+          lastScrolledTarget = target.id
         })
       } else if (!target && !narrating && _.min(topMovers) < items.length) {
         // console.debug('detected movers', !!target)
