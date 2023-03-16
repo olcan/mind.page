@@ -3228,32 +3228,34 @@
     // as with header (see above), we allow some html tag lines and/or hash tag lines before title line
     item.title = item.text.match(/^(?:\s*(?:<|#[^#\s])[^\n]*\n)*?(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
 
-    if (update_deps) {
-      // compute autodep flag, inheriting from (uniquely named) ancestors based on label prefixes
-      // autodep affects itemDeps (used below) to treat parent as first dependency
-      const prev_autodep = item.autodep // for change propagation to descendants
-      item.autodep =
-        item.tagsRaw.includes('#_autodep') ||
-        item.labelPrefixes.some(pfx => {
-          const ids = idsFromLabel.get(pfx)
-          return ids?.length == 1 && __item(ids[0]).autodep
-        })
-      // propagate changes in autodep OR label to descendants
-      if (item.autodep != prev_autodep || item.label != prevLabel) {
-        const prefix = item.label + '/'
-        for (let descendant of items) {
-          if (!descendant.label || descendant.label.length <= prefix.length || !descendant.label.startsWith(prefix))
-            continue // skip non-descendant
-          descendant.autodep =
-            item.autodep ||
-            descendant.tagsRaw.includes('#_autodep') ||
-            descendant.labelPrefixes.some(pfx => {
-              const ids = idsFromLabel.get(pfx)
-              return ids?.length == 1 && __item(ids[0]).autodep
-            })
-        }
+    // compute autodep flag, inheriting from (uniquely named) ancestors based on label prefixes
+    // autodep affects itemDeps (used below) to treat parent as first dependency
+    // note the flag itself does NOT depend on dependencies/dependents
+    // it should be computed outside update_deps (e.g. for init before separate pass for deps)
+    const prev_autodep = item.autodep // for change propagation to descendants
+    item.autodep =
+      item.tagsRaw.includes('#_autodep') ||
+      item.labelPrefixes.some(pfx => {
+        const ids = idsFromLabel.get(pfx)
+        return ids?.length == 1 && __item(ids[0]).autodep
+      })
+    // propagate changes in autodep OR label to descendants
+    if (item.autodep != prev_autodep || item.label != prevLabel) {
+      const prefix = item.label + '/'
+      for (let descendant of items) {
+        if (!descendant.label || descendant.label.length <= prefix.length || !descendant.label.startsWith(prefix))
+          continue // skip non-descendant
+        descendant.autodep =
+          item.autodep ||
+          descendant.tagsRaw.includes('#_autodep') ||
+          descendant.labelPrefixes.some(pfx => {
+            const ids = idsFromLabel.get(pfx)
+            return ids?.length == 1 && __item(ids[0]).autodep
+          })
       }
+    }
 
+    if (update_deps) {
       const prevDeps = item.deps || []
       const prevDependents = item.dependents || []
       item.deps = itemDeps(index)
