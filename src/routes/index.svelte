@@ -4948,11 +4948,24 @@
 
     // if alt-modified, run all runnable dependencies (sequentially) before running this item
     if (e?.altKey) {
+      item.running = true
       return (async () => {
         const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
-        for (let dep of runnable_deps) await onItemRun(__item(dep).index, null /* no alt-runs */, touch_first)
-        return onItemRun(index, null /* no alt-run */, touch_first)
-      })()
+        for (let dep of runnable_deps) __item(dep).running = true
+        for (let dep of runnable_deps) {
+          _item(item.id).status = `running ${__item(dep).name} …`
+          try {
+            await onItemRun(__item(dep).index, null /* no alt-runs */, touch_first)
+          } finally {
+            __item(dep).running = false
+          }
+        }
+        _item(item.id).status = 'running …'
+        return onItemRun(item.index, null /* no alt-run */, touch_first)
+      })().finally(() => {
+        _item(item.id).status = ''
+        item.running = false
+      })
     }
 
     // preview all previewable items before running
