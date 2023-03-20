@@ -6915,42 +6915,41 @@
         visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected')) ?? -1
 
-        // if context is based on nesting (vs _context tag) and selected tag is nested under it, then we only navigate among other nested siblings, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing
+        // if context is based on nesting (vs _context tag), then we only navigate among other nested children, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
         const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
         // context labels can be non-unique, so we have to use item(lastContext.getAttribute("data-item-id"))
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
         if (contextBasedOnNesting) {
-          if (selectedIndex >= 0 && visibleTags[selectedIndex]['title']?.toLowerCase().startsWith(contextLabel + '/')) {
-            visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
-            selectedIndex = visibleTags.findIndex(e => e.matches('.selected'))
-          } else if (selectedIndex < 0) {
-            // if selected tag is nested but NOT visible on item, then we navigate among all non-visible siblings
-            // (note we do not switch to visible siblings as the navigation would then be restricted to those)
-            const targetLabel = editorText.trim().toLowerCase()
-            if (targetLabel.startsWith(contextLabel + '/')) {
-              const prefix = contextLabel + '/'
-              let labels = _labels(
-                label =>
-                  label.length > prefix.length && label.startsWith(prefix) && label.indexOf('/', prefix.length) < 0
+          // restrict visible tags to nested siblings
+          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
+          // expand w/ non-visible siblings, if any, and determine selection based on target (i.e. query)
+          let labels = visibleTags.map(e => e['title'].toLowerCase())
+          const targetLabel = editorText.trim().toLowerCase()
+          if (targetLabel.startsWith(contextLabel + '/')) {
+            const prefix = contextLabel + '/'
+            labels = _.uniq(
+              labels.concat(
+                _labels(
+                  label =>
+                    label.length > prefix.length && label.startsWith(prefix) && label.indexOf('/', prefix.length) < 0
+                )
               )
-              labels = labels.filter(label => !visibleTags?.find(e => e['title']?.toLowerCase() == label))
-              selectedIndex = labels.indexOf(targetLabel)
-              if (selectedIndex >= 0 && labels.length > 1) {
-                const mod = (n, m) => ((n % m) + m) % m
-                if (key == 'ArrowRight') selectedIndex = mod(selectedIndex + 1, labels.length)
-                else if (key == 'ArrowLeft') selectedIndex = mod(selectedIndex - 1, labels.length)
-                const childLabel = labels[selectedIndex]
-                lastEditorChangeTime = 0 // force immediate update
-                forceNewStateOnEditorChange = true // add to history like click-based nav
-                onEditorChange(childLabel + ' ', true) // keep_times for consistency w/ mousedown w/ altKey:true
-                // note since we are using onEditorChange, we need to handle scrolling as needed
-                update_dom().then(scrollToTarget)
-                return
-              }
-            }
+            )
           }
-        }
-        if (selectedIndex >= 0) {
+          selectedIndex = labels.indexOf(targetLabel)
+          if (selectedIndex >= 0 && labels.length > 1) {
+            const mod = (n, m) => ((n % m) + m) % m
+            if (key == 'ArrowRight') selectedIndex = mod(selectedIndex + 1, labels.length)
+            else if (key == 'ArrowLeft') selectedIndex = mod(selectedIndex - 1, labels.length)
+            const childLabel = labels[selectedIndex]
+            lastEditorChangeTime = 0 // force immediate update
+            forceNewStateOnEditorChange = true // add to history like click-based nav
+            onEditorChange(childLabel + ' ', true) // keep_times for consistency w/ mousedown w/ altKey:true
+            // note since we are using onEditorChange, we need to handle scrolling as needed
+            update_dom().then(scrollToTarget)
+            return
+          }
+        } else if (selectedIndex >= 0) {
           if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1)
             visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
           else if (key == 'ArrowLeft' && selectedIndex > 0)
