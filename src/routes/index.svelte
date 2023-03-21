@@ -60,7 +60,7 @@
   let admin = false
   let anonymous = false
   let readonly = false
-  let url_hash = isClient ? decodeURIComponent(location.hash) : null
+  let url_fragment = isClient ? decodeURIComponent(location.hash) : null
   let url_params = isClient ? Object.fromEntries(Array.from(new URL(location.href).searchParams.entries())) : null
   let fixed = !!url_params?.shared
   let shared_key = url_params?.shared?.replace(/^\w+\//, '')
@@ -2899,10 +2899,33 @@
     items[index].showLogsTime = Date.now() // invalidates auto-hide
   }
 
+  function handleFragment(fragment) {
+    // if fragment matches an item (by id or label), navigate to that item
+    const index = indexFromId.get(fragment.substring(1).replace(/^id:/, ''))
+    let unique = false
+    if (index !== undefined) {
+      unique = true
+      replaceStateOnEditorChange = true // replace state
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange(items[index].name + ' ')
+    } else if (idsFromLabel.get(fragment.toLowerCase())?.length) {
+      unique = idsFromLabel.get(fragment.toLowerCase())?.length == 1
+      replaceStateOnEditorChange = true // replace state
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange(fragment + ' ')
+    }
+    // if fragment matches a unique item, scroll to that item if needed
+    if (unique) update_dom().then(scrollToTarget)
+  }
+
   let scrollToTopOnPopState = false
   function onPopState(e) {
     readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
-    if (!e?.state) return // for fragment (#id) hrefs
+    if (!e?.state) {
+      // empty state indicates a change in url fragment, which we use to navigate if it matches an item
+      handleFragment(decodeURIComponent(location.hash))
+      return
+    }
     if (!initialized) {
       // NOTE: this can happen when tab is restored, seems harmless so far
       // console.warn("onPopState before init");
@@ -6726,28 +6749,8 @@
               })()
             }
 
-            // if url fragment ("hash") corresponds to an item tag or id, focus on that item ...
-            if (url_hash) {
-              // if it is a valid item id, then we convert it to name
-              // this means tags that match item ids can not be linked to, which seems fine
-              const index = indexFromId.get(url_hash.substring(1))
-              let unique = false
-              if (index !== undefined) {
-                unique = true
-                replaceStateOnEditorChange = true // replace state
-                lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange(items[index].name + ' ')
-              } else if (idsFromLabel.get(url_hash.toLowerCase())?.length) {
-                unique = idsFromLabel.get(url_hash.toLowerCase())?.length == 1
-                replaceStateOnEditorChange = true // replace state
-                lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange(url_hash + ' ')
-              } else {
-                _modal(`url fragment ${url_hash} does not match any items`)
-              }
-              // if hash matches a unique item, scroll to that item if needed
-              if (unique) update_dom().then(scrollToTarget)
-            }
+            // handle url fragment if any
+            if (url_fragment) handleFragment(url_fragment)
 
             // finalize dom & evaluate _on_welcome on welcome items
             update_dom().then(() => {
