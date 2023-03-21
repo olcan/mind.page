@@ -6908,16 +6908,25 @@
       }
       if (lastContext) {
         let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
+
         // drop duplicates to avoid ambiguities/cycles
         visibleTags = _.uniqBy(visibleTags, (t: any) => t.title)
+
         // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
-        const parsedVisibleTags = item(lastContext.getAttribute('data-item-id')).tagsVisible
-        visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
+        // const parsedVisibleTags = item(lastContext.getAttribute('data-item-id')).tagsVisible
+        // visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
+
+        // drop indirect descendants as navigating to them directly would (confusingly) skip levels
+        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
+        const prefix = contextLabel + '/'
+        _.remove(
+          visibleTags,
+          (t: any) => t.title.toLowerCase().startsWith(prefix) && t.title.indexOf('/', prefix.length) >= 0
+        )
+
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected')) ?? -1
 
         // if context is based on nesting (vs _context tag), then we only navigate among other nested children, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
-        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
-        // context labels can be non-unique, so we have to use item(lastContext.getAttribute("data-item-id"))
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
         if (contextBasedOnNesting) {
           // restrict visible tags to nested siblings
@@ -6926,7 +6935,6 @@
           let labels = visibleTags.map(e => e['title'].toLowerCase())
           const targetLabel = editorText.trim().toLowerCase()
           if (targetLabel.startsWith(contextLabel + '/')) {
-            const prefix = contextLabel + '/'
             labels = _.uniq(
               labels.concat(
                 _labels(
@@ -6936,6 +6944,7 @@
               )
             )
           }
+          console.debug({ visibleTags, labels, contextLabel, targetLabel })
           selectedIndex = labels.indexOf(targetLabel)
           if (selectedIndex >= 0 && labels.length > 1) {
             const mod = (n, m) => ((n % m) + m) % m
@@ -6972,12 +6981,13 @@
             '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
           )
         } else {
-          // filter to children w/ nested labels
+          // filter to children w/ nested labels, excluding multi-level nested labels
+          const prefix = targetLabel + '/'
           const childTags = Array.from(
             document.querySelectorAll(
               '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
             )
-          ).filter(t => t['title']?.startsWith(targetLabel + '/'))
+          ).filter(t => t['title']?.toLowerCase().startsWith(prefix) && t['title'].indexOf('/', prefix.length) == -1)
           child = childTags[0]
         }
 
