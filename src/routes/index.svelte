@@ -6945,7 +6945,7 @@
               )
             )
           }
-          console.debug({ visibleTags, labels, contextLabel, targetLabel })
+          // console.debug({ visibleTags, labels, contextLabel, targetLabel })
           selectedIndex = labels.indexOf(targetLabel)
           if (selectedIndex >= 0 && labels.length > 1) {
             const mod = (n, m) => ((n % m) + m) % m
