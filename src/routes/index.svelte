@@ -6927,12 +6927,12 @@
 
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected')) ?? -1
 
-        // if context is based on nesting (vs _context tag), then we only navigate among other nested children, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
+        // if context is based on nesting (vs _context tag), then we only navigate among other nested descendants, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
         if (contextBasedOnNesting) {
-          // restrict visible tags to nested siblings
-          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // siblings
-          // expand w/ non-visible siblings, if any, and determine selection based on target (i.e. query)
+          // restrict visible tags to nested descendants
+          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // descendants
+          // expand w/ non-visible children, if any, and determine selection based on target (i.e. query)
           let labels = visibleTags.map(e => e['title'].toLowerCase())
           const targetLabel = editorText.trim().toLowerCase()
           if (targetLabel.startsWith(contextLabel + '/')) {
@@ -6945,6 +6945,21 @@
               )
             )
           }
+          // also expand to siblings of target if different from descendants/children of context
+          // note this can be problematic since lastContext can change for siblings, causing inconsistent navigation
+          // const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+          // if (parentLabel != targetLabel && parentLabel != contextLabel) {
+          //   const prefix = parentLabel + '/'
+          //   labels = _.uniq(
+          //     labels.concat(
+          //       _labels(
+          //         label =>
+          //           label.length > prefix.length && label.startsWith(prefix) && label.indexOf('/', prefix.length) < 0
+          //       )
+          //     )
+          //   )
+          // }
+
           // console.debug({ visibleTags, labels, contextLabel, targetLabel })
           selectedIndex = labels.indexOf(targetLabel)
           if (selectedIndex >= 0 && labels.length > 1) {
