@@ -6895,7 +6895,7 @@
     if ((key == 'ArrowLeft' || key == 'ArrowRight') && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
-        .filter(e => e.querySelector('mark.selected'))
+        .filter(e => e.querySelector('mark.selected:not(.deps-and-dependents *)'))
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
 
       // if no context/target but query is a tag, then take it as target and its parent as context
@@ -6907,6 +6907,8 @@
           lastContext = _item(parentLabel).elem?.querySelector('.container')
       }
       if (lastContext) {
+        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
+        const prefix = contextLabel + '/'
         let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
 
         // drop duplicates to avoid ambiguities/cycles
@@ -6917,12 +6919,11 @@
         // visibleTags = visibleTags.filter((t: any) => parsedVisibleTags.includes(t.title.toLowerCase()))
 
         // drop indirect descendants as navigating to them directly would (confusingly) skip levels
-        const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
-        const prefix = contextLabel + '/'
-        _.remove(
-          visibleTags,
-          (t: any) => t.title.toLowerCase().startsWith(prefix) && t.title.indexOf('/', prefix.length) >= 0
-        )
+        // const prefix = contextLabel + '/'
+        // _.remove(
+        //   visibleTags,
+        //   (t: any) => t.title.toLowerCase().startsWith(prefix) && t.title.indexOf('/', prefix.length) >= 0
+        // )
 
         let selectedIndex = visibleTags?.findIndex(e => e.matches('.selected')) ?? -1
 
@@ -6944,7 +6945,7 @@
               )
             )
           }
-          // console.debug({ visibleTags, labels, contextLabel, targetLabel })
+          console.debug({ visibleTags, labels, contextLabel, targetLabel })
           selectedIndex = labels.indexOf(targetLabel)
           if (selectedIndex >= 0 && labels.length > 1) {
             const mod = (n, m) => ((n % m) + m) % m
@@ -6981,13 +6982,15 @@
             '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
           )
         } else {
-          // filter to children w/ nested labels, excluding multi-level nested labels
+          // filter to children w/ nested labels
           const prefix = targetLabel + '/'
           const childTags = Array.from(
             document.querySelectorAll(
               '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
             )
-          ).filter(t => t['title']?.toLowerCase().startsWith(prefix) && t['title'].indexOf('/', prefix.length) == -1)
+          ).filter(
+            t => t['title']?.toLowerCase().startsWith(prefix) /* && t['title'].indexOf('/', prefix.length) == -1*/
+          )
           child = childTags[0]
         }
 
@@ -7050,14 +7053,14 @@
       }
       // see comments above about lastContext
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
-        .filter(e => e.querySelector('mark.selected'))
+        .filter(e => e.querySelector('mark.selected:not(.deps-and-dependents *)'))
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim().toLowerCase()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
         if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')
-          // if (!lastContext?.querySelector('mark.selected')) lastContext = null
+          // if (!lastContext?.querySelector('mark.selected:not(.deps-and-dependents *)')) lastContext = null
         }
       }
       if (lastContext) {
