@@ -2087,6 +2087,7 @@
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
   let renderingVisibleItems = false
+  let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
   let ignoreEditorChanges = false
 
@@ -2119,7 +2120,7 @@
         intro = false
     }
 
-    // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used to enable/disable auto-hiding (hideIndex decrease) during onEditorChange
+    // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used when considering auto-hide/show (hideIndex change) below
     const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
 
     // if editor text is cleared while a target is selected, we force new state just as in onTagClick
@@ -2639,8 +2640,16 @@
 
       // auto-show session items (incl. all ranked items) if no position-based toggles, otherwise revert to minimal
       const hideIndexIdeal = toggles.length == 0 ? hideIndexForSession : hideIndexMinimal
-      // disallow decrease in hideIndex unless there is a query, to improve focus
-      if ((text && editorTextModified) || hideIndexIdeal > hideIndex) hideIndex = hideIndexIdeal
+
+      // reset hide index to ideal if query was modified OR if visible item ranking is modified
+      // (vs highlighting-only updates, e.g. via itemExpansionChanged)
+      const itemIds = items.map(item => item.id)
+      const visibleRankingModified = !_.isEqual(
+        itemIds.slice(0, hideIndex),
+        itemIdsOnLastEditorChange.slice(0, hideIndex)
+      )
+      if (editorTextModified || visibleRankingModified) hideIndex = hideIndexIdeal
+      itemIdsOnLastEditorChange = itemIds
 
       // if ranking while unfocused, retreat to minimal index
       // if (!focused) hideIndex = hideIndexMinimal
