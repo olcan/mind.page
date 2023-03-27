@@ -7187,14 +7187,21 @@
     updateInstance()
   }
 
+  let lastFocusedElem
   function onFocus() {
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
     if (ios || android) return // focus handled in focus/checkFocus below
     const was_focused = focused
     focused = document.hasFocus()
+    // note focused element is not always restored as expected, so we restore manually on re-focus
+    if (!focused && was_focused) lastFocusedElem = document.activeElement
     // note focus_time tracks interactions beyond focused=true
     if (focused) focus_time = instance.focus_time = Date.now()
-    if (focused && !was_focused) onFocused() // handle change to focused=true
+    if (focused && !was_focused) {
+      lastFocusedElem?.focus()
+      lastFocusedElem = null
+      onFocused() // handle change to focused=true
+    }
     // retreat to minimal hide index when window is defocused
     // if (was_focused && !focused) hideIndex = hideIndexMinimal;
   }
@@ -7215,7 +7222,6 @@
     if (!onStorageFired && !anonymous) saveHiddenItem('focus', { index })
   }
 
-  let lastBlurredElem
   function focus() {
     focus_time = instance.focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
     if (!ios && !android) {
@@ -7230,8 +7236,8 @@
     focused = true
     onFocused() // handle change to focused=true
     // see comment below; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
-    lastBlurredElem?.focus()
-    lastBlurredElem = null
+    lastFocusedElem?.focus()
+    lastFocusedElem = null
   }
 
   function checkFocus() {
@@ -7249,8 +7255,8 @@
     focused = false
     // hideIndex = hideIndexMinimal;
     // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
-    lastBlurredElem = document.activeElement as HTMLElement
-    lastBlurredElem?.blur()
+    lastFocusedElem = document.activeElement as HTMLElement
+    lastFocusedElem?.blur()
   }
 
   function saveHiddenItem(name, item) {
