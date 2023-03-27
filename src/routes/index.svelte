@@ -4707,7 +4707,10 @@
     // always defer to _run function if defined, even if there is js_input (for custom handling of js code), but allow skipping by returning null
     // note this does not apply to debug items which already contain complete run/eval logic from a prior run/eval
     if (!item.debug)
-      jsin = [`if (typeof _run == 'function') { const out = _run(); if (out !== null) return out }`, jsin].join('\n')
+      jsin = [
+        `if (typeof _run == 'function') { const out = ${async ? 'await ' : ''}_run(); if (out !== null) return out }`,
+        jsin,
+      ].join('\n')
     jsin = jsin.trim()
     // if (!jsin) return item.text // input missing or empty, ignore
     let jsout
