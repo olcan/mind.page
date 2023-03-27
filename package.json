@@ -27,10 +27,10 @@
     "compression": "^1.7.4",
     "express": "4.18.2",
     "firebase": "^9.12.1",
-    "firebase-admin": "11.1.0",
+    "firebase-admin": "^11.5.0",
     "firebase-auth": "^0.1.2",
     "firebase-functions": "^3.24.1",
-    "http-proxy-middleware": "^3.0.0-beta.0",
+    "http-proxy-middleware": "^3.0.0-beta.1",
     "npm": "^8.19.2"
   },
   "devDependencies": {

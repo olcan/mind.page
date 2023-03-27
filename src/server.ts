@@ -194,23 +194,24 @@ const sapper_server = express().use(
   // websockets can also be proxied
   createProxyMiddleware({
     changeOrigin: true,
-    pathFilter: path => /^\/proxy\/https?:\/\/?.+$/.test(path),
+    pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
     pathRewrite: (path, req) => {
-      path = path.replace(/^\/proxy\/https?:\/\/?[^/?#]+/, '')
+      path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
       if (!path.startsWith('/')) path = '/' + path
       // console.debug('proxy path', path)
       return path
     },
     router: req => {
       const backend = req.url
-        .match(/^\/proxy\/(https?:\/\/?[^/?#]+)/)
+        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
         .pop()
-        .replace(/(https?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
+        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
       // console.debug('proxying to', backend)
       return backend
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
+    // logger: console,
   }),
 
   // parse cookies
