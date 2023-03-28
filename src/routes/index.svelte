@@ -7201,9 +7201,12 @@
     // note focus_time tracks interactions beyond focused=true
     if (focused) focus_time = instance.focus_time = Date.now()
     if (focused && !was_focused) {
-      lastFocusedElem?.focus()
-      lastFocusedElem = null
       onFocused() // handle change to focused=true
+      // note delayed dispatch seems necessary in case there is a pending click that will update focus, e.g. when clicking inside editor after a find-on-page that temporarily removes focus from the page (to the browser)
+      setTimeout(() => {
+        lastFocusedElem?.focus()
+        lastFocusedElem = null
+      }, 250)
     }
     // retreat to minimal hide index when window is defocused
     // if (was_focused && !focused) hideIndex = hideIndexMinimal;
