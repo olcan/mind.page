@@ -874,7 +874,7 @@
     // source can be "self" (default), specific item name (label or id), or "any"
     // if source is suffixed with '?', then lines w/ empty stack are included
     get_log(options = {}) {
-      let since = options['since'] || 'run'
+      let since = options['since'] || 'eval'
       if (since == 'run') since = item(this.id).lastRunTime
       else if (since == 'eval') since = item(this.id).lastEvalTime
       else if (typeof since != 'number') {
