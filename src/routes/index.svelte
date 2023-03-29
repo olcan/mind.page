@@ -897,7 +897,7 @@
         return []
       }
       const filter = options['filter']
-      if (filter !== undefined && typeof filter != 'function') {
+      if (filter && typeof filter != 'function') {
         console.error(
           `get_log: invalid filter '${filter}', should be function(entry) and return true|false to accept|reject entries with fields {time,level,stack,type,text}`
         )
