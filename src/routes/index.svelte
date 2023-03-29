@@ -1387,6 +1387,11 @@
       delete _item.tasks[name]
     }
 
+    // returns true if any task under given name is currently pending completion (may be waiting or running)
+    pending_task(name) {
+      return !!item(this.id).tasks?.[name]
+    }
+
     // promise = new Promise attached (see above) to item
     // the given executor function (resolve[,reject])=>{} is also attached
     promise(func) {
