@@ -911,7 +911,7 @@
         if (entry.time < since) break
         if (entry.level < level) continue
         if (filter_id && (!allow_empty_stack || entry.stack.length > 0) && !entry.stack.includes(filter_id)) continue
-        if (filter && !filter(entry)) continue
+        if (filter && !filter(entry) && (!options['last'] || log.length > 0)) continue
         let prefix = entry.type == 'log' ? '' : entry.type.toUpperCase() + ': '
         if (prefix == 'WARN: ') prefix = 'WARNING: '
         log.push(prefix + entry.text)
