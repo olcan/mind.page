@@ -915,6 +915,7 @@
         let prefix = entry.type == 'log' ? '' : entry.type.toUpperCase() + ': '
         if (prefix == 'WARN: ') prefix = 'WARNING: '
         log.push(prefix + entry.text)
+        if (options['last'] && !filter) break // if 'last' option given w/o (additive) filter, we are done
       }
       return log.reverse()
     }
@@ -1347,6 +1348,7 @@
         if (!_exists(this.id)) return // item deleted
         const _item = item(this.id)
         if (_item.tasks[name] != task) return // task cancelled or replaced
+        // IMPORTANT NOTE: a previously dispatched task that had started running CANNOT BE CANCELLED; when runs overlap in time, earlier run takes priority and newer run will be cancelled instead (via second check of task pointer below, which will have been deleted by earlier run) to ensure that runs do not overlap in time; we do this using a promise chain that serializes the running/cleanup of all runs
         _item.running_tasks ??= {}
         _item.running_tasks[name] = this.resolve(_item.running_tasks[name]).then(() => {
           if (_item.tasks[name] != task) return // task cancelled or replaced
@@ -1504,19 +1506,18 @@
     // often invoked from error handling code
     // otherwise can force re-render even if deephash/html are unchanged
     // note forced re-render also forces re-eval of macros at re-render time
-    // delayed to prevent accidental tight render<->trigger loops that could crash browser
+    // force render is delayed to prevent accidental tight render<->trigger loops that could crash browser
     invalidate_elem_cache({ force_render = false, render_delay = 1000 } = {}) {
-      this.dispatch_task(
-        'invalidate_elem_cache',
-        () => {
-          invalidateElemCache(this.id)
-          if (force_render) {
+      invalidateElemCache(this.id)
+      if (force_render)
+        this.dispatch_task(
+          'force_render',
+          () => {
             item(this.id).version++
             items = items // trigger svelte render
-          }
-        },
-        render_delay
-      )
+          },
+          render_delay
+        )
     }
   }
 
