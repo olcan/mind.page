@@ -3691,7 +3691,6 @@
         sessionHistory.unshift(sessionHistory[0])
     }
 
-    let origText = text // if text is modified, caret position will be reset
     let time = Date.now() // default time is current, can be past if undeleting
     let clearLabel = false // force clear, even if text starts with tag
     if (editing == null) {
@@ -4425,6 +4424,8 @@
       editorText = text = text.trim() + `/${suffix} `
     }
 
+    const text_modified = text != editorText // used below, e.g. to disinguish generated vs typed text
+
     let itemToSave = { user: user.uid, time, attr, text }
     let item = initItemState(_.clone(itemToSave), 0, {
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
@@ -4476,8 +4477,7 @@
 
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
       // note we allow both item text and editor text to be modified together (e.g. see above for appending /#)
-      // if (text != origText) selectionStart = selectionEnd = 0
-      if (text != editorText) selectionStart = selectionEnd = 0
+      if (text_modified) selectionStart = selectionEnd = 0
 
       // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
