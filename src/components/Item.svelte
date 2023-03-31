@@ -1695,16 +1695,14 @@
         )}
       </div>
     {/if}
-    {#if running}
-      <div class="loading">
+    <div class="loading">
+      {#if running}
         <Circle2 size="40" unit="px" />
-        <div class="status" />
-      </div>
-    {:else if saving}
-      <div class="loading">
+      {:else if saving}
         <Circle size="25" unit="px" />
-      </div>
-    {/if}
+      {/if}
+      <div class="status" />
+    </div>
   </div>
 </div>
 
@@ -1988,8 +1986,9 @@
     background: rgba(0, 0, 0, 0.5);
     pointer-events: none; /* passthrough */
   }
-  .loading > div:not(.status) {
+  .loading > :global(div:not(.status)) {
     opacity: 0.75;
+    min-height: var(--size); /* prevent distortion when indicator + status exceed item height */
   }
   .running .loading,
   .saving .loading {

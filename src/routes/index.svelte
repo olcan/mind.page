@@ -443,6 +443,9 @@
     get running(): boolean {
       return !!item(this.id).running
     }
+    set running(running) {
+      item(this.id).running = running
+    }
     get saving(): boolean {
       return !!item(this.id).saving
     }
@@ -1027,14 +1030,14 @@
     }
 
     get status(): string {
-      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+      const statusdiv = this.elem?.querySelector('.container > .loading > .status')
       return statusdiv?.innerHTML ?? null
     }
 
     set status(status: string) {
       this.dispatch_task('set_status', () => {
-        const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
-        if (!statusdiv) return
+        const statusdiv = this.elem?.querySelector('.container > .loading > .status')
+        if (!statusdiv) return 250 // retry in 250ms
         // retry later if there is a selection
         if (
           getSelection().type == 'Range' &&
@@ -1046,14 +1049,14 @@
     }
 
     get progress(): number {
-      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status')
+      const statusdiv = this.elem?.querySelector('.container > .loading > .status')
       const progress = statusdiv?.getAttribute('data-progress')
       return !progress ? null : parseFloat(progress)
     }
 
     set progress(progress: number) {
       if (progress < 0 || progress > 1) throw new Error('invalid progress ' + progress)
-      const statusdiv = this.elem?.querySelector('.container.running > .loading > .status') as HTMLDivElement
+      const statusdiv = this.elem?.querySelector('.container > .loading > .status') as HTMLDivElement
       if (!statusdiv) return
       const percentage = (progress * 100).toFixed(3) + '%'
       statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
@@ -1262,7 +1265,7 @@
     // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
     start(async_func, log_options) {
       log_options = _.merge({ since: Date.now() }, log_options) // set default 'since' for write_log below
-      item(this.id).running = true
+      this.running = true
       return update_dom().then(() =>
         this.resolve(async_func())
           .then(output => {
@@ -1275,7 +1278,7 @@
           })
           .finally(() => {
             this.write_log(log_options) // can also be customized via _this.log_options
-            item(this.id).running = false
+            this.running = false
           })
       )
     }
