@@ -4422,7 +4422,14 @@
     ) {
       forceNewStateOnEditorChange = true // force new state on onEditorChange (invoked below w/ new item added)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
-      let suffix = 0 // incremented to avoid conflict
+      // starting suffix is the incremented parent suffix (if any) or 0, incremented until unique
+      let suffix =
+        Number(
+          text
+            .trim()
+            .match(/\/(\d+)$/)
+            ?.pop() ?? -1
+        ) + 1
       while (_exists(text.trim() + `/${suffix}`)) suffix++
       editorText = text = text.trim() + `/${suffix} `
     }

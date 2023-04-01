@@ -315,6 +315,13 @@
       return pfx + '```' + type + '\n' + body + '```'
     })
 
+    // force line break after block endings (most useful for macro-generated blocks that may be followed by text)
+    const block_regex = blockRegExp(/\S*?/)
+    const regex = new RegExp(block_regex.source + ' *([^\\n]?)', block_regex.flags)
+    text = text.replace(regex, (m, pfx, type, body, sfx) => {
+      return pfx + '```' + type + '\n' + body + '```' + (sfx ? '\n' + sfx : '')
+    })
+
     // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
     text = text.replace(blockRegExp('(?:_markdown|_md)(?:_\\S*)? *'), (m, pfx, type, body) => {
       if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
