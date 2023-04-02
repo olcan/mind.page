@@ -26,7 +26,7 @@
   const _ = globalThis['_'] // imported in client.ts
 
   // import he from "he";
-  import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped } from '../util.js'
+  import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped, blockRegExp } from '../util.js'
 
   const placeholder = ' '
   let spellcheck = false
@@ -451,17 +451,11 @@
       if (key == 'Slash') {
         // attempt to determine language type, default being html/markdown w/ <-- comment --> syntax
         let language
-        const block_start = textarea.value.lastIndexOf('```', textarea.selectionStart)
-        const block_end = textarea.value.indexOf('```', textarea.selectionEnd)
-        if (block_start >= 0 && block_end >= 0) {
-          const block_prefix = textarea.value.substring(0, block_start)
-          const block_type = textarea.value
-            .substring(block_start + 3)
-            .match(/^\S+/)
-            ?.pop()
-          const block_suffix = textarea.value.substring(block_end + 3)
-          if (block_prefix.match(/(?:^|\n) *$/) && block_type && block_suffix.match(/^ *(?:\n|$)/))
-            language = block_type
+        for (const block of textarea.value.matchAll(blockRegExp(/\S*?/))) {
+          if (block.index > textarea.selectionStart) break // already past selection
+          if (block.index + block[0].length < textarea.selectionEnd) continue // not there yet
+          language = block[2] // language is in second capture group
+          break
         }
         language ??= 'markdown' // assume markdown as default language
         language = language.match(/^_?(\S+?)(?:_|$)/)?.pop() ?? language // trim prefix/suffix
