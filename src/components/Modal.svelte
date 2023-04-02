@@ -270,7 +270,10 @@
     // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
     setTimeout(() => {
       if (key == 'Enter') _onConfirm()
-      else if (key == 'Escape') onBackgroundClick()
+      else if (key == 'Escape') {
+        if (cancel) _onCancel()
+        else onBackgroundClick()
+      }
     })
   }
 
@@ -435,6 +438,7 @@
   }
   input {
     -webkit-appearance: none;
+    appearance: none;
     font-size: 20px;
     border-radius: 4px;
     border: 1px solid #ddd;
