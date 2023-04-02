@@ -1175,6 +1175,7 @@
           // async wrapper
           if (options['async_simple']) {
             // use light-weight wrapper without output/logging into item
+            // note this also disables running state, error handling, cache invalidation, etc
             evaljs = ['(async () => {', evaljs, '})()'].join('\n')
           } else evaljs = ['_this.start(async () => {', evaljs, '}) // _this.start'].join('\n')
         } else {
@@ -1247,7 +1248,13 @@
       }
       evalStack.push(this.id)
       try {
-        const out = eval.call(window, evaljs)
+        let out = eval.call(window, evaljs)
+        // if eval returns promise, attach it and set up default rejection handler
+        // note rethrowing errors triggers outer try/catch block via invoke wrapper (see attach/invoke)
+        if (out instanceof Promise)
+          out = this.attach(out).catch(e => {
+            throw e // handled & rethrown in outer catch block
+          })
         if (evalStack.pop() != this.id) console.error('invalid stack')
         return out
       } catch (e) {
@@ -1290,7 +1297,7 @@
       try {
         let out = func()
         // if function returns promise, attach it and set up default rejection handler
-        // note rethrowing errors triggers outer try/catch block via _separate_ invoke wrapper (see onRejected below)
+        // note rethrowing errors triggers outer try/catch block via _another_ invoke wrapper (see attach below)
         if (out instanceof Promise)
           out = this.attach(out).catch(e => {
             throw e // handled & rethrown in outer catch block
