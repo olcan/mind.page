@@ -2648,6 +2648,12 @@
       // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
       hideIndexMinimal = toggles.length == 0 ? hideIndexFromRanking : target ? toggles[0].start : toggles[0].end
 
+      // enforce minimal hide index
+      if (hideIndex < hideIndexMinimal) hideIndex = hideIndexMinimal
+
+      // if ranking while unfocused, force retreat to minimal index
+      // if (!focused) hideIndex = hideIndexMinimal
+
       // first time-based toggle point is the "session toggle" for items "touched" in this session (since first ranking)
       // note soft-touched items are special in that they can be hidden by going back, and will be reset upon loading
       // when items are ordered by a query (vs just time), we only consider up to first unpinned item untouched in session
@@ -2666,9 +2672,6 @@
       )
       if (editorTextModified || visibleRankingModified) hideIndex = hideIndexIdeal
       itemIdsOnLastEditorChange = itemIds
-
-      // if ranking while unfocused, retreat to minimal index
-      // if (!focused) hideIndex = hideIndexMinimal
 
       if (hideIndexForSession > hideIndexFromRanking && hideIndexForSession < items.length) {
         toggles.push({
@@ -5362,16 +5365,16 @@
     return e.reason
       ? `Unhandled Rejection: ${e.reason} (line:${e.reason.line}, col:${e.reason.column})`
       : e.message
-      ? e.lineno
-        ? `${e.message} (line:${e.lineno}, col:${e.colno})`
-        : e.line
-        ? `${e.message} (line:${e.line}, col:${e.column})`
-        : // if we have a stack trace instead of line/column, we attach it to message unless it already has '; STACK:…'
-        e.stack && !e.message.match(/; STACK:/)
-        ? // NOTE: slice(1) skips the error message itself, which seems to be included in the stack
-          `${e.message}; STACK: ${e.stack.split(/\n\s*/g).slice(1).join(' <- ').replace(/\s+/g, ' ')}`
-        : e.message
-      : undefined
+        ? e.lineno
+          ? `${e.message} (line:${e.lineno}, col:${e.colno})`
+          : e.line
+            ? `${e.message} (line:${e.line}, col:${e.column})`
+            : // if we have a stack trace instead of line/column, we attach it to message unless it already has '; STACK:…'
+              e.stack && !e.message.match(/; STACK:/)
+              ? // NOTE: slice(1) skips the error message itself, which seems to be included in the stack
+                `${e.message}; STACK: ${e.stack.split(/\n\s*/g).slice(1).join(' <- ').replace(/\s+/g, ' ')}`
+              : e.message
+        : undefined
   }
 
   function encryptionError(e) {
@@ -8162,6 +8165,11 @@
   <link rel="manifest" href="manifest.json?v={favicon_version}" />
   {#if signedin}
     <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-11040878740"></script>
     <script>
       window.dataLayer = window.dataLayer || []
@@ -8171,6 +8179,11 @@
       gtag('js', new Date())
       gtag('config', 'AW-11040878740')
     </script>
+    <!-- Event snippet for Signed-in Page view conversion page -->
+    <!-- Event snippet for Signed-in Page view conversion page -->
+    <!-- Event snippet for Signed-in Page view conversion page -->
+    <!-- Event snippet for Signed-in Page view conversion page -->
+    <!-- Event snippet for Signed-in Page view conversion page -->
     <!-- Event snippet for Signed-in Page view conversion page -->
     <script>
       gtag('event', 'conversion', { send_to: 'AW-11040878740/R6I_CMmf0oQYEJTh2ZAp' })
