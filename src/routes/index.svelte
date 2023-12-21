@@ -1576,7 +1576,7 @@
     // console.debug(`updating vertical padding for new height ${viewHeight} != ${lastViewHeight}`)
     const prevScrollTop = document.body.scrollTop
     const prevPadding = itemsdiv.querySelector('.column-padding').offsetHeight
-    padding = 0.7 * viewHeight
+    padding = 0.85 * viewHeight // matches .items padding-bottom and .column-padding height
     // console.debug(`updating vertical padding to ${padding} for viewHeight ${viewHeight}, was ${lastViewHeight}`)
     // padding += Math.max(0, 20 - (prevScrollTop + padding - prevPadding))
     itemsdiv.querySelectorAll('.column-padding').forEach((div: HTMLElement) => (div.style.height = padding + 'px'))
@@ -8166,10 +8166,6 @@
   {#if signedin}
     <!-- Google tag (gtag.js) -->
     <!-- Google tag (gtag.js) -->
-    <!-- Google tag (gtag.js) -->
-    <!-- Google tag (gtag.js) -->
-    <!-- Google tag (gtag.js) -->
-    <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-11040878740"></script>
     <script>
       window.dataLayer = window.dataLayer || []
@@ -8179,10 +8175,6 @@
       gtag('js', new Date())
       gtag('config', 'AW-11040878740')
     </script>
-    <!-- Event snippet for Signed-in Page view conversion page -->
-    <!-- Event snippet for Signed-in Page view conversion page -->
-    <!-- Event snippet for Signed-in Page view conversion page -->
-    <!-- Event snippet for Signed-in Page view conversion page -->
     <!-- Event snippet for Signed-in Page view conversion page -->
     <!-- Event snippet for Signed-in Page view conversion page -->
     <script>
@@ -8405,7 +8397,7 @@
 
     /* bottom padding for easier tapping on last item, also more stable editing/resizing of bottom items */
     /* matches .column-padding to enable scrolling down to top of header regardless of .items contents */
-    padding-bottom: 70vh;
+    padding-bottom: 85vh;
     /* box-sizing: border-box; */
   }
   /* .items.multi-column {
@@ -8436,7 +8428,7 @@
   }
   /* column padding allows scrolling top items to ~anywhere on screen */
   .column-padding {
-    height: 70vh;
+    height: 85vh;
   }
   .column:first-child .column-padding {
     background: #171717; /* matches .header-container unfocused background */
