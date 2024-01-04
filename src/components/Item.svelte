@@ -832,12 +832,12 @@
         const type = line.match(/^ERROR:/)
           ? 'error'
           : line.match(/^WARNING:/)
-          ? 'warn'
-          : line.match(/^INFO:/)
-          ? 'info'
-          : line.match(/^DEBUG:/)
-          ? 'debug'
-          : 'log'
+            ? 'warn'
+            : line.match(/^INFO:/)
+              ? 'info'
+              : line.match(/^DEBUG:/)
+                ? 'debug'
+                : 'log'
         summary += `<span class="log-dot console-${type}">⸱</span>`
       })
       text += `\n<div class="log-summary" onclick="_handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`
@@ -1628,8 +1628,12 @@
   >
     {#if editing}
       <div class="edit-menu">
-        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
-        {#if editable} <div class="button save" on:click={onSaveClick}>save</div> {/if}
+        {#if runnable}
+          <div class="button run" on:click={onRunClick}>run</div>
+        {/if}
+        {#if editable}
+          <div class="button save" on:click={onSaveClick}>save</div>
+        {/if}
         {#if pushable}
           <div class="button push" on:click={onPushClick}>
             <img src="/arrow.up.svg" alt="push" title="push" />
@@ -1681,7 +1685,9 @@
       />
     {:else}
       <div class="item-menu">
-        {#if runnable} <div class="button run" on:click={onRunClick}>run</div> {/if}
+        {#if runnable}
+          <div class="button run" on:click={onRunClick}>run</div>
+        {/if}
         <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
@@ -2059,11 +2065,28 @@
     margin-left: 20px;
   } */
   .item > :global(.content span.list-item) {
-    display: block;
-    padding-left: 0.3em; /* some internal padding (in case list-item given background/border/etc), undone via margin */
-    margin-left: -0.5em; /* includes negated padding to shift outside; em scales relative to font size */
     color: #ddd;
+    display: block;
+    padding-left: 5px; /* some internal padding in case list-item given background/border/etc */
+    margin-left: -5px; /* negate internal padding to avoid increasing bullet gap */
   }
+
+  /* safari-only styles to fix bullet gap behavior, see https://stackoverflow.com/a/25975282 for safari selector */
+  :global(_::-webkit-full-page-media),
+  :global(_:future),
+  :global(:root) .item > :global(.content span.list-item) {
+    display: inline-block; /* fix safari treatment of negative margin pushing bullets out instead of reducing gap */
+    vertical-align: top; /* fix default baseline alignment of bullets for inline-block */
+    /* -4px is better for ul, -5px better for ol, must be consistent w/ padding-left set below */
+    margin-left: -9px; /* extra -4px to reduce bullet gap in safari */
+    /* text-indent: -4px; */ /* alternative to reduce bullet gap in safari */
+  }
+  :global(_::-webkit-full-page-media),
+  :global(_:future),
+  :global(:root) .item > :global(.content :is(ul, ol)) {
+    padding-left: 24px; /* compensate for negative margin on .list-item to reduce bullet gap in Safari */
+  }
+
   /* additional space between list items */
   .item > :global(.content :is(ul, ol) > li:not(:last-of-type)) {
     padding-bottom: 2px;
