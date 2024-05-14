@@ -1369,8 +1369,10 @@
                   delete _item.tasks[name] // task cancelled!
                   return
                 }
-                if (out >= 0) this.dispatch(task, out) // dispatch repeat
-                else if (repeat_ms >= 0) this.dispatch(task, repeat_ms) // dispatch repeat
+                if (out >= 0)
+                  this.dispatch(task, out) // dispatch repeat
+                else if (repeat_ms >= 0)
+                  this.dispatch(task, repeat_ms) // dispatch repeat
                 else delete _item.tasks[name] // task done!
               })
               .catch(e => {
@@ -3721,7 +3723,8 @@
     // should always be invoked as return alert(...)
     const alert = msg => {
       const was_focused = document.activeElement == textArea(-1)
-      if (return_alerts) return msg // return alert message string
+      if (return_alerts)
+        return msg // return alert message string
       else _modal_alert(msg, () => was_focused && textArea(-1).focus())
     }
 
@@ -4452,9 +4455,9 @@
       editing: editing,
       saving: !editing,
       savedId: null, // filled in below after save
-      savedTime: 0, // filled in onItemSaved
-      savedAttr: null, // filled in onItemSaved
-      savedText: '', // filled in onItemSaved (also means delete on cancel & skip confirm on delete)
+      savedTime: 0, // filled in onSaveDone
+      savedAttr: null, // filled in onSaveDone
+      savedText: '', // filled in onSaveDone (also means delete on cancel & skip confirm on delete)
     })
     items = [item, ...items]
 
@@ -4558,8 +4561,8 @@
             }
             item.savedId = doc.id
 
-            // if editing, we do not call onItemSaved so save is postponed to post-edit, and cancel = delete
-            if (!item.editing) onItemSaved(item.id, itemToSave)
+            // if editing, we do not call onSaveDone so save is postponed to post-edit, and cancel = delete
+            if (!item.editing) onSaveDone(item.id, itemToSave)
 
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
@@ -4584,8 +4587,8 @@
     tick().then(() => textArea(near).focus())
   }
 
-  function onItemSaved(id: string, savedItem) {
-    // console.debug("saved item", id);
+  function onSaveDone(id: string, savedItem) {
+    console.debug('saved item', id)
     decryptItem(savedItem).then(savedItem => {
       const index = indexFromId.get(id)
       if (index == undefined) return // item was deleted
@@ -4792,14 +4795,14 @@
     }
 
     if (readonly) {
-      setTimeout(() => onItemSaved(item.id, itemToSave))
+      setTimeout(() => onSaveDone(item.id, itemToSave))
       return
     }
 
     encryptItem(itemToSave).then(itemToSave => {
       // console.debug('saving item', itemToSave)
       updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
-        .then(() => onItemSaved(item.id, itemToSave))
+        .then(() => onSaveDone(item.id, itemToSave))
         .catch(console.error)
 
       // also save to history ...
@@ -5125,6 +5128,13 @@
       onItemTouch(index)
       return update_dom().then(runItem) // return promise to allow pending dependents for alt-modified runs (see above)
     }
+  }
+
+  function onItemSave(index: number = -1, e: MouseEvent = null) {
+    if (index < 0) index = focusedItem
+    const item = items[index]
+    // if (item.text != item.savedText) saveItem(item.id)
+    saveItem(item.id) // save item even if text is unchanged, i.e. to update time
   }
 
   function onItemTouch(index: number, e: MouseEvent = null) {
@@ -7692,6 +7702,7 @@
                 onEdited={onItemEdited}
                 onEditorKeyDown={onItemEditorKeyDown}
                 onRun={onItemRun}
+                onSave={onItemSave}
                 onTouch={onItemTouch}
                 onUpdate={onItemUpdate}
                 onPush={onItemPush}

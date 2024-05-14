@@ -20,6 +20,7 @@
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
   export let onDone = (text: string, e: any, cancelled: boolean = false, run: boolean = false) => {}
   export let onRun = () => {}
+  export let onSave = () => {}
   export let onPrev = () => {}
   export let onNext = () => {}
 
@@ -562,8 +563,7 @@
     } else {
       if (
         (key == 'Enter' && e.shiftKey && !(e.metaKey || e.ctrlKey)) ||
-        (key == 'Enter' && !e.shiftKey && (e.metaKey || e.ctrlKey)) ||
-        (key == 'KeyS' && (e.metaKey || e.ctrlKey) && !e.shiftKey)
+        (key == 'Enter' && !e.shiftKey && (e.metaKey || e.ctrlKey))
       ) {
         e.preventDefault()
         const run = key == 'Enter' && (e.metaKey || e.ctrlKey)
@@ -577,6 +577,13 @@
           altKey: e.altKey,
           shiftKey: e.shiftKey,
         }
+        return
+      }
+
+      // save item with Cmd/Ctrl+S
+      if (key == 'KeyS' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        e.preventDefault()
+        onSave()
         return
       }
 

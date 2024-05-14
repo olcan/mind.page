@@ -81,6 +81,7 @@
   export let onEscape = e => true // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
   export let onRun = (index: number = -1, e: MouseEvent = null) => {}
+  export let onSave = (index: number = -1, e: MouseEvent = null) => {}
   export let onTouch = (index: number, e: MouseEvent = null) => {}
   export let onUpdate = (index: number) => {}
   export let onPush = (index: number) => {}
@@ -1673,6 +1674,7 @@
         bind:selectionEnd
         cancelOnDelete={fixed}
         {onRun}
+        {onSave}
         {onPrev}
         {onNext}
         onFocused={focused => onFocused(index, focused)}
