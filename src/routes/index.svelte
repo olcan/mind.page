@@ -4588,7 +4588,7 @@
   }
 
   function onSaveDone(id: string, savedItem) {
-    console.debug('saved item', id)
+    console.debug('saved item', id, __item(id).savedId)
     decryptItem(savedItem).then(savedItem => {
       const index = indexFromId.get(id)
       if (index == undefined) return // item was deleted
