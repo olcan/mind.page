@@ -26,6 +26,7 @@ const firebase_admin = admin.initializeApp(firebaseConfig)
 // helper to determine host name
 // also sets globalThis.hostname for easy access from other files (e.g. index.svelte)
 // rewrites 127.0.0.1 and local.dev as localhost for convenience in localhost checks
+// also rewrites 192.168.86.10x to localhost for convenience in localhost checks
 function get_hostname(req) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
   const hostport = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
