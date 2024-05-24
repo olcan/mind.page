@@ -331,6 +331,7 @@
       // note the second \n comes from the closing block delimiter ```\n since blockRegExp excludes the final \n
       if (!body.match(/(?:^|\n)\s*[|>][^\n]*\n$/)) body = body.replace(/\n$/, '')
       else body = body.replace(/\n$/, '\n\\')
+      body = body.replace(/((?:^|\n) *)\\```/g, '$1```') // unescape nested blocks
       return pfx + body
     })
 
@@ -635,7 +636,7 @@
       .join('\n')
       .replace(/\\\n/g, '')
       .replace(/\\<br>\n\n/g, '') // used inside menu items
-      .replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
+    //.replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
 
     // remove *_removed blocks
     text = text.replace(blockRegExp(/\w*_removed/), '')

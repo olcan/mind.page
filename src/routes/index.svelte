@@ -4799,6 +4799,7 @@
       return
     }
 
+    items = items // trigger svelte render for saving state change
     encryptItem(itemToSave).then(itemToSave => {
       // console.debug('saving item', itemToSave)
       updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
