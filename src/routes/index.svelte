@@ -103,7 +103,7 @@
   // second argument can also be object for more readability
   // additional arguments are for internal use
   function _item(name: string, silent: any = false, read_only = undefined, default_read_only_id = undefined): any {
-    if (!name) return null
+    if (!name) return null // missing
     if (typeof silent == 'object') ({ silent = false, read_only, default_read_only_id } = silent)
     let item
     if (name.startsWith('#')) {
@@ -302,11 +302,12 @@
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     window['_item'] = _item
-    window['__item'] = item // internal item(...) function (for debugging only)
-    // internal item array and other state (for debugging only)
+    window['__item'] = item // internal item(...) function (for debugging or advanced uses only)
+    // internal item array and other state (for debugging or advanced uses only)
     Object.defineProperty(window, '__items', { get: () => items })
     Object.defineProperty(window, '__toggles', { get: () => toggles })
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
+    Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
     window['_exists'] = _exists
     window['_create'] = _create
@@ -363,6 +364,7 @@
   // private function for looking up item given its id
   // (throws "deleted" error if item has been deleted)
   function item(id: string) {
+    if (!id) return null // missing
     const index = indexFromId.get(id)
     if (index === undefined) throw new Error(`item ${id} deleted`)
     return items[index]
@@ -1029,6 +1031,10 @@
       itemShowLogs(this.id, autohide_after)
     }
 
+    hide_logs() {
+      itemHideLogs(this.id)
+    }
+
     get status(): string {
       const statusdiv = this.elem?.querySelector('.container > .loading > .status')
       return statusdiv?.innerHTML ?? null
@@ -1066,6 +1072,11 @@
     show_status(status, progress) {
       if (status) this.status = status
       if (progress) this.progress = progress
+    }
+
+    clear_status() {
+      this.status = '' // triggers hide due to style on .status:empty in Item.svelte
+      this.progress = 0
     }
 
     // "touches" item by updating its time
@@ -1192,6 +1203,7 @@
           // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
           !options['read_only'] ? [] : ['const _item = (n,s,ro) => window._item(n,s,ro,_id);'],
           'const _this = _item(_id);',
+          'const __this = __item(_id);',
           evaljs,
         ]
           .flat()
@@ -4562,7 +4574,9 @@
             item.savedId = doc.id
 
             // if editing, we do not call onSaveDone so save is postponed to post-edit, and cancel = delete
-            if (!item.editing) onSaveDone(item.id, itemToSave)
+            // NOTE: we now call onSaveDone for consistency with new Cmd-S behavior to continue editing, also since we are actually saving here; that is, the cancel=delete behavior is only triggered when item is closed, and the item will be there if you reload w/o closing
+            // if (!item.editing) onSaveDone(item.id, itemToSave)
+            onSaveDone(item.id, itemToSave)
 
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
@@ -4703,6 +4717,12 @@
         if (dispatchTime == items[index].showLogsTime) items[index].showLogs = false
       }, autohide_after)
     }
+  }
+
+  function itemHideLogs(id: string) {
+    let index = indexFromId.get(id)
+    if (index == undefined) return
+    items[index].showLogs = false
   }
 
   function removeBlock(text: string, type: string) {
