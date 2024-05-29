@@ -417,7 +417,9 @@
     // replace naked URLs (regex from util.js) with markdown links (or images) named after host name
     // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
     const urlRegex = new RegExp(
-      tagRegexExclusions + '|' + /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/.source,
+      tagRegexExclusions +
+        '|' +
+        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/.source,
       'g'
     )
     const replaceURLs = text =>
@@ -425,6 +427,7 @@
         if (pfx === undefined) return m // skip exclusion
         // disallow matching prefix ](\s+ to avoid matching urls inside markdown links
         if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
+        if (url.startsWith('go/')) url = 'http://' + url
         let sfx = ''
         if (url[url.length - 1].match(/[\.,;:]/)) {
           // move certain last characters out of the url
@@ -436,7 +439,8 @@
         url = url.replace('?dl=0', '')
         try {
           const obj = new URL(url)
-          const label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
+          let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
+          if (obj.host == 'go') label = obj.host + obj.pathname // include path for go/... links
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
@@ -1280,12 +1284,15 @@
 
     // linkify urls & tags in code comments (regexes from util.js)
     const link_urls = text =>
-      text.replace(/(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/g, (m, pfx, href) => {
-        return (
-          `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
-          `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
-        )
-      })
+      text.replace(
+        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
+        (m, pfx, href) => {
+          return (
+            `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
+            `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
+          )
+        }
+      )
     const link_tags = text =>
       text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag

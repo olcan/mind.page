@@ -48,7 +48,7 @@ export function highlight(code, language) {
       // we allow @ prefix due to use in stack traces in some browsers
       // consider allowing semi-colon in tail when matching in escaped html, e.g. in editor
       // (for simplicity we do not currently have a separate pattern for escaped html)
-      /(^|\s|\(|@)([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:;,.])/gi,
+      /(^|\s|\(|@)((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/gi,
       (m, pfx, href) =>
         `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )

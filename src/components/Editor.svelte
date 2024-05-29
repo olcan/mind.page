@@ -131,7 +131,7 @@
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
         // same as in link_urls above, see comments there
-        /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:,.])/gi,
+        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
@@ -237,7 +237,7 @@
     // note for simplicity we do not yet have a separate url regex for escaped html
     const link_urls = text =>
       text.replace(
-        /(^|\s|\()([a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?[^\s)<>:]*[^\s)<>:,.])/gi,
+        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
         (m, pfx, url) => `${pfx}<a>${url}</a>`
       )
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
