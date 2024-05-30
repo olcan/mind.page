@@ -1626,7 +1626,7 @@
     class:running
     class:admin
     class:showLogs
-    class:bordered={error || warning || running || target}
+    class:bordered={error || warning || running || target || pushable || previewable}
     class:editable
     class:pushable
     class:previewable
@@ -1961,6 +1961,7 @@
     /* overflow: auto; */
   }
 
+  /* NOTE: if you add/remove border types here, need to also update class:bordered={...} above*/
   .target {
     border-color: #242;
   }
@@ -1989,6 +1990,10 @@
   .previewable {
     border-color: #c7c;
   }
+  .editing {
+    border-color: transparent; /* border is visible but NOT updated while editing, so we hide for now */
+  }
+
   /* .item.saving {
     opacity: 0.5;
   } */
