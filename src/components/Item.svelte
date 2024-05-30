@@ -1749,7 +1749,7 @@
     position: relative;
     border-radius: 5px; /* aligns with editor radius (4px) 1px inside */
     background: #111;
-    border: 1px solid #111;
+    border: 1px solid transparent; /* transparent = same as background */
     box-sizing: border-box;
     pointer-events: all;
   }
