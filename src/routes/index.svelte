@@ -1201,8 +1201,6 @@
           "'use strict';undefined;",
           `const _id = '${this.id}';`,
           `const _name = '${this.name}';`,
-          `const _hash = '${this.hash}';`,
-          `const _deephash = '${this.deephash}';`,
           // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
           !options['read_only'] ? [] : ['const _item = (n,s,ro) => window._item(n,s,ro,_id);'],
           'const _this = _item(_id);',
