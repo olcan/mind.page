@@ -1200,6 +1200,9 @@
         evaljs = [
           "'use strict';undefined;",
           `const _id = '${this.id}';`,
+          `const _name = '${this.name}';`,
+          `const _hash = '${this.hash}';`,
+          `const _deephash = '${this.deephash}';`,
           // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
           !options['read_only'] ? [] : ['const _item = (n,s,ro) => window._item(n,s,ro,_id);'],
           'const _this = _item(_id);',
@@ -1232,8 +1235,9 @@
       // evaljs = evaljs.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro));
       evaljs = evaljs.replace(/@\{(.*?)\}@/g, skipEscaped(replaceMacro))
 
-      // replace any remaining $id, $hash, $deephash, just like in _html(_*) blocks in Item.svelte
+      // replace any remaining $id, $name, $hash, $deephash, just like in _html(_*) blocks in Item.svelte
       evaljs = evaljs.replace(/\$id/g, skipEscaped(this.id))
+      evaljs = evaljs.replace(/\$name/g, skipEscaped(this.name))
       evaljs = evaljs.replace(/\$hash/g, skipEscaped(this.hash))
       evaljs = evaljs.replace(/\$deephash/g, skipEscaped(this.deephash))
       if (options['cid']) evaljs = evaljs.replace(/\$cid/g, skipEscaped(options['cid']))
