@@ -5158,6 +5158,7 @@
   function onItemSave(index: number = -1, e: MouseEvent = null) {
     if (index < 0) index = focusedItem
     const item = items[index]
+    if (item.text != item.savedText) itemTextChanged(index, item.text)
     // if (item.text != item.savedText) saveItem(item.id)
     saveItem(item.id) // save item even if text is unchanged, i.e. to update time
   }
