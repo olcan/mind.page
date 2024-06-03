@@ -1367,6 +1367,7 @@
     // cancels task (w/o invoking function) if item is deleted
     // modifies repeat_ms (once) if function returns number>=0
     // function can be async or return promise
+    // task promise is passed to function, should match __this.running_tasks[name] unless cancelled
     dispatch_task(name, func, delay_ms = 0, repeat_ms = -1) {
       const task = () => {
         if (!_exists(this.id)) return // item deleted
@@ -1377,7 +1378,7 @@
         _item.running_tasks[name] = this.resolve(_item.running_tasks[name]).then(() => {
           if (_item.tasks[name] != task) return // task cancelled or replaced
           try {
-            this.resolve(func())
+            this.resolve(func(task))
               .then(out => {
                 if (out === null) {
                   delete _item.tasks[name] // task cancelled!
