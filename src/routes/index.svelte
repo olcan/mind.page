@@ -1367,7 +1367,7 @@
     // cancels task (w/o invoking function) if item is deleted
     // modifies repeat_ms (once) if function returns number>=0
     // function can be async or return promise
-    // task promise is passed to function, should match __this.running_tasks[name] unless cancelled
+    // task object (function) is passed to dispatched function, should match __this.tasks[name] unless cancelled
     dispatch_task(name, func, delay_ms = 0, repeat_ms = -1) {
       const task = () => {
         if (!_exists(this.id)) return // item deleted
@@ -1375,7 +1375,7 @@
         if (_item.tasks[name] != task) return // task cancelled or replaced
         // IMPORTANT NOTE: a previously dispatched task that had started running CANNOT BE CANCELLED; when runs overlap in time, earlier run takes priority and newer run will be cancelled instead (via second check of task pointer below, which will have been deleted by earlier run) to ensure that runs do not overlap in time; we do this using a promise chain that serializes the running/cleanup of all runs
         _item.running_tasks ??= {}
-        _item.running_tasks[name] = this.resolve(_item.running_tasks[name]).then(() => {
+        const promise = (_item.running_tasks[name] = this.resolve(_item.running_tasks[name]).then(() => {
           if (_item.tasks[name] != task) return // task cancelled or replaced
           try {
             this.resolve(func(task))
@@ -1399,6 +1399,10 @@
             console.error(`stopping task '${name}' due to error: ${e}`)
             delete _item.tasks[name] // task finished (w/ error)!
           }
+        }))
+        // clean up running_tasks when possible (task finished without new one dispatched)
+        promise.finally(() => {
+          if (_item.running_tasks[name] == promise) delete _item.running_tasks[name]
         })
       }
       const _item = item(this.id)
