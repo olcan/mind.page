@@ -1381,23 +1381,23 @@
             this.resolve(func(task))
               .then(out => {
                 if (out === null) {
-                  delete _item.tasks[name] // task cancelled!
+                  if (_item.tasks[name] == task) delete _item.tasks[name] // task cancelled!
                   return
                 }
                 if (out >= 0)
                   this.dispatch(task, out) // dispatch repeat
                 else if (repeat_ms >= 0)
                   this.dispatch(task, repeat_ms) // dispatch repeat
-                else delete _item.tasks[name] // task done!
+                else if (_item.tasks[name] == task) delete _item.tasks[name] // task done!
               })
               .catch(e => {
                 console.error(`stopping task '${name}' due to error: ${e}`)
-                delete _item.tasks[name] // task finished (w/ error)!
+                if (_item.tasks[name] == task) delete _item.tasks[name] // task finished (w/ error)!
               })
           } catch (e) {
             // handle error in sync func
             console.error(`stopping task '${name}' due to error: ${e}`)
-            delete _item.tasks[name] // task finished (w/ error)!
+            if (_item.tasks[name] == task) delete _item.tasks[name] // task finished (w/ error)!
           }
         }))
         // clean up running_tasks when possible (task finished without new one dispatched)
