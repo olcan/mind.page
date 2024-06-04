@@ -759,23 +759,35 @@
           const dep = _item(id)
           // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
           if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
-          // indicate dependency name in comments for certain types of reads
-          if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${dep.name} */`)
+          // indicate dependency name in comments for comment_deps (using html) or for certain types of reads
+          // note the conditions here should match those below (just outside the for loop)
+          if (options['comment_deps'])
+            content.push(`<!-- ${dep.name} -->`) // use html comment
+          else if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${dep.name} */`)
           else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${dep.name} -->`)
           content.push(dep.read(type, options))
         })
+        // if dependencies are commented, also comment the dependent item name (where include_deps is true)
+        if (options['comment_deps'])
+          content.push(`<!-- ${item.name} -->`) // use html comment
+        else if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${item.name} */`)
+        else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${item.name} -->`)
       }
 
       // exclude async content (and return early) if requested
       if (options['exclude_async'] && item.deepasync) return content.filter(s => s).join('\n')
 
-      // copy item text for potential macro expansion
-      let text = item.text
+      // copy item text (for possible post-processing below)
+      // replace item text if a replacement is specified in replace_items
+      let text = options['replace_items']?.[item.name] ?? item.text
 
       // evaluate <<macros>> if requested (logic mirrors that in Item.svelte)
+      // expanded state (item.expanded) is ignored/untouched for replace_items, making eval transient/read-only
+      const ignore_expanded_state = !!options['replace_items']
       if (options['eval_macros']) {
         // note the reset conditions here (deephash, version, etc) should match those in toHTML in Item.svelte
         if (
+          !ignore_expanded_state &&
           item.expanded &&
           !item.expanded.error &&
           item.expanded.deephash == item.deephash &&
@@ -783,7 +795,7 @@
         ) {
           text = item.expanded.text // use prior expansion
         } else {
-          item.expanded = {} // reset macro expansion state
+          if (!ignore_expanded_state) item.expanded = {} // reset macro expansion state
           let cacheIndex = 0
           const replaceMacro = (m, js) => {
             if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
@@ -791,18 +803,24 @@
               return this.eval(js, {
                 trigger: 'macro_' + cacheIndex++,
                 cid: `${this.id}-${this.deephash}-${cacheIndex}`, // enable replacement of $cid
+                replace_items: options['replace_items'], // include any replacements (for eval prefix read_deep)
               })
             } catch (e) {
-              item.expanded.error = e
+              if (!ignore_expanded_state) item.expanded.error = e
               console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
               throw e // stop read and throw error
             }
           }
-          item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-          item.expanded.deephash = item.deephash
-          item.expanded.version = item.version
-          item.expanded.count = cacheIndex
-          itemExpansionChanged(item)
+          if (!ignore_expanded_state) {
+            item.expanded.text = text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+            item.expanded.deephash = item.deephash
+            item.expanded.version = item.version
+            item.expanded.count = cacheIndex
+            itemExpansionChanged(item)
+          } else {
+            // eval macros without updating expanded state
+            text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+          }
         }
       }
       // extract specified block type (if any)
