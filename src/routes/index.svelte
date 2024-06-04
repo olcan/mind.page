@@ -2438,18 +2438,6 @@
         }
       }
 
-      // calculate missing tags (excluding certain special tags from consideration)
-      // visible tags are considered "missing" if no other item contains them
-      // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
-      // hidden "special" tags are not considered "missing" since they toggle special features
-      // NOTE: doing this here is easier than keeping these updated in itemTextChanged
-      // NOTE: tagCounts include prefix tags, deduplicated at item level
-      item.missingTags = tagsVisible
-        .filter(t => t != label && (tagCounts.get(t) || 0) <= 1)
-        .concat(tagsHidden.filter(t => t != label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
-
-      // if (item.missingTags.length > 0) console.debug(item.missingTags, tags);
-
       // mark 'has error' on any logged errors or warnings
       // also mark if item has any failed _tests in its global store (set by #tester)
       item.hasError = !!text.match(/^(?:ERROR|WARNING):/m) || _.values(item.global_store?._tests).some(t => !t.ok)
@@ -3305,10 +3293,32 @@
     item.tagsExpandedWithMacros = item.tagsExpanded
     if (item.expanded?.item?.tagsExpanded)
       // include macro expansions
-      item.tagsExpandedWithMacros = item.tagsExpandedWithMacros.concat(item.expanded.item.tagsExpanded)
+      item.tagsExpandedWithMacros = _.uniq(item.tagsExpandedWithMacros.concat(item.expanded.item.tagsExpanded))
     if (!_.isEqual(item.tagsExpandedWithMacros, prevTagsExpandedWithMacros)) {
       prevTagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, tagCounts.get(tag) - 1))
       item.tagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1))
+    }
+
+    // calculate missing tags (excluding certain special tags from consideration)
+    // visible tags are considered "missing" if no other item contains them
+    // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
+    // hidden "special" tags are not considered "missing" since they toggle special features
+    // NOTE: tagCounts include prefix tags, deduplicated at item level
+    item.missingTags = item.tagsVisible
+      .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+      .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+
+    // if label changed & updating deps, update missingTags on all items tagged with current OR previous label
+    if (item.label != prevLabel && update_deps) {
+      for (let tagger of items) {
+        if (tagger.tags.includes(prevLabel) || tagger.tags.includes(tagger.label)) {
+          tagger.missingTags = tagger.tagsVisible
+            .filter(t => t != tagger.label && (tagCounts.get(t) || 0) <= 1)
+            .concat(
+              tagger.tagsHidden.filter(t => t != tagger.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
+            )
+        }
+      }
     }
 
     // extract title, if any found, as the first non-tag non-html non-empty line
