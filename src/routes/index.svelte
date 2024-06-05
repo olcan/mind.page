@@ -1301,8 +1301,8 @@
         // note this also does not apply to errors throws above, e.g. for missing dependencies
         // also note we prefer plain text (vs html spans) for non-error macro output
         if (
-          options['trigger'].startsWith('macro_') &&
           !options['replace_items'] &&
+          options['trigger']?.startsWith('macro_') &&
           (item(this.id).template || this.dependencies.some(id => item(id).template))
         ) {
           return '`\\<<' + orig_evaljs.replace(/[`\\$]/g, '\\$&') + '>>`'
