@@ -914,7 +914,7 @@
     // replace textarea.focus/ w/ custom method that sets .editor.focused
     // otherwise textarea can be invisible, preventing focus
     const _focus = textarea.focus
-    textarea.focus = () => (editor.classList.add('focused'), _focus.call(textarea))
+    textarea.focus = () => (editor?.classList.add('focused'), _focus.call(textarea))
     // set up listener for selection changes (does not capture all, see comment in onSelectionChange)
     document.addEventListener('selectionchange', onSelectionChange)
     // console.debug("onMount selection", selectionStart, selectionEnd);
