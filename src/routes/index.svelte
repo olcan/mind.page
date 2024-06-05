@@ -1114,6 +1114,8 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
+      const orig_evaljs = evaljs // can be returned for macro eval errors on template items (see use below)
+
       // initialize items if not already done (usually due to macros at first render)
       // note should no longer be needed since initialize invokes initItems before renderRange
       // initItems()
@@ -1290,6 +1292,15 @@
         if (evalStack.pop() != this.id) console.error('invalid stack')
         return out
       } catch (e) {
+        // if this is a macro eval on a template item (or dependent), return stringified macro js
+        // this is disabled when there are replacements, as those are expected to fix any errors
+        if (
+          options['trigger'].startsWith('macro_') &&
+          !options['replace_items'] &&
+          (item(this.id).template || this.dependencies.some(id => item(id).template))
+        ) {
+          return '`\\<<' + orig_evaljs.replace(/[`\\$]/g, '\\$&') + '>>`'
+        }
         console.error(e)
         this.invalidate_elem_cache()
         if (evalStack.pop() != this.id) console.error('invalid stack')
@@ -2054,6 +2065,7 @@
       tag == '#listen' ||
       tag == '#async' ||
       tag == '#debug' ||
+      tag == '#template' ||
       tag == '#autorun' ||
       tag == '#autodep' ||
       tag == '#spell' ||
@@ -2075,6 +2087,7 @@
     else if (tag == '#listen') return ['#features/_listen']
     else if (tag == '#async') return ['#features/_async']
     else if (tag == '#debug') return ['#features/_debug']
+    else if (tag == '#template') return ['#features/_template']
     else if (tag == '#autorun') return ['#features/_autorun']
     else if (tag == '#autodep') return ['#features/_autodep']
     else if (tag == '#spell') return ['#features/_spell']
@@ -3219,6 +3232,7 @@
     item.listen = item.tagsRaw.includes('#_listen')
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
+    item.template = item.tagsRaw.includes('#_template')
     item.autorun = item.tagsRaw.includes('#_autorun')
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
@@ -3412,14 +3426,19 @@
 
       // update deps and deephash as needed for all dependent items
       // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
-      if (!item.dependents || item.label != prevLabel || item.deephash != prevDeepHash) {
+      if (
+        !item.dependents ||
+        item.label != prevLabel ||
+        item.autodep != prev_autodep ||
+        item.deephash != prevDeepHash
+      ) {
         item.dependents = []
         items.forEach((depitem, depindex) => {
           if (depindex == index) return // skip self
           const was_dependent = depitem.deps.includes(item.id) // was dependent w/ prevLabel?
           let is_dependent = was_dependent
-          if (item.label != prevLabel) {
-            // label changed, need to update dependencies
+          if (item.label != prevLabel || item.autodep != prev_autodep) {
+            // label or autodep changed, need to update dependencies
             depitem.deps = itemDeps(depindex)
             is_dependent = depitem.deps.includes(item.id)
           }
