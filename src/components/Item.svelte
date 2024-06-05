@@ -293,8 +293,7 @@
         } catch (e) {
           expanded.error ??= e // record first error & continue replacing
           // no need to log missing dependency errors
-          if (!e.message.startsWith('missing dependencies'))
-            console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
+          if (!e.message.startsWith('eval missing dependencies')) console.error(`macro error in item ${name}: ${e}`)
           return `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
           // return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
         }
@@ -1255,9 +1254,9 @@
     setTimeout(highlightClosure)
 
     // indicate errors/warnings and context/target items
-    // NOTE: .error and .warning classes can be used to trigger a visual indication of errors/warnings, but ranking is handled separately in index.svelte (in onEditorChange)
-    error = itemdiv.querySelector('.console-error,.macro-error,mark.missing,.error') != null
-    warning = itemdiv.querySelector('.console-warn,.warning') != null
+    // NOTE: .error and .warning classes can be used to trigger a visual indication of errors/warnings, but ranking is handled separately in index.svelte (in onEditorChange) and uses a separate hasError flag computed there
+    error = !!itemdiv.querySelector('.console-error,.macro-error,mark.missing,.error')
+    warning = !!itemdiv.querySelector('.console-warn,.warning')
 
     // trigger typesetting of any math elements
     // NOTE: we do this async to see if we can load MathJax async in template.html
@@ -1502,7 +1501,7 @@
               read_only: true, // make lexical _this read-only to block simple unintentional writes
             })
           } catch (e) {
-            console.error(`<script> error in item ${label || 'id:' + id}: ${e}`)
+            console.error(`<script> error in item ${name}: ${e}`)
             scriptErrors.push(e)
           }
         }
@@ -2595,16 +2594,6 @@
   .item > :global(.content span.macro-error) {
     color: #f55;
     border: 1px dashed #f55;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px; /* same as code */
-    font-weight: 600;
-    border-radius: 4px;
-    padding: 2px 4px;
-  }
-
-  .item > :global(.content span.macro-template-error) {
-    color: #55f;
-    border: 1px dashed #55f;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px; /* same as code */
     font-weight: 600;

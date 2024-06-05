@@ -811,7 +811,7 @@
                 // dispatch onEditorChange to update item.hasError & ranking
                 setTimeout(() => onEditorChange(editorText))
               }
-              console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
+              console.error(`macro error in item ${this.name}: ${e}`)
               throw e // stop read and throw error
             }
           }
@@ -1118,7 +1118,9 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
-      const orig_evaljs = evaljs // can be returned for macro eval errors on template items (see use below)
+      // disallow deep recursive eval on same item to prevent infinite recursion and stack overflow
+      const evalStackCount = _.sumBy(evalStack, id => (id == this.id ? 1 : 0))
+      if (evalStackCount >= 3) throw new Error(`eval item ${this.name} already on stack ${evalStackCount}x`)
 
       // initialize items if not already done (usually due to macros at first render)
       // note should no longer be needed since initialize invokes initItems before renderRange
@@ -1131,7 +1133,7 @@
       const missing_deps = []
       itemDeps(this.index, [], missing_deps)
       if (missing_deps.length > 0)
-        throw new Error('missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
+        throw new Error('eval missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
 
       // set up options used to read prefix below
       // used both to read prefix for eval, and to read items returned by eval macros
@@ -1250,7 +1252,7 @@
           if (out instanceof _Item) out = out.read_deep((options['type'] || 'js') + '_macro', prefix_read_options)
           return out
         } catch (e) {
-          console.error(`eval_macro error in item ${this.label || 'id:' + this.id}: ${e}`)
+          console.error(`eval_macro error in item ${this.name}: ${e}`)
           throw e // stop eval and throw error
         }
       }
@@ -1296,20 +1298,9 @@
         if (evalStack.pop() != this.id) console.error('invalid stack')
         return out
       } catch (e) {
-        // if this is a macro eval on a template item (or dependent), return stringified macro js
-        // this is disabled when there are replacements, as those are expected to fix any errors
-        // note this also does not apply to errors throws above, e.g. for missing dependencies
-        // also note we prefer plain text (vs html spans) for non-error macro output
-        if (
-          !options['replace_items'] &&
-          options['trigger']?.startsWith('macro_') &&
-          (item(this.id).template || this.dependencies.some(id => item(id).template))
-        ) {
-          return '`\\<<' + orig_evaljs.replace(/[`\\$]/g, '\\$&') + '>>`'
-        }
+        if (evalStack.pop() != this.id) console.error('invalid stack')
         console.error(e)
         this.invalidate_elem_cache()
-        if (evalStack.pop() != this.id) console.error('invalid stack')
         throw e
       }
     }
@@ -1354,9 +1345,9 @@
         if (evalStack.pop() != this.id) console.error('invalid stack')
         return out
       } catch (e) {
+        if (evalStack.pop() != this.id) console.error('invalid stack')
         console.error(e)
         this.invalidate_elem_cache()
-        if (evalStack.pop() != this.id) console.error('invalid stack')
         throw e
       }
     }
@@ -2071,7 +2062,6 @@
       tag == '#listen' ||
       tag == '#async' ||
       tag == '#debug' ||
-      tag == '#template' ||
       tag == '#autorun' ||
       tag == '#autodep' ||
       tag == '#spell' ||
@@ -2093,7 +2083,6 @@
     else if (tag == '#listen') return ['#features/_listen']
     else if (tag == '#async') return ['#features/_async']
     else if (tag == '#debug') return ['#features/_debug']
-    else if (tag == '#template') return ['#features/_template']
     else if (tag == '#autorun') return ['#features/_autorun']
     else if (tag == '#autodep') return ['#features/_autodep']
     else if (tag == '#spell') return ['#features/_spell']
@@ -3242,7 +3231,6 @@
     item.listen = item.tagsRaw.includes('#_listen')
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
-    item.template = item.tagsRaw.includes('#_template')
     item.autorun = item.tagsRaw.includes('#_autorun')
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
