@@ -806,7 +806,11 @@
                 replace_items: options['replace_items'], // include any replacements (for eval prefix read_deep)
               })
             } catch (e) {
-              if (!ignore_expanded_state) item.expanded.error = e
+              if (!ignore_expanded_state) {
+                item.expanded.error = e
+                // dispatch onEditorChange to update item.hasError & ranking
+                setTimeout(() => onEditorChange(editorText))
+              }
               console.error(`macro error in item ${this.label || 'id:' + this.id}: ${e}`)
               throw e // stop read and throw error
             }
@@ -2453,7 +2457,11 @@
 
       // mark 'has error' on any logged errors or warnings
       // also mark if item has any failed _tests in its global store (set by #tester)
-      item.hasError = !!text.match(/^(?:ERROR|WARNING):/m) || _.values(item.global_store?._tests).some(t => !t.ok)
+      // also mark if item has any macro errors
+      item.hasError =
+        !!text.match(/^(?:ERROR|WARNING):/m) ||
+        _.values(item.global_store?._tests).some(t => !t.ok) ||
+        !!item.expanded?.error
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -3313,25 +3321,28 @@
       item.tagsExpandedWithMacros.forEach(tag => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1))
     }
 
-    // calculate missing tags (excluding certain special tags from consideration)
-    // visible tags are considered "missing" if no other item contains them
-    // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
-    // hidden "special" tags are not considered "missing" since they toggle special features
-    // NOTE: tagCounts include prefix tags, deduplicated at item level
-    item.missingTags = item.tagsVisible
-      .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
-      .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+    // update missingTags only if update_deps is true (i.e. skip first pass pre-initItemState in initialize)
+    if (update_deps) {
+      // update missing tags (excluding certain special tags from consideration)
+      // visible tags are considered "missing" if no other item contains them
+      // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
+      // hidden "special" tags are not considered "missing" since they toggle special features
+      // NOTE: tagCounts include prefix tags, deduplicated at item level
+      item.missingTags = item.tagsVisible
+        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
 
-    // if label changed & updating deps, update missingTags on all items tagged with current OR previous label
-    if (item.label != prevLabel && update_deps) {
-      for (let tagger of items) {
-        if (tagger == item) continue
-        if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) {
-          tagger.missingTags = tagger.tagsVisible
-            .filter(t => t != tagger.label && (tagCounts.get(t) || 0) <= 1)
-            .concat(
-              tagger.tagsHidden.filter(t => t != tagger.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
-            )
+      // if label changed, update missingTags on all items tagged with current OR previous label
+      if (item.label != prevLabel) {
+        for (let tagger of items) {
+          if (tagger == item) continue
+          if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) {
+            tagger.missingTags = tagger.tagsVisible
+              .filter(t => t != tagger.label && (tagCounts.get(t) || 0) <= 1)
+              .concat(
+                tagger.tagsHidden.filter(t => t != tagger.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
+              )
+          }
         }
       }
     }
@@ -5828,7 +5839,7 @@
     item.contextLabel = ''
     item.matchingTerms = []
     item.matchingTermsSecondary = []
-    // item.missingTags = []
+    item.missingTags = []
     item.hasError = false
     // state from updateItemLayout
     item.index = index
@@ -5945,6 +5956,11 @@
     finalizeStateOnEditorChange = true // make initial empty state final
     onEditorChange('') // initial sorting
     items.forEach((item, index) => {
+      // initialize missingTags based on labels & tags (initialized above)
+      // changes are handled in itemTextChanged (w/ update_deps==true)
+      item.missingTags = item.tagsVisible
+        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
       // initialize autodep based on labels & tags (initialized above)
       // changes are handled in itemTextChanged (w/ update_deps==true)
       item.autodep =
