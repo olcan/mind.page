@@ -292,11 +292,11 @@
           })
         } catch (e) {
           expanded.error ??= e // record first error & continue replacing
-          // display missing dependencies using special style
-          if (e.message.startsWith('missing dependencies'))
-            return `<span class="macro-missing-deps" title="${_.escape(e.message)}">${js}</span>`
-          console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
-          return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
+          return `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
+          // no need to log missing dependency errors
+          if (!e.message.startsWith('missing dependencies'))
+            console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
+          // return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
         }
       }
       text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
@@ -2593,18 +2593,18 @@
   }
 
   .item > :global(.content span.macro-error) {
-    color: black;
-    background: #f55;
-    border-radius: 4px;
+    color: #f55;
+    border: 1px dashed #f55;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px; /* same as code */
     font-weight: 600;
+    border-radius: 4px;
     padding: 2px 4px;
   }
 
-  .item > :global(.content span.macro-missing-deps) {
-    color: #f55;
-    border: 1px dashed #f55;
+  .item > :global(.content span.macro-template-error) {
+    color: #55f;
+    border: 1px dashed #55f;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px; /* same as code */
     font-weight: 600;
