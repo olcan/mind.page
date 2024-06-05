@@ -292,10 +292,10 @@
           })
         } catch (e) {
           expanded.error ??= e // record first error & continue replacing
-          return `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
           // no need to log missing dependency errors
           if (!e.message.startsWith('missing dependencies'))
             console.error(`macro error in item ${label || 'id:' + id}: ${e}`)
+          return `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
           // return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
         }
       }

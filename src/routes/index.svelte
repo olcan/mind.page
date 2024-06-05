@@ -1298,6 +1298,8 @@
       } catch (e) {
         // if this is a macro eval on a template item (or dependent), return stringified macro js
         // this is disabled when there are replacements, as those are expected to fix any errors
+        // note this also does not apply to errors throws above, e.g. for missing dependencies
+        // also note we prefer plain text (vs html spans) for non-error macro output
         if (
           options['trigger'].startsWith('macro_') &&
           !options['replace_items'] &&
