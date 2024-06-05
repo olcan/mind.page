@@ -1152,6 +1152,8 @@
         options
       )
 
+      const evaljs_orig = evaljs // orig js passed to eval() before processing below
+
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
         // remove comment lines
@@ -1288,7 +1290,12 @@
       }
       evalStack.push(this.id)
       try {
+        // note we pass eval js (via window) for more advanced evals, e.g. for placeholder macros
+        window['_item_eval_js'] = evaljs_orig
+        window['_item_eval_js_full'] = evaljs
         let out = eval.call(window, evaljs)
+        delete window['_item_eval_js_full']
+        delete window['_item_eval_js']
         // if eval returns promise, attach it and set up default rejection handler
         // note rethrowing errors triggers outer try/catch block via invoke wrapper (see attach/invoke)
         if (out instanceof Promise)
