@@ -1152,6 +1152,8 @@
         options
       )
 
+      const evaljs_orig = evaljs // original evaljs passed to eval()
+
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
         // remove comment lines
@@ -1288,6 +1290,9 @@
       }
       evalStack.push(this.id)
       try {
+        // note we provide eval js via window using push/pop to allow nested evals
+        ;(window['_item_eval_js'] ??= []).push(evaljs_orig)
+        ;(window['_item_eval_js_full'] ??= []).push(evaljs)
         let out = eval.call(window, evaljs)
         // if eval returns promise, attach it and set up default rejection handler
         // note rethrowing errors triggers outer try/catch block via invoke wrapper (see attach/invoke)
@@ -1302,7 +1307,9 @@
         throw e
       } finally {
         // ensure cleanup of stack of window state
-        if (evalStack.pop() != this.id) console.error('invalid stack')
+        if (evalStack.pop() != this.id) console.error('invalid eval stack')
+        if (window['_item_eval_js']?.pop() != evaljs_orig) console.error('invalid _item_eval_js stack')
+        if (window['_item_eval_js_full']?.pop() != evaljs) console.error('invalid _item_eval_js_full stack')
       }
     }
 
