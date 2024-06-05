@@ -3325,7 +3325,8 @@
     // if label changed & updating deps, update missingTags on all items tagged with current OR previous label
     if (item.label != prevLabel && update_deps) {
       for (let tagger of items) {
-        if (tagger.tags.includes(prevLabel) || tagger.tags.includes(tagger.label)) {
+        if (tagger == item) continue
+        if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) {
           tagger.missingTags = tagger.tagsVisible
             .filter(t => t != tagger.label && (tagCounts.get(t) || 0) <= 1)
             .concat(
@@ -5827,7 +5828,7 @@
     item.contextLabel = ''
     item.matchingTerms = []
     item.matchingTermsSecondary = []
-    item.missingTags = []
+    // item.missingTags = []
     item.hasError = false
     // state from updateItemLayout
     item.index = index
