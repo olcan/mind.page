@@ -1401,51 +1401,70 @@
     // cancels task (w/o invoking function) if item is deleted
     // modifies repeat_ms (once) if function returns number>=0
     // function can be async or return promise
-    // task object (function) is passed to dispatched function, should match __this.tasks[name] unless cancelled
+    // returns task object (dispatched wrapper function)
+    // _on_cancel, _on_done(out), or _on_error(e) can be set on task object
+    // (exactly one of these will always get invoked for every dispatched task)
     dispatch_task(name, func, delay_ms = 0, repeat_ms = -1) {
       const _item = item(this.id)
       _item.tasks ??= {}
-      const task = (_item.tasks[name] = () => {
-        if (!_exists(this.id)) return // item deleted
-        if (_item.tasks[name] != task) return // task cancelled or replaced
-        // IMPORTANT NOTE: If a previously dispatched task that had already started running, since it cannot be stopped, we let it complete (finish _final_ repeat, return null, or throw error) and then delete _tasks[name] and thus cancel any replacement tasks. Note in particular that any repeats of an older running task will always get cancelled in favor of a newer task unless the last repeat returns null or throws error, which then cancels the newer task as well as repeats of the older task. To prevent any concurrent runs, we use a promise chain (_item.running_tasks) that serializes all runs.
+      // convenience function to finish a task
+      const finish_task = (task, method, ...args) => {
+        if (_item.tasks[name] != task) return // already cancelled
+        task[method]?.(...args) // otherwise already cancelled
+        delete _item.tasks[name]
+      }
+      const task = () => {
+        if (_item.tasks[name] != task) return // already cancelled
+        if (!_exists(this.id)) {
+          // item deleted, cancel
+          task['_on_cancel']?.()
+          delete _item.tasks[name] // just in case, since we still have pointer to deleted item
+          return // item deleted
+        }
+        // use promise chain (_item.running_tasks) to serializes all runs
+        // note it is important that func returns a promise that resolves/rejects when it is finished
         _item.running_tasks ??= {}
         const promise = (_item.running_tasks[name] = Promise.allSettled([_item.running_tasks[name]]).then(() => {
           try {
-            if (_item.tasks[name] != task) return // task cancelled or replaced
-            return this.resolve(func(task))
+            if (_item.tasks[name] != task) return // already cancelled
+            return this.resolve(func())
               .then(out => {
-                if (out === null) {
-                  delete _item.tasks[name] // task cancelled!
-                  return
-                }
-                if (out >= 0)
+                if (_item.tasks[name] != task) return // already cancelled (output is ignored, _on_done skipped)
+                if (out === null)
+                  finish_task(task, '_on_cancel') // cancelled
+                else if (out >= 0)
                   this.dispatch(task, out) // dispatch repeat
                 else if (repeat_ms >= 0)
                   this.dispatch(task, repeat_ms) // dispatch repeat
-                else delete _item.tasks[name] // task done!
+                else finish_task(task, '_on_done', out) // done!
               })
               .catch(e => {
+                if (_item.tasks[name] != task) return // already cancelled (error is ignored, _on_error skipped)
                 console.error(`stopping task '${name}' due to error: ${e}`)
-                delete _item.tasks[name] // task finished (w/ error)!
+                finish_task(task, '_on_error', e)
               })
           } catch (e) {
             // handle error in sync func
+            if (_item.tasks[name] != task) return // already cancelled (error is ignored, _on_error skipped)
             console.error(`stopping task '${name}' due to error: ${e}`)
-            delete _item.tasks[name] // task finished (w/ error)!
+            finish_task(task, '_on_error', e)
           }
         })).finally(() => {
           // clean up running_tasks once promise chain is fully resolved
           if (_item.running_tasks[name] == promise) delete _item.running_tasks[name]
         })
-      })
-      this.dispatch(task, delay_ms) // initial dispatch
+      }
+      _item.tasks[name]?.['_on_cancel']?.() // cancel any existing task
+      _item.tasks[name] = task // store new task as pending first run
+      this.dispatch(task, delay_ms) // dispatch first run (w/ optional delay)
+      return task // can be used to set _on_cancel, _on_done(out), _on_error(e)
     }
 
     // cancels any previously dispatched task under given name
     cancel_task(name) {
       const _item = item(this.id)
-      if (!_item.tasks) return
+      if (!_item.tasks?.[name]) return // missing or already cancelled
+      _item.tasks[name]['_on_cancel']?.()
       delete _item.tasks[name]
     }
 
