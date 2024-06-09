@@ -5041,7 +5041,7 @@
       }
       if (item.text.trim().length == 0) {
         // delete empty item w/o confirmation
-        deleteItem(index, false /* confirm_delete */)
+        deleteItem(index)
       } else {
         const prev_name = item.name
         itemTextChanged(index, item.text)
