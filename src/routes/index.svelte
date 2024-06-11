@@ -4994,6 +4994,8 @@
       // item.time = item.savedTime;
       // item.attr = _.cloneDeep(item.savedAttr);
       item.text = item.saving ? item.savingText : item.savedText
+      // invalidate item elem in case saved/saving text was rendered/cached
+      _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
     }
 
     // check for deletion triggered by editor, which can be cancelled via confirmation
