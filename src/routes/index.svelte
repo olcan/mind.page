@@ -5244,8 +5244,8 @@
     // if (items[index].time > newestTime) console.warn('invalid item time')
     if (items[index].time > newestTime) newestTime = items[index].time
     if (e?.altKey && e?.metaKey) {
-      // move item time back 1 day
-      items[index].time = items[index].time - 24 * 3600 * 1000
+      // move item time back 1 day, or 30 days if shift is also held
+      items[index].time = items[index].time - (e.shiftKey ? 30 : 1) * 24 * 3600 * 1000
     } else if (e?.altKey) {
       if (index == items.length - 1 || items[index].time < items[index + 1].time) {
         _modal('can not move item down')
