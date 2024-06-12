@@ -109,25 +109,37 @@
       new RegExp(combine(macro, comment, html, math1, math2, code1, code2), 'g'),
       skipEscaped((m, macro, comment, html, math1, math2, code1, code2) => {
         m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
+        // note we leave section-delimiting comments/macros untouched for highlightMacrosAndComments
+        // see below for section-delimiter patterns
+        // if (macro != undefined || comment != undefined) return m
+        if (macro != undefined)
+          if (/^ *_?(?:assistant|model|agent|system|user) *$/.test(macro)) return m
+          else
+            return (
+              '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
+              highlight(_.unescape(macro), 'js') +
+              '<span class="macro-delimiter">&gt;&gt;</span></span>'
+            )
+        if (comment != undefined)
+          if (/^ *\/?(?:removed|hidden) *$/.test(comment)) return m
+          else return highlight(_.unescape(m), 'html')
+        if (html != undefined) return highlight(_.unescape(m), 'html')
         if (math1 != undefined || math2 != undefined)
           return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
         if (code1 != undefined) return `<span class="code">\`\`${code1}\`\`</span>`
         if (code2 != undefined) return `<span class="code">\`${code2}\`</span>`
-        if (html != undefined) return highlight(_.unescape(m), 'html')
-        // leave macros and comments untouched for highlightMacrosAndComments
-        // this prevents e.g. replacing `code` or $math$ inside macros/comments
-        if (macro != undefined || comment != undefined) return m
       })
     )
   }
-  function highlightMacrosAndComments(text) {
-    const comment = /&lt;!--(.*?)--&gt;(?:(?!&gt;)|$)/g
-    const macro = /&lt;&lt;(.*?)&gt;&gt;/g
+  function highlightSectionDelimiters(text) {
+    const comment = /&lt;!--( *\/?(?:removed|hidden) *)--&gt;(?:(?!&gt;)|$)/g
+    const macro = /&lt;&lt;( *_?(?:assistant|model|agent|system|user) *)&gt;&gt;/g
     const combine = (...regexes) => regexes.map(r => r.source).join('|')
     return text.replace(
       new RegExp(combine(macro, comment), 'g'),
       skipEscaped((m, macro, comment) => {
         m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
+        // note we highlight as regular macro or comment for now
         if (macro != undefined)
           return (
             '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
@@ -235,23 +247,23 @@
 
     // wrap hidden/removed sections
     html = html.replace(
-      /(^|\n\s*?)(&lt;!-- *?hidden *?--&gt;.+?&lt;!-- *?\/hidden *?--&gt; *?\n)/gs,
+      /(^|\n\s*?)(&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs,
       '$1<div class="section hidden">$2</div>'
     )
     html = html.replace(
-      /(^|\n\s*?)(&lt;!-- *?removed *?--&gt;.+?&lt;!-- *?\/removed *?--&gt; *?\n)/gs,
+      /(^|\n\s*?)(&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs,
       '$1<div class="section removed">$2</div>'
     )
 
     html = html.replace(
-      /(^|\n\s*?)(&lt;&lt; *?_?(?:assistant|model|agent) *?&gt;&gt;.+?\n?)( *?&lt;&lt; *?(?:system|user) *?&gt;&gt;|$)/gs,
+      /(^|\n\s*?)(&lt;&lt; *_?(?:assistant|model|agent) *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user) *&gt;&gt;|$)/gs,
       '$1<div class="section agent">$2</div>$3'
     )
 
     // indicate section delimiters
-    // html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>')
+    // html = html.replace(/(&lt;!-- *\/?(?:hidden|removed) *--&gt;)/g, '<span class="section-delimiter">$1</span>')
 
-    highlights.innerHTML = highlightMacrosAndComments(html)
+    highlights.innerHTML = highlightSectionDelimiters(html)
 
     // linkify urls & tags in comments (regexes from util.js)
     // we allow semi-colon in tail of url to avoid breaking html entities (which are ok for display in editor)
