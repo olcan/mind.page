@@ -749,6 +749,21 @@
       return _item.debug_store
     }
 
+    eval_macros(text: string) {
+      // note the reset conditions here (deephash, version, etc) should match those in toHTML in Item.svelte
+      let macroIndex = 0
+      const replaceMacro = (m, js) => {
+        if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
+        try {
+          return this.eval(js, { trigger: 'eval_macro_' + macroIndex++ })
+        } catch (e) {
+          console.error(`macro error in item ${this.name}: ${e}`)
+          throw e
+        }
+      }
+      return text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
+    }
+
     read(type: string = '', options: object = {}) {
       const item = items[this.index]
       let content = []
@@ -1239,13 +1254,13 @@
           .join('\n')
       }
 
-      // evaluate inline @{eval_macros}@
+      // evaluate inline @{code_macros}@
       let macroIndex = 0
       const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x @{ 2) }@ 2)
         try {
           let out = this.eval(js, {
-            trigger: 'eval_macro_' + macroIndex++,
+            trigger: 'code_macro_' + macroIndex++,
             exclude_prefix: true /* avoid infinite recursion */,
           })
           // if output is an item, read(*_macro) by default, where * is the prefix type
@@ -1254,7 +1269,7 @@
           if (out instanceof _Item) out = out.read_deep((options['type'] || 'js') + '_macro', prefix_read_options)
           return out
         } catch (e) {
-          console.error(`eval_macro error in item ${this.name}: ${e}`)
+          console.error(`code_macro error in item ${this.name}: ${e}`)
           throw e // stop eval and throw error
         }
       }
