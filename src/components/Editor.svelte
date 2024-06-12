@@ -95,8 +95,7 @@
   function highlightOther(text) {
     // NOTE: lack of negative lookbehind means we have to match the previous character, which means we require at least one character between an ending delimiter and the start of a new delimiter, e.g. <br><br> or <center></center> would not highlight the second tag; as a workaround, we do not match "><", so adjacent tags are highlighted together
     // NOTE: to prevent any nested highlights, we use a single regex w/ alternatives where each alternative contains exactly one capture group (content) that can be used to detect which alternative matched
-    const comment = /&lt;!--(.*?)--&gt;(?:(?!&gt;)|$)/g
-    const macro = /&lt;&lt;(.*?)&gt;&gt;/g
+    // NOTE: we match comments and macros separately later as they can be used as section delimiters
     // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
     const html = /&lt;((?=[/\w]).*?(?:[/\w]|&#39;|&quot;))&gt;(?:(?!&gt;)|$)/g
     const math1 = /\$\$`(.*?)`\$\$/g
@@ -105,8 +104,24 @@
     const code2 = /`(.*?)`/g
     const combine = (...regexes) => regexes.map(r => r.source).join('|')
     return text.replace(
-      new RegExp(combine(macro, comment, html, math1, math2, code1, code2), 'g'),
-      skipEscaped((m, macro, comment, html, math1, math2, code1, code2) => {
+      new RegExp(combine(html, math1, math2, code1, code2), 'g'),
+      skipEscaped((m, html, math1, math2, code1, code2) => {
+        m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
+        if (math1 != undefined || math2 != undefined)
+          return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
+        if (code1 != undefined) return `<span class="code">\`\`${code1}\`\`</span>`
+        if (code2 != undefined) return `<span class="code">\`${code2}\`</span>`
+        if (html != undefined) return highlight(_.unescape(m), 'html')
+      })
+    )
+  }
+  function highlightMacrosAndComments(text) {
+    const comment = /&lt;!--(.*?)--&gt;(?:(?!&gt;)|$)/g
+    const macro = /&lt;&lt;(.*?)&gt;&gt;/g
+    const combine = (...regexes) => regexes.map(r => r.source).join('|')
+    return text.replace(
+      new RegExp(combine(macro, comment), 'g'),
+      skipEscaped((m, macro, comment) => {
         m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
         if (macro != undefined)
           return (
@@ -114,11 +129,7 @@
             highlight(_.unescape(macro), 'js') +
             '<span class="macro-delimiter">&gt;&gt;</span></span>'
           )
-        if (comment != undefined || html != undefined) return highlight(_.unescape(m), 'html')
-        if (math1 != undefined || math2 != undefined)
-          return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
-        if (code1 != undefined) return `<span class="code">\`\`${code1}\`\`</span>`
-        if (code2 != undefined) return `<span class="code">\`${code2}\`</span>`
+        if (comment != undefined) return highlight(_.unescape(m), 'html')
       })
     )
   }
@@ -219,18 +230,23 @@
 
     // wrap hidden/removed sections
     html = html.replace(
-      /(^|\n\s*?)(&lt;!--\s*?hidden\s*?--&gt;.+?&lt;!--\s*?\/hidden\s*?--&gt;\s*?\n)/gs,
+      /(^|\n\s*?)(&lt;!-- *?hidden *?--&gt;.+?&lt;!-- *?\/hidden *?--&gt; *?\n)/gs,
       '$1<div class="section hidden">$2</div>'
     )
     html = html.replace(
-      /(^|\n\s*?)(&lt;!--\s*?removed\s*?--&gt;.+?&lt;!--\s*?\/removed\s*?--&gt;\s*?\n)/gs,
+      /(^|\n\s*?)(&lt;!-- *?removed *?--&gt;.+?&lt;!-- *?\/removed *?--&gt; *?\n)/gs,
       '$1<div class="section removed">$2</div>'
     )
 
-    // indicate section delimiters
-    html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>')
+    html = html.replace(
+      /(^|\n\s*?)(&lt;&lt; *?(?:_?assistant|model) *?&gt;&gt;.+?\n?)( *?&lt;&lt; *?(?:system|user) *?&gt;&gt;|$)/gs,
+      '$1<div class="section assistant">$2</div>$3'
+    )
 
-    highlights.innerHTML = html
+    // indicate section delimiters
+    // html = html.replace(/(&lt;!--\s*?\/?(?:hidden|removed)\s*?--&gt;)/g, '<span class="section-delimiter">$1</span>')
+
+    highlights.innerHTML = highlightMacrosAndComments(html)
 
     // linkify urls & tags in comments (regexes from util.js)
     // we allow semi-colon in tail of url to avoid breaking html entities (which are ok for display in editor)
@@ -1140,9 +1156,14 @@
     margin: -1px -5px;
     padding: 0 4px;
   }
-  .editor > .backdrop :global(.section-delimiter) {
-    color: #666;
+  .editor > .backdrop :global(.section.assistant) {
+    border: none;
+    margin: 0 -4px;
+    background: #222;
   }
+  /* .editor > .backdrop :global(.section-delimiter) {
+    color: #666;
+  } */
   .editor.focused > .backdrop :global(span.highlight.matched) {
     color: black;
     background: #9f9;
