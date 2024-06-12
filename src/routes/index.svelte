@@ -749,13 +749,13 @@
       return _item.debug_store
     }
 
-    eval_macros(text: string) {
+    eval_macros(text: string, options: object = {}) {
       // note the reset conditions here (deephash, version, etc) should match those in toHTML in Item.svelte
       let macroIndex = 0
       const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
         try {
-          return this.eval(js, { trigger: 'eval_macro_' + macroIndex++ })
+          return this.eval(js, { trigger: 'eval_macro_' + macroIndex++, ...options })
         } catch (e) {
           console.error(`macro error in item ${this.name}: ${e}`)
           throw e
@@ -819,6 +819,7 @@
                 trigger: 'macro_' + cacheIndex++,
                 cid: `${this.id}-${this.deephash}-${cacheIndex}`, // enable replacement of $cid
                 replace_items: options['replace_items'], // include any replacements (for eval prefix read_deep)
+                context: options['context'], // pass along optional context
               })
             } catch (e) {
               if (!ignore_expanded_state) {
@@ -1305,9 +1306,10 @@
       }
       evalStack.push(this.id)
       try {
-        // note we provide eval js via window using push/pop to allow nested evals
+        // note we pass along eval js and custom 'context' via window using push/pop to allow nested evals
         ;(window['_item_eval_js'] ??= []).push(evaljs_orig)
         ;(window['_item_eval_js_full'] ??= []).push(evaljs)
+        ;(window['_item_eval_context'] ??= []).push(options['context'])
         let out = eval.call(window, evaljs)
         // if eval returns promise, attach it and set up default rejection handler
         // note rethrowing errors triggers outer try/catch block via invoke wrapper (see attach/invoke)
@@ -1323,8 +1325,9 @@
       } finally {
         // ensure cleanup of stack of window state
         if (evalStack.pop() != this.id) console.error('invalid eval stack')
-        if (window['_item_eval_js']?.pop() != evaljs_orig) console.error('invalid _item_eval_js stack')
-        if (window['_item_eval_js_full']?.pop() != evaljs) console.error('invalid _item_eval_js_full stack')
+        if (window['_item_eval_js']?.pop() != evaljs_orig) console.error('invalid _item_eval_js')
+        if (window['_item_eval_js_full']?.pop() != evaljs) console.error('invalid _item_eval_js_full')
+        if (window['_item_eval_context']?.pop() != options['context']) console.error('invalid _item_eval_context')
       }
     }
 
