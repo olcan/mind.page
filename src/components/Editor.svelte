@@ -239,8 +239,8 @@
     )
 
     html = html.replace(
-      /(^|\n\s*?)(&lt;&lt; *?(?:_?assistant|model) *?&gt;&gt;.+?\n?)( *?&lt;&lt; *?(?:system|user) *?&gt;&gt;|$)/gs,
-      '$1<div class="section assistant">$2</div>$3'
+      /(^|\n\s*?)(&lt;&lt; *?_?(?:assistant|model|agent) *?&gt;&gt;.+?\n?)( *?&lt;&lt; *?(?:system|user) *?&gt;&gt;|$)/gs,
+      '$1<div class="section agent">$2</div>$3'
     )
 
     // indicate section delimiters
@@ -1156,7 +1156,7 @@
     margin: -1px -5px;
     padding: 0 4px;
   }
-  .editor > .backdrop :global(.section.assistant) {
+  .editor > .backdrop :global(.section.agent) {
     border: none;
     margin: 0 -4px;
     background: #222;
