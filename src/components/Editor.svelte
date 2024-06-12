@@ -97,6 +97,8 @@
     // NOTE: to prevent any nested highlights, we use a single regex w/ alternatives where each alternative contains exactly one capture group (content) that can be used to detect which alternative matched
     // NOTE: we match comments and macros separately later as they can be used as section delimiters
     // NOTE: this can match either a single html tag, e.g. <p> or a full range of open/close tags and this turns out to be fine since the whole range can highlighted as html either way
+    const macro = /&lt;&lt;(.*?)&gt;&gt;/g
+    const comment = /&lt;!--(.*?)--&gt;(?:(?!&gt;)|$)/g
     const html = /&lt;((?=[/\w]).*?(?:[/\w]|&#39;|&quot;))&gt;(?:(?!&gt;)|$)/g
     const math1 = /\$\$`(.*?)`\$\$/g
     const math2 = /\$`(.*?)`\$/g
@@ -104,14 +106,17 @@
     const code2 = /`(.*?)`/g
     const combine = (...regexes) => regexes.map(r => r.source).join('|')
     return text.replace(
-      new RegExp(combine(html, math1, math2, code1, code2), 'g'),
-      skipEscaped((m, html, math1, math2, code1, code2) => {
+      new RegExp(combine(macro, comment, html, math1, math2, code1, code2), 'g'),
+      skipEscaped((m, macro, comment, html, math1, math2, code1, code2) => {
         m = m.replace(/<mark>(.*?)<\/mark>/g, '$1') // undo any tag highlights
         if (math1 != undefined || math2 != undefined)
           return `<span class="math">` + highlight(_.unescape(m), 'latex') + `</span>`
         if (code1 != undefined) return `<span class="code">\`\`${code1}\`\`</span>`
         if (code2 != undefined) return `<span class="code">\`${code2}\`</span>`
         if (html != undefined) return highlight(_.unescape(m), 'html')
+        // leave macros and comments untouched for highlightMacrosAndComments
+        // this prevents e.g. replacing `code` or $math$ inside macros/comments
+        if (macro != undefined || comment != undefined) return m
       })
     )
   }
