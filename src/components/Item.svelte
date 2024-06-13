@@ -2596,7 +2596,7 @@
     border: 1px dashed #f55;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px; /* same as code */
-    font-weight: 600;
+    font-weight: 400;
     border-radius: 4px;
     padding: 2px 4px;
   }
