@@ -3214,7 +3214,7 @@
     // precompute macro-expanded item state used for search in onEditorChange and store in item.expanded.item
     // we reuse itemTextChanged (w/ update_deps:false) to switch temporarily to expanded text and back
     // this is simpler, ensures consistency, and is also easy to extend to other item state in future
-    itemTextChanged(item.index, item.expanded.text, false /* skip deps */)
+    itemTextChanged(item.index, item.expanded.text, false /* update_deps */)
     item.expanded.item = _.pick(item, [
       // these names should match destructured item state in onEditorChange
       'tagsVisibleExpanded',
@@ -3227,10 +3227,11 @@
       'tagsAlt',
       'lctext',
       'tagsExpanded',
+      'missingTags', // TODO
       'text',
     ])
     // note this call may use item.expanded.item.* to update certain global state, e.g. tagCounts
-    itemTextChanged(item.index, item.text, false /* skip deps */)
+    itemTextChanged(item.index, item.text, false /* update_deps */)
 
     // if there is a query, trigger rerank/rehighlight with 1s debounce
     if (editorText.trim() && !expansionRerankPending) {
@@ -3357,7 +3358,8 @@
     }
 
     // update missingTags only if update_deps is true (i.e. skip first pass pre-initItemState in initialize)
-    if (update_deps) {
+    // only exception is for itemExpansionChanged, which we infer based in item.expanded state for now
+    if (update_deps || (item.expanded?.count && !item.expanded?.item)) {
       // update missing tags (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
