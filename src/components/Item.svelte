@@ -2202,7 +2202,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-weight: 300;
     white-space: pre-wrap; /* preserve whitespace */
-    background: #222;
+    background: rgba(255, 255, 255, 0.075); /* transparency allows shading of background */
     padding: 2px 4px;
     border-radius: 4px;
   }
@@ -2221,7 +2221,7 @@
   }
   .item > :global(.content a) {
     color: #79e;
-    background: #222;
+    background: rgba(255, 255, 255, 0.075); /* transparency allows shading of background */
     /* 1px bottom padding ~matches inline-block visually while allowing inline treatment, e.g. for ellipses */
     /* but 0 bottom padding is consistent w/ .item mark, so we go w/ that for now ... */
     padding: 0 4px;
@@ -2360,6 +2360,7 @@
     border: 0;
     border-top: 1px dashed #333;
     height: 1px;
+    margin: 0 -10px; /* extend out to edges of item */
     margin-top: 10px;
     margin-bottom: 9px; /* 1px less to center top border */
     clear: both; /* clear floats on both sides by default */
