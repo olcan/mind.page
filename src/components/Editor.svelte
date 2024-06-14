@@ -113,7 +113,7 @@
         // see below for section-delimiter patterns
         // if (macro != undefined || comment != undefined) return m
         if (macro != undefined)
-          if (/^ *_?(?:assistant|model|agent|system|user) *$/.test(macro)) return m
+          if (/^ *_?(?:assistant|model|agent|system|user)(?: *\([^\n]*\))? *$/.test(macro)) return m
           else
             return (
               '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>' +
@@ -133,7 +133,7 @@
   }
   function highlightSectionDelimiters(text) {
     const comment = /&lt;!--( *\/?(?:removed|hidden) *)--&gt;(?:(?!&gt;)|$)/g
-    const macro = /&lt;&lt;( *_?(?:assistant|model|agent|system|user) *)&gt;&gt;/g
+    const macro = /&lt;&lt;( *_?(?:assistant|model|agent|system|user)(?: *\([^\n]*\))? *)&gt;&gt;/g
     const combine = (...regexes) => regexes.map(r => r.source).join('|')
     return text.replace(
       new RegExp(combine(macro, comment), 'g'),
@@ -256,7 +256,7 @@
     )
 
     html = html.replace(
-      /(^|\n\s*?)(&lt;&lt; *_?(?:assistant|model|agent) *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user) *&gt;&gt;|$)/gs,
+      /(^|\n\s*?)(&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs,
       '$1<div class="section agent">$2</div>$3'
     )
 
