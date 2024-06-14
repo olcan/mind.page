@@ -755,7 +755,7 @@
       const replaceMacro = (m, js) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
         try {
-          return this.eval(js, { trigger: 'eval_macro_' + macroIndex++, ...options })
+          return this.eval(js, { trigger: 'macro_' + macroIndex++, ...options })
         } catch (e) {
           console.error(`macro error in item ${this.name}: ${e}`)
           throw e
@@ -1317,6 +1317,9 @@
           out = this.attach(out).catch(e => {
             throw e // handled & rethrown in outer catch block
           })
+        // throw error for macros (macro_* trigger) that return a function (that is likely missing arguments)
+        if (options['trigger']?.startsWith('macro_') && typeof out == 'function')
+          throw new Error(`function-valued macro may be missing arguments`)
         return out
       } catch (e) {
         console.error(e)
