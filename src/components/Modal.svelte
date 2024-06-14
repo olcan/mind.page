@@ -531,6 +531,7 @@
     padding-left: 20px;
   }
   :global(.modal pre) {
+    margin: 0;
     max-width: 100%;
     max-height: 40vh; /* max 40% of viewport height */
     overflow: scroll;
