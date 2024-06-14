@@ -2109,6 +2109,7 @@
       tag == '#debug' ||
       tag == '#autorun' ||
       tag == '#autodep' ||
+      tag == '#style' ||
       tag == '#spell' ||
       tag == '#nospell' ||
       !!tag.match(/^#pin(?:\/|$)/) ||
@@ -2130,6 +2131,7 @@
     else if (tag == '#debug') return ['#features/_debug']
     else if (tag == '#autorun') return ['#features/_autorun']
     else if (tag == '#autodep') return ['#features/_autodep']
+    else if (tag == '#style') return ['#features/_style']
     else if (tag == '#spell') return ['#features/_spell']
     else if (tag == '#nospell') return ['#features/_nospell']
     else if (tag.match(/(?:\/|#)pin(?:\/|$)/)) return ['#features/_pin']
@@ -3170,6 +3172,16 @@
       .join(' ')
   }
 
+  function itemStyleDepsString(item) {
+    return item.deps
+      .map(id => {
+        const dep = __item(id)
+        if (dep.style) return dep.name.replace(/\W/g, '_') // to get valid class name
+      })
+      .filter(t => t)
+      .join(' ')
+  }
+
   function itemDependentsString(item) {
     return item.dependents
       .map(id => {
@@ -3278,6 +3290,7 @@
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
     item.autorun = item.tagsRaw.includes('#_autorun')
+    item.style = item.tagsRaw.includes('#_style')
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
     item.pinTerm = pintags[0] || ''
@@ -3520,6 +3533,7 @@
 
       // update deps/dependents strings
       item.depsString = itemDepsString(item)
+      item.styleDepsString = itemStyleDepsString(item)
       item.dependentsString = itemDependentsString(item)
 
       // update dependents for dependencies and vice versa (including strings)
@@ -3537,6 +3551,7 @@
       _.uniq(item.dependents.concat(prevDependents)).forEach((id: string) => {
         const dep = __item(id)
         dep.depsString = itemDepsString(dep)
+        dep.styleDepsString = itemStyleDepsString(dep)
       })
     }
   }
@@ -6022,6 +6037,7 @@
     })
     items.forEach(item => {
       item.depsString = itemDepsString(item)
+      item.styleDepsString = itemStyleDepsString(item)
       item.dependentsString = itemDependentsString(item)
     })
 
@@ -7883,6 +7899,7 @@
                 timeString={item.timeString}
                 timeOutOfOrder={item.timeOutOfOrder}
                 depsString={item.depsString}
+                styleDepsString={item.styleDepsString}
                 dependentsString={item.dependentsString}
                 aboveFold={item.aboveFold}
                 leader={item.leader}

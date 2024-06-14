@@ -50,6 +50,7 @@
   export let timeString: string
   export let timeOutOfOrder: boolean
   export let depsString: string
+  export let styleDepsString: string
   export let dependentsString: string
   export let aboveFold: boolean
   export let leader: boolean
@@ -1700,7 +1701,7 @@
         <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div class="item" id={'item-' + id} bind:this={itemdiv} class:saving>
+      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(
           text || placeholder,
