@@ -3290,6 +3290,7 @@
     item.async = item.tagsRaw.includes('#_async')
     item.debug = item.tagsRaw.includes('#_debug')
     item.autorun = item.tagsRaw.includes('#_autorun')
+    const prev_style = item.style
     item.style = item.tagsRaw.includes('#_style')
     const pintags = item.tagsRaw.filter(t => t.match(/^#_pin(?:\/|$)/))
     item.pinned = !fixed && pintags.length > 0
@@ -3457,6 +3458,7 @@
 
       // if deephash has changed, invoke _on_item_change on all _listen (or self) items
       // also warn about modified (based on deephash) _init or _welcome items
+      // also install new/modified style items
       function invoke_listeners_for_changed_item(id, label, prev_label, dependency = false) {
         const item = __item(id)
         if ((item.init || item.welcome) && id != new_init_welcome_item_id && !dependency) {
@@ -3466,6 +3468,7 @@
           )
           item.shouldReload = true
         }
+        if ((item.style || prev_style) && !dependency) installStyleItem(item) // install new/modified style item
         setTimeout(() => {
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
@@ -5801,12 +5804,37 @@
     }
   }
 
+  function installStyleItem(item) {
+    let style = document.querySelector('.style_' + item.id)
+    // uninstall if item is deleted (cleared out) or is no longer a style item
+    if (!item.style) {
+      style?.remove()
+      console.debug(`uninstalled styles from item ${item.name}`)
+      return
+    }
+    const css = extractBlock(item.text, 'css_style')
+    if (style?.innerHTML == css) return // already installed and unchanged
+    if (!css) {
+      console.warn(`style item ${item.name} missing css_style block`)
+      style?.remove()
+      return
+    }
+    if (!style) {
+      style = document.createElement('style')
+      style.className = 'style_' + item.id
+      document.head.appendChild(style)
+    }
+    style.innerHTML = css
+    console.debug(`installed css_style block from style item ${item.name}`)
+  }
+
   let itemInitTime = 0
   function initItems() {
     if (itemInitTime) return // already initialized items
     itemInitTime = Date.now()
     items.forEach(item => {
-      if (!item.init) return
+      if (item.style) installStyleItem(item) // initial install of style item
+      if (!item.init) return // not init item
       // if item has js_init block, use that, otherwise use js block (without dependencies to avoid complications due to init order etc)
       const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
       if (!itemDefinesFunction(item, '_init', { type: init_block_type })) return
