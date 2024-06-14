@@ -3176,7 +3176,7 @@
     return item.deps
       .map(id => {
         const dep = __item(id)
-        if (dep.style) return dep.name.replace(/\W/g, '_') // to get valid class name
+        if (dep.style) return 'dep_' + dep.name.replace(/\W/g, '_').replace(/^_/, '') // replace initial _ due to #
       })
       .filter(t => t)
       .join(' ')
