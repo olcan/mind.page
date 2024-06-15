@@ -5694,17 +5694,16 @@
       hash(item.text) != item.local_store._preview_hash &&
       !(await _modal_confirm(`Item ${item.name} has non-preview changes. Overwrite to preview anyway?`))
     ) {
-      console.warn(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
-      return
+      // throw error (vs return) to stop any pending run, otherwise run will keep attempting preview of previewables
+      throw new Error(`cancelled preview for ${item.name} from ${repo}/${path} due to non-preview changes`)
     }
 
     // disallow renaming preview
     const parsed_label = parseLabel(text)
     if (parsed_label != item.name) {
-      _modal(
-        `preview failed: parsed label '${parsed_label}' does not match current name ${item.name} for preview from ${repo}/${path}`
-      )
-      return
+      const msg = `preview failed: parsed label '${parsed_label}' does not match current name ${item.name} for preview from ${repo}/${path}`
+      await _modal(msg)
+      throw new Error(msg) // stop any pending run; see comment above
     }
 
     // install missing "dependencies" based on updated text
