@@ -11,6 +11,7 @@
   let username = ''
   let autocomplete = ''
   let images = false
+  let style = ''
   let canConfirm = (input: string) => input == null || input.length > 0 // confirm by default for non-input modal
   let onConfirm = (input = null) => {}
   let onCancel = () => {}
@@ -33,6 +34,7 @@
     username,
     autocomplete,
     images,
+    style,
     canConfirm,
     onConfirm,
     onCancel,
@@ -76,6 +78,7 @@
             username,
             autocomplete,
             images,
+            style,
             canConfirm,
             onConfirm,
             onCancel,
@@ -135,6 +138,7 @@
       username,
       autocomplete,
       images,
+      style,
       canConfirm,
       onConfirm,
       onCancel,
@@ -150,6 +154,7 @@
         username,
         autocomplete,
         images,
+        style,
         canConfirm,
         onConfirm,
         onCancel,
@@ -325,7 +330,7 @@
 </script>
 
 <div class="background" class:visible={_visible} on:click={onBackgroundClick}>
-  <div class="modal" bind:this={modaldiv}>
+  <div class="modal" {style} bind:this={modaldiv}>
     {#if content}{@html replaceNakedURLs(marked.parse(content, { breaks: true }))}{/if}
     {#if input != null}
       <!-- for Chrome warnings, we wrap in form and add username of type "text" -->
@@ -418,6 +423,8 @@
     visibility: visible;
   }
   .modal {
+    box-sizing: border-box;
+    /* note we use css variables that can be modified in style attribute */
     height: auto;
     /* width + max-width works best across devices, including android chrome */
     width: 500px;
