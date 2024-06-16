@@ -1015,20 +1015,24 @@
       // console.debug('saving after write', this.name, { text, type, options })
       if (!options['skip_save']) saveItem(this.id)
       items = items // trigger svelte render to reflect saving state
-      tick().then(() => {
-        // update all other item state (including dependents)
-        // note this can be slow on items with many dependents, e.g. #util/core
-        itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
 
-        // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
-        this.invalidate_elem_cache({ force_render: true })
+      // NOTE: disabling this dispatch for now as it seems the only purpose was to get saving state reflected before doing expensive updates, but (1) most expensive updates in these functions should be dispatched anyway, (2) dispatching itemTextChanged also delays updates to item state which is not desirable in general
+      //      tick().then(() => {
 
-        // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
-        setTimeout(() => {
-          lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange(editorText) // item time/text has changed
-        })
+      // update all other item state (including dependents)
+      // note this can be slow on items with many dependents, e.g. #util/core
+      itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
+
+      // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
+      this.invalidate_elem_cache({ force_render: true })
+
+      // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
+      setTimeout(() => {
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(editorText) // item time/text has changed
       })
+
+      //      })
     }
 
     clear(type: string, options) {
@@ -4893,8 +4897,15 @@
     let jsout
     const start = Date.now()
     try {
-      jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/ })
-    } catch (e) {} // already logged, just continue
+      let run_options
+      try {
+        run_options = _item(item.id).eval(`typeof _run_options != 'undefined' ? _run_options : null`, {
+          exclude_async_deps: false,
+        })
+        if (run_options) console.debug('run_options', run_options)
+      } catch {} // already logged
+      jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/, ...run_options })
+    } catch {} // already logged, just continue
     // append _output and _log and update item for changes (via itemTextChanged below)
     // ignore promise output for appending _output
     if (!(jsout instanceof Promise)) {
