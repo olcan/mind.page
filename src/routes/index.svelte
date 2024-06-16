@@ -1345,6 +1345,10 @@
     // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
     start(async_func, log_options) {
       log_options = _.merge({ since: Date.now() }, log_options) // set default 'since' for write_log below
+      // note we throw an error if item is already running, as we do not currently manage nested running states
+      // one way to enable this would be to serialize all runs, another would be to use a run_id to gate running=false
+      // however in general we probably don't want this, e.g. we disable 'run' button when an item is already running
+      if (this.running) throw new Error('item already running')
       this.running = true
       return update_dom().then(() =>
         this.resolve(async_func())
