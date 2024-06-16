@@ -1011,8 +1011,8 @@
       if (!__item.log && !options['keep_time']) __item.time = Date.now()
 
       // trigger save first to put item in saving state (prevents unnecessary edit cancel confirmation)
-      // also skip save by default if editing, allowing user to control timing of save and onItemSave/_on_item_change
-      // otherwise if the save is chained (e.g. due to already saving), additional edits can get bundled into it
+      // also skip save by default if editing, allowing user control on timing of save and (via onItemSave) itemTextChanged/_on_item_change
+      // note otherwise if the save is chained (e.g. due to already saving), additional user edits can get bundled into it, and those will not generally trigger itemTextChanged/_on_item_change (e.g. in onSaveDone) until editing is done or user triggers save via onItemSave (also see comments there)
       // console.debug('saving after write', this.name, { text, type, options })
       options['skip_save'] ??= this.editing // skip_save by default when editing
       if (!options['skip_save']) saveItem(this.id)
@@ -5301,7 +5301,9 @@
   function onItemSave(index: number = -1, e: MouseEvent = null) {
     if (index < 0) index = focusedItem
     const item = items[index]
-    if (item.text != item.savedText) itemTextChanged(index, item.text)
+    // note we want to trigger itemTextChanged, which e.g. will trigger _on_item_change based on deephash change, NOT based on change from savedText, which can be somewhat arbitrary when saves get delayed/chained and cause user edits (to item.text) to get bundled into the delayed save without triggering itemTextChanged/_on_item_change; note coupling itemTextChanged/_on_item_change with user-triggered save is pretty intuitive even though technically it is not necessary (e.g. triggering could always get delayed until close of editing as a rule)
+    // if (item.text != item.savedText) itemTextChanged(index, item.text)
+    itemTextChanged(index, item.text)
     // if (item.text != item.savedText) saveItem(item.id)
     saveItem(item.id) // save item even if text is unchanged, i.e. to update time
   }
