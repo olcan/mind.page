@@ -41,6 +41,7 @@
   export let label: string
   export let labelText: string
   export let labelUnique: boolean
+  export let headerMinimal: boolean
   export let contextLabel: string
   export let missingTags: any
   export let matchingTerms: any
@@ -1701,7 +1702,7 @@
         <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving>
+      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(
           text || placeholder,
