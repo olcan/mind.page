@@ -1011,10 +1011,13 @@
       if (!__item.log && !options['keep_time']) __item.time = Date.now()
 
       // trigger save first to put item in saving state (prevents unnecessary edit cancel confirmation)
-      // if (!item(this.id)?.editing) saveItem(this.id);
+      // also skip save by default if editing, allowing user to control timing of save and onItemSave/_on_item_change
+      // otherwise if the save is chained (e.g. due to already saving), additional edits can get bundled into it
       // console.debug('saving after write', this.name, { text, type, options })
+      options['skip_save'] ??= this.editing // skip_save by default when editing
       if (!options['skip_save']) saveItem(this.id)
-      items = items // trigger svelte render to reflect saving state
+
+      items = items // trigger svelte render for saving state AND new text if editing
 
       // NOTE: disabling this dispatch for now as it seems the only purpose was to get saving state reflected before doing expensive updates, but (1) most expensive updates in these functions should be dispatched anyway, (2) dispatching itemTextChanged also delays updates to item state which is not desirable in general
       //      tick().then(() => {
