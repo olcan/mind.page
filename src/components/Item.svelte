@@ -14,6 +14,8 @@
     invalidateElemCache,
     adoptCachedElem,
     skipEscaped,
+    exclusionRegExp,
+    skipExclusions,
     hash as _hash,
   } from '../util.js'
 
@@ -400,8 +402,15 @@
       text += '</div>'
     }
 
-    // remove removed sections
-    text = text.replace(/<\!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, '')
+    // remove removed sections, except inside blocks
+    const blockExclusions = [
+      '(?:^|\\n) *```.*?\\n *```', // multi-line block
+      '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
+    ]
+    text = text.replace(
+      exclusionRegExp(blockExclusions, /<\!-- *removed *-->.*?<\!-- *\/removed *--> *?(\n|$)/gs),
+      skipExclusions(m => ``)
+    )
 
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(text, '_log')
@@ -649,10 +658,10 @@
     // hide *_hidden blocks
     text = text.replace(blockRegExp(/\w*_hidden/), (m, pfx) => '<!--hidden-->\n' + m + '\n<!--/hidden-->')
 
-    // hide hidden sections
+    // hide hidden sections, except inside blocks
     text = text.replace(
-      /<\!--\s*hidden\s*-->(.*?)<\!--\s*\/hidden\s*-->\s*?(\n|$)/gs,
-      '<div style="display: none;">\n$1\n</div>\n'
+      exclusionRegExp(blockExclusions, /<\!-- *hidden *-->(.*?)<\!-- *\/hidden *--> *?(\n|$)/gs),
+      skipExclusions((m, body) => `<div style="display: none;">\n${body}\n</div>\n`)
     )
 
     // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles
