@@ -247,16 +247,16 @@
 
     // wrap hidden/removed sections
     html = html.replace(
-      /(^|\n\s*?)(&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs,
+      /(^|\n)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs,
       '$1<div class="section hidden">$2</div>'
     )
     html = html.replace(
-      /(^|\n\s*?)(&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs,
+      /(^|\n)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs,
       '$1<div class="section removed">$2</div>'
     )
 
     html = html.replace(
-      /(^|\n\s*?)(&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs,
+      /(^|\n)( *&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs,
       '$1<div class="section agent">$2</div>$3'
     )
 
