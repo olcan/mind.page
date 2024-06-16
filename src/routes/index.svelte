@@ -4906,7 +4906,6 @@
         run_options = _item(item.id).eval(`typeof _run_options != 'undefined' ? _run_options : null`, {
           exclude_async_deps: false,
         })
-        if (run_options) console.debug('run_options', run_options)
       } catch {} // already logged
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/, ...run_options })
     } catch {} // already logged, just continue
