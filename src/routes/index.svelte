@@ -1012,7 +1012,7 @@
 
       // trigger save first to put item in saving state (prevents unnecessary edit cancel confirmation)
       // also skip save by default if editing, allowing user control on timing of save and (via onItemSave) itemTextChanged/_on_item_change
-      // note otherwise if the save is chained (e.g. due to already saving), additional user edits can get bundled into it, and those will not generally trigger itemTextChanged/_on_item_change (e.g. in onSaveDone) until editing is done or user triggers save via onItemSave (also see comments there)
+      // note otherwise if the save is chained (e.g. due to already saving), additional user edits can get bundled into it, and those will not generally trigger itemTextChanged/_on_item_change (e.g. in onSaveDone) until editing is done or user triggers save via onItemSave (this is a somewhat separate or secondary concern from save-on-write-while-edit behavior but seems to make sense from UX perspective, see comments in onItemSave also)
       // console.debug('saving after write', this.name, { text, type, options })
       options['skip_save'] ??= this.editing // skip_save by default when editing
       if (!options['skip_save']) saveItem(this.id)
