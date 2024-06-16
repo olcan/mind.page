@@ -283,9 +283,10 @@
 
     // highlight block delimiters
     html = html.replace(
-      /(^|\n)( *```[^\n]*\n)(.*?)\n?( *```)/gs, // note the \n before the closing delimiter was added after block div
+      /(^|\n)( *```[^\n]*)(.*?)(\n *```)/gs,
       (m, pfx, open, block, close) =>
-        `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close}</span>`
+        // note the \n before the closing delimiter was added after block div, so we drop it here
+        `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close.substring(1)}</span>`
     )
     highlights.innerHTML = html
 
