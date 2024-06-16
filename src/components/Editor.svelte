@@ -27,7 +27,16 @@
   const _ = globalThis['_'] // imported in client.ts
 
   // import he from "he";
-  import { highlight, replaceTags, parseTags, numberWithCommas, skipEscaped, blockRegExp } from '../util.js'
+  import {
+    highlight,
+    replaceTags,
+    parseTags,
+    numberWithCommas,
+    skipEscaped,
+    blockRegExp,
+    exclusionRegExp,
+    skipExclusions,
+  } from '../util.js'
 
   const placeholder = ' '
   let spellcheck = false
@@ -222,19 +231,15 @@
         // if language spec contains colon separators, take last part without a period
         if (language.includes(':')) language = _.findLast(language.split(':'), s => !s.includes('.')) ?? ''
         code = ''
-        html += '<span class="block-delimiter">'
-        html += _.escape(line)
-        html += '</span>\n'
+        html += line + '\n' // leave block delimiter as is
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">'
         // drop any underscore (_+) prefix (treated as editor-only highlighting)
         language = language.replace(/^_+/, '')
         html += highlight(code, language)
-        html += '</div>'
+        html += '</div>\n'
         insideBlock = false
-        html += '<span class="block-delimiter">'
-        html += _.escape(line)
-        html += '</span>\n'
+        html += line + '\n' // leave block delimiter as is
       } else if (insideBlock) {
         code += line + '\n'
       } else {
@@ -245,25 +250,44 @@
     // append unclosed block as regular markdown
     if (insideBlock) html += highlightLinks(highlightTitles(highlightOther(highlightTags(_.escape(code), tags))))
 
-    // wrap hidden/removed sections
+    // apply special sections and delimiter highlights (delayed from highlightOther)
+    // we have to apply exclusions for blocks to prevent messing with blocks (just like the loop above)
+    const exclusions = [
+      '(?:^|\\n) *```.*?\\n *```', // multi-line block
+      '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
+    ]
     html = html.replace(
-      /(^|\n)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs,
-      '$1<div class="section hidden">$2</div>'
+      exclusionRegExp(exclusions, /(^|\n)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs),
+      skipExclusions((m, pfx, body) => `${pfx}<div class="section hidden">${highlightSectionDelimiters(body)}</div>`)
     )
     html = html.replace(
-      /(^|\n)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs,
-      '$1<div class="section removed">$2</div>'
+      exclusionRegExp(exclusions, /(^|\n)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs),
+      skipExclusions((m, pfx, body) => `${pfx}<div class="section removed">${highlightSectionDelimiters(body)}</div>`)
     )
-
+    // highlight "agent" sections
     html = html.replace(
-      /(^|\n)( *&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs,
-      '$1<div class="section agent">$2</div>$3'
+      exclusionRegExp(
+        exclusions,
+        /(^|\n)( *&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs
+      ),
+      skipExclusions(
+        (m, pfx, body, sfx) =>
+          `${pfx}<div class="section agent">${highlightSectionDelimiters(body)}</div>${highlightSectionDelimiters(sfx)}`
+      )
+    )
+    // highlight delimiter macros not used as "agent" section delimiters
+    html = html.replace(
+      exclusionRegExp(exclusions, /(^|\n)( *&lt;&lt; *_?(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;)/gs),
+      skipExclusions((m, pfx, body) => `${pfx}${highlightSectionDelimiters(body)}`)
     )
 
-    // indicate section delimiters
-    // html = html.replace(/(&lt;!-- *\/?(?:hidden|removed) *--&gt;)/g, '<span class="section-delimiter">$1</span>')
-
-    highlights.innerHTML = highlightSectionDelimiters(html)
+    // highlight block delimiters
+    html = html.replace(
+      /(^|\n)( *```[^\n]*\n)(.*?)\n?( *```)/gs, // note the \n before the closing delimiter was added after block div
+      (m, pfx, open, block, close) =>
+        `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close}</span>`
+    )
+    highlights.innerHTML = html
 
     // linkify urls & tags in comments (regexes from util.js)
     // we allow semi-colon in tail of url to avoid breaking html entities (which are ok for display in editor)
