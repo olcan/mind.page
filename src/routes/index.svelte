@@ -1412,9 +1412,7 @@
         return promise
       } else if (typeof thing == 'function') {
         const func = thing
-        return ((...args) => {
-          this.invoke(() => func(...args))
-        }).bind(this)
+        return ((...args) => this.invoke(() => func(...args))).bind(this)
       } else {
         return thing // return as is
       }
