@@ -2176,17 +2176,19 @@
     else return base
   }
 
-  function pushState(state) {
+  function pushState(state, skip_reset = false) {
     // console.debug('pushState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
+    if (state.index == 1 && !skip_reset) history.go(-history.length + 1) // replace invalid history from prior sessions
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
   }
 
-  function replaceState(state) {
+  function replaceState(state, skip_reset = false) {
     // console.debug('replaceState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
+    if (state.index == 0 && !skip_reset) history.go(-history.length + 1) // replace invalid history from prior sessions
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
@@ -3039,6 +3041,7 @@
   }
 
   let scrollToTopOnPopState = false
+  let skipScrollForPopState = false
   function onPopState(e) {
     readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
     if (!e?.state) {
@@ -3057,7 +3060,7 @@
     // important to try to establish consistency since history links are based on history.go
     if (typeof e.state.index == 'undefined') {
       console.warn('replacing onPopState w/ missing index', sessionStateHistory, sessionStateHistoryIndex)
-      replaceState(sessionStateHistory[sessionStateHistoryIndex])
+      replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
       return
     }
     if (e.state.index > sessionStateHistory.length - 1) {
@@ -3065,13 +3068,15 @@
         `replacing onPopState w/ out-of-bounds index ${e.state.index} > ${sessionStateHistory.length - 1}`,
         sessionStateHistory
       )
-      replaceState(sessionStateHistory[sessionStateHistoryIndex])
+      replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
       return
     }
     let state = e.state // can be replaced with state from history
+    // note simply replacing inconsistent popped state can cause duplicate entries in history
+    // we mitigate this by using history.go(...) in push/replaceState for indices 0/1
     if (!_.isEqual(e.state, sessionStateHistory[e.state.index])) {
       console.warn('replacing onPopState w/ inconsistent state', e.state, sessionStateHistory[sessionStateHistoryIndex])
-      replaceState((state = sessionStateHistory[e.state.index]))
+      replaceState((state = sessionStateHistory[e.state.index]), true /* skip reset while popping */)
     }
 
     // if popped state index is current state index, there should be nothing to do
@@ -3104,16 +3109,19 @@
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof state.hideIndex == 'number') hideIndex = Math.max(hideIndex, state.hideIndex)
 
-    // scroll to state.scrollPosition (unless scrollToTopOnPopState is set)
-    update_dom().then(() => {
-      if (scrollToTopOnPopState) {
-        scrollTo(headerdiv.offsetTop)
-        scrollToTopOnPopState = false
-      } else {
-        // scroll to last recorded scroll position at this state
-        scrollTo(state.scrollPosition || 0)
-      }
-    })
+    if (!skipScrollForPopState) {
+      // scroll to state.scrollPosition (unless scrollToTopOnPopState is set)
+      update_dom().then(() => {
+        if (scrollToTopOnPopState) {
+          scrollTo(headerdiv.offsetTop)
+          scrollToTopOnPopState = false
+        } else {
+          // scroll to last recorded scroll position at this state
+          scrollTo(state.scrollPosition || 0)
+        }
+      })
+    }
+    skipScrollForPopState = false
   }
 
   function onBeforeUnload(e) {
@@ -7062,6 +7070,7 @@
     } else {
       // note disabling for now due to target item getting scrolled out of view undesirably
       // scrollToTopOnPopState = true
+      skipScrollForPopState = true
       history.go(index - sessionStateHistoryIndex)
     }
   }
