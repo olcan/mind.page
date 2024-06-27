@@ -301,6 +301,10 @@
     Object.defineProperty(window, '_instance', { get: () => instance })
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
+    Object.defineProperty(window, '_history', { get: () => sessionStateHistory })
+    Object.defineProperty(window, '_history_index', { get: () => sessionStateHistoryIndex })
+    Object.defineProperty(window, '_mindbox_history', { get: () => sessionHistory })
+    Object.defineProperty(window, '_mindbox_history_index', { get: () => sessionHistoryIndex })
     window['_item'] = _item
     window['__item'] = item // internal item(...) function (for debugging or advanced uses only)
     // internal item array and other state (for debugging or advanced uses only)
@@ -2173,16 +2177,18 @@
   }
 
   function pushState(state) {
+    // console.debug('pushState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
-    sessionStateHistory[sessionStateHistoryIndex] = history.state
+    sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
   }
 
   function replaceState(state) {
+    // console.debug('replaceState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
-    sessionStateHistory[sessionStateHistoryIndex] = history.state
+    sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
   }
 
@@ -2858,15 +2864,6 @@
           state.index = ++sessionStateHistoryIndex
           sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
           pushState(state)
-          // TODO: remove this once you understand why states in history can sometimes be undefined; seems to be related to going back across page reloads (vs opening a fresh tab) but it is not clear how exactly
-          sessionStateHistory.forEach((state, j) => {
-            if (!state)
-              console.error(
-                `sessionStateHistory has gap at index ${j} (last ${
-                  sessionStateHistory.length - 1
-                }, current ${sessionStateHistoryIndex})`
-              )
-          })
         } else {
           state.index = sessionStateHistoryIndex
           replaceState(state)
@@ -3054,21 +3051,47 @@
       // console.warn("onPopState before init");
       return
     }
-    //console.debug('onPopState', e.state, items.length + ' items')
+    // console.debug('onPopState', e.state, items.length + ' items')
 
-    // restore intro mode for narration
-    intro = e.state.intro
+    // replace popped state inconsistent with sessionStateHistory
+    // important to try to establish consistency since history links are based on history.go
+    if (typeof e.state.index == 'undefined') {
+      console.warn('replacing onPopState w/ missing index', sessionStateHistory, sessionStateHistoryIndex)
+      replaceState(sessionStateHistory[sessionStateHistoryIndex])
+      return
+    }
+    if (e.state.index > sessionStateHistory.length - 1) {
+      console.warn(
+        `replacing onPopState w/ out-of-bounds index ${e.state.index} > ${sessionStateHistory.length - 1}`,
+        sessionStateHistory
+      )
+      replaceState(sessionStateHistory[sessionStateHistoryIndex])
+      return
+    }
+    let state = e.state // can be replaced with state from history
+    if (!_.isEqual(e.state, sessionStateHistory[e.state.index])) {
+      console.warn('replacing onPopState w/ inconsistent state', e.state, sessionStateHistory[sessionStateHistoryIndex])
+      replaceState((state = sessionStateHistory[e.state.index]))
+    }
+
+    // if popped state index is current state index, there should be nothing to do
+    if (state.index == sessionStateHistoryIndex) {
+      console.warn('ignoring onPopState for current index')
+      return
+    }
 
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
-    if (e.state.index === null) console.error('popping state w/o index! (taking it as 0)')
-    sessionStateHistoryIndex = e.state.index ?? 0
+    sessionStateHistoryIndex = state.index
+
+    // restore intro mode for narration
+    intro = state.intro
 
     // restore editor text and unsaved times
-    editorText = e.state.editorText || ''
-    if (e.state.unsavedTimes) {
+    editorText = state.editorText || ''
+    if (state.unsavedTimes) {
       items.forEach(item => (item.time = item.savedTime))
-      e.state.unsavedTimes.forEach(entry => {
+      state.unsavedTimes.forEach(entry => {
         const index = indexFromId.get(entry.id)
         if (index === undefined) return // item was deleted
         items[index].time = entry.time
@@ -3077,16 +3100,18 @@
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     ignoreStateOnEditorChange = true // do not update history when going back
     onEditorChange(editorText, true /* keep_times */)
+
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
-    if (typeof e.state.hideIndex == 'number') hideIndex = Math.max(hideIndex, e.state.hideIndex)
-    // if (narrating) return;
+    if (typeof state.hideIndex == 'number') hideIndex = Math.max(hideIndex, state.hideIndex)
+
+    // scroll to state.scrollPosition (unless scrollToTopOnPopState is set)
     update_dom().then(() => {
       if (scrollToTopOnPopState) {
         scrollTo(headerdiv.offsetTop)
         scrollToTopOnPopState = false
       } else {
         // scroll to last recorded scroll position at this state
-        scrollTo(e.state.scrollPosition || 0)
+        scrollTo(state.scrollPosition || 0)
       }
     })
   }
@@ -7035,7 +7060,8 @@
       scrollTo(headerdiv.offsetTop)
       return
     } else {
-      scrollToTopOnPopState = true
+      // note disabling for now due to target item getting scrolled out of view undesirably
+      // scrollToTopOnPopState = true
       history.go(index - sessionStateHistoryIndex)
     }
   }
