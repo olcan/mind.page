@@ -2176,10 +2176,10 @@
     else return base
   }
 
-  function pushState(state, skip_reset = false) {
+  function pushState(state) {
     // console.debug('pushState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
-    if (state.index == 1 && !skip_reset) history.go(-history.length + 1) // replace invalid history from prior sessions
+    if (state.index == 1) history.go(-history.length + 1) // replace invalid history from prior sessions
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
