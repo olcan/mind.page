@@ -257,14 +257,19 @@
       '(?:^|\\n) *```.*?\\n *```', // multi-line block
       '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
     ]
-    html = html.replace(
-      exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt;) *\n/gs),
-      skipExclusions((m, pfx, body) => `${pfx}<div class="section hidden">${highlightSectionDelimiters(body)}</div>`)
-    )
-    html = html.replace(
-      exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt;) *\n/gs),
-      skipExclusions((m, pfx, body) => `${pfx}<div class="section removed">${highlightSectionDelimiters(body)}</div>`)
-    )
+    // note section delimiter divs must consume a line break on both sides for the div (w/ block display) to align with the editor text, but that prevents repeat matches, so as a workaround we repeat replacements until nothing changes
+    let prev_html
+    do {
+      prev_html = html
+      html = html.replace(
+        exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt;) *\n/gs),
+        skipExclusions((m, pfx, body) => `${pfx}<div class="section hidden">${highlightSectionDelimiters(body)}</div>`)
+      )
+      html = html.replace(
+        exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt;) *\n/gs),
+        skipExclusions((m, pfx, body) => `${pfx}<div class="section removed">${highlightSectionDelimiters(body)}</div>`)
+      )
+    } while (html != prev_html)
     // highlight "agent" sections
     html = html.replace(
       exclusionRegExp(
