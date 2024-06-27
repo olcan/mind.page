@@ -5478,8 +5478,9 @@
     // trigger focus on any fresh scrolling
     // in particular for mouse/trackpad input not detected via touchstart/mousedown/keydown
     // we ignore scroll events within 1s of window resize (found problematic on android but generally sensible)
+    // we also ignore scroll events (for focusing) during initial render (while rendered=false)
     // does not appear to be possible to shift-focus-on-scroll on macos
-    if (Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
+    if (rendered && Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
     lastScrollTime = Date.now()
     if (!historyUpdatePending) {
       historyUpdatePending = true
@@ -7464,6 +7465,7 @@
   }
 
   function focus() {
+    if (!document.hasFocus()) return // decline focus (and updating focus_time) unless document has focus
     focus_time = instance.focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
     if (!ios && !android) {
       onFocus() // focus based on document.hasFocus()
