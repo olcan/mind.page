@@ -653,15 +653,15 @@
     //.replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
 
     // remove *_removed blocks
-    text = text.replace(blockRegExp(/\w*_removed/), '')
+    text = text.replace(blockRegExp(/\S*_removed/), '')
 
     // hide *_hidden blocks
-    text = text.replace(blockRegExp(/\w*_hidden/), (m, pfx) => '\n<!--hidden-->\n' + m + '\n<!--/hidden-->\n')
+    text = text.replace(blockRegExp(/\S*_hidden/), (m, pfx) => `${pfx}<!--hidden-->\n ${m} \n<!--/hidden-->\n`)
 
     // hide hidden sections, except inside blocks
     text = text.replace(
-      exclusionRegExp(blockExclusions, /<\!-- *hidden *-->(.*?)<\!-- *\/hidden *--> *?(\n|$)/gs),
-      skipExclusions((m, body, sfx) => `<div style="display: none;">\n${body}\n</div>${sfx}\n`)
+      exclusionRegExp(blockExclusions, /<\!-- *hidden *-->(.*?)<\!-- *\/hidden *--> *?(?=\n|$)/gs),
+      skipExclusions((m, body, sfx) => `<div style="display: none;">\n${body}\n</div>\n`)
     )
 
     // replace #item between style tags (can be inside _html or not) for use in item-specific css-styles

@@ -877,11 +877,11 @@
       // remove hidden|removed sections if requested (whole item reads only)
       // includes hidden|removed markdown blocks or html sections (via delimiter comments)
       if (options['remove_hidden'] && !type) {
-        text = text.replace(blockRegExp('.*_hidden *'), '')
+        text = text.replace(blockRegExp('\\S*_hidden *'), '')
         text = text.replace(/<\!--\s*hidden\s*-->(.*?)<!--\s*\/hidden\s*-->\s*?(\n|$)/gs, '')
       }
       if (options['remove_removed'] && !type) {
-        text = text.replace(blockRegExp('.*_removed *'), '')
+        text = text.replace(blockRegExp('\\S*_removed *'), '')
         text = text.replace(/<\!--\s*removed\s*-->(.*?)<!--\s*\/removed\s*-->\s*?(\n|$)/gs, '')
       }
 

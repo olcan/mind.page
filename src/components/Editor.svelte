@@ -252,23 +252,24 @@
 
     // apply special sections and delimiter highlights (delayed from highlightOther)
     // we have to apply exclusions for blocks to prevent messing with blocks (just like the loop above)
+    // we also have to consider that closing div tags (from section delimiters) need to be treated as a line break
     const exclusions = [
       '(?:^|\\n) *```.*?\\n *```', // multi-line block
       '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
     ]
     html = html.replace(
-      exclusionRegExp(exclusions, /(^|\n)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt; *\n)/gs),
+      exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *hidden *--&gt;.+?&lt;!-- *\/hidden *--&gt;) *\n/gs),
       skipExclusions((m, pfx, body) => `${pfx}<div class="section hidden">${highlightSectionDelimiters(body)}</div>`)
     )
     html = html.replace(
-      exclusionRegExp(exclusions, /(^|\n)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt; *\n)/gs),
+      exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;!-- *removed *--&gt;.+?&lt;!-- *\/removed *--&gt;) *\n/gs),
       skipExclusions((m, pfx, body) => `${pfx}<div class="section removed">${highlightSectionDelimiters(body)}</div>`)
     )
     // highlight "agent" sections
     html = html.replace(
       exclusionRegExp(
         exclusions,
-        /(^|\n)( *&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs
+        /(^|\n|<\/div>)( *&lt;&lt; *_?(?:assistant|model|agent)(?: *\([^\n]*\))? *&gt;&gt;.+?\n?)( *&lt;&lt; *(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;|$)/gs
       ),
       skipExclusions(
         (m, pfx, body, sfx) =>
@@ -277,13 +278,13 @@
     )
     // highlight delimiter macros not used as "agent" section delimiters
     html = html.replace(
-      exclusionRegExp(exclusions, /(^|\n)( *&lt;&lt; *_?(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;)/gs),
+      exclusionRegExp(exclusions, /(^|\n|<\/div>)( *&lt;&lt; *_?(?:system|user)(?: *\([^\n]*\))? *&gt;&gt;)/gs),
       skipExclusions((m, pfx, body) => `${pfx}${highlightSectionDelimiters(body)}`)
     )
 
     // highlight block delimiters
     html = html.replace(
-      /(^|\n)( *```[^\n]*)(.*?)(\n *```)/gs,
+      /(^|\n|<\/div>)( *```[^\n]*)(.*?)(\n *```)/gs,
       (m, pfx, open, block, close) =>
         // note the \n before the closing delimiter was added after block div, so we drop it here
         `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close.substring(1)}</span>`
