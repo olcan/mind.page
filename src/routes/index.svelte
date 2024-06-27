@@ -1140,7 +1140,7 @@
 
     // triggers a save to persistent store, even if item is not modified
     save() {
-      saveItem(this.id)
+      return saveItem(this.id)
     }
 
     // evaluates given code in context of this item
@@ -4771,23 +4771,18 @@
     tick().then(() => textArea(near).focus())
   }
 
-  function onSaveDone(id: string, savedItem) {
+  async function onSaveDone(id: string, savedItem) {
     console.debug('saved item', id, __item(id).savedId)
-    decryptItem(savedItem).then(savedItem => {
-      const index = indexFromId.get(id)
-      if (index == undefined) return // item was deleted
-      let item = items[index]
-      item.savedTime = savedItem.time
-      item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
-      item.savedText = savedItem.text
-      item.saving = false
-      item.savingText = null
-      items[index] = item // trigger dom update
-      if (item.saveClosure) {
-        item.saveClosure(item.id)
-        delete item.saveClosure
-      }
-    }) // decryptItem(savedItem)
+    savedItem = await decryptItem(savedItem) // in case encrypted
+    const index = indexFromId.get(id)
+    if (index == undefined) return // item was deleted
+    let item = items[index]
+    item.savedTime = savedItem.time
+    item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
+    item.savedText = savedItem.text
+    item.saving = false
+    item.savingText = null
+    items[index] = item // trigger dom update
   }
 
   function onItemEscape(e) {
@@ -4970,45 +4965,47 @@
     const index = indexFromId.get(id)
     if (index == undefined) return // item deleted
     let item = items[index]
-    // if item is already saving, set saveClosure and return (no need to chain)
-    if (item.saving) {
-      item.saveClosure = saveItem
-      return
-    }
     if (!item.savedId) {
       // NOTE: this can happen due to appendJSOutput for new item on onEditorDone()
       // console.error("item is not being saved but also does not have its permanent id");
       return
     }
     item.saving = true
-    item.savingText = item.text
-    let itemToSave = {
-      // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
-      // user: user.uid, // allows us to use set() instead of update()
-      time: item.time,
-      attr: _.cloneDeep(item.attr),
-      text: item.text,
-    }
+    const task = (item.saveTask = Promise.allSettled([item.saveTask])
+      .then(async () => {
+        item.savingText = item.text
+        let itemToSave = {
+          // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
+          // user: user.uid, // allows us to use set() instead of update()
+          time: item.time,
+          attr: _.cloneDeep(item.attr),
+          text: item.text,
+        }
+        if (readonly) {
+          await onSaveDone(item.id, itemToSave)
+          return
+        }
 
-    if (readonly) {
-      setTimeout(() => onSaveDone(item.id, itemToSave))
-      return
-    }
+        items = items // trigger svelte render for saving state change
+        itemToSave = await encryptItem(itemToSave)
+        await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
+        await onSaveDone(item.id, itemToSave)
 
-    items = items // trigger svelte render for saving state change
-    encryptItem(itemToSave).then(itemToSave => {
-      // console.debug('saving item', itemToSave)
-      updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
-        .then(() => onSaveDone(item.id, itemToSave))
-        .catch(console.error)
+        // also save to history ...
+        await addDoc(collection(getFirestore(firebase), 'history'), {
+          item: item.savedId,
+          user: user.uid,
+          ...itemToSave,
+        })
+      })
+      .finally(() => {
+        if (item.saveTask == task) {
+          delete item.saveTask
+          item.saving = false
+        }
+      }))
 
-      // also save to history ...
-      addDoc(collection(getFirestore(firebase), 'history'), {
-        item: item.savedId,
-        user: user.uid,
-        ...itemToSave,
-      }).catch(console.error)
-    }) // encryptItem(itemToSave)
+    return task
   }
 
   // https://stackoverflow.com/a/9039885
