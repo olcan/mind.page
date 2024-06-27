@@ -231,7 +231,7 @@
         // if language spec contains colon separators, take last part without a period
         if (language.includes(':')) language = _.findLast(language.split(':'), s => !s.includes('.')) ?? ''
         code = ''
-        html += line + '\n' // leave block delimiter as is
+        html += _.escape(line) + '\n' // leave block delimiter line as is (but ensure html-escaping of line)
       } else if (insideBlock && line.match(/^\s*```/)) {
         html += '<div class="block">'
         // drop any underscore (_+) prefix (treated as editor-only highlighting)
@@ -239,7 +239,7 @@
         html += highlight(code, language)
         html += '</div>\n'
         insideBlock = false
-        html += line + '\n' // leave block delimiter as is
+        html += _.escape(line) + '\n' // leave block delimiter line as is (but ensure html-escaping of line)
       } else if (insideBlock) {
         code += line + '\n'
       } else {
