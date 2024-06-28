@@ -7360,9 +7360,12 @@
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim().toLowerCase()
         const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        const contextLabel = item(_item(targetLabel).id).contextLabel // closest ancestor label from context
         if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')
           // if (!lastContext?.querySelector('mark.selected:not(.deps-and-dependents *)')) lastContext = null
+        } else if (contextLabel) {
+          lastContext = _item(contextLabel).elem?.querySelector('.container')
         }
       }
       if (lastContext) {
