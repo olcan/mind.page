@@ -2179,7 +2179,8 @@
   function pushState(state) {
     // console.debug('pushState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
-    if (state.index == 1) history.go(-history.length + 1) // replace invalid history from prior sessions
+    // replace invalid history from prior sessions by going back to first entry before replaceState
+    if (state.index == 1 && history.length > 1) history.go(-history.length + 1)
     history.pushState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
@@ -2188,7 +2189,8 @@
   function replaceState(state, skip_reset = false) {
     // console.debug('replaceState', state)
     if (state.index == 0) state.intro = true // force intro at 0 index
-    if (state.index == 0 && !skip_reset) history.go(-history.length + 1) // replace invalid history from prior sessions
+    // replace invalid history from prior sessions by going back to first entry before replaceState
+    if (state.index == 0 && history.length > 1 && !skip_reset) history.go(-history.length + 1)
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     sessionStateHistory[sessionStateHistoryIndex] = _.cloneDeep(history.state)
     sessionStateHistory = sessionStateHistory // trigger svelte update
@@ -4617,14 +4619,7 @@
     ) {
       forceNewStateOnEditorChange = true // force new state on onEditorChange (invoked below w/ new item added)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
-      // starting suffix is the incremented parent suffix (if any) or 0, incremented until unique
-      let suffix =
-        Number(
-          text
-            .trim()
-            .match(/\/(\d+)$/)
-            ?.pop() ?? -1
-        ) + 1
+      let suffix = 0
       while (_exists(text.trim() + `/${suffix}`)) suffix++
       editorText = text = text.trim() + `/${suffix} `
     }
@@ -5042,10 +5037,12 @@
     indexFromId = new Map<string, number>()
     items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     // deletion can affect ordering (e.g. due to missingTags), so we need onEditorChange
-    // we also clear query if deleted item was being navigated
+    // we also clear (or change to parent item) query if deleted item was being targeted
     if (editorText.trim().toLowerCase() == name.toLowerCase()) {
       replaceStateOnEditorChange = true // do not create new entry
-      editorText = ''
+      let parent = name.startsWith('#') ? name.replace(/\/[^\/]*$/, '') : ''
+      if (parent && !_exists(parent, false /*allow_multiple*/)) parent = ''
+      editorText = parent // can be ''
     }
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     onEditorChange(editorText)
@@ -5055,7 +5052,6 @@
       text: item.savedText,
     }) // for /undelete
     if (!readonly && item.savedId) deleteDoc(doc(getFirestore(firebase), 'items', item.savedId)).catch(console.error)
-
     // if deleted item was being navigated, go back to previous state
     // if (navigated && sessionStateHistoryIndex > 0) update_dom().then(() => history.back())
     return true
