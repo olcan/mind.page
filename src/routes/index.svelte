@@ -5326,9 +5326,18 @@
     const item = items[index]
     // note we want to trigger itemTextChanged, which e.g. will trigger _on_item_change based on deephash change, NOT based on change from savedText, which can be somewhat arbitrary when saves get delayed/chained and cause user edits (to item.text) to get bundled into the delayed save without triggering itemTextChanged/_on_item_change; note coupling itemTextChanged/_on_item_change with user-triggered save is pretty intuitive even though technically it is not necessary (e.g. triggering could always get delayed until close of editing as a rule)
     // if (item.text != item.savedText) itemTextChanged(index, item.text)
+    const prev_name = item.name // to detect renaming below
     itemTextChanged(index, item.text)
     // if (item.text != item.savedText) saveItem(item.id)
     saveItem(item.id) // save item even if text is unchanged, i.e. to update time
+
+    // if item was renamed while being targeted (navigated), update query to new name
+    if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
+      replaceStateOnEditorChange = true // do not create new entry
+      editorText = item.name
+    }
+    lastEditorChangeTime = 0 // disable debounce even if editor focused
+    onEditorChange(editorText)
   }
 
   function onItemTouch(index: number, e: MouseEvent = null) {
