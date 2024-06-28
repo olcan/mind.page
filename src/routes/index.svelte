@@ -7300,10 +7300,9 @@
           child.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
           return
         } else {
-          // if no child found on target, search for items w/ nested names
-          const childLabel = _labels(
-            (label, ids) =>
-              ids.length == 1 && label.startsWith(targetLabel + '/') && label.indexOf('/', targetLabel.length + 1) == -1
+          // if no child found on target, search for items w/ nested names and take the one with the shortest name
+          const childLabel = _labels((label, ids) => ids.length == 1 && label.startsWith(targetLabel + '/')).sort(
+            (a, b) => a.length - b.length
           )[0]
           if (childLabel) {
             lastEditorChangeTime = 0 // force immediate update
