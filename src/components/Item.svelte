@@ -622,7 +622,7 @@
         if (!str.match(/^\s*\[[^^].*\]:/)) str = replaceURLs(str)
 
         // close bullet lists with extra \n before next line
-        if (lastLine.match(/^\s*[-*+]/) && !line.match(/^\s*[-*+]/)) str = '\n' + str
+        if (lastLine.match(/^\s*(?:\d+\.|[-*+])/) && !line.match(/^\s*(?:\d+\.|[-*+])/)) str = '\n' + str
 
         // handle horizontal rule syntax and disable heading syntax based on -|= to prevent ambiguity
         if (str.match(/^ *(?:---+|___+|\*\*\*+) *$/)) str = `<hr>\n`
