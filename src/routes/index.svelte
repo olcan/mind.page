@@ -5029,7 +5029,7 @@
     // by default, confirm if item has saved text (not new item) & unique label
     confirm_delete ??= item.savedText && item.labelUnique
     if (confirm_delete && !confirm(`Delete ${item.name}?`)) return false
-    const { name } = item // name used below
+    const { name, contextLabel } = item
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
@@ -5037,12 +5037,10 @@
     indexFromId = new Map<string, number>()
     items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     // deletion can affect ordering (e.g. due to missingTags), so we need onEditorChange
-    // we also clear (or change to parent item) query if deleted item was being targeted
+    // we also clear (or back up to contextLabel) query if deleted item was being targeted
     if (editorText.trim().toLowerCase() == name.toLowerCase()) {
       replaceStateOnEditorChange = true // do not create new entry
-      let parent = name.startsWith('#') ? name.replace(/\/[^\/]*$/, '') : ''
-      if (parent && !_exists(parent, false /*allow_multiple*/)) parent = ''
-      editorText = parent // can be ''
+      editorText = contextLabel // can be ''
     }
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     onEditorChange(editorText)
