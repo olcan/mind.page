@@ -12,6 +12,7 @@ import crypto from 'crypto'
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
+const server_id = crypto.randomBytes(8).toString('hex')
 
 const chokidar = dev ? require('chokidar') : null
 const events = {} // recorded fs events for /watch/... requests
@@ -123,6 +124,8 @@ const sapper_server = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
+    } else if (req.path == '/server_id') {
+      res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
     } else if (hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
@@ -146,6 +149,8 @@ const sapper_server = express().use(
       events[key] = []
     } else if (hostname == 'localhost' && req.path.startsWith('/client/sapper-dev-client')) {
       // modify sapper-dev-client.*.js file (see comments below on changes)
+      // the file is in __sapper__/dev/client/sapper-dev-client.*.js
+      // the dev server is in node_modules/sapper/dist/dev.js
       const abspath = process.env['PWD'] + '/__sapper__/dev' + req.path
       // res.sendFile(abspath)
       fs.readFile(abspath, 'utf8', (err, data) => {
@@ -157,10 +162,20 @@ const sapper_server = express().use(
           // use /proxy for HTTP to avoid mixed content errors
           // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
           data = data.replace('http:', '/proxy/http:')
-          // force reload on re-connect; otherwise server restarts are NOT detected via proxy
+          // force reload on server connection with new server_id
+          // otherwise server restarts are NOT detected via proxy
           data = data.replace(
             `console.log(\`[SAPPER] dev client connected\`);`,
-            `if (window._dev_client_connected) { location.reload() } else { console.log(\`[SAPPER] dev client connected\`) }; window._dev_client_connected = true`
+            `console.log(\`[SAPPER] dev client connected\`);
+             fetch('/server_id').then(resp => resp.text()).then(server_id => {
+              if (window._dev_server_id && window._dev_server_id != server_id) {
+                console.log('[SAPPER] dev server_id changed!', window._dev_server_id, '-->', server_id)
+                window.location.reload()
+                return
+              }
+              window._dev_server_id = server_id
+              console.log('[SAPPER] dev server_id is', server_id)
+            })`
           )
           res.send(data)
         }
@@ -300,7 +315,7 @@ let sapper_https_server // started here unless on_firebase
 if (!on_firebase) {
   // listen on standard HTTP port
   sapper_server.listen(PORT, () => {
-    console.log('HTTP server listening on http://localhost:' + PORT)
+    console.log(`HTTP server ${server_id} listening on http://localhost:${PORT}`)
   })
 
   // also listen on HTTPS port
@@ -313,7 +328,7 @@ if (!on_firebase) {
       sapper_server
     )
     .listen(443, () => {
-      console.log('HTTPS server listening on https://localhost:443')
+      console.log(`HTTPS server ${server_id} listening on https://localhost:443`)
     })
 }
 
