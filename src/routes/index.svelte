@@ -4082,6 +4082,7 @@
           time = item.time
           text = item.text
           editing = true
+          run = false // do not run duplicate (even on cmd+enter)
           break
         }
         case '/_undelete': {
@@ -4092,6 +4093,7 @@
           text = deletedItems[0].text
           deletedItems.shift()
           editing = false
+          run = false // do not run undeleted item (even on cmd+enter)
           break
         }
         case '/_invert': {
