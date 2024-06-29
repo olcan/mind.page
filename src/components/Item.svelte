@@ -1124,8 +1124,7 @@
           collapsed_prefix = label.substring(0, label.length - rendered.length + 1)
           terms = _.uniq([...terms, ...terms.map(term => term.replace(collapsed_prefix, '#…')), '#…'])
         }
-
-        console.debug(label, terms)
+        // console.debug(label, terms)
       }
 
       if (terms.length == 0) return
