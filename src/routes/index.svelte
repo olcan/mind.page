@@ -4743,7 +4743,10 @@
             // if editing, we do not call onSaveDone so save is postponed to post-edit, and cancel = delete
             // NOTE: we now call onSaveDone for consistency with new Cmd-S behavior to continue editing, also since we are actually saving here; that is, the cancel=delete behavior is only triggered when item is closed, and the item will be there if you reload w/o closing
             // if (!item.editing) onSaveDone(item.id, itemToSave)
-            onSaveDone(item.id, itemToSave).finally(() => { item.saving = false })
+            onSaveDone(item.id, itemToSave).finally(() => {
+              // for consistency with saveItem, we have to clear saving flag unless there is a saveTask
+              if (!item.saveTask) item.saving = false
+            })
 
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
