@@ -2115,7 +2115,8 @@
 
   function isSpecialTag(tag) {
     return (
-      tag == '#log' ||
+      tag == '#log' || // visible
+      tag == '#todo' || // visible, no special behavior, just want to exclude from missingTags
       tag == '#menu' ||
       tag == '#context' ||
       tag == '#init' ||
@@ -2136,8 +2137,10 @@
 
   // returns "alternative tags" for dependency analysis and tag search/highlights
   function altTags(tag) {
+    // note #log and #todo are visible special tags and do not need alts
+    // note #todo tag (unlike #log) does not toggle any special behavior; we just want to exclude it from missingTags
     if (tag == '#log') return []
-    // ["#features/log"]; // visible tag does not need an alt
+    else if (tag == '#todo') return []
     else if (tag == '#menu') return ['#features/_menu']
     else if (tag == '#context') return ['#features/_context']
     else if (tag == '#init') return ['#features/_init']
@@ -3431,10 +3434,10 @@
       // update missing tags (excluding certain special tags from consideration)
       // visible tags are considered "missing" if no other item contains them
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
-      // hidden "special" tags are not considered "missing" since they toggle special features
+      // "special" tags (visible or hidden) are not considered "missing" since they toggle special features
       // NOTE: tagCounts include prefix tags, deduplicated at item level
       item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+        .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
         .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
 
       // if label changed, update missingTags on all items tagged with current OR previous label
@@ -3443,7 +3446,7 @@
           if (tagger == item) continue
           if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) {
             tagger.missingTags = tagger.tagsVisible
-              .filter(t => t != tagger.label && (tagCounts.get(t) || 0) <= 1)
+              .filter(t => t != tagger.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
               .concat(
                 tagger.tagsHidden.filter(t => t != tagger.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
               )
@@ -6105,7 +6108,7 @@
       // initialize missingTags based on labels & tags (initialized above)
       // changes are handled in itemTextChanged (w/ update_deps==true)
       item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && (tagCounts.get(t) || 0) <= 1)
+        .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
         .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
       // initialize autodep based on labels & tags (initialized above)
       // changes are handled in itemTextChanged (w/ update_deps==true)
