@@ -595,10 +595,11 @@
               reltag = '#' + tag.substring(grandParentLabel.length)
 
             // shorten selected label to its context label (i.e. closest existing ancestor name)
+            // always include short (2-digits or less) numeric label suffixes (e.g. .../99/9/9) to help disambiguate
             if (lctag == label && contextLabel && (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag)))
-              reltag = '#…' + tag.substring(contextLabel.length)
+              reltag = '#…' + tag.substring(contextLabel.replace(/(?:\/\d\d?)+$/, '').length)
 
-            // shorten prefix-matching labels
+            // shorten prefix-matching labels, including short numeric suffix (see comment above)
             if (
               lctag == label &&
               label.includes('/') &&
@@ -606,7 +607,7 @@
               label[firstTerm.length] == '/' &&
               label.substring(0, firstTerm.length) == firstTerm
             )
-              reltag = '#…' + tag.substring(firstTerm.length)
+              reltag = '#…' + tag.substring(firstTerm.replace(/(?:\/\d\d?)+$/, '').length)
             return (
               `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
               `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
@@ -1113,6 +1114,18 @@
           )
             terms.push('#' + term.substring(grandParentLabel.length + 1))
         })
+
+        // apply any shortening (#…) on label to all highlight terms to ensure proper highlighting of label prefix
+        // note we could recompute the shortening here but it is easier to just fetch the rendered label text
+        // also note shortening of label can be based on contextLabel or a prefix matching term (see toHTML)
+        let collapsed_prefix
+        const rendered = (itemdiv.querySelector('mark.label') as HTMLElement)?.innerText
+        if (rendered.startsWith('…')) {
+          collapsed_prefix = label.substring(0, label.length - rendered.length + 1)
+          terms = _.uniq([...terms, ...terms.map(term => term.replace(collapsed_prefix, '#…')), '#…'])
+        }
+
+        console.debug(label, terms)
       }
 
       if (terms.length == 0) return
@@ -1154,7 +1167,8 @@
         // if we are highlighting inside tag, we expand the regex to allow shortening and rendering adjustments ...
         if (node.parentElement.tagName == 'MARK') {
           let tagTerms = terms
-            .concat(highlight_counts['#…'] + highlight_counts['…'] >= maxHighlightsPerTerm ? [] : ['#…'])
+            // note #… is now added to terms above based on shortening applied to label
+            // .concat(highlight_counts['#…'] + highlight_counts['…'] >= maxHighlightsPerTerm ? [] : ['#…'])
             .map(_.escapeRegExp)
           tagTerms = tagTerms.concat(tagTerms.map(t => t.replace(/^#(.+)$/, '^$1')))
           tagTerms.sort((a, b) => b.length - a.length) // longer first as needed for regex
