@@ -5077,24 +5077,38 @@
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
     let item = items[index]
 
-    // update time for non-log item
-    if (!item.log) item.time = Date.now()
-
     // if cancelled, restore savedText (or savingText if saving)
     // we do not restore time so item remains "soft touched"
     // we also do not restore attr
     if (cancelled) {
+      const discardEdits = () => {
+        // item.time = item.savedTime;
+        // item.attr = _.cloneDeep(item.savedAttr);
+        item.text = item.saving ? item.savingText : item.savedText
+        // invalidate item elem in case saved/saving text was rendered/cached
+        _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
+      }
       // confirm cancellation when there are unsaved changes and item is not already saving
-      if (item.text != item.savedText && !item.saving && !confirm(`Discard changes to ${item.name}?`)) {
-        item.editing = true
+      if (item.text != item.savedText && !item.saving) {
+        _modal(`Discard unsaved changes to ${item.name}?`, {
+          confirm: 'Discard',
+          cancel: 'Cancel',
+          background: 'cancel',
+        }).then(confirmed => {
+          if (confirmed) {
+            discardEdits()
+            item.editing = false
+            onItemEditing(item.index, false, false /* do not treat as cancellation, already discarded */)
+          }
+        })
+        item.editing = true // back to editing for now
         return
       }
-      // item.time = item.savedTime;
-      // item.attr = _.cloneDeep(item.savedAttr);
-      item.text = item.saving ? item.savingText : item.savedText
-      // invalidate item elem in case saved/saving text was rendered/cached
-      _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
+      discardEdits()
     }
+
+    // update time for non-log item
+    if (!item.log) item.time = Date.now()
 
     // check for deletion triggered by editor, which can be cancelled via confirmation
     // we only confirm if item is not already emptied out, which triggers deletion automatically
@@ -7389,6 +7403,7 @@
 
     // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup
     // if no edited items left, then clear editor (mindbox)
+    // note Safari has a problem with Escape (but not say Backspace) propagating to auto-cancel window.confirm
     if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp') && !modified) {
       e.preventDefault()
       if (editingItems.length) {
@@ -7453,6 +7468,14 @@
 
     // forward unhandled key to window._on_key
     if (window['_on_key']) window['_on_key'](key, e)
+  }
+
+  function onKeyUp(e: KeyboardEvent) {
+    const key = e.code || e.key // for android compatibility
+    if (!key) return // can be empty for pencil input on ios
+    // console.debug("window.onKeyUp:", e, key)
+    e.stopPropagation()
+    e.preventDefault()
   }
 
   function onFocused() {
@@ -8043,6 +8066,7 @@
 
 <svelte:window
   on:keydown={onKeyDown}
+  on:keyup={onKeyUp}
   on:focus={onFocus}
   on:focusin={onFocus}
   on:blur={onFocus}
