@@ -159,6 +159,7 @@
     text = '',
     {
       run = false,
+      save = true,
       edit = false,
       history = false,
       command = false,
@@ -190,6 +191,7 @@
       history ? {} : null, // null event disables key handling, history, etc
       false, // not cancelled
       !!run, // run?
+      !!save, // save?
       edit == true, // edit? (true/false only, null requires keyboard event)
       attr, // used internally for installed and shared items
       !command, // ignore command unless command truthy
@@ -542,7 +544,7 @@
         if (!_.isEqual(_item.attr[prop], this[prop])) {
           _item.attr[prop] = _.cloneDeep(this[prop])
           itemAttrChanged(this.id, false /* remote */) // invoke _on_attr_change on item or listeners
-          this.save()
+          if (!this.editing) this.save() // skip save if editing to allow better user control, see onItemSave
         }
       })
     }
@@ -1014,32 +1016,28 @@
 
       if (!__item.log && !options['keep_time']) __item.time = Date.now()
 
-      // trigger save first to put item in saving state (prevents unnecessary edit cancel confirmation)
-      // also skip save by default if editing, allowing user control on timing of save and (via onItemSave) itemTextChanged/_on_item_change
-      // note otherwise if the save is chained (e.g. due to already saving), additional user edits can get bundled into it, and those will not generally trigger itemTextChanged/_on_item_change (e.g. in onSaveDone) until editing is done or user triggers save via onItemSave (this is a somewhat separate or secondary concern from save-on-write-while-edit behavior but seems to make sense from UX perspective, see comments in onItemSave also)
-      // console.debug('saving after write', this.name, { text, type, options })
       options['skip_save'] ??= this.editing // skip_save by default when editing
-      if (!options['skip_save']) saveItem(this.id)
+      if (!options['skip_save']) saveItem(this.id) // sets item.saving, which e.g. helps skip edit cancel confirmation
 
       items = items // trigger svelte render for saving state AND new text if editing
 
-      // NOTE: disabling this dispatch for now as it seems the only purpose was to get saving state reflected before doing expensive updates, but (1) most expensive updates in these functions should be dispatched anyway, (2) dispatching itemTextChanged also delays updates to item state which is not desirable in general
-      //      tick().then(() => {
+      // if editing, we postpone processing of changes to when item is closed or saved manually
+      // also see comments in onItemSave on the decoupling of change handling from saving
+      if (!this.editing) {
+        // update all other item state (including dependents)
+        // note this can be slow on items with many dependents, e.g. #util/core
+        // also note this can trigger saving indirectly via listeners that save item or modify item attributes
+        itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
 
-      // update all other item state (including dependents)
-      // note this can be slow on items with many dependents, e.g. #util/core
-      itemTextChanged(this.index, this.text, true /*update_deps*/, true /*run_deps*/, options['keep_time'])
+        // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
+        this.invalidate_elem_cache({ force_render: true })
 
-      // invalidate element cache & force render even if text/deephash/html unchanged because writing to an item is a non-trivial operation that may be accompanied w/ external changes not captured in deephash (e.g. document-level css, highlight.js plugins, etc)
-      this.invalidate_elem_cache({ force_render: true })
-
-      // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
-      setTimeout(() => {
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(editorText) // item time/text has changed
-      })
-
-      //      })
+        // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
+        setTimeout(() => {
+          lastEditorChangeTime = 0 // disable debounce even if editor focused
+          onEditorChange(editorText) // item time/text has changed
+        })
+      }
     }
 
     clear(type: string, options) {
@@ -3859,6 +3857,7 @@
     e: any = null,
     cancelled: boolean = false,
     run: boolean = false,
+    save: boolean = true,
     editing = null,
     attr = null,
     ignore_command = false,
@@ -3881,7 +3880,7 @@
       }
       return
     }
-    // console.debug('onEditorDone', { text, e, cancelled, run, editing, attr, ignore_command })
+    // console.debug('onEditorDone', { text, e, cancelled, run, save, editing, attr, ignore_command, return_alerts })
 
     // reset history index, update entry 0 and unshift duplicate entry
     // NOTE: we do not depend on onEditorChange keeping entry 0 updated, even though it should
@@ -4641,7 +4640,7 @@
     let item = initItemState(_.clone(itemToSave), 0, {
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
       editing: editing,
-      saving: !editing,
+      saving: save,
       savedId: null, // filled in below after save
       savedTime: 0, // filled in onSaveDone
       savedAttr: null, // filled in onSaveDone
@@ -4739,6 +4738,9 @@
       })
     })
 
+    // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
+    // if (!item.saving) itemToSave.text = ''
+
     encryptItem(itemToSave)
       .then(itemToSave => {
         ;(readonly
@@ -4755,8 +4757,15 @@
             }
             item.savedId = doc.id
 
-            // if editing, we do not call onSaveDone so save is postponed to post-edit, and cancel = delete
-            // NOTE: we now call onSaveDone for consistency with new Cmd-S behavior to continue editing, also since we are actually saving here; that is, the cancel=delete behavior is only triggered when item is closed, and the item will be there if you reload w/o closing
+            // if saving is disabled, we stop here after creating item and setting its permanent id (item.savedId)
+            // if editing, item contents are considered unsaved, and a cancel/discard will empty-out & delete item
+            // if not editing, item is still considered unsaved, but is likely to get saved programmatically
+            // in either case, item is actually saved at this point, e.g. will reappear on a forced reload
+            // this gets quite confusing if not editing, so this combination (!save & !edit) is discouraged
+            // we could save w/ empty text (commented out above) and auto-delete on init, but feels overkill
+            // (especially since programmatic saving is likely, and trying to prevent saving feels contrived)
+            if (!save) return
+
             // if (!item.editing) onSaveDone(item.id, itemToSave)
             onSaveDone(item.id, itemToSave).finally(() => {
               // for consistency with saveItem, we have to clear saving flag unless there is a saveTask
@@ -4975,15 +4984,11 @@
   }
 
   function saveItem(id: string) {
-    // console.debug("saving item", id);
+    // console.debug('saving item', id)
     const index = indexFromId.get(id)
     if (index == undefined) return // item deleted
     let item = items[index]
-    if (!item.savedId) {
-      // NOTE: this can happen due to appendJSOutput for new item on onEditorDone()
-      // console.error("item is not being saved but also does not have its permanent id");
-      return
-    }
+    if (!item.savedId) return // saveItem is for existing items that already have their permanent id
     item.saving = true
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
@@ -5098,7 +5103,7 @@
       }
       // confirm cancellation when there are unsaved changes and item is not already saving
       if (item.text != item.savedText && !item.saving) {
-        _modal(`Discard unsaved changes to ${item.name}?`, {
+        _modal(`Discard unsaved changes to ${item.uniqueLabel || 'item'}?`, {
           confirm: 'Discard',
           cancel: 'Cancel',
           background: 'cancel',
