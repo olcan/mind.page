@@ -4621,6 +4621,7 @@
     // this also ensures the new item is created _below_ target item (and easily navigated via arrow keys etc)
     // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
     // we also make sure a new history state is created so user can always go back if needed
+    let selection_base = -1 // based index for tail selection below
     if (
       e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
       !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
@@ -4630,6 +4631,7 @@
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       let suffix = 0
       while (_exists(text.trim() + `/${suffix}`)) suffix++
+      selection_base = text.trim().length + 1 // select just past the '/'
       editorText = text = text.trim() + `/${suffix} `
     }
 
@@ -4687,6 +4689,12 @@
       // for generated (vs typed) items, focus at the start for better context and no scrolling up
       // note we allow both item text and editor text to be modified together (e.g. see above for appending /#)
       if (text_modified) selectionStart = selectionEnd = 0
+
+      // if a selection base is specified (e.g. when appending /# above) use that
+      if (selection_base >= 0) {
+        selectionStart = selection_base
+        selectionEnd = text.length
+      }
 
       // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
