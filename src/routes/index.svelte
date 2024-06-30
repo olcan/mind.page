@@ -5136,14 +5136,12 @@
       return
     }
 
-    // attempt deletion of emptied out item, restore saved/saving text otherwise
+    // attempt deletion of emptied out item, restore text (just before delete) otherwise
     // note delete may be subject to confirmation (see deleteItem for default conditions)
     if (item.text.trim().length == 0) {
       if (!deleteItem(index)) {
-        item.text = item.saving ? item.savingText : item.savedText
-        // invalidate item elem in case saved/saving text was rendered/cached
-        _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
-        textArea(item.index)?.focus() // refocus on editor
+        item.text = textArea(item.index).value // should work as long as delete is handled sync
+        textArea(item.index).focus() // refocus on editor
         item.editing = true
       }
       return // item deleted
