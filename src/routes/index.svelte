@@ -5128,6 +5128,19 @@
       return
     }
 
+    // attempt deletion of emptied out item, restore saved/saving text otherwise
+    // note delete may be subject to confirmation (see deleteItem for default conditions)
+    if (item.text.trim().length == 0) {
+      if (!deleteItem(index)) {
+        item.text = item.saving ? item.savingText : item.savedText
+        // invalidate item elem in case saved/saving text was rendered/cached
+        _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
+        textArea(item.index)?.focus() // refocus on editor
+        item.editing = true
+      }
+      return // item deleted
+    }
+
     if (editing) {
       // started editing
       editingItems.push(index)
@@ -5153,40 +5166,35 @@
         focusedItem = -1
         item.focused = false
       }
-      if (item.text.trim().length == 0) {
-        // delete empty item w/o confirmation
-        deleteItem(index)
-      } else {
-        const prev_name = item.name
-        itemTextChanged(index, item.text)
-        // clear _output and execute javascript unless cancelled
-        if (run && !cancelled && item.runnable /* just updated */) {
-          // clear *_output blocks as they should be re-generated
-          item.text = clearBlock(item.text, '\\w*?_output')
-          // remove *_log blocks so errors do not leave empty blocks
-          item.text = removeBlock(item.text, '\\w*?_log')
-          itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
-          appendJSOutput(index)
-        }
-        // remember item for resumeLastEdit
-        // if (!cancelled) lastEditItem = item.id;
-        lastEditItem = item.id
-        // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
-        if (e?.altKey && e?.metaKey) item.time = item.savedTime
-        if (
-          !cancelled &&
-          (item.time != item.savedTime || item.text != item.savedText || !_.isEqual(item.attr, item.savedAttr))
-        )
-          saveItem(item.id)
-
-        // if item was renamed while being targeted (navigated), update query to new name
-        if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
-          replaceStateOnEditorChange = true // do not create new entry
-          editorText = item.name
-        }
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(editorText) // item time and/or text may have changed
+      const prev_name = item.name
+      itemTextChanged(index, item.text)
+      // clear _output and execute javascript unless cancelled
+      if (run && !cancelled && item.runnable /* just updated */) {
+        // clear *_output blocks as they should be re-generated
+        item.text = clearBlock(item.text, '\\w*?_output')
+        // remove *_log blocks so errors do not leave empty blocks
+        item.text = removeBlock(item.text, '\\w*?_log')
+        itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
+        appendJSOutput(index)
       }
+      // remember item for resumeLastEdit
+      // if (!cancelled) lastEditItem = item.id;
+      lastEditItem = item.id
+      // if alt/option+cmd are held together, restore (i.e. do not modify) savedTime
+      if (e?.altKey && e?.metaKey) item.time = item.savedTime
+      if (
+        !cancelled &&
+        (item.time != item.savedTime || item.text != item.savedText || !_.isEqual(item.attr, item.savedAttr))
+      )
+        saveItem(item.id)
+
+      // if item was renamed while being targeted (navigated), update query to new name
+      if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
+        replaceStateOnEditorChange = true // do not create new entry
+        editorText = item.name
+      }
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange(editorText) // item time and/or text may have changed
 
       // NOTE: we do not focus back up on the editor unless we are already at the top
       //       (especially bad on iphone due to lack of keyboard focus benefit)
