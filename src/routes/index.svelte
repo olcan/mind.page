@@ -4989,7 +4989,10 @@
     if (index == undefined) return // item deleted
     let item = items[index]
     if (!item.savedId) return // saveItem is for existing items that already have their permanent id
-    item.saving = true
+    // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
+    // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
+    const silent = item.text == item.savedText /* && item.time == item.savedTime */
+    if (!silent) item.saving = true
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
         item.savingText = item.text
