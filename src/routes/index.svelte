@@ -3287,7 +3287,7 @@
       'tagsAlt',
       'lctext',
       'tagsExpanded',
-      'missingTags', // TODO
+      'missingTags',
       'text',
     ])
     // note this call may use item.expanded.item.* to update certain global state, e.g. tagCounts
@@ -4765,7 +4765,11 @@
             // if (!item.editing) onSaveDone(item.id, itemToSave)
             onSaveDone(item.id, itemToSave).finally(() => {
               // for consistency with saveItem, we have to clear saving flag unless there is a saveTask
-              if (!item.saveTask) item.saving = false
+              if (!item.saveTask) {
+                item.saving = false
+                item.savingText = null // required when saving == false
+                items = items // trigger svelte render for saving state change
+              }
             })
 
             // also save to history (using persistent doc.id) ...
@@ -4800,7 +4804,6 @@
     item.savedTime = savedItem.time
     item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
     item.savedText = savedItem.text
-    item.savingText = null
     items[index] = item // trigger dom update
   }
 
@@ -4988,10 +4991,13 @@
     // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
     // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
     const silent = item.text == item.savedText /* && item.time == item.savedTime */
-    if (!silent) item.saving = true
+    if (!silent) {
+      item.saving = true
+      item.savingText = item.text // required when saving == true
+      items = items // trigger svelte render for saving state change
+    }
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
-        item.savingText = item.text
         let itemToSave = {
           // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
           // user: user.uid, // allows us to use set() instead of update()
@@ -5004,7 +5010,6 @@
           return
         }
 
-        items = items // trigger svelte render for saving state change
         itemToSave = await encryptItem(itemToSave)
         await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
         await onSaveDone(item.id, itemToSave)
@@ -5020,6 +5025,8 @@
         if (item.saveTask == task) {
           delete item.saveTask
           item.saving = false
+          item.savingText = null // required when saving == false
+          items = items // trigger svelte render for saving state change
         }
       }))
 
