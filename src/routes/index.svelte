@@ -342,6 +342,8 @@
     window['_resolve_tags'] = resolveTags
     window['_resolve_tag'] = resolveTag
     window['_special_tag'] = isSpecialTag
+    window['_extract_block'] = extractBlock
+    window['_replace_block'] = (text, type, replacer) => text.replace(blockRegExp(type), replacer)
     window['_stringify'] = stringify
     window['_byte_stringify'] = byte_stringify
     // encoding/decoding/hashing functions
