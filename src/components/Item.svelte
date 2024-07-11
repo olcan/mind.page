@@ -1305,14 +1305,17 @@
       })
     })
 
-    // linkify urls & tags in code comments (regexes from util.js)
+    // linkify urls & tags in code comments (regexes from util.js, labeling logic from replaceURLs in toHTML)
     const link_urls = text =>
       text.replace(
         /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
         (m, pfx, href) => {
+          const obj = new URL(href)
+          let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
+          if (obj.host == 'go') label = obj.host + obj.pathname // include path for go/... links
           return (
             `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
-            `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${href}</a>`
+            `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
           )
         }
       )
