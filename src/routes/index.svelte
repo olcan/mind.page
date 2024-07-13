@@ -454,7 +454,12 @@
       return !!item(this.id).running
     }
     set running(running) {
-      item(this.id).running = running
+      const _item = item(this.id)
+      if (_item.running != running) {
+        _item.running = running
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(editorText) // trigger re-ranking since running can affect it
+      }
     }
     get saving(): boolean {
       return !!item(this.id).saving
