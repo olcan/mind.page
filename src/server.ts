@@ -9,6 +9,7 @@ import fs from 'fs'
 import os from 'os'
 import ip from 'ip'
 import crypto from 'crypto'
+import mime from 'mime'
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -33,7 +34,7 @@ function get_hostname(req) {
   const hostport = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
   return (globalThis.hostname = hostport
     .replace(/:.+$/, '')
-    .replace(/^(?:127\.0\.0\.1|local\.dev|192\.168\.86\.10\d)$/, 'localhost'))
+    .replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..*|192\.168\.86\.10\d)$/, 'localhost'))
 }
 
 // helper to determine host directory
@@ -128,6 +129,18 @@ const sapper_server = express().use(
       res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
       res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
+    } else if (hostname == 'localhost' && req.path.startsWith('/file_abs/')) {
+      const abspath = req.path.slice(9)
+      // res.sendFile(abspath)
+      fs.readFile(abspath, 'utf8', (err, data) => {
+        if (err) {
+          console.error(err)
+          res.status(400).send('could not find ' + abspath + ';' + err)
+        } else {
+          res.type(mime.getType(abspath))
+          res.send(data)
+        }
+      })
     } else if (hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
       const [m, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
       if (!client_id || !req_path) {
@@ -225,6 +238,14 @@ const sapper_server = express().use(
       // console.debug('proxying to', backend)
       return backend
     },
+    // on: {
+    //   error: (error, req, res, target) => {
+    //     console.error(error)
+    //   },
+    //   proxyRes: (proxyRes, req, res) => {
+    //     console.debug(req.headers, proxyRes.headers)
+    //   },
+    // },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
     // logger: console,
