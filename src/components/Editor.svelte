@@ -1046,6 +1046,7 @@
     line-height: 24px;
     caret-color: red;
     overflow: hidden;
+    line-break: anywhere;
   }
   .backdrop {
     /* color: transparent; */
@@ -1058,7 +1059,7 @@
     border: 1px dashed #444;
     box-sizing: border-box;
     white-space: pre-wrap;
-    word-wrap: break-word;
+    line-break: anywhere;
     opacity: 0.9;
   }
   .editor.focused > .backdrop {
