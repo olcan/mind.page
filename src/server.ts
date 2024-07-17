@@ -29,9 +29,9 @@ const firebase_admin = admin.initializeApp(firebaseConfig)
 // also sets globalThis.hostname for easy access from other files (e.g. index.svelte)
 // rewrites 127.0.0.1 and local.dev as localhost for convenience in localhost checks
 // also rewrites 192.168.86.10x to localhost for convenience in localhost checks
-function get_hostname(req) {
+function get_hostname(hostport) {
   // see https://stackoverflow.com/a/51200572 about x-forwarded-host
-  const hostport = (req.headers['x-forwarded-host'] || req.headers['host']).toString()
+  toString()
   return (globalThis.hostname = hostport
     .replace(/:.+$/, '')
     .replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..*|192\.168\.86\.10\d)$/, 'localhost'))
@@ -79,7 +79,9 @@ const sapper_server = express().use(
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     // console.debug('handling path', req.path)
-    const hostname = get_hostname(req)
+    const hostport = req.headers['x-forwarded-host'] || req.headers['host']
+    const hostname_orig = hostport.replace(/:\d+$/, '')
+    const hostname = get_hostname(hostport)
     const hostdir = get_hostdir(hostname)
     // serve /manifest.json from any path (to allow scoping in manifest)
     if (req.path.endsWith('/manifest.json')) {
@@ -88,8 +90,8 @@ const sapper_server = express().use(
         scope: scope,
         // NOTE: start_url is not allowed to be outside scope, and if there is redirect it can force address bar for app
         start_url: scope,
-        name: hostname + scope.slice(0, -1),
-        short_name: hostname + scope.slice(0, -1),
+        name: hostname_orig + scope.slice(0, -1),
+        short_name: hostname_orig + scope.slice(0, -1),
         display: scope.includes('f')
           ? 'fullscreen'
           : scope.includes('s')
