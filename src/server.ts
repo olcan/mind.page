@@ -34,7 +34,7 @@ function get_hostname(hostport) {
   toString()
   return (globalThis.hostname = hostport
     .replace(/:.+$/, '')
-    .replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..*|192\.168\.86\.10\d)$/, 'localhost'))
+    .replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+|192\.168\.86\.10\d)$/, 'localhost'))
 }
 
 // helper to determine host directory

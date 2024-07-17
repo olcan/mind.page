@@ -7846,7 +7846,7 @@
   const hostname =
     typeof location == 'undefined'
       ? globalThis.hostname
-      : location.hostname.replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..*?|192\.168\.86\.10\d)$/, 'localhost')
+      : location.hostname.replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+?|192\.168\.86\.10\d)$/, 'localhost')
 
   // custom directory for some static files, based on hostname
   const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
