@@ -61,12 +61,12 @@
           if (!options) {
             const output = pending_outputs.get(promise)
             pending_outputs.delete(promise)
-            resolve_visible(output)
-            promise_visible = null
-            resolve_visible = null
-            _visible = false
             lastActiveElement?.focus()
             lastActiveElement = null
+            _visible = false
+            promise_visible = null
+            resolve_visible(output)
+            resolve_visible = null
             return
           }
           ;({
@@ -90,6 +90,7 @@
           ready_image_count = 0
           _visible = true
           lastActiveElement ??= document.activeElement
+          ;(document.activeElement as HTMLElement)?.blur()
 
           // hacky "fix" for Chrome autofill onchange bug https://stackoverflow.com/a/62199697
           // chrome fails to trigger onchange and enable confirm button despite autofill
@@ -188,12 +189,12 @@
     }
     // resolve and close any visible modal
     if (_visible) {
-      resolve_visible(output)
-      promise_visible = null
-      resolve_visible = null
-      _visible = false
       lastActiveElement?.focus()
       lastActiveElement = null
+      _visible = false
+      promise_visible = null
+      resolve_visible(output)
+      resolve_visible = null
     }
     return promise
   }
@@ -212,12 +213,12 @@
     onConfirm(output)
     // resolve and close visible modal (unless alredy closed in onConfirm)
     if (_visible) {
-      resolve_visible(output)
-      promise_visible = null
-      resolve_visible = null
-      _visible = false
       lastActiveElement?.focus()
       lastActiveElement = null
+      _visible = false
+      promise_visible = null
+      resolve_visible(output)
+      resolve_visible = null
     }
   }
 
@@ -228,12 +229,12 @@
     onCancel()
     // resolve and close visible modal
     const output = images ? [] : input != null ? null : false
-    resolve_visible(output)
-    promise_visible = null
-    resolve_visible = null
-    _visible = false
     lastActiveElement?.focus()
     lastActiveElement = null
+    _visible = false
+    promise_visible = null
+    resolve_visible(output)
+    resolve_visible = null
   }
 
   let modaldiv
