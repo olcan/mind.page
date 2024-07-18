@@ -1059,7 +1059,6 @@
     border: 1px dashed #444;
     box-sizing: border-box;
     white-space: pre-wrap;
-    line-break: anywhere;
     opacity: 0.9;
   }
   .editor.focused > .backdrop {
