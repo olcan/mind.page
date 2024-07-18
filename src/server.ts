@@ -52,6 +52,48 @@ paths.push('/')
 
 const sapper_server = express().use(
   paths,
+
+  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
+  // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
+  // redirects are followed instead of exposed to server for robust CORS bypass
+  // note // in https?:// can be rewritted to / by browser or intemediaries
+  // websockets can also be proxied
+  createProxyMiddleware({
+    changeOrigin: true,
+    pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
+    pathRewrite: (path, req) => {
+      path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
+      if (!path.startsWith('/')) path = '/' + path
+      // console.debug('proxy path', path)
+      return path
+    },
+    router: req => {
+      const backend = req.url
+        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
+        .pop()
+        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
+      // console.debug('proxying to', backend)
+      return backend
+    },
+    on: {
+      proxyReq: (proxyReq, req) => {
+        // note this fixes missing body issue in some cases (e.g. to tiny0.duckdns.org) but not in all cases (e.g. claude) and in fact can conceal the missing body error (e.g. for claude, which returns simply 400 with html that says only "cloudflare")
+        // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
+        fixRequestBody(proxyReq, req)
+        // console.debug(proxyReq.headers)
+      },
+      // proxyRes: (proxyRes, req, res) => {
+      //   console.debug(proxyRes.headers)
+      // },
+      // error: (error, req, res, target) => {
+      //   console.error(error)
+      // },
+    },
+    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
+    ws: true, // proxy websockets also
+    // logger: console,
+  }),
+
   compression({ threshold: 0 }),
   sirv('static', {
     dev,
@@ -202,42 +244,6 @@ const sapper_server = express().use(
       next()
     }
   },
-
-  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
-  // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
-  // redirects are followed instead of exposed to server for robust CORS bypass
-  // note // in https?:// can be rewritted to / by browser or intemediaries
-  // websockets can also be proxied
-  createProxyMiddleware({
-    changeOrigin: true,
-    pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
-    pathRewrite: (path, req) => {
-      path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
-      if (!path.startsWith('/')) path = '/' + path
-      // console.debug('proxy path', path)
-      return path
-    },
-    router: req => {
-      const backend = req.url
-        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
-        .pop()
-        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
-      // console.debug('proxying to', backend)
-      return backend
-    },
-    on: {
-      proxyReq: fixRequestBody, // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
-      // proxyRes: (proxyRes, req, res) => {
-      //   console.debug(req.headers, proxyRes.headers)
-      // },
-      // error: (error, req, res, target) => {
-      //   console.error(error)
-      // },
-    },
-    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
-    ws: true, // proxy websockets also
-    // logger: console,
-  }),
 
   // parse cookies
   cookieParser(),
