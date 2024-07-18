@@ -203,7 +203,7 @@ const sapper_server = express().use(
     }
   },
 
-  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware/tree/v2.0.4#readme
+  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
   // redirects are followed instead of exposed to server for robust CORS bypass
   // note // in https?:// can be rewritted to / by browser or intemediaries
