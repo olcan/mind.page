@@ -10,6 +10,7 @@ import os from 'os'
 import ip from 'ip'
 import crypto from 'crypto'
 import mime from 'mime'
+import { canonicalizeHost, getHostDir } from './util.js'
 
 const { PORT, NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -24,23 +25,6 @@ const events = {} // recorded fs events for /watch/... requests
 import { firebaseConfig } from '../firebase-config.js'
 const admin = require('firebase-admin')
 const firebase_admin = admin.initializeApp(firebaseConfig)
-
-// helper to determine host name
-// also sets globalThis.hostname for easy access from other files (e.g. index.svelte)
-// rewrites 127.0.0.1 and local.dev as localhost for convenience in localhost checks
-// also rewrites 192.168.86.10x to localhost for convenience in localhost checks
-function get_hostname(hostport) {
-  // see https://stackoverflow.com/a/51200572 about x-forwarded-host
-  toString()
-  return (globalThis.hostname = hostport
-    .replace(/:.+$/, '')
-    .replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+|192\.168\.86\.10\d)$/, 'localhost'))
-}
-
-// helper to determine host directory
-function get_hostdir(hostname) {
-  return ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
-}
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
 // see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain
@@ -81,8 +65,9 @@ const sapper_server = express().use(
     // console.debug('handling path', req.path)
     const hostport = req.headers['x-forwarded-host'] || req.headers['host']
     const hostname_orig = hostport.replace(/:\d+$/, '')
-    const hostname = get_hostname(hostport)
-    const hostdir = get_hostdir(hostname)
+    // note globalThis.hostname is used in index.svelte on server side
+    const hostname = (globalThis.hostname = canonicalizeHost(hostport))
+    const hostdir = getHostDir(hostname)
     // serve /manifest.json from any path (to allow scoping in manifest)
     if (req.path.endsWith('/manifest.json')) {
       const scope = req.originalUrl.replace(/manifest\.json[?]?.*$/, '')

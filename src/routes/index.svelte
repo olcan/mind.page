@@ -275,6 +275,10 @@
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
+  // note globalThis.hostname should be defined on server (see server.ts)
+  const hostname = globalThis.hostname || canonicalizeHost(location.hostname)
+  const hostdir = getHostDir(hostname)
+
   // define window properties and functions
   if (isClient) {
     Object.defineProperty(window, '_user', {
@@ -319,6 +323,8 @@
     window['_create'] = _create
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
+    window['_host'] = hostname
+    window['_is_local'] = host => canonicalizeHost(host) == 'localhost'
     window['_modal'] = _modal
     window['_modal_close'] = _modal_close
     window['_modal_update'] = _modal_update
@@ -5863,6 +5869,8 @@
 
   import { onMount } from 'svelte'
   import {
+    canonicalizeHost,
+    getHostDir,
     extractBlock,
     blockRegExp,
     tagRegex,
@@ -7841,15 +7849,6 @@
     e.stopPropagation()
     ;(e.target as HTMLElement).classList.toggle('intro')
   }
-
-  // retrieve host name, via globalThis.request on server side (see server.ts)
-  const hostname =
-    typeof location == 'undefined'
-      ? globalThis.hostname
-      : location.hostname.replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+?|192\.168\.86\.10\d)$/, 'localhost')
-
-  // custom directory for some static files, based on hostname
-  const hostdir = ['mind.page', 'mindbox.io', 'olcan.com'].includes(hostname) ? hostname : 'other'
 
   // favicon version to force updates, especially on iOS
   const favicon_version = 1

@@ -5,6 +5,17 @@ export function numberWithCommas(x) {
   return parts.join('.')
 }
 
+// canonicalize host name given a host(:port) string
+// get host from url using new URL(url).host
+// mainly to canonicalize/detect 'localhost'
+export function canonicalizeHost(host) {
+  return host.replace(/:.+$/, '').replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+|192\.168\.86\.10\d)$/, 'localhost')
+}
+
+export function getHostDir(host) {
+  return ['mind.page', 'mindbox.io', 'olcan.com'].includes(host) ? host : 'other'
+}
+
 export function blockRegExp(type_regex) {
   if (type_regex.source) type_regex = type_regex.source // get source string if passed regex
   // sanity check against patterns that can match across multiple blocks
