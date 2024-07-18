@@ -1,6 +1,6 @@
 import sirv from 'sirv'
 import express from 'express'
-import { createProxyMiddleware } from 'http-proxy-middleware'
+import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import * as sapper from '@sapper/server'
@@ -225,14 +225,15 @@ const sapper_server = express().use(
       // console.debug('proxying to', backend)
       return backend
     },
-    // on: {
-    //   error: (error, req, res, target) => {
-    //     console.error(error)
-    //   },
-    //   proxyRes: (proxyRes, req, res) => {
-    //     console.debug(req.headers, proxyRes.headers)
-    //   },
-    // },
+    on: {
+      proxyReq: fixRequestBody, // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
+      // proxyRes: (proxyRes, req, res) => {
+      //   console.debug(req.headers, proxyRes.headers)
+      // },
+      // error: (error, req, res, target) => {
+      //   console.error(error)
+      // },
+    },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
     // logger: console,
