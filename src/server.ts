@@ -77,9 +77,11 @@ const sapper_server = express().use(
     },
     on: {
       proxyReq: (proxyReq, req) => {
-        // note this fixes missing body issue in some cases (e.g. to tiny0.duckdns.org) but not in all cases (e.g. claude) and in fact can conceal the missing body error (e.g. for claude, which returns simply 400 with html that says only "cloudflare")
+        // note this fixes missing body issue in some cases (e.g. to tiny0.duckdns.org) but not in all cases (e.g. claude) and in fact can conceal the missing body error (e.g. for claude, which returns simply 400 with html that says only "cloudflare"); we have confirmed the body is "fixed" in both cases and there is no need to call proxyReq.end (as some do) so the problem must be about something else (vs "concealed" missing body), likely a security/cors issue with intentionally obscured responses
         // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
-        fixRequestBody(proxyReq, req)
+        // also https://github.com/chimurai/http-proxy-middleware/issues/40
+        // also https://github.com/chimurai/http-proxy-middleware/blob/45fce2ccb80b8617773b92a8dc563767fb7e2a61/src/handlers/fix-request-body.ts#L9
+        fixRequestBody(proxyReq, req) // see http-proxy-middleware > dist > handlers > fix-request-body.js
         // console.debug(proxyReq.headers)
       },
       // proxyRes: (proxyRes, req, res) => {
