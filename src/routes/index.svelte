@@ -7571,7 +7571,10 @@
     // note focused element is not always restored as expected, so we restore manually on re-focus
     if (!focused && was_focused) lastFocusedElem = document.activeElement
     // note focus_time tracks interactions beyond focused=true
-    if (focused) focus_time = instance.focus_time = Date.now()
+    if (focused) {
+      focus_time = instance.focus_time = Date.now()
+      primary = true // proactively mark self primary until global snapshot
+    }
     if (focused && !was_focused) {
       onFocused() // handle change to focused=true
       // note delayed dispatch seems necessary in case there is a pending click that will update focus, e.g. when clicking inside editor after a find-on-page that temporarily removes focus from the page (to the browser)
@@ -7603,6 +7606,7 @@
   function focus() {
     if (!document.hasFocus()) return // decline focus (and updating focus_time) unless document has focus
     focus_time = instance.focus_time = Date.now() // note focus_time tracks interactions beyond focused=true
+    primary = true // proactively mark self primary until global snapshot
     if (!ios && !android) {
       onFocus() // focus based on document.hasFocus()
       return
