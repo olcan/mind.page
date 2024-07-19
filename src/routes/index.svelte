@@ -7844,7 +7844,8 @@
     const replace_dialog = method => {
       const _dialog = window[method] as any
       window[method] = function (...args) {
-        console.warn(`window.${method} can stop working on iOS devices; consider using _modal_${method} instead`)
+        if (ios)
+          console.warn(`window.${method} can stop working on iOS devices; consider using _modal_${method} instead`)
         return _dialog(...args)
       } as any
     }
