@@ -1,6 +1,7 @@
 <script lang="ts">
   export let id_suffix = 'editor'
   export let text = ''
+  export let editorText = ''
   export let focused = false
   export let editable = true
   export let showButtons = false
@@ -168,7 +169,7 @@
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
         // same as in link_urls above, see comments there
-        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
+        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
@@ -301,7 +302,7 @@
     // note for simplicity we do not yet have a separate url regex for escaped html
     const link_urls = text =>
       text.replace(
-        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
+        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
         (m, pfx, url) => `${pfx}<a>${url}</a>`
       )
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
@@ -400,7 +401,7 @@
         textarea.focus()
         document.execCommand('insertText', false, tags)
         onInput()
-        if (create) onDone(text, { code: 'Enter' })
+        if (create) onDone(editorText, { code: 'Enter' })
       },
     })
   }
@@ -438,7 +439,7 @@
         textarea.selectionStart = textarea.selectionEnd = caretPos - 1
         e.preventDefault()
         e.stopPropagation()
-        onDone((text = textarea.value), e)
+        onDone((editorText = textarea.value), e)
         return
       }
       // workaround for "Windows" key on Hacker's Keyboard on android
@@ -614,7 +615,7 @@
         e.preventDefault()
         const run = key == 'Enter' && (e.metaKey || e.ctrlKey)
         createClosure = () => {
-          onDone((text = textarea.value), e, false, run)
+          onDone((editorText = textarea.value), e, false, run)
           createClosure = createClosureModifierKeys = null
         }
         createClosureModifierKeys = {
@@ -632,7 +633,7 @@
         e.preventDefault()
         const run = key == 'Enter' && (e.metaKey || e.ctrlKey)
         createClosure = () => {
-          onDone((text = textarea.value), e, false, run)
+          onDone((editorText = textarea.value), e, false, run)
           createClosure = createClosureModifierKeys = null
         }
         createClosureModifierKeys = {
@@ -714,7 +715,7 @@
     if (key == 'Escape') {
       e.preventDefault()
       if (!onEscape(e)) return // escape was handled, should be ignored
-      onDone(text /* maintain text */, e, true /* cancelled */)
+      onDone(editorText, e, true /* cancelled */)
       return
     }
 
@@ -734,7 +735,7 @@
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if (key == 'Backspace' && (e.metaKey || e.ctrlKey)) {
       if (!cancelOnDelete) e._delete = true // use this flag instead of clearing text, which is hard to cancel
-      onDone(text, e, cancelOnDelete) // if cancelled, item will not be deleted
+      onDone(editorText, e, cancelOnDelete) // if cancelled, item will not be deleted
       e.preventDefault()
       return
     }
@@ -824,12 +825,24 @@
     }
   }
 
+  function insertZWSP(text) {
+    return text.replace(
+      /(^|\s|\()(go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)([^\s)<>:]*[^\s)<>:,.])/gi,
+      (m, pfx, domain, path) =>
+        pfx + domain.replace(/\/$/, '/\u200B') + path.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, '$1\u200B')
+    )
+  }
+
+  function removeZWSP(text) {
+    return text.replaceAll('\u200B', '')
+  }
+
   function onCopy(e: ClipboardEvent) {
     e.preventDefault()
     e.stopPropagation()
     const data = e.clipboardData || e['originalEvent'].clipboardData
     let text = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd)
-    // text = text.replaceAll('\u200B', '') // remove any ZWSPs
+    text = removeZWSP(text)
     data.setData('text/plain', text)
   }
 
@@ -849,13 +862,7 @@
           }
           // replace tabs with double-space
           text = text.replace(/\t/g, '  ')
-
-          // insert zero-width spaces (ZWSPs) into urls to emulate break-all and prevent undesirable behavior of break-word, e.g. where long urls in bullet lists would wrap on the left side and leave bullet line blank. note we have to remove the these in onCopy (see above)
-          // text = text.replace(
-          //   /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
-          //   (m, pfx, url) => pfx + (url.includes('\u200B') ? url : url.replace(/(.{10})/g, '$1\u200B'))
-          // )
-
+          text = insertZWSP(text)
           // NOTE: on android getAsString causes a mysterious reset selectionStart->selectionEnd
           textarea.selectionStart = selectionStart // fix for android
           document.execCommand('insertText', false, text)
@@ -895,7 +902,8 @@
       lastInputInsertText = e.data
       lastInputInsertTextTime = Date.now()
     }
-    text = textarea.value // no trimming until onDone
+    // insert ZWSP and update editorText as we edit
+    editorText = textarea.value = insertZWSP(textarea.value)
     updateTextDivs()
     onEdited(textarea.value)
   }
@@ -903,7 +911,7 @@
   function onCreate(e) {
     e.stopPropagation()
     e.preventDefault()
-    onDone(text, { code: 'Enter' })
+    onDone(editorText, { code: 'Enter' })
   }
 
   function onClear(e) {
@@ -1032,7 +1040,7 @@
     {spellcheck}
     disabled={!editable}
     class:editable
-    value={text}
+    value={insertZWSP(text)}
   />
   {#if showButtons}
     <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->

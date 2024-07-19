@@ -60,6 +60,7 @@
   export let runnable: boolean
 
   export let text: string
+  export let editorText: string
   export let expanded: any
   export let hash: string
   export let deephash: string
@@ -193,7 +194,7 @@
   function onDeleteClick(e) {
     e.stopPropagation()
     e.preventDefault()
-    text = '' // indicates deletion
+    editorText = text = '' // indicates deletion
     onEditing(index, (editing = false), false /* cancelled */, false /* run */, e)
   }
 
@@ -1703,6 +1704,7 @@
         id_suffix={id}
         bind:this={editor}
         bind:text
+        bind:editorText
         bind:focused
         bind:selectionStart
         bind:selectionEnd

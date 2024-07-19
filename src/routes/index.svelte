@@ -3326,6 +3326,12 @@
     remote = false
   ) {
     const item = items[index]
+
+    if (text.match(/\u200B/)) {
+      console.warn('removing unexpected ZWSPs in item text')
+      item.text = text = text.replace(/\u200B/g, '') // remove any ZWSPs
+    }
+
     // console.debug("itemTextChanged", item.name);
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
@@ -4645,6 +4651,11 @@
 
     const text_modified = text != editorText // used below, e.g. to disinguish generated vs typed text
 
+    if (text.match(/\u200B/)) {
+      console.warn('attempted to create item w/ ZWSPs')
+      text = text.replace(/\u200B/g, '') // remove any ZWSPs
+    }
+
     let itemToSave = { user: user.uid, time, attr, text }
     let item = initItemState(_.clone(itemToSave), 0, {
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
@@ -5001,6 +5012,10 @@
     if (index == undefined) return // item deleted
     let item = items[index]
     if (!item.savedId) return // saveItem is for existing items that already have their permanent id
+    if (item.text.match(/\u200B/)) {
+      console.warn('attempted to save item w/ ZWSPs')
+      item.text = item.text.replace(/\u200B/g, '') // remove any ZWSPs
+    }
     // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
     // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
     const silent = item.text == item.savedText /* && item.time == item.savedTime */
@@ -5109,6 +5124,11 @@
     // console.debug(`item ${index} editing: ${editing}, editingItems:${editingItems}, focusedItem:${focusedItem}`);
     let item = items[index]
 
+    // copy item.text to item.editorText or vice versa
+    // make sure to remove any ZWSPs from editorText
+    if (editing) item.editorText = item.text
+    else item.text = item.editorText.replace(/\u200B/g, '')
+
     // if cancelled, restore savedText (or savingText if saving)
     // we do not restore time so item remains "soft touched"
     // we also do not restore attr
@@ -5117,6 +5137,7 @@
         // item.time = item.savedTime;
         // item.attr = _.cloneDeep(item.savedAttr);
         item.text = item.saving ? item.savingText : item.savedText
+        item.editorText = item.text
         // invalidate item elem in case saved/saving text was rendered/cached
         _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
       }
@@ -5144,7 +5165,7 @@
 
     // check for deletion triggered by editor, which can be cancelled via confirmation
     // we only confirm if item is not already emptied out, which triggers deletion automatically
-    if (item.text.trim() && e['_delete']) {
+    if (item.text.trim() && e?.['_delete']) {
       if (confirm(`Delete ${item.uniqueLabel || 'item'}?`)) {
         item.text = '' // will trigger unconfirmed deletion below
       } else {
@@ -5386,6 +5407,10 @@
   function onItemSave(index: number = -1, e: MouseEvent = null) {
     if (index < 0) index = focusedItem
     const item = items[index]
+    if (!item.editing) return // should not happen unless editing
+    // fetch editor text into item.text, remove any ZWSPs
+    item.text = item.editorText.replace(/\u200B/g, '')
+
     // note we want to trigger itemTextChanged, which e.g. will trigger _on_item_change based on deephash change, NOT based on change from savedText, which can be somewhat arbitrary when saves get delayed/chained and cause user edits (to item.text) to get bundled into the delayed save without triggering itemTextChanged/_on_item_change; note coupling itemTextChanged/_on_item_change with user-triggered save is pretty intuitive even though technically it is not necessary (e.g. triggering could always get delayed until close of editing as a rule)
     // if (item.text != item.savedText) itemTextChanged(index, item.text)
     const prev_name = item.name // to detect renaming below
@@ -8022,7 +8047,8 @@
                 onNext={onNextItem}
                 {onMacrosExpanded}
                 expanded={item.expanded}
-                bind:text={item.text}
+                text={item.text}
+                bind:editorText={item.editorText}
                 bind:editing={item.editing}
                 bind:focused={item.focused}
                 editable={item.editable}
