@@ -1065,9 +1065,9 @@
     overflow: hidden;
     word-break: break-word; /* default for textarea */
   }
-  .editor:has(span.link) :is(.backdrop, textarea) {
+  /* .editor:has(span.link) :is(.backdrop, textarea) {
     word-break: break-all;
-  }
+  } */
 
   .backdrop {
     /* color: transparent; */
