@@ -785,6 +785,10 @@
 
     read(type: string = '', options: object = {}) {
       const item = items[this.index]
+      if (item.text.includes('\u200B')) {
+        console.warn(`item.read: removing ZWSPs in ${item.name}`)
+        item.text = item.text.replaceAll('\u200B', '')
+      }
       let content = []
       // include dependencies in order, _before_ item itself
       if (options['include_deps']) {
@@ -3327,9 +3331,9 @@
   ) {
     const item = items[index]
 
-    if (text.match(/\u200B/)) {
-      console.warn('removing unexpected ZWSPs in item text')
-      item.text = text = text.replace(/\u200B/g, '') // remove any ZWSPs
+    if (text.includes('\u200B')) {
+      console.warn(`itemTextChanged: removing ZWSPs in ${item.name}`)
+      item.text = text = text.replaceAll('\u200B', '')
     }
 
     // console.debug("itemTextChanged", item.name);
@@ -4651,9 +4655,9 @@
 
     const text_modified = text != editorText // used below, e.g. to disinguish generated vs typed text
 
-    if (text.match(/\u200B/)) {
-      console.warn('attempted to create item w/ ZWSPs')
-      text = text.replace(/\u200B/g, '') // remove any ZWSPs
+    if (text.includes('\u200B')) {
+      console.warn('onEditorDone: removing ZWSPs in new item text')
+      text = text.replaceAll('\u200B', '')
     }
 
     let itemToSave = { user: user.uid, time, attr, text }
@@ -5012,9 +5016,9 @@
     if (index == undefined) return // item deleted
     let item = items[index]
     if (!item.savedId) return // saveItem is for existing items that already have their permanent id
-    if (item.text.match(/\u200B/)) {
-      console.warn('attempted to save item w/ ZWSPs')
-      item.text = item.text.replace(/\u200B/g, '') // remove any ZWSPs
+    if (item.text.includes('\u200B')) {
+      console.warn(`saveItem: removing ZWSPs in ${item.name}`)
+      item.text = item.text.replaceAll('\u200B', '')
     }
     // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
     // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
