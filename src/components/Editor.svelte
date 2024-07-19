@@ -824,6 +824,15 @@
     }
   }
 
+  function onCopy(e: ClipboardEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const data = e.clipboardData || e['originalEvent'].clipboardData
+    let text = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd)
+    // text = text.replaceAll('\u200B', '') // remove any ZWSPs
+    data.setData('text/plain', text)
+  }
+
   function onPaste(e: ClipboardEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -840,6 +849,13 @@
           }
           // replace tabs with double-space
           text = text.replace(/\t/g, '  ')
+
+          // insert zero-width spaces (ZWSPs) into urls to emulate break-all and prevent undesirable behavior of break-word, e.g. where long urls in bullet lists would wrap on the left side and leave bullet line blank. note we have to remove the these in onCopy (see above)
+          // text = text.replace(
+          //   /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
+          //   (m, pfx, url) => pfx + (url.includes('\u200B') ? url : url.replace(/(.{10})/g, '$1\u200B'))
+          // )
+
           // NOTE: on android getAsString causes a mysterious reset selectionStart->selectionEnd
           textarea.selectionStart = selectionStart // fix for android
           document.execCommand('insertText', false, text)
@@ -1008,6 +1024,7 @@
     on:input={onInput}
     on:keydown={onKeyDown}
     on:keyup={onKeyUp}
+    on:copy={onCopy}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => onFocused((focused = false))}
@@ -1046,8 +1063,12 @@
     line-height: 24px;
     caret-color: red;
     overflow: hidden;
-    line-break: anywhere;
+    word-break: break-word; /* default for textarea */
   }
+  .editor:has(span.link) :is(.backdrop, textarea) {
+    word-break: break-all;
+  }
+
   .backdrop {
     /* color: transparent; */
     color: #ddd;
