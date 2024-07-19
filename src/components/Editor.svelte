@@ -902,8 +902,8 @@
       lastInputInsertText = e.data
       lastInputInsertTextTime = Date.now()
     }
-    // insert ZWSP and update editorText as we edit
-    editorText = textarea.value = insertZWSP(textarea.value)
+    // NOTE: we are unable to update textarea.value here, e.g. to enable wrapping of _typed_ urls, as it causes weird behavior of cursor for copy/paste and deletions, esp. of sections ending in a url
+    editorText = insertZWSP(textarea.value)
     updateTextDivs()
     onEdited(textarea.value)
   }
