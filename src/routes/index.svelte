@@ -5188,9 +5188,11 @@
 
     // check for deletion triggered by editor, which can be cancelled via confirmation
     // we only confirm if item is not already emptied out, which triggers deletion automatically
+    let confirm_delete = undefined // use default defined in deleteItem
     if (item.text.trim() && e?.['_delete']) {
       if (confirm(`Delete ${item.uniqueLabel || 'item'}?`)) {
-        item.text = '' // will trigger unconfirmed deletion below
+        item.text = item.editorText = ''
+        confirm_delete = false // already confirmed
       } else {
         item.editing = true
         return
@@ -5207,7 +5209,7 @@
     // attempt deletion of emptied out item, restore text (just before delete) otherwise
     // note delete may be subject to confirmation (see deleteItem for default conditions)
     if (item.text.trim().length == 0) {
-      if (!deleteItem(index)) {
+      if (!deleteItem(index, confirm_delete)) {
         item.text = textArea(item.index).value // should work as long as delete is handled sync
         textArea(item.index).focus() // refocus on editor
         item.editing = true
