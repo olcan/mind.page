@@ -463,7 +463,6 @@
       const _item = item(this.id)
       if (_item.running != running) {
         _item.running = running
-        // TODO: figure out why hideIndex stays small, also consider debounce as in itemExpansionChanged
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since running can affect it
       }
@@ -2650,6 +2649,8 @@
           b.target - a.target ||
           // editing mode (except log items)
           (!b.log && b.editing) - (!a.log && a.editing) ||
+          // running items
+          b.running - a.running ||
           // errors
           b.hasError - a.hasError ||
           // previewables
@@ -2858,7 +2859,18 @@
         console.error('invalid hideIndex', hideIndex, items.length)
       }
 
-      // console.debug(toggles, belowFoldIndex, hideIndexFromRanking, hideIndexForSession, hideIndexMinimal, hideIndex)
+      // console.debug(
+      //   toggles,
+      //   editorTextModified,
+      //   visibleRankingModified,
+      //   itemIds.slice(0, hideIndex),
+      //   belowFoldIndex,
+      //   hideIndexFromRanking,
+      //   hideIndexForSession,
+      //   hideIndexMinimal,
+      //   hideIndexIdeal,
+      //   hideIndex
+      // )
     }
 
     // note this check is already done in updateItemLayout but is also necessary here in case hideIndex was increased
