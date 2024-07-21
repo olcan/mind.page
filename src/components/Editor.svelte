@@ -731,9 +731,9 @@
       return
     }
 
-    // delete non-empty item with Cmd/Ctrl+Backspace
+    // delete non-empty item with Cmd/Ctrl+Backspace/Delete
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
-    if (key == 'Backspace' && (e.metaKey || e.ctrlKey)) {
+    if ((key == 'Backspace' || key == 'Delete') && (e.metaKey || e.ctrlKey)) {
       if (!cancelOnDelete) e._delete = true // use this flag instead of clearing text, which is hard to cancel
       onDone(editorText, e, cancelOnDelete) // if cancelled, item will not be deleted
       e.preventDefault()

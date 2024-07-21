@@ -7492,10 +7492,20 @@
       }
     }
 
-    // unedit last edited item (if any) on unmodified escape or unhandled backspace/arrowup
+    // delete target item with Cmd/Ctrl+Backspace/Delete
+    // if trimmed editor text matches a unique item, then delete that item
+    if ((key == 'Backspace' || key == 'Delete') && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      if (_exists(editorText.trim(), false /* allow_multiple */)) {
+        _item(editorText.trim()).delete(false /* skip confirmation */)
+        return
+      }
+    }
+
+    // unedit last edited item (if any) on unmodified (and so far unhandled) escape or backspace/delete/arrowup
     // if no edited items left, then clear editor (mindbox)
     // note Safari has a problem with Escape (but not say Backspace) propagating to auto-cancel window.confirm
-    if ((key == 'Escape' || key == 'Backspace' || key == 'ArrowUp') && !modified) {
+    if ((key == 'Escape' || key == 'Backspace' || key == 'Delete' || key == 'ArrowUp') && !modified) {
       e.preventDefault()
       if (editingItems.length) {
         // unedit the last edited item
@@ -7534,6 +7544,7 @@
       key == 'ArrowUp' /*&& e.metaKey*/ ||
       (key == 'ArrowDown' && e.metaKey) ||
       key == 'Backspace' ||
+      key == 'Delete' ||
       key == 'Tab' ||
       key == 'Escape'
     ) {
