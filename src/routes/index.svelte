@@ -5033,7 +5033,6 @@
     const index = indexFromId.get(id)
     if (index == undefined) return // item deleted
     let item = items[index]
-    if (!item.savedId) return // saveItem is for existing items that already have their permanent id
     if (item.text.includes('\u200B')) {
       console.warn(`saveItem: removing ZWSPs in ${item.name}`)
       item.text = item.text.replaceAll('\u200B', '')
@@ -5048,6 +5047,8 @@
     }
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
+        // wait for persistent id as long as item is not deleted in mean time
+        while (_exists(item.id) && !item.savedId) await _delay(1000)
         let itemToSave = {
           // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
           // user: user.uid, // allows us to use set() instead of update()
@@ -5107,8 +5108,8 @@
       return false
     }
     const item = items[index]
-    // by default, confirm if item has saved text (not new item) & unique label
-    confirm_delete ??= item.savedText && item.labelUnique
+    // by default, confirm if item has saved/saving text (not new item) & unique label
+    confirm_delete ??= (item.savedText || item.savingText) && item.labelUnique
     if (confirm_delete && !confirm(confirm_msg || `Delete ${item.name}?`)) return false
     const { name, contextLabel } = item
     itemTextChanged(index, '') // clears label, deps, etc
@@ -5128,7 +5129,7 @@
     deletedItems.unshift({
       time: item.savedTime,
       attr: _.cloneDeep(item.savedAttr),
-      text: item.savedText,
+      text: item.savingText ?? item.savedText, // use saving text if was saving
     }) // for /undelete
     if (!readonly && item.savedId) deleteDoc(doc(getFirestore(firebase), 'items', item.savedId)).catch(console.error)
     // if deleted item was being navigated, go back to previous state
@@ -5158,7 +5159,7 @@
       const discardEdits = () => {
         // item.time = item.savedTime;
         // item.attr = _.cloneDeep(item.savedAttr);
-        item.text = item.saving ? item.savingText : item.savedText
+        item.text = item.savingText ?? item.savedText
         item.editorText = item.text
         // invalidate item elem in case saved/saving text was rendered/cached
         _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
