@@ -463,6 +463,7 @@
       const _item = item(this.id)
       if (_item.running != running) {
         _item.running = running
+        // TODO: figure out why hideIndex stays small, also consider debounce as in itemExpansionChanged
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since running can affect it
       }
@@ -1856,10 +1857,13 @@
       }
       columnLastItem[item.column] = index
 
-      // mark item as "mover" if it changes column or position (within column), and is currently visible on page
+      // mark item as "mover" if it becomes visible or changes column or position (within column)
       // note visibility (hideIndex) can change between layouts, but we use mover flags only for immediately scrolling
-      item.mover = index < hideIndex && (item.column != item.lastColumn || item.pos != item.lastPos)
+      item.mover =
+        index < hideIndex && (!item.lastVisible || item.column != item.lastColumn || item.pos != item.lastPos)
+
       if (item.mover && index < topMovers[item.column]) topMovers[item.column] = index
+      item.lastVisible = index < hideIndex
       item.lastColumn = item.column
       item.lastPos = item.pos
     })
@@ -5161,6 +5165,7 @@
           }
         })
         item.editing = true // back to editing for now
+        item.editorText = item.text
         return
       }
       discardEdits()
@@ -6098,6 +6103,7 @@
     item.outerHeight = 0
     item.pos = -1 // layout position in column
     item.lastPos = -1
+    item.lastVisible = false
     // dependents (filled below)
     item.dependents = []
     item.dependentsString = ''
