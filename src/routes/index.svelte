@@ -3816,7 +3816,7 @@
     return item
   }
 
-  // note return value of this function is also returned to any programmatic context where commands are triggered, either directly via return value of _create, or indirectly via window._mindbox_return when triggered via MindBox using dispatched DOM events (e.g. as in MindBox.create); only allowed return values are undefined, null, or _Item, w/ strings in particular reserved for alerting errors returned as a string due to return_alerts option
+  // note return value of this function is also returned to any programmatic context where commands are triggered, either directly via return value of _create, or indirectly via window._mindbox_return when triggered via MindBox using dispatched DOM events; only allowed return values are undefined, null, or _Item, w/ strings in particular reserved for alerting errors returned as a string due to return_alerts option
   function handleCommandReturn(cmd, item, obj, run, edit, return_alerts, handleError) {
     if (typeof obj == 'string') {
       lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -3884,6 +3884,7 @@
   ) {
     editorText = text // in case invoked without setting editorText
     const key = e?.code || e?.key
+    window['_mindbox_event'] = e
     window['_mindbox_return'] = undefined // set on non-empty returns for MindBox.create
     if (cancelled) {
       if (key == 'Escape') {
