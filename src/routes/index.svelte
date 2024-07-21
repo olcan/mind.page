@@ -4670,6 +4670,7 @@
       savedTime: 0, // filled in onSaveDone
       savedAttr: null, // filled in onSaveDone
       savedText: '', // filled in onSaveDone (also means delete on cancel & skip confirm on delete)
+      editorText: text, // since we may edit w/o calling onItemEditing
     })
     items = [item, ...items]
 
