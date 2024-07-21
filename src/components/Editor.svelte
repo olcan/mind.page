@@ -534,8 +534,8 @@
             /<\/?\w(?:"[^"]*"|[^>"])*?>/gs,
             skipEscaped(m => (last_tag = m))
           )
-          if (last_tag.match(/<script.*?>/s)) language = 'javascript'
-          else if (last_tag.match(/<[s]tyle.*?>/s)) language = 'css'
+          if (last_tag?.match(/<script.*?>/s)) language = 'javascript'
+          else if (last_tag?.match(/<[s]tyle.*?>/s)) language = 'css'
         }
 
         if (double_slash_comment_languages.has(language)) {
