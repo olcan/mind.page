@@ -5101,7 +5101,7 @@
   const android = isAndroid()
   const ios = isIOS()
 
-  function deleteItem(index, confirm_delete = undefined): boolean {
+  function deleteItem(index, confirm_delete = null, confirm_msg = null): boolean {
     if (fixed) {
       _modal('can not delete item when viewing shared items')
       return false
@@ -5109,7 +5109,7 @@
     const item = items[index]
     // by default, confirm if item has saved text (not new item) & unique label
     confirm_delete ??= item.savedText && item.labelUnique
-    if (confirm_delete && !confirm(`Delete ${item.name}?`)) return false
+    if (confirm_delete && !confirm(confirm_msg || `Delete ${item.name}?`)) return false
     const { name, contextLabel } = item
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
@@ -5186,17 +5186,12 @@
     // update time for non-log item
     if (!item.log) item.time = Date.now()
 
-    // check for deletion triggered by editor, which can be cancelled via confirmation
-    // we only confirm if item is not already emptied out, which triggers deletion automatically
-    let confirm_delete = undefined // use default defined in deleteItem
+    // check for deletion triggered by editor via e._delete (w/o clearing out)
+    // we skip confirmation in this case for consistency with global shortcut
+    let confirm_delete = null // use default defined in deleteItem
     if (item.text.trim() && e?.['_delete']) {
-      if (confirm(`Delete ${item.uniqueLabel || 'item'}?`)) {
-        item.text = item.editorText = ''
-        confirm_delete = false // already confirmed
-      } else {
-        item.editing = true
-        return
-      }
+      item.text = item.editorText = ''
+      confirm_delete = false // already confirmed
     }
 
     // check for deletion by emptying out item, which is disallowed in fixed mode
@@ -5209,8 +5204,9 @@
     // attempt deletion of emptied out item, restore text (just before delete) otherwise
     // note delete may be subject to confirmation (see deleteItem for default conditions)
     if (item.text.trim().length == 0) {
-      if (!deleteItem(index, confirm_delete)) {
-        item.text = textArea(item.index).value // should work as long as delete is handled sync
+      const confirm_msg = `Delete ${item.uniqueLabel || 'item'}?`
+      if (!deleteItem(index, confirm_delete, confirm_msg)) {
+        item.text = item.editorText = textArea(item.index).value // should work as long as delete is handled sync
         textArea(item.index).focus() // refocus on editor
         item.editing = true
       }
