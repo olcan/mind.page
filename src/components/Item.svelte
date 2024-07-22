@@ -433,6 +433,7 @@
         /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/.source,
       'g'
     )
+    const host_base = location.host
     const replaceURLs = text =>
       text.replace(urlRegex, (m, pfx, url, offset, orig_str) => {
         if (pfx === undefined) return m // skip exclusion
@@ -449,9 +450,16 @@
         url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com')
         url = url.replace('?dl=0', '')
         try {
-          const obj = new URL(url)
-          let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
-          if (obj.host == 'go') label = obj.host + obj.pathname + (obj.search + obj.hash ? '/…' : '') // always include path for collapse search/hash
+          let { host, pathname, search, hash } = new URL(url)
+          // drop suffix of host shared with host_base
+          for (let i = 0; i < host.length; i++) {
+            if (host_base.endsWith(host.substring(i))) {
+              host = host.substring(0, i)
+              break
+            }
+          }
+          let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
+          if (host == 'go') label = host + pathname + (search + hash) ? '/…' : ''
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
@@ -1314,13 +1322,21 @@
     })
 
     // linkify urls & tags in code comments (regexes from util.js, labeling logic from replaceURLs in toHTML)
+    const host_base = location.host
     const link_urls = text =>
       text.replace(
         /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
         (m, pfx, href) => {
-          const obj = new URL(href)
-          let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
-          if (obj.host == 'go') label = obj.host + obj.pathname + (obj.search + obj.hash) ? '/…' : '' // always include path for collapse search/hash
+          let { host, pathname, search, hash } = new URL(href)
+          // drop suffix of host shared with host_base
+          for (let i = 0; i < host.length; i++) {
+            if (host_base.endsWith(host.substring(i))) {
+              host = host.substring(0, i)
+              break
+            }
+          }
+          let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
+          if (host == 'go') label = host + pathname + (search + hash) ? '/…' : ''
           return (
             `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
             `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
