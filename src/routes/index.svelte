@@ -550,6 +550,7 @@
     // note dispatch allows changes to be combined, batched, cancel out, etc
     // note changes can happen in both directions, e.g. remote changes to this.attr[prop] -> this[prop]
     _update_attr_async(prop) {
+      // console.debug('dispatching _update_attr_async', prop)
       this.dispatch_task('_update_attr_async.' + prop, () => {
         if (!_exists(this.id)) return // item deleted, just cancel
         const _item = item(this.id)
@@ -557,7 +558,8 @@
         if (!_.isEqual(_item.attr[prop], this[prop])) {
           _item.attr[prop] = _.cloneDeep(this[prop])
           itemAttrChanged(this.id, false /* remote */) // invoke _on_attr_change on item or listeners
-          if (!this.editing) this.save() // skip save if editing to allow better user control, see onItemSave
+          // console.debug('saving in _update_attr_async', prop)
+          if (!this.editing) this.save() // skip save if editing, to allow better user control over timing of saves while editing (see onItemSave), as long as we detect/save attribute changes in onItemEditing
         }
       })
     }
@@ -4551,8 +4553,11 @@
                   // start watching repo path (if not already being watched) for newly installed item
                   if (!updating) watchLocalRepo(item.attr.repo)
 
-                  // if this is root command, finalize modals and trigger push if needed
+                  // if this is root command, finalize modals & trigger push if needed
                   if (root) {
+                    // if item was marked pushable and #pusher is missing, we clear it here since /_update is an explicit manual operation analogous to update_item() of #updater, which presumably set the flag; otherwise we /push the item below and let #pusher clear the flag
+                    if (item.pushable && !_exists('#pusher')) _item(item.id).pushable = false // set via _Item setter
+
                     await _modal_close() // close/cancel all modals
                     await _modal({
                       content: `${updating ? 'Updated' : 'Installed'} ${item.name}`,
@@ -4560,10 +4565,7 @@
                       background: 'confirm',
                     })
 
-                    // if item was marked pushable and #pusher exists, we push item and let it clear the pushable flag; otherwise we just clear it here since /_update is an explicit manual operation analogous to update_item() of #updater, which presumably set the flag
                     if (item.pushable && _exists('#pusher')) onEditorDone('/push ' + item.name)
-                    // just clear flag as #updater would have done in update_item
-                    else _item(item.id).pushable = false // set via _Item setter
 
                     // ask about reloading for changes to init/welcome items ...
                     const reload_items = items.filter(i => i.shouldReload).map(i => i.name)
@@ -4851,7 +4853,7 @@
   }
 
   async function onSaveDone(id: string, savedItem) {
-    console.debug('saved item', id, __item(id).savedId)
+    console.debug('saved item', id, __item(id).savedId, __item(id).name, savedItem.attr)
     savedItem = await decryptItem(savedItem) // in case encrypted
     const index = indexFromId.get(id)
     if (index == undefined) return // item was deleted
@@ -5190,6 +5192,8 @@
         item.editorText = item.text
         // invalidate item elem in case saved/saving text was rendered/cached
         _item(item.id).invalidate_elem_cache({ force_render: true, render_delay: 0 })
+        // note we still have to save attribute changes, see _update_attr_async
+        if (!_.isEqual(item.attr, item.savedAttr)) saveItem(item.id)
       }
       // confirm cancellation when there are unsaved changes and item is not already saving
       if (item.text != item.savedText && !item.saving) {
