@@ -4559,13 +4559,12 @@
                       confirm: 'OK',
                       background: 'confirm',
                     })
-                    // also push item if it was marked pushable
-                    // #pusher should exist since it sets pushable, but we check anyway ...
-                    if (item.pushable) {
-                      if (_item('#pusher')) onEditorDone('/push ' + item.name)
-                      else console.error(`${cmd}: unable to push item ${item.name} due to missing (deleted?) #pusher`)
-                      // item.pushable = false // clear flag even if push command failed
-                    }
+
+                    // if item was marked pushable and #pusher exists, we push item and let it clear the pushable flag; otherwise we just clear it here since /_update is an explicit manual operation analogous to update_item() of #updater, which presumably set the flag
+                    if (item.pushable && _exists('#pusher')) onEditorDone('/push ' + item.name)
+                    // just clear flag as #updater would have done in update_item
+                    else _item(item.id).pushable = false // set via _Item setter
+
                     // ask about reloading for changes to init/welcome items ...
                     const reload_items = items.filter(i => i.shouldReload).map(i => i.name)
                     if (reload_items.length) {
