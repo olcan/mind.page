@@ -954,9 +954,11 @@
       .catch(console.error)
   }
 
-  function renderImages(elems) {
+  function renderImages(elems, item = window['_item'](id)) {
+    const { id, name } = item // intentionally overload global id/name used below
     cacheElems() // cache/restore any new cached elements
     // set up img elements to trigger downloading (if _pending) and invoke onResized upon loading
+    // console.debug('renderImages', name, elems.length)
     elems.forEach(img => {
       if (img.hasAttribute('_rendered')) return // already rendered
       if (!img.hasAttribute('src')) {
@@ -973,10 +975,12 @@
       _.entries(attrs).forEach(([k, v]) => img.setAttribute(k, v))
       if (img.hasAttribute('_pending')) onImageRendered(img) // trigger pending download of _src
       img.onload = () => {
-        onResized(id, container, 'img.onload')
         // note image is not _rendered until _pending attribute is removed by onImageRendered
         if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
         img['_resize']?.()
+        // note this call has to happen after _rendered attribute is set
+        // console.debug('image rendered', id, name, img)
+        onResized(id, container, 'img.onload')
       }
       // also handle onerror/onabort as if image was loaded, but with a warning _failed/_aborted attribute
       // these are invoked w/ uninformative 'error' events, see https://developer.mozilla.org/en-US/docs/Web/API/Element/error_event
@@ -1000,6 +1004,9 @@
 
   afterUpdate(() => {
     // always report container height for potential changes
+    // WARNING: afterUpdate can be triggered for _multiple_ items on every key press in the editor of a single item, so it is critical for onResized to be efficient. These updates were traced to binding such as editor.focused when focusing on an editor or editor.selectionStart when typing into an editor, and then seem to always get propagated to every item that is rendered on the page
+    // console.trace()
+    // console.debug('afterUpdate', name)
     setTimeout(() => onResized(id, container, 'afterUpdate'), 0)
 
     // itemdiv or its parent can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
@@ -1553,7 +1560,7 @@
     window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
-  window['_render_images'] ??= item => renderImages(item.elem?.querySelectorAll('.item > .content img') ?? [])
+  window['_render_images'] ??= item => renderImages(item.elem?.querySelectorAll('.item > .content img') ?? [], item)
   window['_dot_rendered'] ??= function (item, dot) {
     // render "stack" clusters (subgraphs)
     dot.querySelectorAll('.cluster.stack').forEach(cluster => {

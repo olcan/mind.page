@@ -2938,12 +2938,22 @@
   }
 
   function checkIfRenderingVisibleItems() {
+    // console.debug('checkIfRenderingVisibleItems')
     // this needs to be done wherever either item layout OR hideIndex is updated
     // we can check for height==0 or !item.rendered if we want to also wait for images/scripts/math/etc
     // we allow editing items since the rendered item (item.elem) is not visible on page
     // we would also allow below-fold items, but unfortunately that is not reliable when heights are unknown
     renderingVisibleItems =
       hideIndex > 0 && _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
+    // if (renderingVisibleItems) {
+    //   console.debug(
+    //     'still rendering',
+    //     items
+    //       .slice(0, hideIndex)
+    //       .filter(item => !item.rendered && !item.editing)
+    //       .map(item => item.name)
+    //   )
+    // }
   }
 
   function toggleItems(index: number) {
@@ -4889,17 +4899,35 @@
     // count number of elements that will trigger additional resizes
     // if height>0 and no more resizes are expected, set rendered=true & invoke resolve_render (if set up)
     // otherwise reset rendered=false, typically due to re-render w/ pendingElems>0 (height=0 would trigger warning)
-    item.pendingElems = container.querySelectorAll(
-      ['script', 'img:not([_rendered])', ':is(span.math,span.math-display):not([_rendered])'].join()
-    ).length
+    item.pendingElems =
+      container
+        .querySelector(':scope > .item > .content')
+        ?.querySelectorAll(
+          ['script', 'img:not([_rendered])', ':is(span.math,span.math-display):not([_rendered])'].join()
+        )?.length ?? 0
     let just_rendered = false
     if (height > 0 && item.pendingElems == 0) {
-      just_rendered = !item.rendered
-      item.rendered = true
-      item.resolve_render?.(container.closest('.super-container'))
-      item.resolve_render = null
+      if (!item.rendered) {
+        item.rendered = true
+        just_rendered = true
+        // console.debug('item rendered', item.name, trigger)
+        if (item.resolve_render) {
+          item.resolve_render(container.closest('.super-container'))
+          item.resolve_render = null
+        }
+      }
     } else if (item.rendered) {
       item.rendered = false
+      // console.debug(
+      //   'item unrendered',
+      //   item.name,
+      //   trigger,
+      //   container
+      //     .querySelector(':scope > .item > .content')
+      //     ?.querySelectorAll(
+      //       ['script', 'img:not([_rendered])', ':is(span.math,span.math-display):not([_rendered])'].join()
+      //     )
+      // )
     }
 
     if (height == prevHeight && !just_rendered) return // nothing has changed
