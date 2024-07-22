@@ -451,7 +451,7 @@
         try {
           const obj = new URL(url)
           let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
-          if (obj.host == 'go') label = obj.host + obj.pathname // include path for go/... links
+          if (obj.host == 'go') label = obj.host + obj.pathname + (obj.search + obj.hash ? '/…' : '') // always include path for collapse search/hash
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
@@ -1320,7 +1320,7 @@
         (m, pfx, href) => {
           const obj = new URL(href)
           let label = obj.host + ((obj.pathname + obj.search + obj.hash).length > 1 ? '/…' : '')
-          if (obj.host == 'go') label = obj.host + obj.pathname // include path for go/... links
+          if (obj.host == 'go') label = obj.host + obj.pathname + (obj.search + obj.hash) ? '/…' : '' // always include path for collapse search/hash
           return (
             `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
             `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
