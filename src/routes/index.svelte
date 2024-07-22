@@ -6369,6 +6369,7 @@
       if (instanceId != instance.user + '-' + instance.init_time) console.error('inconsistent instance id/info')
       if (instance.focus_time != focus_time) console.error('inconsistent instance info (focus_time)')
       instance.update_time = Date.now()
+      console.debug('updated instance')
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instance)
         .catch(console.error)
         .finally(() => {
@@ -6756,6 +6757,10 @@
               instances = instances.filter(i => i.update_time > Date.now() - 2 * 60 * 1000) // filter dead since init
               instances = instances.sort((a, b) => b.focus_time - a.focus_time) // sort by decreasing focus time
               primary = instances[0]?.init_time == initTime
+              console.debug(
+                'updated instances',
+                instances.map(i => i.server_domain)
+              )
             }
           )
         }
