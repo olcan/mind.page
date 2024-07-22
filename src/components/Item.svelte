@@ -954,11 +954,9 @@
       .catch(console.error)
   }
 
-  function renderImages(elems, item = window['_item'](id)) {
-    const { id, name } = item // intentionally overload global id/name used below
+  function renderImages(id, elems) {
     cacheElems() // cache/restore any new cached elements
     // set up img elements to trigger downloading (if _pending) and invoke onResized upon loading
-    // console.debug('renderImages', name, elems.length)
     elems.forEach(img => {
       if (img.hasAttribute('_rendered')) return // already rendered
       if (!img.hasAttribute('src')) {
@@ -979,7 +977,9 @@
         if (!img.hasAttribute('_pending')) img.setAttribute('_rendered', Date.now().toString())
         img['_resize']?.()
         // note this call has to happen after _rendered attribute is set
-        // console.debug('image rendered', id, name, img)
+        // also note you can NOT access global like name here!
+        // instead you have to go through window['_item'](id)
+        // console.debug('image rendered', id, img)
         onResized(id, container, 'img.onload')
       }
       // also handle onerror/onabort as if image was loaded, but with a warning _failed/_aborted attribute
@@ -1368,7 +1368,7 @@
     }
 
     // render images currently on item (dynamically added images may be rendered via _render_images)
-    renderImages(itemdiv.querySelectorAll('img'))
+    renderImages(id, itemdiv.querySelectorAll('img'))
 
     // turn un-typed inputs into multiple file inputs
     itemdiv.querySelectorAll('input:not([type])').forEach((input: HTMLInputElement) => {
@@ -1560,7 +1560,7 @@
     window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
-  window['_render_images'] ??= item => renderImages(item.elem?.querySelectorAll('.item > .content img') ?? [], item)
+  window['_render_images'] ??= item => renderImages(item.id, item.elem?.querySelectorAll('.item > .content img') ?? [])
   window['_dot_rendered'] ??= function (item, dot) {
     // render "stack" clusters (subgraphs)
     dot.querySelectorAll('.cluster.stack').forEach(cluster => {
