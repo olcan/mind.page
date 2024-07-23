@@ -459,7 +459,7 @@
             }
           }
           let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
-          if (host == 'go') label = host + pathname + (search + hash) ? '/…' : ''
+          if (host == 'go') label = host + pathname + (search + hash ? '/…' : '')
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
@@ -1336,7 +1336,7 @@
             }
           }
           let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
-          if (host == 'go') label = host + pathname + (search + hash) ? '/…' : ''
+          if (host == 'go') label = host + pathname + (search + hash ? '/…' : '')
           return (
             `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
             `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
