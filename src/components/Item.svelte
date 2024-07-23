@@ -430,7 +430,7 @@
     const urlRegex = new RegExp(
       tagRegexExclusions +
         '|' +
-        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/.source,
+        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/.source,
       'g'
     )
     const host_base = location.host
@@ -1325,7 +1325,7 @@
     const host_base = location.host
     const link_urls = text =>
       text.replace(
-        /(^|\s|\()((?:go\/|[a-z](?:[-a-z0-9\+\.])*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
+        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
         (m, pfx, href) => {
           let { host, pathname, search, hash } = new URL(href)
           // drop suffix of host shared with host_base
