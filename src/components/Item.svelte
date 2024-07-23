@@ -2257,6 +2257,7 @@
     background: rgba(255, 255, 255, 0.075); /* transparency allows shading of background */
     padding: 2px 4px;
     border-radius: 4px;
+    hyphens: auto; /* inline code can get long and cause undesirable wrapping */
   }
   .item > :global(.content a code) {
     background: none;
@@ -2270,6 +2271,7 @@
     padding: 2px 5px;
     margin: -2px -5px;
     border-left: 1px solid #333;
+    hyphens: none; /* disable in multi-line code blocks (vs inline code) */
   }
   .item > :global(.content a) {
     color: #79e;
