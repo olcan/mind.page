@@ -5428,17 +5428,17 @@
     const runItem = () => {
       const index = indexFromId.get(item.id)
       if (index === undefined) return // item deleted
+      if (item.editing) item.text = item.editorText.replace(/\u200B/g, '')
       // clear *_output blocks as they should be re-generated
       item.text = clearBlock(item.text, '\\w*?_output')
       // remove *_log blocks so errors do not leave empty blocks
       item.text = removeBlock(item.text, '\\w*?_log')
+      if (item.editing) item.editorText = item.text
       const prev_name = item.name // to detect renaming below
       itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
       const jsout = appendJSOutput(index) // can return promise
       item.time = Date.now()
-      // we now save even if editing, for consistency with write() saving during edit
-      // if (!item.editing) saveItem(item.id);
-      saveItem(item.id)
+      if (item.editing) textArea(index).value = item.editorText = item.text // TODO
       // if item was renamed while being targeted (navigated), update query to new name
       if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
         replaceStateOnEditorChange = true // do not create new entry
