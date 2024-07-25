@@ -4693,10 +4693,11 @@
       id: (Date.now() + sessionCounter++).toString(), // temporary id for this session only
       editing: editing,
       saving: save,
+      savingText: save ? text : null,
       savedId: null, // filled in below after save
       savedTime: 0, // filled in onSaveDone
       savedAttr: null, // filled in onSaveDone
-      savedText: '', // filled in onSaveDone (also means delete on cancel & skip confirm on delete)
+      savedText: '', // filled in onSaveDone
       editorText: text, // since we may edit w/o calling onItemEditing
     })
     items = [item, ...items]
@@ -4805,7 +4806,7 @@
             tempIdFromSavedId.set(doc.id, item.id)
             if (index == undefined) {
               // item was deleted before it could be saved
-              doc.delete().catch(console.error)
+              deleteDoc(doc).catch(console.error)
               return
             }
             item.savedId = doc.id
