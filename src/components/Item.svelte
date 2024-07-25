@@ -2261,6 +2261,7 @@
   }
   .item > :global(.content a code) {
     background: none;
+    /* vertical-align: text-top; */ /* center-aligns in parent (a) background */
   }
   .item > :global(.content pre > code) {
     background: none;
