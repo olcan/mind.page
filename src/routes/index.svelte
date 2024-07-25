@@ -3075,12 +3075,16 @@
     let unique = false
     if (index !== undefined) {
       unique = true
-      replaceStateOnEditorChange = true // replace state
+      // // finalize current state and force new one, just like onTagClick
+      forceNewStateOnEditorChange = true // add to history like click-based nav
+      finalizeStateOnEditorChange = true // finalize state
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(items[index].name + ' ')
     } else if (idsFromLabel.get(fragment.toLowerCase())?.length) {
       unique = idsFromLabel.get(fragment.toLowerCase())?.length == 1
-      replaceStateOnEditorChange = true // replace state
+      // // finalize current state and force new one, just like onTagClick
+      forceNewStateOnEditorChange = true // add to history like click-based nav
+      finalizeStateOnEditorChange = true // finalize state
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(fragment + ' ')
     }
@@ -3093,7 +3097,7 @@
   function onPopState(e) {
     readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
     if (!e?.state) {
-      // empty state indicates a change in url fragment, which we use to navigate if it matches an item
+      // empty state indicates a change in url fragment, which we use to navigate if it matches an item; this seems to be due to hash change triggering a change in state (to null), see step 12 in https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event#when_popstate_is_sent
       handleFragment(decodeURIComponent(location.hash))
       return
     }
@@ -3102,35 +3106,46 @@
       // console.warn("onPopState before init");
       return
     }
+
     // console.debug('onPopState', e.state, items.length + ' items')
-
-    // replace popped state inconsistent with sessionStateHistory
-    // important to try to establish consistency since history links are based on history.go
-    if (typeof e.state.index == 'undefined') {
-      console.warn('replacing onPopState w/ missing index', sessionStateHistory, sessionStateHistoryIndex)
-      replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
-      return
-    }
-    if (e.state.index > sessionStateHistory.length - 1) {
-      console.warn(
-        `replacing onPopState w/ out-of-bounds index ${e.state.index} > ${sessionStateHistory.length - 1}`,
-        sessionStateHistory
-      )
-      replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
-      return
-    }
     let state = e.state // can be replaced with state from history
-    // note simply replacing inconsistent popped state can cause duplicate entries in history
-    // we mitigate this by using history.go(...) in push/replaceState for indices 0/1
-    if (!_.isEqual(e.state, sessionStateHistory[e.state.index])) {
-      console.warn('replacing onPopState w/ inconsistent state', e.state, sessionStateHistory[sessionStateHistoryIndex])
-      replaceState((state = sessionStateHistory[e.state.index]), true /* skip reset while popping */)
-    }
 
-    // if popped state index is current state index, there should be nothing to do
-    if (state.index == sessionStateHistoryIndex) {
-      console.warn('ignoring onPopState for current index')
-      return
+    // note hash changes seem to produce a history entry with a numeric 'id', that then gets popped when user goes back, so we handle this by decrementing history index and replacing e.state with the state from history; not sure why this happens, could not find official docs on it, may have to do with sapper or svelte but could not confirm. however it seems to work in both chrome and safari
+    if (typeof e.state.id != 'undefined' && sessionStateHistoryIndex > 0) {
+      sessionStateHistoryIndex--
+      replaceState((state = sessionStateHistory[sessionStateHistoryIndex]), true /* skip reset while popping */)
+    } else {
+      // replace popped state inconsistent with sessionStateHistory
+      // important to try to establish consistency since history links are based on history.go
+      if (typeof e.state.index == 'undefined') {
+        console.warn('replacing onPopState w/ missing index', e.state, sessionStateHistory, sessionStateHistoryIndex)
+        replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
+        return
+      }
+      if (e.state.index > sessionStateHistory.length - 1) {
+        console.warn(
+          `replacing onPopState w/ out-of-bounds index ${e.state.index} > ${sessionStateHistory.length - 1}`,
+          sessionStateHistory
+        )
+        replaceState(sessionStateHistory[sessionStateHistoryIndex], true /* skip reset while popping */)
+        return
+      }
+      // note simply replacing inconsistent popped state can cause duplicate entries in history
+      // we mitigate this by using history.go(...) in push/replaceState for indices 0/1
+      if (!_.isEqual(e.state, sessionStateHistory[e.state.index])) {
+        console.warn(
+          'replacing onPopState w/ inconsistent state',
+          e.state,
+          sessionStateHistory[sessionStateHistoryIndex]
+        )
+        replaceState((state = sessionStateHistory[e.state.index]), true /* skip reset while popping */)
+      }
+
+      // if popped state index is current state index, there should be nothing to do
+      if (state.index == sessionStateHistoryIndex) {
+        console.warn('ignoring onPopState for current index')
+        return
+      }
     }
 
     // update session history index to the popped state
