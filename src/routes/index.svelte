@@ -5086,7 +5086,7 @@
     }
     // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
     // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
-    const silent = item.text == item.savedText /* && item.time == item.savedTime */
+    const silent = !item.editing && item.text == item.savedText /* && item.time == item.savedTime */
     if (!silent) {
       item.saving = true
       item.savingText = item.text // required when saving == true
