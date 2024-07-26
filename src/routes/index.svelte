@@ -1039,6 +1039,8 @@
       if (!options['skip_save']) saveItem(this.id) // sets item.saving, which e.g. helps skip edit cancel confirmation
 
       items = items // trigger svelte render for saving state AND new text if editing
+      // if editing, we need to update both editorText and textarea value
+      if (this.editing) textArea(__item.index).value = __item.editorText = __item.text
 
       // update all other item state (including dependents)
       // note this can be slow on items with many dependents, e.g. #util/core
@@ -5449,12 +5451,12 @@
       item.text = clearBlock(item.text, '\\w*?_output')
       // remove *_log blocks so errors do not leave empty blocks
       item.text = removeBlock(item.text, '\\w*?_log')
-      if (item.editing) item.editorText = item.text
+      if (item.editing) textArea(index).value = item.editorText = item.text
       const prev_name = item.name // to detect renaming below
       itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
       const jsout = appendJSOutput(index) // can return promise
       item.time = Date.now()
-      if (item.editing) textArea(index).value = item.editorText = item.text // TODO
+      if (item.editing) textArea(index).value = item.editorText = item.text
       // if item was renamed while being targeted (navigated), update query to new name
       if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
         replaceStateOnEditorChange = true // do not create new entry
