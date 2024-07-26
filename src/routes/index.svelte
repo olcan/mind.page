@@ -5075,7 +5075,7 @@
     return jsout
   }
 
-  function saveItem(id: string) {
+  function saveItem(id: string, silent = null) {
     // console.debug('saving item', id)
     const index = indexFromId.get(id)
     if (index == undefined) return // item deleted
@@ -5085,8 +5085,8 @@
       item.text = item.text.replaceAll('\u200B', '')
     }
     // allow silent-saving of minor changes to prevent unnecessary UX interruptions, esp. on slow connections
-    // note this also affects manual save UX in onItemSave, with no indication of time-only saves (if allowed)
-    const silent = !item.editing && item.text == item.savedText /* && item.time == item.savedTime */
+    // note this also affects manual save UX in onItemSave
+    silent ??= item.text == item.savedText /* && item.time == item.savedTime */
     if (!silent) {
       item.saving = true
       item.savingText = item.text // required when saving == true
@@ -5485,9 +5485,8 @@
     // note we want to trigger itemTextChanged, which e.g. will trigger _on_item_change based on deephash change, NOT based on change from savedText, which can be somewhat arbitrary when saves get delayed/chained and cause user edits (to item.text) to get bundled into the delayed save without triggering itemTextChanged/_on_item_change; note coupling itemTextChanged/_on_item_change with user-triggered save is pretty intuitive even though technically it is not necessary (e.g. triggering could always get delayed until close of editing as a rule)
     // if (item.text != item.savedText) itemTextChanged(index, item.text)
     const prev_name = item.name // to detect renaming below
-    itemTextChanged(index, item.text)
-    // if (item.text != item.savedText) saveItem(item.id)
-    saveItem(item.id) // save item even if text is unchanged, i.e. to update time
+    itemTextChanged(index, item.text) // updates item.time on deephash change
+    saveItem(item.id, false /* silent */) // save and indicate saving
 
     // if item was renamed while being targeted (navigated), update query to new name
     if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
