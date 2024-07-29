@@ -87,9 +87,7 @@ const sapper_server = express().use(
       // proxyRes: (proxyRes, req, res) => {
       //   console.debug(proxyRes.headers)
       // },
-      // error: (error, req, res, target) => {
-      //   console.error(error)
-      // },
+      error: (error, req, res, target) => console.error(error),
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
