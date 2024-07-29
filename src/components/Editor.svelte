@@ -825,11 +825,22 @@
     }
   }
 
-  function insertZWSP(text) {
+  function insertZWSP(text, insertions = null) {
     return text.replace(
       /(^|\s|\()(go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?\u200B?)([^\s)<>:]*[^\s)<>:,.])/gi,
-      (m, pfx, domain, path) =>
-        pfx + domain.replace(/\/$/, '/\u200B') + path.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, '$1\u200B')
+      (m, pfx, domain, path, offset) => {
+        offset += pfx.length
+        if (domain.endsWith('/')) {
+          offset += domain.length
+          domain += '\u200B'
+          insertions?.push(offset) // record (pre-)insertion offset
+        }
+        path = path.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, (m, path_pfx, path_offset) => {
+          insertions?.push(offset + path_offset) // record (pre-)insertion offset
+          return path_pfx + '\u200B'
+        })
+        return pfx + domain + path
+      }
     )
   }
 
@@ -865,6 +876,7 @@
           text = insertZWSP(text)
           // NOTE: on android getAsString causes a mysterious reset selectionStart->selectionEnd
           textarea.selectionStart = selectionStart // fix for android
+          textarea.selectionEnd = selectionEnd
           document.execCommand('insertText', false, text)
         })
       } else if (item.type.startsWith('image/') || item.type == 'application/pdf') {
@@ -885,6 +897,7 @@
             const img = zoom == 1.0 ? `<img src="${fname}">` : `<img src="${fname}" style="zoom:${zoom}">`
             textarea.focus()
             textarea.selectionStart = selectionStart // fix for android (see note above)
+            textarea.selectionEnd = selectionEnd
             document.execCommand('insertText', false, img)
           })
           .catch(console.error)
@@ -902,7 +915,25 @@
       lastInputInsertText = e.data
       lastInputInsertTextTime = Date.now()
     }
-    textarea.value = editorText = insertZWSP(textarea.value)
+
+    // insert ZWSPs
+    // NOTE: we are unable to update textarea.value here (and thus support breaking of _typed_ urls) without either causing caret to jump OR breaking undo history, at least introducing a "select all" operation to it. There appears to be no way to group together a bunch of single-char insertion operations.
+    // const insertions = []
+    editorText = insertZWSP(textarea.value) //, insertions)
+    // console.debug(insertions, selectionStart, selectionEnd)
+
+    // update textarea.value using execCommand to maintain undo history
+    // update selectionStart/End accounting for insertions above
+    // const selectionStart = textarea.selectionStart
+    // const selectionEnd = textarea.selectionEnd
+    // // textarea.selectionStart = 0
+    // // textarea.selectionEnd = textarea.value.length
+    // document.execCommand('selectAll', false)
+    // // textarea.value = editorText
+    // document.execCommand('insertText', false, editorText)
+    // textarea.selectionStart = selectionStart + _.sumBy(insertions, i => (i < selectionStart ? 1 : 0))
+    // textarea.selectionEnd = selectionEnd + _.sumBy(insertions, i => (i < selectionEnd ? 1 : 0))
+
     updateTextDivs()
     onEdited(textarea.value)
   }
