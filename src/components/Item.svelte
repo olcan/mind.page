@@ -684,6 +684,7 @@
     // convert markdown to html
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
+      if (href.startsWith('go/')) href = 'http://' + href
       if (href.startsWith('##')) {
         // fragment link
         const fragment = href.substring(1)
