@@ -827,7 +827,7 @@
 
   function insertZWSP(text) {
     return text.replace(
-      /(^|\s|\()(go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)([^\s)<>:]*[^\s)<>:,.])/gi,
+      /(^|\s|\()(go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?\u200B?)([^\s)<>:]*[^\s)<>:,.])/gi,
       (m, pfx, domain, path) =>
         pfx + domain.replace(/\/$/, '/\u200B') + path.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, '$1\u200B')
     )
@@ -902,9 +902,7 @@
       lastInputInsertText = e.data
       lastInputInsertTextTime = Date.now()
     }
-    // NOTE: we are unable to update textarea.value here, e.g. to enable wrapping of _typed_ urls, as it causes weird behavior of cursor for copy/paste and deletions, esp. of sections ending in a url, just copy/paste at top, or select and delete at top, and observe cursor jump to the end and undo not work
-    // TODO: look into handling typed urls when you get a chance, not a big issue
-    editorText = insertZWSP(textarea.value)
+    textarea.value = editorText = insertZWSP(textarea.value)
     updateTextDivs()
     onEdited(textarea.value)
   }
