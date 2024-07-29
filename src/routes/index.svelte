@@ -4745,7 +4745,7 @@
     showDotted = false
 
     if (run) {
-      // NOTE: appendJSOutput can trigger _writes that trigger saveItem, which will be skipped due to saveId being null
+      // NOTE: appendJSOutput can trigger item.writes that trigger saveItem, which will be skipped due to saveId being null
       appendJSOutput(indexFromId.get(item.id))
       text = itemToSave.text = item.text // no need to update editorText
     }
@@ -5070,7 +5070,7 @@
       item.text = appendBlock(item.text, '_log', log)
       _item(item.id).show_logs()
     }
-    // NOTE: index can change during JS eval due to _writes
+    // NOTE: index can change during JS eval due to item.writes
     itemTextChanged(indexFromId.get(item.id), item.text)
     return jsout
   }
@@ -7004,7 +7004,7 @@
                       hiddenItemChangedRemotely(wrapper.name, change.type)
                       return
                     }
-                    // NOTE: remote modify is similar to _write without saving
+                    // NOTE: remote modify is similar to item.write without saving
                     // NOTE: document may be under temporary id if it was added locally
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
                     if (index === undefined) return // nothing to modify
@@ -7029,6 +7029,9 @@
                       true /* keep_time */,
                       true /* remote */
                     )
+                    // if editing, we need to update both editorText and textarea value
+                    if (this.editing) textArea(index).value = item.editorText = item.text
+
                     lastEditorChangeTime = 0 // disable debounce even if editor focused
                     onEditorChange(editorText) // item time/text has changed
                     // reset preview hash to prevent warning when previews are synced across tabs
