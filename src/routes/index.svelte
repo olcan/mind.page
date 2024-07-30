@@ -461,8 +461,13 @@
     }
     set running(running) {
       const _item = item(this.id)
-      if (_item.running != running) {
-        _item.running = running
+      const change = _item.running != running // change handled below
+      _item.running += running ? 1 : -1 // update running count
+      if (_item.running < 0) {
+        console.error('attempted running=false when already false', this.name)
+        _item.running = 0
+      }
+      if (change) {
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since running can affect it
       }
@@ -1367,10 +1372,6 @@
     // returns promise resolved/rejected once evaluation is done (w/ output) or triggers error
     start(async_func, log_options) {
       log_options = _.merge({ since: Date.now() }, log_options) // set default 'since' for write_log below
-      // note we throw an error if item is already running, as we do not currently manage nested running states
-      // one way to enable this would be to serialize all runs, another would be to use a run_id to gate running=false
-      // however in general we probably don't want this, e.g. we disable 'run' button when an item is already running
-      if (this.running) throw new Error('item already running')
       this.running = true
       return update_dom().then(() =>
         this.resolve(async_func())
@@ -5047,9 +5048,7 @@
     try {
       let run_options
       try {
-        run_options = _item(item.id).eval(`typeof _run_options != 'undefined' ? _run_options : null`, {
-          exclude_async_deps: false,
-        })
+        run_options = _item(item.id).eval(`typeof _run_options != 'undefined' ? _run_options : null`)
       } catch {} // already logged
       jsout = _item(item.id).eval(jsin, { debug: item.debug, async, trigger: 'run' /*|create*/, ...run_options })
     } catch {} // already logged, just continue
@@ -5357,7 +5356,7 @@
 
     // if alt-modified, run all runnable dependencies (sequentially) before running this item
     if (e?.altKey) {
-      item.running = true
+      _item(item.id).running = true
       return (async () => {
         const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
         for (let dep of runnable_deps) __item(dep).running = true
@@ -5373,7 +5372,7 @@
         return onItemRun(item.index, null /* no alt-run */, touch_first)
       })().finally(() => {
         _item(item.id).status = ''
-        item.running = false
+        _item(item.id).running = false
       })
     }
 
@@ -6170,6 +6169,7 @@
     item.lastEvalTime = 0 // used for _item.get_log
     item.lastRunTime = 0 // used for _item.get_log
     item.version = 0
+    item.running = 0 // tracked as number to allow nesting
     return _.merge(item, state)
   }
 
