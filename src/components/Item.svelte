@@ -3,6 +3,7 @@
   const marked = globalThis['marked'] // imported (and set up) in client.ts
   import {
     highlight,
+    urlRegExp,
     blockRegExp,
     extractBlock,
     replaceTags,
@@ -427,19 +428,14 @@
 
     // replace naked URLs (regex from util.js) with markdown links (or images) named after host name
     // we use the same exclusions as tags (or replaceTags) to skip code blocks, html tags, etc
-    const urlRegex = new RegExp(
-      tagRegexExclusions +
-        '|' +
-        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/.source,
-      'g'
-    )
+    const urlRegex = new RegExp(tagRegexExclusions + '|' + urlRegExp().source, 'gi')
     const host_base = location.host
     const replaceURLs = text =>
       text.replace(urlRegex, (m, pfx, url, offset, orig_str) => {
         if (pfx === undefined) return m // skip exclusion
         // disallow matching prefix ](\s+ to avoid matching urls inside markdown links
         if (orig_str.substring(0, offset + pfx.length).match(/\]\(\s*$/)) return m
-        if (url.startsWith('go/')) url = 'http://' + url
+        if (window['_shortcut_hosts']?.some(h => url.startsWith(h + '/'))) url = 'http://' + url
         let sfx = ''
         if (url[url.length - 1].match(/[\.,;:]/)) {
           // move certain last characters out of the url
@@ -459,7 +455,7 @@
             }
           }
           let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
-          if (host == 'go') label = host + pathname + (search + hash ? '/…' : '')
+          if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
             return `${pfx}<img title="${_.escape(label)}" src="${url}">${sfx}`
           }
@@ -684,7 +680,7 @@
     // convert markdown to html
     let renderer = new marked.Renderer()
     renderer.link = (href, title, text) => {
-      if (href.startsWith('go/')) href = 'http://' + href
+      if (window['_shortcut_hosts']?.some(h => href.startsWith(h + '/'))) href = 'http://' + href
       if (href.startsWith('##')) {
         // fragment link
         const fragment = href.substring(1)
@@ -1325,25 +1321,22 @@
     // linkify urls & tags in code comments (regexes from util.js, labeling logic from replaceURLs in toHTML)
     const host_base = location.host
     const link_urls = text =>
-      text.replace(
-        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/g,
-        (m, pfx, href) => {
-          let { host, pathname, search, hash } = new URL(href)
-          // drop suffix of host shared with host_base
-          for (let i = 0; i < host.length; i++) {
-            if (host_base.endsWith(host.substring(i))) {
-              host = host.substring(0, i)
-              break
-            }
+      text.replace(urlRegExp(), (m, pfx, href) => {
+        let { host, pathname, search, hash } = new URL(href)
+        // drop suffix of host shared with host_base
+        for (let i = 0; i < host.length; i++) {
+          if (host_base.endsWith(host.substring(i))) {
+            host = host.substring(0, i)
+            break
           }
-          let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
-          if (host == 'go') label = host + pathname + (search + hash ? '/…' : '')
-          return (
-            `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
-            `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
-          )
         }
-      )
+        let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
+        if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
+        return (
+          `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
+          `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
+        )
+      })
     const link_tags = text =>
       text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag

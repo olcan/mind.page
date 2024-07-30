@@ -12,6 +12,19 @@ export function canonicalizeHost(host) {
   return host.replace(/:.+$/, '').replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+|192\.168\.86\.10\d)$/, 'localhost')
 }
 
+// url regex constructor
+// url scheme regex from https://stackoverflow.com/a/190405
+// we are fairly restrictive on the tail (last character) by default, disallowing common punctuation
+export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,.]/ } = {}) {
+  shortcut_hosts ??= window._shortcut_hosts ?? []
+  let shortcut_host_alts = shortcut_hosts.map(h => _.escapeRegExp(h + '/')).join('|')
+  if (shortcut_host_alts) shortcut_host_alts += '|'
+  return new RegExp(
+    prefix.source + `((?:${shortcut_host_alts}[a-z][-a-z0-9\\+\\.]*://[^\\s)<>/]+/?)[^\\s)<>:]*${suffix.source})`,
+    'gi'
+  )
+}
+
 export function getHostDir(host) {
   return ['mind.page', 'mindbox.io', 'olcan.com'].includes(host) ? host : 'other'
 }
@@ -54,12 +67,8 @@ export function highlight(code, language) {
   language = language.replace(/(?:_removed|_hidden|_tmp)$/, '')
   const link_urls = text =>
     text.replace(
-      // url scheme regex from https://stackoverflow.com/a/190405
-      // we are more restrictive on the tail (last character), disallowing common punctuation
       // we allow @ prefix due to use in stack traces in some browsers
-      // consider allowing semi-colon in tail when matching in escaped html, e.g. in editor
-      // (for simplicity we do not currently have a separate pattern for escaped html)
-      /(^|\s|\(|@)((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:;,.])/gi,
+      urlRegExp({ prefix: /(^|\s|\(|@)/ }),
       (m, pfx, href) =>
         `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )

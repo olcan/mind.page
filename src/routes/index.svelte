@@ -324,6 +324,8 @@
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
     window['_host'] = hostname
+    window['_url_regexp'] = urlRegExp
+    window['_block_regexp'] = blockRegExp
     window['_is_local'] = host => canonicalizeHost(host) == 'localhost'
     window['_modal'] = _modal
     window['_modal_close'] = _modal_close
@@ -5966,6 +5968,7 @@
     canonicalizeHost,
     getHostDir,
     extractBlock,
+    urlRegExp,
     blockRegExp,
     tagRegex,
     parseTags,

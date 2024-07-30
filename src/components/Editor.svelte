@@ -30,6 +30,7 @@
   // import he from "he";
   import {
     highlight,
+    urlRegExp,
     replaceTags,
     parseTags,
     numberWithCommas,
@@ -169,7 +170,7 @@
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
         // same as in link_urls above, see comments there
-        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
+        urlRegExp({ suffix: /[^\s)<>:,.]/ }),
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
@@ -300,11 +301,7 @@
     // linkify urls & tags in comments (regexes from util.js)
     // we allow semi-colon in tail of url to avoid breaking html entities (which are ok for display in editor)
     // note for simplicity we do not yet have a separate url regex for escaped html
-    const link_urls = text =>
-      text.replace(
-        /(^|\s|\()((?:go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?)[^\s)<>:]*[^\s)<>:,.])/gi,
-        (m, pfx, url) => `${pfx}<a>${url}</a>`
-      )
+    const link_urls = text => text.replace(urlRegExp({ suffix: /[^\s)<>:,.]/ }), (m, pfx, url) => `${pfx}<a>${url}</a>`)
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))
@@ -826,22 +823,16 @@
   }
 
   function insertZWSP(text, insertions = null) {
-    return text.replace(
-      /(^|\s|\()(go\/|[a-z][-a-z0-9\+\.]*:\/\/[^\s)<>/]+\/?\u200B?)([^\s)<>:]*[^\s)<>:,.])/gi,
-      (m, pfx, domain, path, offset) => {
-        offset += pfx.length
-        if (domain.endsWith('/')) {
-          offset += domain.length
-          domain += '\u200B'
-          insertions?.push(offset) // record (pre-)insertion offset
-        }
-        path = path.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, (m, path_pfx, path_offset) => {
-          insertions?.push(offset + path_offset) // record (pre-)insertion offset
-          return path_pfx + '\u200B'
-        })
-        return pfx + domain + path
-      }
-    )
+    return text.replace(urlRegExp({ suffix: /[^\s)<>:,.]/ }), (m, pfx, _url, offset) => {
+      offset += pfx.length
+      let [_, scheme, url] = _url.match(/^((?:.+?:\/\/)?)(.+)$/)
+      offset += scheme.length
+      url = url.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, (m, url_pfx, url_offset) => {
+        insertions?.push(offset + url_offset) // record (pre-)insertion offset
+        return url_pfx + '\u200B'
+      })
+      return pfx + scheme + url
+    })
   }
 
   function removeZWSP(text) {
