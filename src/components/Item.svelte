@@ -2252,6 +2252,7 @@
     padding: 2px 4px;
     border-radius: 4px;
     hyphens: auto; /* inline code can get long and cause undesirable wrapping */
+    hyphenate-character: '⋯'; /* dash can be confusing in code, '' is same as word-break:all */
   }
   .item > :global(.content a code) {
     background: none;
@@ -2278,6 +2279,7 @@
     text-decoration: none;
     line-height: 24px;
     hyphens: auto; /* url links can get long and cause undesirable wrapping */
+    hyphenate-character: '⋯'; /* dash can be confusing in code, '' is same as word-break:all */
   }
   .item > :global(:is(.content, .deps-and-dependents) mark) {
     color: black;
