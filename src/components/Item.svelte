@@ -2252,7 +2252,6 @@
     padding: 2px 4px;
     border-radius: 4px;
     hyphens: auto; /* inline code can get long and cause undesirable wrapping */
-    hyphenate-character: ''; /* no need for character, just want the wrapping */
   }
   .item > :global(.content a code) {
     background: none;
@@ -2278,6 +2277,7 @@
     border-radius: 4px;
     text-decoration: none;
     line-height: 24px;
+    hyphens: auto; /* url links can get long and cause undesirable wrapping */
   }
   .item > :global(:is(.content, .deps-and-dependents) mark) {
     color: black;
