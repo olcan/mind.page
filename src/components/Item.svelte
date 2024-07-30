@@ -2259,6 +2259,7 @@
     padding: 2px 4px;
     border-radius: 4px;
     hyphens: auto; /* inline code can get long and cause undesirable wrapping */
+    hyphenate-character: ''; /* no need for character, just want the wrapping */
   }
   .item > :global(.content a code) {
     background: none;
