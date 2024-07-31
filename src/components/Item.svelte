@@ -534,7 +534,9 @@
 
         // insert spacers at empty lines (otherwise ignored by marked)
         // using <br> (vs &nbsp;) avoids non-breaking of certain syntax (e.g. tables)
-        if (str.match(/^ *$/)) str += '<br>\n'
+        // adding &nbsp; helps realize lines between inline elements
+        //   e.g. images, where <img>\n<br>\n<img> does not create a line
+        if (str.match(/^ *$/)) str += '&nbsp;<br>\n'
 
         // insert spacers at empty lines in blockquotes (otherwise ignored by marked)
         // using non-breaking space (&nbsp;) avoid breaking blockquotes
