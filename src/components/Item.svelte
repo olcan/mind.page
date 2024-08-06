@@ -2422,6 +2422,7 @@
   .item > :global(.content img) {
     max-width: 100%;
     max-height: 100%;
+    min-width: 0; /* enable images to shrink, e.g. in a flex row */
     vertical-align: middle;
   }
   /* set default size/padding of pending images */
