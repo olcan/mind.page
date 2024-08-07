@@ -454,6 +454,8 @@
               break
             }
           }
+          if (pathname == '/') pathname = ''
+          if (!pathname && !host) host = host_base // do not allow empty host + path
           let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
           if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
           if (url.match(/\.(jpeg|jpg|png|gif|svg)$/i)) {
@@ -1332,6 +1334,8 @@
             break
           }
         }
+        if (pathname == '/') pathname = ''
+        if (!pathname && !host) host = host_base // do not allow empty host + path
         let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
         if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
         return (
