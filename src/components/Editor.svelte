@@ -827,7 +827,7 @@
       offset += pfx.length
       let [_, scheme, url] = _url.match(/^((?:.+?:\/\/)?)(.+)$/)
       offset += scheme.length
-      url = url.replace(/([^\u200B]{5,}?[^\w\u200B])(?!\u200B)/g, (m, url_pfx, url_offset) => {
+      url = url.replace(/([^\u200B]{5,}?[^a-zA-Z\u200B])(?!\u200B)/g, (m, url_pfx, url_offset) => {
         insertions?.push(offset + url_offset) // record (pre-)insertion offset
         return url_pfx + '\u200B'
       })
