@@ -19,9 +19,6 @@
     "start": "node __sapper__/build",
     "validate": "svelte-check --ignore src/node_modules/@sapper"
   },
-  "engines": {
-    "node": "16"
-  },
   "main": "lib/firebase/functions.js",
   "dependencies": {
     "compression": "^1.7.4",
@@ -34,13 +31,13 @@
     "npm": "^8.19.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.19.3",
+    "@babel/core": "^7.25.8",
     "@babel/plugin-syntax-dynamic-import": "^7.8.3",
-    "@babel/plugin-transform-runtime": "^7.19.1",
-    "@babel/preset-env": "^7.19.4",
-    "@babel/runtime": "^7.19.4",
-    "@firebase/app": "^0.8.2",
-    "@firebase/storage": "^0.9.12",
+    "@babel/plugin-transform-runtime": "^7.25.7",
+    "@babel/preset-env": "^7.25.8",
+    "@babel/runtime": "^7.25.7",
+    "@firebase/app": "^0.10.13",
+    "@firebase/storage": "^0.13.2",
     "@jupyterlab/services": "^6.4.8",
     "@octokit/rest": "^19.0.5",
     "@rollup/plugin-babel": "^6.0.0",
