@@ -21,6 +21,9 @@ const onwarn = (warning, onwarn) =>
   warning.code === 'THIS_IS_UNDEFINED' ||
   warning.code === 'EVAL' ||
   warning.code === 'a11y-click-events-have-key-events' ||
+  warning.code === 'a11y-no-static-element-interactions' || // for "must have an ARIA role", see https://svelte.dev/docs/accessibility-warnings#a11y-no-static-element-interactions
+  warning.code === 'a11y-no-noninteractive-element-interactions' || // for "should not be assigned mouse or keyboard event listeners"
+  // warning.code.startsWith('a11y-') ||
   onwarn(warning)
 
 export default {

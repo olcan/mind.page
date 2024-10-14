@@ -90,7 +90,7 @@ Object.assign((firebase['storage'] = {}), {
 }) // ~35K
 
 // import/expose Octokit as window.Octokit
-import { Octokit } from '../node_modules/@octokit/rest' // ~50K
+import { Octokit } from '@octokit/rest' // ~50K
 window['Octokit'] = Octokit
 
 // import/expose marked as window.marked

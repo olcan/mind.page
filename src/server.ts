@@ -58,6 +58,7 @@ const sapper_server = express().use(
   // redirects are followed instead of exposed to server for robust CORS bypass
   // note // in https?:// can be rewritted to / by browser or intemediaries
   // websockets can also be proxied
+  // @ts-ignore  // ignore since should go away with sveltekit upgrade
   createProxyMiddleware({
     changeOrigin: true,
     pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
@@ -87,7 +88,7 @@ const sapper_server = express().use(
       // proxyRes: (proxyRes, req, res) => {
       //   console.debug(proxyRes.headers)
       // },
-      error: (error, req, res, target) => console.error(error),
+      // error: (error, req, res, target) => console.error(error),
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
     ws: true, // proxy websockets also
@@ -99,13 +100,13 @@ const sapper_server = express().use(
     dev,
     // maxAge: 365 * 24 * 3600, // cache for up to 1y (disabled in dev mode)
     dotfiles: true, // allow requests for .DS_Store to avoid 404 preventing "app" treatment on Android
-  }),
+  } as any),
 
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     // console.debug('handling path', req.path)
-    const hostport = req.headers['x-forwarded-host'] || req.headers['host']
+    const hostport = (req.headers['x-forwarded-host'] || req.headers['host']) as string
     const hostname_orig = hostport.replace(/:\d+$/, '')
     // note globalThis.hostname is used in index.svelte on server side
     const hostname = (globalThis.hostname = canonicalizeHost(hostport))
@@ -268,7 +269,11 @@ const sapper_server = express().use(
         // see https://developer.twitter.com/en/docs/twitter-api/enterprise/account-activity-api/guides/securing-webhooks
         res.json({
           response_token:
-            'sha256=' + crypto.createHmac('sha256', req.query.crc_key).update(req.query.crc_token).digest('base64'),
+            'sha256=' +
+            crypto
+              .createHmac('sha256', req.query.crc_key as string)
+              .update(req.query.crc_token as string)
+              .digest('base64'),
         })
         return
       }
