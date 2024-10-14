@@ -683,7 +683,7 @@
 
     // convert markdown to html
     let renderer = new marked.Renderer()
-    renderer.link = (href, title, text) => {
+    renderer.link = ({ href, text, title }) => {
       if (window['_shortcut_hosts']?.some(h => href.startsWith(h + '/'))) href = 'http://' + href
       if (href.startsWith('##')) {
         // fragment link

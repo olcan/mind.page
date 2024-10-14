@@ -2,10 +2,7 @@
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
     "target": "ES2018",
-    // "strict": false,
-    // ignore specific errors that popped up with strict:true in recent versions of typescript
-    "noImplicitAny": false,
-    "strictNullChecks": false,
+    "strict": false,
     "lib": ["DOM", "ES2021", "WebWorker"]
     // if you need additional options, see https://github.com/Axelen123/sapper-ts-template/blob/master/tsconfig.json ...
   },
