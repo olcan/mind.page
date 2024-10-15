@@ -4954,7 +4954,9 @@
 
     if (height == prevHeight && !just_rendered) return // nothing has changed
     if (height <= 0 && prevHeight > 0) {
-      console.warn(`ignoring invalid height ${height} (was ${prevHeight}) for item ${item.name} at index ${index}`)
+      // note zero height is fairly common with latest svelte (4.2.19) and console.trace() shows that these are all due to svelte's internal 'destroy' calls as items are removed from the page (as you reveal and then hide items) and simply ignoring the zero height and remembering the last positive height seems reasonable in these cases, so we just comment out this warning as long as we don't find other issues
+      // console.warn(`ignoring invalid height ${height} (was ${prevHeight}) for item ${item.name} at index ${index}`)
+      // console.trace()
       return
     }
     // console.debug(`item ${item.name} height changed from ${prevHeight}} to ${height}`);
