@@ -23,8 +23,10 @@ const events = {} // recorded fs events for /watch/... requests
 // NOTE: Firebase ADMIN API is NOT to be confused with Firebase API
 // see https://firebase.google.com/docs/reference/admin vs https://firebase.google.com/docs/reference
 import { firebaseConfig } from '../firebase-config.js'
-const admin = require('firebase-admin')
-const firebase_admin = admin.initializeApp(firebaseConfig)
+const { initializeApp } = require('firebase-admin/app')
+const { getFirestore } = require('firebase-admin/firestore')
+const { getAuth } = require('firebase-admin/auth')
+initializeApp(firebaseConfig)
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
 // see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain
@@ -229,8 +231,7 @@ const sapper_server = express().use(
     } else if (req.path.startsWith('/user/')) {
       const uid = req.path.match(/^\/user\/(\w+?)$/)?.pop()
       if (!uid) return res.status(400).send('invalid user path ' + req.path)
-      firebase_admin
-        .firestore()
+      getFirestore()
         .collection('users')
         .doc(uid)
         .get()
@@ -281,8 +282,7 @@ const sapper_server = express().use(
         res.status(400).send('webhook missing user parameter')
         return
       }
-      firebase_admin
-        .firestore()
+      getFirestore()
         .collection('webhooks')
         .add({
           time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
@@ -300,7 +300,7 @@ const sapper_server = express().use(
   (req, res, next) => {
     if (req.path == '/github_webhooks') {
       console.log('received /github_webhooks', req.body)
-      firebase_admin.firestore().collection('github_webhooks').add({
+      getFirestore().collection('github_webhooks').add({
         time: Date.now(), // to allow time range queries and cutoff (e.g. time>now)
         body: req.body,
       })
@@ -389,7 +389,7 @@ process['server-preload'] = async (page, session) => {
   } else if (!session.cookie || page.query.user == 'anonymous') {
     user = { uid: 'anonymous' }
   } else {
-    user = await firebase_admin.auth().verifyIdToken(session.cookie).catch(console.error)
+    user = await getAuth().verifyIdToken(session.cookie).catch(console.error)
     if (!user) return { ...resp, server_warning: 'invalid/expired signin' }
     // console.debug('user', user)
   }
@@ -398,8 +398,7 @@ process['server-preload'] = async (page, session) => {
   let items // items preloaded from firebase
 
   console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
-  const item_docs = await firebase_admin
-    .firestore()
+  const item_docs = await getFirestore()
     .collection('items') // server always reads from primary collection
     .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
     .orderBy('time', 'desc')
