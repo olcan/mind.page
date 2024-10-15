@@ -93,12 +93,16 @@ Object.assign((firebase['storage'] = {}), {
 import { Octokit } from '@octokit/rest' // ~50K
 window['Octokit'] = Octokit
 
-// import/expose marked as window.marked
-// also extend marked to use marked-extended-tables
-import { marked } from 'marked' // ~36K
-import marked_extended_tables from 'marked-extended-tables' // ~3K
-marked.use(marked_extended_tables())
-window['marked'] = marked
+// import/expose {mM}arked as window.Marked
+// also import/expose extensions marked-highlight and marked-extended-tables
+import { marked, Marked } from 'marked' // ~36K
+import { markedHighlight } from 'marked-highlight'
+import markedExtendedTables from 'marked-extended-tables' // ~3K
+window['Marked'] = Marked // for local instance, see https://marked.js.org/using_advanced#instance
+window['markedHighlight'] = markedHighlight
+window['markedExtendedTables'] = markedExtendedTables
+marked.use(markedExtendedTables())
+window['marked'] = marked // global instance w/ extended tables enabled
 
 // import/expose jupyter services under window.jupyter
 import { KernelManager, SessionManager, ServerConnection } from '@jupyterlab/services' // ~250K

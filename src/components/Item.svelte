@@ -1,6 +1,8 @@
 <script lang="ts">
   const _ = globalThis['_'] // imported in client.ts
-  const marked = globalThis['marked'] // imported (and set up) in client.ts
+  const Marked = globalThis['Marked'] // imported (and set up) in client.ts
+  const markedHighlight = globalThis['markedHighlight']
+  const markedExtendedTables = globalThis['markedExtendedTables']
   import {
     highlight,
     urlRegExp,
@@ -682,6 +684,7 @@
     )
 
     // convert markdown to html
+    let marked = new Marked()
     let renderer = new marked.Renderer()
     renderer.link = ({ href, text, title }) => {
       if (window['_shortcut_hosts']?.some(h => href.startsWith(h + '/'))) href = 'http://' + href
@@ -714,26 +717,28 @@
         href
       )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
-    // marked.use({ renderer });
-    marked.setOptions({
-      renderer: renderer,
-      highlight: (code, language) => {
-        // leave _html(_*) block as is to be "unwrapped" below
-        // except add a closing comment to allow html itself to contain </code></pre>
-        if (language.match(/^_html(_|$)/)) {
-          return (
-            code
-              .replace(/\$id/g, skipEscaped(id))
-              .replace(/\$name/g, skipEscaped(name))
-              .replace(/\$hash/g, skipEscaped(hash))
-              .replace(/\$deephash/g, skipEscaped(deephash))
-              .replace(/\$cid/g, skipEscaped(`${id}-${deephash}-${++cacheIndex}`)) + '<!--/_html-->'
-          )
-        }
-        return highlight(code, language)
-      },
-      langPrefix: '',
-    })
+    marked.use(renderer)
+    marked.use(markedExtendedTables())
+    marked.use(
+      markedHighlight({
+        langPrefix: '',
+        highlight: (code, language) => {
+          // leave _html(_*) block as is to be "unwrapped" below
+          // except add a closing comment to allow html itself to contain </code></pre>
+          if (language.match(/^_html(_|$)/)) {
+            return (
+              code
+                .replace(/\$id/g, skipEscaped(id))
+                .replace(/\$name/g, skipEscaped(name))
+                .replace(/\$hash/g, skipEscaped(hash))
+                .replace(/\$deephash/g, skipEscaped(deephash))
+                .replace(/\$cid/g, skipEscaped(`${id}-${deephash}-${++cacheIndex}`)) + '<!--/_html-->'
+            )
+          }
+          return highlight(code, language)
+        },
+      })
+    )
 
     // assign indices to checkboxes to be moved into _checkbox_index attribute below
     // adding text after checkbox also allows checkbox items that start w/ tag (<mark>) or other html
