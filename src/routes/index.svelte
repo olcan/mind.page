@@ -4874,7 +4874,7 @@
   }
 
   async function onSaveDone(id: string, savedItem) {
-    console.debug('saved item', id, __item(id).savedId, __item(id).name, savedItem.attr)
+    // console.debug('saved item', id, __item(id).savedId, __item(id).name, savedItem.attr)
     savedItem = await decryptItem(savedItem) // in case encrypted
     const index = indexFromId.get(id)
     if (index == undefined) return // item was deleted
