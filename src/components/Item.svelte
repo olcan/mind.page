@@ -1053,14 +1053,19 @@
 
     // we highlight both primary and secondary matching terms
     const highlightTerms = matchingTerms + ' ' + matchingTermsSecondary
+
+    // skip afterUpdate if hash, version, and highlightTerms are unchanged
+    // note without version, highlights break after item.invalidate_elem_cache()
     if (
       hash == itemdiv.firstElementChild.getAttribute('_hash') &&
+      version.toString() == itemdiv.firstElementChild.getAttribute('_version') &&
       highlightTerms == itemdiv.firstElementChild.getAttribute('_highlightTerms')
     ) {
       // console.debug("afterUpdate skipped");
       return
     }
     itemdiv.firstElementChild.setAttribute('_hash', hash)
+    itemdiv.firstElementChild.setAttribute('_version', version.toString())
     itemdiv.firstElementChild.setAttribute('_highlightTerms', highlightTerms)
     // console.debug("afterUpdate", name);
 
