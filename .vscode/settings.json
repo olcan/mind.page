@@ -1,14 +1,63 @@
 {
-  "editor.formatOnSave": true,
-  "editor.formatOnPaste": true,
+  "editor.inlineSuggest.enabled": true,
+  "editor.fontFamily": "JetBrains Mono, Menlo, Monaco, Courier New, monospace",
+  "editor.fontWeight": "400",
+  "workbench.fontAliasing": "antialiased",
+  "svelte.enable-ts-plugin": true,
+  "editor.fontLigatures": false,
+  "github.copilot.enable": {
+    "*": true,
+    "yaml": false,
+    "plaintext": false,
+    "markdown": true
+  },
+  "git.autofetch": true,
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  "gitlens.codeLens.scopes": [],
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "[svelte]": {
-    "editor.defaultFormatter": "svelte.svelte-vscode"
+    "editor.defaultFormatter": "svelte.svelte-vscode",
+    "editor.rulers": [120]
   },
+  "editor.minimap.enabled": false,
+  "git.postCommitCommand": "sync",
+  "prettier.semi": false,
+  "prettier.singleQuote": true,
+  "prettier.arrowParens": "avoid",
   "prettier.printWidth": 120,
-  "diffEditor.renderSideBySide": false,
+  "editor.wordWrap": "on",
+  "editor.rulers": [120],
+  "editor.tabSize": 2,
   "javascript.suggest.autoImports": false,
   "typescript.suggest.autoImports": false,
-  "editor.tabSize": 2,
-  "editor.rulers": [120]
+  "git.autoStash": true,
+  "[markdown]": {
+    "editor.defaultFormatter": "yzhang.markdown-all-in-one"
+  },
+  "editor.acceptSuggestionOnCommitCharacter": false,
+  "editor.folding": false,
+  "testing.gutterEnabled": false,
+  "editor.glyphMargin": false,
+  "editor.lineNumbers": "off",
+  "scm.diffDecorationsGutterVisibility": "hover",
+  "scm.diffDecorationsGutterWidth": 1,
+  "diffEditor.renderSideBySide": false,
+  "editor.unicodeHighlight.allowedCharacters": {
+    "σ": true,
+    "α": true,
+    "︎↗︎": true
+  },
+  "workbench.editor.wrapTabs": true,
+  "workbench.startupEditor": "none",
+  "editor.fontSize": 15,
+  "svelte.plugin.svelte.compilerWarnings": {
+    "a11y-click-events-have-key-events": "ignore"
+  },
+  "js/ts.implicitProjectConfig.target": "ES2021",
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "editor.accessibilitySupport": "off",
+  "github.copilot.editor.enableAutoCompletions": true,
+  "workbench.colorTheme": "Default Dark+"
 }
