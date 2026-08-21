@@ -5,3 +5,6 @@ __sapper__/
 lib/
 *.log
 ssl-dev/
+
+# dot/git symlinked from .git by init.py
+dot/git
