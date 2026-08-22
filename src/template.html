@@ -121,6 +121,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/tex-svg.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/c3@0.7.2/c3.min.js"></script>
+    <!-- set WASM folder explicitly (no trailing slash); the default is derived from the script URL and
+         yields dist//graphvizlib.wasm, which unpkg now rejects (404 without CORS headers) -->
+    <script>window.__hpcc_wasmFolder = 'https://unpkg.com/@hpcc-js/wasm@0.3.11/dist'</script>
     <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
 
     <!-- NOTE: load highlight library that includes common languages, see https://highlightjs.org/download/ -->
