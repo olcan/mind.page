@@ -20,6 +20,9 @@
     "validate": "svelte-check --ignore src/node_modules/@sapper"
   },
   "main": "lib/firebase/functions.js",
+  "engines": {
+    "node": "22"
+  },
   "dependencies": {
     "@types/mime": "^3.0.4",
     "compression": "^1.7.4",

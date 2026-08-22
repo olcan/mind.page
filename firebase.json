@@ -13,7 +13,7 @@
   },
   "hosting": {
     "public": "static",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "**/ssl-dev/**"],
     "redirects": [
       {
         "source": "/favicon.ico",

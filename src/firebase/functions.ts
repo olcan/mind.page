@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions'
+import * as functions from 'firebase-functions/v1' // v6 root export is 2nd gen; ssr is deployed as 1st gen
 
 // use sapper_server exported from server.ts
 import { sapper_server } from '../../__sapper__/build/server/server.js'

@@ -342,8 +342,8 @@ if (!on_firebase) {
   sapper_https_server = https
     .createServer(
       {
-        key: fs.readFileSync('static/ssl-dev/ca.key'),
-        cert: fs.readFileSync('static/ssl-dev/ca.crt'),
+        key: fs.readFileSync('ssl-dev/ca.key'),
+        cert: fs.readFileSync('ssl-dev/ca.crt'),
       },
       sapper_server
     )
