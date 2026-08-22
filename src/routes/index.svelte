@@ -8606,9 +8606,12 @@
   <!-- see https://stackoverflow.com/a/25041921 about custom apple-touch-icon location -->
   <link rel="apple-touch-icon" type="image/png" href="{hostdir}/apple-touch-icon.png?v={favicon_version}" />
   <link rel="manifest" href="manifest.json?v={favicon_version}" />
-  {#if signedin}
-    <!-- Google tag (gtag.js) -->
-    <!-- Google tag (gtag.js) -->
+  <!-- Google Ads conversion tag (AW-11040878740), disabled for now: ad blockers reject the
+       doubleclick collect POST (net::ERR_BLOCKED_BY_CLIENT in console) wherever it runs, so the
+       conversion data is unreliable anyway. If re-enabled, keep it gated to the product host,
+       since signins on olcan.com/mindbox.io/localhost are not conversions.
+  {#if signedin && hostname == 'mind.page'}
+    Google tag (gtag.js):
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-11040878740"></script>
     <script>
       window.dataLayer = window.dataLayer || []
@@ -8618,12 +8621,12 @@
       gtag('js', new Date())
       gtag('config', 'AW-11040878740')
     </script>
-    <!-- Event snippet for Signed-in Page view conversion page -->
-    <!-- Event snippet for Signed-in Page view conversion page -->
+    Event snippet for Signed-in Page view conversion page:
     <script>
       gtag('event', 'conversion', { send_to: 'AW-11040878740/R6I_CMmf0oQYEJTh2ZAp' })
     </script>
   {/if}
+  -->
 </svelte:head>
 
 <style>
