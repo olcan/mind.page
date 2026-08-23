@@ -7,7 +7,6 @@ import * as sapper from '@sapper/server'
 import https from 'https'
 import fs from 'fs'
 import os from 'os'
-import ip from 'ip'
 import crypto from 'crypto'
 import mime from 'mime'
 import { canonicalizeHost, getHostDir } from './util.js'
@@ -36,6 +35,13 @@ initializeApp(firebaseConfig)
 // standalone (s) should hide chrome toolbar but may show if app navigates outside scope
 // browser (b) runs in a regular browser tab or window
 // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
+// first non-internal ipv4 address of this host (as ip.address() of the dropped `ip` package did)
+function localAddress() {
+  for (const addresses of Object.values(os.networkInterfaces()))
+    for (const a of addresses ?? []) if (a.family == 'IPv4' && !a.internal) return a.address
+  return '127.0.0.1'
+}
+
 const paths = []
 for (let i = 0; i < 10; i++) {
   paths.push(`/${i}f/`) // fullscreen
@@ -318,7 +324,7 @@ const sapper_server = express().use(
     session: (req, res) => ({
       cookie: res['cookie'],
       server_name: os.hostname(),
-      server_ip: ip.address(), // see https://stackoverflow.com/a/43888492
+      server_ip: localAddress(),
       // we use client_ip to help identify distinct client devices (_should_ work on firebase w/ the 'trust proxy' setting set below, but otherwise you can try accessing headers directly as in https://stackoverflow.com/a/67397092)
       // aside from public ip & user agent, there is no info in http headers that can help identify client machine
       // browsers do not reveal any more info to servers than they do to local javascript via navigator.*
