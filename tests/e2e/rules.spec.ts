@@ -8,21 +8,27 @@ import {
 } from '@firebase/rules-unit-testing'
 import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore'
 
-// firestore.rules tests against the emulator (no browser); ids are unique to this file so that the
-// seeded anonymous items (see seed.mjs) are left untouched
+// firestore.rules tests against the emulator (no browser); they use their own project so that the
+// documents they create are invisible to the app, which uses the seeded project (see seed.mjs)
+const PROJECT = 'rules-test'
 const ADMIN = 'y2swh7JY2ScO5soV7mJMHVltAOX2' // admin uid hard-coded in firestore.rules and index.svelte
 let env: RulesTestEnvironment
 
 test.beforeAll(async () => {
   env = await initializeTestEnvironment({
-    projectId: 'olcanswiki',
+    projectId: PROJECT,
     firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 },
   })
   await env.withSecurityRulesDisabled(async ctx => {
     const db = ctx.firestore()
     await setDoc(doc(db, 'items/rules-anon'), { user: 'anonymous', text: 'public', time: 1, attr: null })
     await setDoc(doc(db, 'items/rules-alice'), { user: 'alice', text: 'private', time: 1, attr: null })
-    await setDoc(doc(db, 'items/rules-shared'), { user: 'alice', text: 'shared', time: 1, attr: { shared: { keys: ['k'] } } })
+    await setDoc(doc(db, 'items/rules-shared'), {
+      user: 'alice',
+      text: 'shared',
+      time: 1,
+      attr: { shared: { keys: ['k'] } },
+    })
     await setDoc(doc(db, 'items/rules-blocked'), { user: 'mallory', text: 'x', time: 1, attr: null })
     await setDoc(doc(db, 'blocked_users/mallory'), { time: 1 })
   })

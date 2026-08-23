@@ -41,6 +41,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCustomToken, // for tests, see tests/e2e
   getRedirectResult,
   setPersistence,
   browserLocalPersistence,
@@ -51,6 +52,7 @@ Object.assign((firebase['auth'] = {}), {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCustomToken,
   getRedirectResult,
   setPersistence,
   browserLocalPersistence,

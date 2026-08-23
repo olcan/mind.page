@@ -42,8 +42,12 @@ bundle pointing at `__sapper__/dev`.
 
 ## Tests
 
+Tests run as two projects (see `playwright.config.ts`): `chromium` (read-only) first, then `admin`,
+which writes to the seeded account. Use `--project admin --no-deps` to iterate on the admin tests.
+
 - `rules.spec.ts` - `firestore.rules` via `@firebase/rules-unit-testing` (no browser): anonymous and
-  shared reads, owner-only writes, admin writes to anonymous items, blocked users.
+  shared reads, owner-only writes, admin writes to anonymous items, blocked users. These run against
+  their own emulator project (`rules-test`) so their documents stay invisible to the app.
 - `render.spec.ts` - loads the anonymous account as a read-only visitor (120 of 121 items; the
   welcome template is dropped from read-only views) and renders every item through the app's
   `_render_item`, comparing normalized html against `__snapshots__/render.spec.ts/<id>.html`.
@@ -51,6 +55,26 @@ bundle pointing at `__sapper__/dev`.
   clip-path ids, empty styles) and puts one tag per line for readable diffs; `DYNAMIC_ITEMS` lists
   items that are only checked to render (e.g. the live clock widget). Capture waits for each item's
   html to settle, since charts draw after the render promise resolves.
+
+- `admin.spec.ts` - signs in with a custom token as the admin uid (`helpers.ts`; the user record
+  needs a display name or the app's sign-in handler throws before entering admin mode) and loads
+  `?user=anonymous`, which puts the app in the admin-acting-as-anonymous mode it uses on mindbox.io:
+  write access to the anonymous account, no encryption. It then installs the `mind.items` items that
+  define `_test_*` functions, runs `/test` and asserts every test passed, and checks that an item
+  created by the admin syncs to a read-only visitor in a second browser context, and likewise its
+  deletion.
+
+Notes on driving the app from tests:
+
+- Commands are fired with `_create(text, { command: true })` and asserted by their observable
+  effects: command results come back through the app's own promise plumbing, which does not always
+  resolve to the caller.
+- `_exists()` is true as soon as an item is created client-side; wait for `saved_id` before
+  reloading, or unsaved items are lost.
+- `/_install` prompts for a GitHub token unless one is stored, and installs are served from the local
+  `../mind.items` checkout by `interceptMindItems` (set `MIND_ITEMS_DIR` to override), so tests can
+  cover uncommitted item changes and never hit rate limits.
+- `_Item.delete()` confirms via `window.confirm`, which headless browsers auto-dismiss; pass `false`.
 
 Each item's golden is reviewed like any diff: if a change is intended, run `test:e2e:update` and
 commit the updated snapshot files.

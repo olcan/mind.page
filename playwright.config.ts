@@ -16,7 +16,17 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // read-only tests (rules, rendering goldens) run first; admin tests install items into the seeded
+  // anonymous account and run after them
+  projects: [
+    { name: 'chromium', testIgnore: /admin\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'admin',
+      testMatch: /admin\.spec\.ts/,
+      dependencies: ['chromium'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
   webServer: {
     // note FIREBASE_CONFIG (set by firebase emulators:exec) must be removed, since server.ts takes it
     // to mean running on cloud functions and then does not listen
