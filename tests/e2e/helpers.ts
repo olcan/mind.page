@@ -25,7 +25,14 @@ declare global {
     _render_item: (item: unknown) => Promise<HTMLElement>
     _create: (text: string, options?: object) => unknown
     _exists: (name: string) => boolean
-    __items: { savedId?: string; labelText?: string; matching?: boolean }[] // internal item state
+    __items: {
+      id: string
+      savedId?: string
+      savedText?: string
+      saving?: boolean
+      labelText?: string
+      matching?: boolean
+    }[] // internal item state
     __hideIndex: number // items past this index are hidden (search results are ranked first)
     _user: { uid: string }
     _init_time: number

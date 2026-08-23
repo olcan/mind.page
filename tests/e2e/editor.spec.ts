@@ -97,7 +97,18 @@ test('an item is edited in place with shift+enter, and escape discards an edit',
   await expect
     .poll(async () => (await firestore().collection('items').doc(id).get()).data()?.text, { timeout: 30_000 })
     .toBe('#e2e_typed edited via keyboard')
-  // escape asks before discarding unsaved changes
+  // escape asks before discarding unsaved changes, once the item is no longer saving (a save in
+  // progress discards silently), so wait for the client to have processed the save
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const item = window.__items.find(item => item.id == id)!
+          return !item.saving && item.savedText
+        }, id),
+      { timeout: 30_000 }
+    )
+    .toBe('#e2e_typed edited via keyboard')
   await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
   await expect(textarea).toBeVisible()
   await textarea.press('End')
