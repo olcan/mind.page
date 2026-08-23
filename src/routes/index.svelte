@@ -34,6 +34,8 @@
     where,
     orderBy,
     onSnapshot,
+    terminate,
+    clearIndexedDbPersistence,
   } = firebase?.firestore ?? {}
   const { getStorage, ref, uploadBytes, getBlob } = firebase?.storage ?? {}
 
@@ -3209,6 +3211,28 @@
   }
 
   let signingOut = false
+  // clears firestore's local cache (see client.ts); this terminates firestore, so caller must reload
+  // resolves to false (after logging) if clearing failed or was blocked by other open tabs of this
+  // origin, which hold the database open: clearIndexedDbPersistence then rejects w/ failed-precondition
+  // or leaves the deletion pending, hence the timeout
+  let clearingFirestoreCache = false // suppresses shutdown prompt (see firebase.onLog) in this tab
+  async function clearFirestoreCache(timeout = 5000) {
+    clearingFirestoreCache = true
+    try {
+      const db = getFirestore(firebase)
+      await terminate(db)
+      await Promise.race([
+        clearIndexedDbPersistence(db),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), timeout)),
+      ])
+      console.debug('cleared firestore cache')
+      return true
+    } catch (e) {
+      const reason = e.code == 'failed-precondition' ? 'blocked by other open tabs' : e.message ?? e
+      console.warn(`could not clear firestore cache (${reason})`)
+      return false
+    }
+  }
   function signOut() {
     if (window.sessionStorage.getItem('mindpage_signin_pending')) console.warn('signing out while signin pending ...')
     signingOut = true
@@ -3221,8 +3245,11 @@
     resetUser()
     getAuth(firebase)
       .signOut()
-      .then(() => {
+      .then(async () => {
         console.debug('signed out')
+        // also clear local firestore cache, best-effort since other open tabs can block it; note cached
+        // items are encrypted (see encryptItem) and secret was removed above, so this is only hygiene
+        await clearFirestoreCache(3000)
         location.reload()
       })
       .catch(console.error)
@@ -3988,6 +4015,29 @@
 
     if (!ignore_command) {
       switch (text.trim()) {
+        case '/_clear_cache': {
+          // clears local firestore cache (see client.ts) and reloads; clearing also shuts down firestore in
+          // other open tabs or windows of this origin (they are prompted to reload, see firebase.onLog),
+          // so we confirm first if any are open (see countOtherTabs)
+          const clear = () =>
+            clearFirestoreCache().then(cleared => {
+              if (cleared) return location.reload()
+              _modal(`MindPage could not clear its local cache (see console) and will now reload.`, {
+                confirm: 'Reload',
+                background: 'confirm',
+                onConfirm: () => location.reload(),
+              })
+            })
+          countOtherTabs().then(others => {
+            if (!others) return clear()
+            _modal(
+              `${others} other tab${others > 1 ? 's' : ''} or window${others > 1 ? 's' : ''} of ${hostname} ` +
+                `will stop syncing until reloaded if the cache is cleared now. Clear anyway?`,
+              { confirm: 'Clear', cancel: 'Cancel', background: 'cancel', onConfirm: clear }
+            )
+          })
+          return
+        }
         case '/_signout': {
           if (!signedin) return alert('already signed out')
           signOut()
@@ -6825,6 +6875,11 @@
             }
             // on first snapshot, if init has not started (!initTime), we simply populate items array and trigger initialization; otherwise we must be already initializing items received directly from server so we ignore the first snapshot (presumably coming from a local cache) and simply set up init completion logic
             if (firstSnapshot) {
+              // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
+              init_log(
+                `received first snapshot (${snapshot.docs.length} items, ` +
+                  `${snapshot.metadata.fromCache ? 'cache' : 'current'})`
+              )
               if (!initTime) {
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
@@ -6898,6 +6953,14 @@
                 if (!signingOut) _modal('initialization failed (w/o triggering signout)')
                 return
               }
+              // note w/ persistent local cache (see client.ts), first server snapshot after a cached first
+              // snapshot delivers all remote changes since last sync
+              const remote_changes = snapshot.docChanges().filter(c => !c.doc.metadata.hasPendingWrites)
+              if (remote_changes.length)
+                init_log(
+                  `received ${remote_changes.length} remote change${remote_changes.length > 1 ? 's' : ''} ` +
+                    `(${snapshot.metadata.fromCache ? 'cache' : 'current'})`
+                )
               snapshot.docChanges().forEach(function (change) {
                 const doc = change.doc
                 if (doc.metadata.hasPendingWrites) return // ignore local changes
@@ -7035,7 +7098,7 @@
                       true /* remote */
                     )
                     // if editing, we need to update both editorText and textarea value
-                    if (this.editing) textArea(index).value = item.editorText = item.text
+                    if (item.editing) textArea(index).value = item.editorText = item.text
 
                     lastEditorChangeTime = 0 // disable debounce even if editor focused
                     onEditorChange(editorText) // item time/text has changed
@@ -7048,6 +7111,7 @@
           },
           error => {
             console.error(error)
+            if (isFirestoreShutdown(error)) onFirestoreShutdown() // e.g. cache cleared in another tab
             if (error.code == 'permission-denied') {
               // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
               //       (this triggers a prompt for secret phrase on reload, but can be prevented by clearing cookie)
@@ -7923,10 +7987,40 @@
     }
   }
   // set up firebase log handler to count firebase errors (client only)
+  // hold a (shared) web lock for the lifetime of this tab, released on close or reload, so that other
+  // open tabs or windows of this origin (in this browser) can be counted exactly via navigator.locks.query()
+  // e.g. before clearing the local firestore cache (see /_clear_cache), which shuts them down
+  const tab_lock = isClient ? `mindpage-tab:${Date.now()}-${Math.random().toString(36).slice(2)}` : ''
+  if (isClient && navigator.locks)
+    navigator.locks.request(tab_lock, { mode: 'shared' }, () => new Promise(() => {})) // held until unload
+  async function countOtherTabs() {
+    if (!navigator.locks?.query) return 0 // unsupported (e.g. old browsers), assume none
+    const { held } = await navigator.locks.query()
+    return held.filter(lock => lock.name.startsWith('mindpage-tab:') && lock.name != tab_lock).length
+  }
+  // firestore shuts itself down when its local cache (see client.ts) is deleted from another tab or
+  // window of this origin (e.g. via /_clear_cache or signout); listeners then fail w/ "Firestore shutting
+  // down" and this tab silently stops syncing until reloaded, so we detect this in listener error handlers
+  // (e.g. for items) and in firebase.onLog below, which covers listeners w/o error handlers (e.g. in
+  // items), for which the sdk logs "Uncaught Error in snapshot listener", and prompt a reload (once)
+  function isFirestoreShutdown(error_or_message) {
+    return String(error_or_message?.message ?? error_or_message).includes('Firestore shutting down')
+  }
+  let firestore_shutdown_prompted = false
+  function onFirestoreShutdown() {
+    if (clearingFirestoreCache || firestore_shutdown_prompted) return
+    firestore_shutdown_prompted = true
+    _modal(
+      `MindPage's local data store was shut down, usually because its cache was cleared in another ` +
+        `tab or window of ${hostname}. MindPage will now reload to attempt to continue syncing.`,
+      { confirm: 'Reload', background: 'confirm', onConfirm: () => location.reload() }
+    )
+  }
   let firebase_errors = 0
   if (isClient)
-    firebase.onLog(({ level }) => {
+    firebase.onLog(({ level, message, args }) => {
       if (level == 'error') firebase_errors++
+      if ([message, ...(args ?? [])].some(isFirestoreShutdown)) onFirestoreShutdown()
     })
 
   // replace window.{alert,confirm,prompt} to warn that they may stop working on iOS devices

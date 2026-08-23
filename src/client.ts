@@ -11,6 +11,17 @@ const firebase = initializeApp(firebaseConfig)
 firebase['onLog'] = onLog // for use in index.svelte
 window['firebase'] = firebase
 
+// cache firestore data in IndexedDB (default is memory only): first snapshot comes from cache on
+// reload (then reconciled w/ server as remote changes, see onSnapshot in index.svelte), offline
+// writes survive reloads, and listeners resume from last state instead of re-reading every doc;
+// multi-tab manager is required since several tabs (e.g. /0/../9/ scopes) can be open at once;
+// must be called before getFirestore(firebase) (which then returns this instance); if IndexedDB
+// is unavailable (e.g. private mode) the sdk logs a warning and falls back to memory cache
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+initializeFirestore(firebase, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+})
+
 // import/expose firebase/auth on window
 import {
   getAuth,
@@ -49,6 +60,8 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  terminate,
+  clearIndexedDbPersistence,
 } from 'firebase/firestore' // ~262K
 Object.assign((firebase['firestore'] = {}), {
   getFirestore,
@@ -65,6 +78,8 @@ Object.assign((firebase['firestore'] = {}), {
   orderBy,
   limit,
   onSnapshot,
+  terminate,
+  clearIndexedDbPersistence,
 })
 
 // import/expose firebase/storage on window

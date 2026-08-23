@@ -7,3 +7,8 @@ import {} from '@sapper/service-worker'
 // and Chrome warns that a no-op handler adds overhead on every navigation, so it is disabled for
 // now. Bring it back if its absence becomes inconvenient.
 // self.addEventListener('fetch', event => {})
+
+// activate new versions immediately instead of waiting for all controlled tabs to close, so that
+// e.g. the previous no-op fetch handler is replaced on next load; this also keeps the worker
+// bundle non-empty, avoiding the rollup warning 'Generated an empty chunk: "service-worker"'
+self.addEventListener('install', () => (self as unknown as ServiceWorkerGlobalScope).skipWaiting())
