@@ -3,16 +3,30 @@ import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
+import { getFirestore } from 'firebase-admin/firestore'
+import { createHash } from 'crypto'
 
 // app globals used via page.evaluate (see window._* in index.svelte and client.ts)
 declare global {
   interface Window {
     _items: () => { id: string; name: string; text: string; global_store?: Record<string, unknown> }[]
-    _item: (name: string, silent?: boolean) => { elem: HTMLElement | null; delete: (confirm?: boolean) => void } | null
+    _item: (
+      name: string,
+      silent?: boolean
+    ) => {
+      id: string
+      elem: HTMLElement | null
+      text: string
+      saved_id?: string
+      delete: (confirm?: boolean) => void
+      share: (key: string, index?: number) => void
+      unshare: (key: string) => void
+    } | null
     _render_item: (item: unknown) => Promise<HTMLElement>
     _create: (text: string, options?: object) => unknown
     _exists: (name: string) => boolean
-    __items: { savedId?: string; labelText?: string }[] // internal item state
+    __items: { savedId?: string; labelText?: string; matching?: boolean }[] // internal item state
+    __hideIndex: number // items past this index are hidden (search results are ranked first)
     _user: { uid: string }
     _init_time: number
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item
@@ -26,21 +40,46 @@ declare global {
   }
 }
 
+// test users in the auth emulator; a record needs a display name, without which the app's sign-in
+// handler threw before reaching isAdmin() (fixed, but the e2e user should look like a real one)
+export type TestUser = { uid: string; displayName: string; email: string }
+
 // admin uid hard-coded in firestore.rules and index.svelte (isAdmin); signed in as this uid with
 // ?user=anonymous, the app acts on the anonymous account with write access, as on mindbox.io
-export const ADMIN_UID = 'y2swh7JY2ScO5soV7mJMHVltAOX2'
+export const ADMIN: TestUser = {
+  uid: 'y2swh7JY2ScO5soV7mJMHVltAOX2',
+  displayName: 'E2E Admin',
+  email: 'admin@e2e.test',
+}
 
-// custom token for the admin uid; unsigned, accepted by the auth emulator (FIREBASE_AUTH_EMULATOR_HOST)
-// the user record is created first with a display name, without which the app's sign-in handler
-// throws (sharer_name.match in index.svelte) before reaching isAdmin(), leaving the page read-only
-export async function adminToken(): Promise<string> {
-  const auth = getAuth(getApps()[0] ?? initializeApp({ projectId: 'olcanswiki' }))
-  await auth
-    .createUser({ uid: ADMIN_UID, displayName: 'E2E Admin', email: 'admin@e2e.test', emailVerified: true })
-    .catch(e => {
-      if (e.code != 'auth/uid-already-exists') throw e
-    })
-  return auth.createCustomToken(ADMIN_UID)
+// a regular (personal) account; the uid must match \w+ for /user/<uid> (see server.ts)
+export const ALICE: TestUser = { uid: 'alice_e2e', displayName: 'Alice Test', email: 'alice@e2e.test' }
+
+// firebase-admin against the emulators (FIREBASE_AUTH_EMULATOR_HOST, FIRESTORE_EMULATOR_HOST are set
+// by `firebase emulators:exec`); used to mint tokens and to inspect documents behind the app
+export function admin() {
+  return getApps()[0] ?? initializeApp({ projectId: 'olcanswiki' })
+}
+export function firestore() {
+  return getFirestore(admin())
+}
+
+// custom token for a test user; unsigned, accepted by the auth emulator; the user record is
+// created on first use
+export async function customToken(user: TestUser): Promise<string> {
+  const auth = getAuth(admin())
+  await auth.createUser({ ...user, emailVerified: true }).catch(e => {
+    if (e.code != 'auth/uid-already-exists') throw e
+  })
+  return auth.createCustomToken(user.uid)
+}
+
+// secret phrase as stored by the app in localStorage (mindpage_secret): base64 of sha-256(uid + phrase),
+// see getSecretPhrase in index.svelte; lets tests skip the prompts and pins the derivation
+export function secretFor(user: TestUser, phrase: string): string {
+  return createHash('sha256')
+    .update(user.uid + phrase)
+    .digest('base64')
 }
 
 // waits for the app to be initialized and initially rendered
@@ -61,18 +100,18 @@ export async function loadAnonymous(page: Page) {
   await waitForApp(page)
 }
 
-// signs in as the admin uid and loads the anonymous account with write access (see ADMIN_UID)
-export async function loadAdmin(page: Page) {
-  const token = await adminToken()
-  await page.goto('/?user=anonymous')
+// signs in as a test user on the given url and waits for the reloaded app to be signed in; the
+// sign-in is not awaited in-page since the app reloads itself when the auth state changes
+export async function signIn(page: Page, user: TestUser, url = '/') {
+  const token = await customToken(user)
+  await page.goto(url)
   // fails fast if the served build predates the signInWithCustomToken export in client.ts
-  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, {
-    timeout: 30_000,
-  })
-  // sign in without awaiting the result in-page: the app reloads itself when the auth state
-  // changes, which destroys this evaluation's context; then wait for the reloaded app to be in
-  // admin mode (acting on the anonymous account with write access)
+  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
   await page.evaluate(token => {
+    // as signIn() in index.svelte: marks the sign-in as pending so that the reload does not start as
+    // an anonymous visitor (whose welcome prompt would otherwise stay open, queueing later modals)
+    sessionStorage.setItem('mindpage_signin_pending', '1')
+    document.cookie = '__session=signin_pending;max-age=600'
     void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
   }, token)
   await expect
@@ -80,7 +119,18 @@ export async function loadAdmin(page: Page) {
       timeout: 90_000,
     })
     .toBe(true)
+}
+
+// signs in as the admin uid and loads the anonymous account with write access (see ADMIN)
+export async function loadAdmin(page: Page) {
+  await signIn(page, ADMIN, '/?user=anonymous')
   await waitForApp(page)
+}
+
+// signs in as a regular user and loads their personal account
+export async function loadUser(page: Page, user: TestUser) {
+  await signIn(page, user, '/')
+  expect(await page.evaluate(() => window._user.uid)).toBe(user.uid)
 }
 
 // /_install prompts for a github personal access token (see index.svelte) unless one is stored, so

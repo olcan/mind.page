@@ -13,5 +13,8 @@ initializeApp({ projectId: 'olcanswiki' })
 const db = getFirestore()
 let batch = db.batch()
 for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), data)
+// user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
+batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
+batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test', mindpageDisplayName: 'Alice (custom)' })
 await batch.commit()
 console.log(`seeded ${items.length} anonymous items into firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`)

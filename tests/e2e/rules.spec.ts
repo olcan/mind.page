@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs'
-import { test, expect } from '@playwright/test'
+import { test } from '@playwright/test'
 import {
   assertFails,
   assertSucceeds,

@@ -42,9 +42,16 @@ bundle pointing at `__sapper__/dev`.
 
 ## Tests
 
-Tests run as two projects (see `playwright.config.ts`): `chromium` (read-only) first, then `admin`,
-which writes to the seeded account. Use `--project admin --no-deps` to iterate on the admin tests.
+Tests run as two projects (see `playwright.config.ts`): `chromium` (read-only) first, then `write`
+(`admin`, `editor` and `personal` specs), which changes the seeded accounts. Use
+`--project write --no-deps <spec>` to iterate on a write spec.
 
+- `server.spec.ts` - `server.ts` over http (no browser): the ssr shell and the session fields it
+  embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their
+  manifests, host-dependent icons and titles, `/server_id`, `/user/<uid>`, the webhook endpoints
+  (stored documents checked through firebase-admin), the cors proxy against a local backend, and the
+  localhost-only dev routes. The server-side item preload is disabled in `server.ts`, so the ssr
+  contract is the shell plus these fields.
 - `rules.spec.ts` - `firestore.rules` via `@firebase/rules-unit-testing` (no browser): anonymous and
   shared reads, owner-only writes, admin writes to anonymous items, blocked users. These run against
   their own emulator project (`rules-test`) so their documents stay invisible to the app.
@@ -63,6 +70,18 @@ which writes to the seeded account. Use `--project admin --no-deps` to iterate o
   define `_test_*` functions, runs `/test` and asserts every test passed, and checks that an item
   created by the admin syncs to a read-only visitor in a second browser context, and likewise its
   deletion.
+- `editor.spec.ts` - the editor driven like a user, as admin on the anonymous account: typing in the
+  mindbox and creating with shift+enter, search (debounced, ranked after the pinned items, the tag
+  in the url hash), escape and shift+backspace, clicking a tag and going back, editing an item in
+  place (click, shift+enter to save, escape with a discard prompt), and `/_undelete`. The mindbox
+  textarea is hidden behind a backdrop until focused, so tests click the backdrop.
+- `personal.spec.ts` - a regular account (`alice_e2e`): the first sign-in copies the welcome item
+  and prompts for a new secret phrase, items are then stored as `cipher` with `text` and `attr`
+  nulled, reloading decrypts silently, a new device is prompted for the phrase and a wrong one can
+  only sign out, shared items are stored in the clear and visible by key to anonymous visitors (with
+  the sharer named in the header), unsharing re-encrypts, and signing out clears the secret, the
+  session and the local cache. `secretFor` in `helpers.ts` reproduces the stored secret (sha-256 of
+  uid + phrase) so later tests can skip the prompts.
 
 Notes on driving the app from tests:
 
@@ -77,6 +96,10 @@ Notes on driving the app from tests:
   `../mind.items` checkout by `interceptMindItems` (set `MIND_ITEMS_DIR` to override), so tests can
   cover uncommitted item changes and never hit rate limits.
 - `_Item.delete()` confirms via `window.confirm`, which headless browsers auto-dismiss; pass `false`.
+- `signIn` in `helpers.ts` marks the sign-in as pending (`mindpage_signin_pending`, the
+  `__session=signin_pending` cookie) like the app's own `signIn()`, so that the reload after the
+  auth change does not start as an anonymous visitor, whose welcome prompt would stay open and
+  queue every later modal behind it.
 
 Each item's golden is reviewed like any diff: if a change is intended, run `test:e2e:update` and
 commit the updated snapshot files.

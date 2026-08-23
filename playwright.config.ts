@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test'
 // e2e tests run against local firebase emulators (see tests/e2e/run.sh) and the production build
 // served by node __sapper__/build; tests share one app instance and one emulator dataset, so they
 // run serially
+const WRITE_SPECS = /(admin|editor|personal)\.spec\.ts/
+
 export default defineConfig({
   testDir: 'tests/e2e',
   workers: 1,
@@ -16,16 +18,11 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  // read-only tests (rules, rendering goldens) run first; admin tests install items into the seeded
-  // anonymous account and run after them
+  // read-only tests (server, rules, rendering goldens) run first; write tests (admin installs, the
+  // editor, a personal account) change the seeded accounts and run after them
   projects: [
-    { name: 'chromium', testIgnore: /admin\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
-    {
-      name: 'admin',
-      testMatch: /admin\.spec\.ts/,
-      dependencies: ['chromium'],
-      use: { ...devices['Desktop Chrome'] },
-    },
+    { name: 'chromium', testIgnore: WRITE_SPECS, use: { ...devices['Desktop Chrome'] } },
+    { name: 'write', testMatch: WRITE_SPECS, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
     // note FIREBASE_CONFIG (set by firebase emulators:exec) must be removed, since server.ts takes it
