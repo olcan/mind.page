@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, firestore, loadUser, secretFor, waitForApp } from './helpers'
+import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers'
 
 // personal account path: first sign-in (welcome item, secret phrase), encrypted items, the secret on
 // a new device, sharing by key with anonymous visitors, and sign-out
@@ -77,6 +77,40 @@ test('a new device must enter the phrase; a wrong one can only sign out', async 
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
     .toContain('secret text 12345')
+})
+
+test('a slow first connection does not reset the account to empty', async ({ page }) => {
+  // a fresh device has an empty persistent cache; if the firestore channel is slow, the empty
+  // cache snapshot must not initialize the account (which would create a welcome item and, on a
+  // device without the secret, prompt for a NEW phrase over the existing items)
+  await withSecret(page)
+  let blocked = true
+  await page.route(/:8080\/google\.firestore/, route =>
+    blocked ? void setTimeout(() => route.continue(), 8_000) : route.continue()
+  )
+  // sign in without waiting for initialization (as signIn in helpers, which polls past it)
+  const token = await customToken(ALICE)
+  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+  await page.evaluate(token => {
+    sessionStorage.setItem('mindpage_signin_pending', '1')
+    document.cookie = '__session=signin_pending;max-age=600'
+    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+  }, token)
+  // the reload into the signed-in app clears the pending flag before initializing
+  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+  await page.waitForTimeout(4_000) // while the channel stalls, the app must keep waiting
+  expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
+  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+  blocked = false
+  await expect
+    .poll(() => page.evaluate(() => window._init_time > 0 && window._readonly === false).catch(() => false), {
+      timeout: 90_000,
+    })
+    .toBe(true)
+  await waitForApp(page)
+  const names = await page.evaluate(() => window._items().map(item => item.name))
+  expect(names).toContain('#e2e_private') // account intact, no welcome item added
+  expect(names.filter(name => name == '#e2e_private')).toHaveLength(1)
 })
 
 test('shared items are stored in the clear and visible to anonymous visitors by key', async ({ page, browser }) => {

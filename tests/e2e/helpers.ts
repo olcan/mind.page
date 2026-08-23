@@ -35,7 +35,7 @@ declare global {
     }[] // internal item state
     __hideIndex: number // items past this index are hidden (search results are ranked first)
     _user: { uid: string }
-    _init_time: number
+    _init_time: number // 0-ish (undefined) until initialization begins
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item
     _readonly: boolean
     firebase: {
