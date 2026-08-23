@@ -30,7 +30,7 @@
     "@types/mime": "^3.0.4",
     "compression": "^1.7.4",
     "express": "^4.21.1",
-    "firebase": "^10.14.1",
+    "firebase": "^12.18.0",
     "firebase-admin": "^14.3.0",
     "firebase-functions": "^7.3.2",
     "http-proxy-middleware": "^3.0.3"
@@ -44,9 +44,7 @@
     "@babel/plugin-transform-runtime": "^7.25.7",
     "@babel/preset-env": "^7.25.8",
     "@babel/runtime": "^7.25.7",
-    "@firebase/app": "^0.10.13",
     "@firebase/rules-unit-testing": "^5.0.2",
-    "@firebase/storage": "^0.13.2",
     "@jupyterlab/services": "^7.2.5",
     "@octokit/rest": "^21.0.2",
     "@playwright/test": "^1.62.1",
