@@ -1,4 +1,8 @@
 #!/bin/bash
+# Prefer IPv4 in Node: on some hosts *.googleapis.com resolves to IPv6 addresses whose TLS handshake
+# hangs (Google-bound IPv6 black-holed by a VPN route) while IPv4 works, which stalls the server's
+# firebase-admin calls (e.g. /user/<uid>). Harmless where IPv6 works.
+export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first"
 until npx sapper dev; do
     echo "npx sapper dev crashed with exit code $?;  respawning..." >&2
     sleep 1
