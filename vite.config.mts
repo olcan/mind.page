@@ -17,7 +17,12 @@ const hmrPort = Number(process.env.HMR_PORT ?? 24678)
 const hmrServer = https ? createServer(https) : undefined
 
 export default defineConfig(({ command }) => {
-  if (command == 'serve' && hmrServer) hmrServer.listen(hmrPort)
+  // tolerate a busy port: tools also load this config with command 'serve' (e.g. svelte-check),
+  // and a second dev instance should use HMR_PORT instead of crashing the first
+  if (command == 'serve' && hmrServer && !hmrServer.listening)
+    hmrServer
+      .on('error', (err: NodeJS.ErrnoException) => console.warn(`hmr server not listening (${err.code}); set HMR_PORT for another instance`))
+      .listen(hmrPort)
   return {
   // host true binds the wildcard address: macos only allows unprivileged low ports there, and the
   // lan address is part of the usual dev flow (device testing via the ssl-dev cert sans)

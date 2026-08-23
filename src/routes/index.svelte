@@ -2273,7 +2273,8 @@
     }
 
     // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used when considering auto-hide/show (hideIndex change) below
-    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
+    // note history.state is null after a browser-native hash navigation (e.g. a ##fragment link)
+    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state?.editorText
 
     // if editor text is cleared while a target is selected, we force new state just as in onTagClick
     // only exception is when replaceStateOnEditorChange is set, e.g. to clear query for deleted items in deleteItem
@@ -2882,7 +2883,7 @@
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
       const orderHash = hash(items.map(item => item.id).join())
-      if (editorText != history.state.editorText || orderHash != history.state.orderHash) {
+      if (editorText != history.state?.editorText || orderHash != history.state?.orderHash) {
         // need to update history
         const state = {
           index: undefined, // set below depending on push vs replace
@@ -2895,7 +2896,7 @@
           intro,
         }
         // console.debug(history.state.final ? "push" : "replace", state);
-        if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
+        if (forceNewStateOnEditorChange || (history.state?.final && !replaceStateOnEditorChange)) {
           // console.debug({
           //   forceNewStateOnEditorChange,
           //   replaceStateOnEditorChange,
@@ -2961,7 +2962,7 @@
   function toggleItems(index: number) {
     hideIndex = index
     checkIfRenderingVisibleItems()
-    replaceState(Object.assign(history.state, { hideIndex }))
+    replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { hideIndex }))
   }
 
   function scrollToTarget() {
@@ -5725,7 +5726,7 @@
       historyUpdatePending = true
       setTimeout(() => {
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
-        replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }))
+        replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { scrollPosition: document.body.scrollTop }))
         historyUpdatePending = false
       }, 250)
     }
@@ -8066,7 +8067,7 @@
   function onWebcamClick(e) {
     intro = !intro
     // replace state except for first (always intro)
-    if (history.state.index > 0) replaceState(Object.assign(history.state, { intro }))
+    if (history.state?.index > 0) replaceState(Object.assign(history.state, { intro }))
     e.stopPropagation()
     ;(e.target as HTMLElement).classList.toggle('intro')
   }

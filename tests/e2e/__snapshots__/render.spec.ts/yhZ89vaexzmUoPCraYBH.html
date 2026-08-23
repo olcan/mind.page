@@ -15,11 +15,11 @@
 </li>
 <li>
 <span class="list-item">
-<code>_item(name,[log_errors])</code> returns <a href="#MindPage/core/_item" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item',event)">_Item</a> with name (label or id).</span>
+<code>_item(name,[log_errors])</code> returns <mark class="link" title="#MindPage/core/_item" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item','_Item',event)" onclick="event.preventDefault();event.stopPropagation();">_Item</mark> with name (label or id).</span>
 </li>
 <li>
 <span class="list-item">
-<code>_items([label])</code> returns array of <a href="#MindPage/core/_item" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item',event)">_Items</a>.</span>
+<code>_items([label])</code> returns array of <mark class="link" title="#MindPage/core/_item" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item','_Items',event)" onclick="event.preventDefault();event.stopPropagation();">_Items</mark>.</span>
 </li>
 <li>
 <span class="list-item">
@@ -47,7 +47,7 @@
 </li>
 <li>
 <span class="list-item">
-<a href="#MindPage/core/functions/_modal" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/functions/_modal',event)">_modal</a> opens modal confirmation/input prompts.</span>
+<mark class="link" title="#MindPage/core/functions/_modal" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/functions/_modal','_modal',event)" onclick="event.preventDefault();event.stopPropagation();">_modal</mark> opens modal confirmation/input prompts.</span>
 </li>
 <li>
 <span class="list-item">
@@ -152,35 +152,35 @@
 <code>_hash(x,[hasher],[stringifier])</code> hashes <code>x</code> using <code>hasher</code> and <code>stringifier</code>. Default hasher is <code>_hash_64_fnv1a</code> (see below) and default stringifier is <code>toString</code> for functions and <code>JSON.stringify</code> for everything else. Returns integer (≤52-bit) or hex string (&gt;52-bit) depending on <code>hasher</code>:<ul>
 <li>
 <span class="list-item">
-<code>_hash_32_djb2(string)</code> hashes using <a href="http://www.cse.yorku.ca/~oz/hash.html" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','http://www.cse.yorku.ca/~oz/hash.html',event)">djb2</a> (xor variant).</span>
+<code>_hash_32_djb2(string)</code> hashes using <a target="_blank" rel="opener" title="http://www.cse.yorku.ca/~oz/hash.html" href="http://www.cse.yorku.ca/~oz/hash.html" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','http://www.cse.yorku.ca/~oz/hash.html',event)">djb2</a> (xor variant).</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_32_fnv1a(string)</code> hashes using 32-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+<code>_hash_32_fnv1a(string)</code> hashes using 32-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" href="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function',event)">fnv-1a</a>.</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_32_murmur3(string)</code> hashes using 32-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a>.</span>
+<code>_hash_32_murmur3(string)</code> hashes using 32-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/MurmurHash" href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a>.</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_52_fnv1a(string)</code> hashes using 52-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+<code>_hash_52_fnv1a(string)</code> hashes using 52-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" href="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function',event)">fnv-1a</a>.</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_64_fnv1a(string)</code> hashes using 64-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+<code>_hash_64_fnv1a(string)</code> hashes using 64-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" href="https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function',event)">fnv-1a</a>.</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_128_murmur3_x64(string)</code> hashes using 128-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x64 variant).</span>
+<code>_hash_128_murmur3_x64(string)</code> hashes using 128-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/MurmurHash" href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x64 variant).</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_128_murmur3_x86(string)</code> hashes using 128-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x86 variant).</span>
+<code>_hash_128_murmur3_x86(string)</code> hashes using 128-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/MurmurHash" href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x86 variant).</span>
 </li>
 <li>
 <span class="list-item">
-<code>_hash_160_sha1(string)</code> hashes using 160-bit <a href="https://en.wikipedia.org/wiki/SHA-1" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/SHA-1',event)">secure hash algo 1</a>.</span>
+<code>_hash_160_sha1(string)</code> hashes using 160-bit <a target="_blank" rel="opener" title="https://en.wikipedia.org/wiki/SHA-1" href="https://en.wikipedia.org/wiki/SHA-1" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/SHA-1',event)">secure hash algo 1</a>.</span>
 </li>
 </ul>
 </span>
