@@ -192,39 +192,6 @@ const app = express().use(
       }
       res.json(events[key])
       events[key] = []
-    } else if (hostname == 'localhost' && req.path.startsWith('/client/sapper-dev-client')) {
-      // modify sapper-dev-client.*.js file (see comments below on changes)
-      // the file is in __sapper__/dev/client/sapper-dev-client.*.js
-      // the dev server is in node_modules/sapper/dist/dev.js
-      const abspath = process.env['PWD'] + '/__sapper__/dev' + req.path
-      // res.sendFile(abspath)
-      fs.readFile(abspath, 'utf8', (err, data) => {
-        if (err) {
-          console.error(err)
-          res.status(400).send('could not find ' + abspath + ';' + err)
-        } else {
-          res.contentType('text/javascript') // Or some other more appropriate value
-          // use /proxy for HTTP to avoid mixed content errors
-          // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
-          data = data.replace('http:', '/proxy/http:')
-          // force reload on server connection with new server_id
-          // otherwise server restarts are NOT detected via proxy
-          data = data.replace(
-            `console.log(\`[SAPPER] dev client connected\`);`,
-            `console.log(\`[SAPPER] dev client connected\`);
-             fetch('/server_id').then(resp => resp.text()).then(server_id => {
-              if (window._dev_server_id && window._dev_server_id != server_id) {
-                console.log('[SAPPER] dev server_id changed!', window._dev_server_id, '-->', server_id)
-                window.location.reload()
-                return
-              }
-              window._dev_server_id = server_id
-              console.log('[SAPPER] dev server_id is', server_id)
-            })`
-          )
-          res.send(data)
-        }
-      })
     } else if (hostname == 'localhost' && req.path == '/preview') {
       const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title><script>document.open('text/html');document.write(localStorage.getItem('mindpage_preview_html') ?? 'missing html');document.close()</script></head></html>`
       res.status(200).contentType('text/html').send(html)

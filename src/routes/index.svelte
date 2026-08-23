@@ -1,11 +1,3 @@
-<script context="module" lang="ts">
-  // server-side preload function, see server.ts for comments
-  export async function preload(page, session) {
-    // this.error(404, 'Not found')
-    return process['server-preload'](page, session) // see server.ts
-  }
-</script>
-
 <script lang="ts">
   const isClient = typeof window !== 'undefined'
   // import firebase via client.ts (can also be via server.ts if preloading used again)
