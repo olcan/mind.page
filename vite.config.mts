@@ -17,7 +17,9 @@ export default defineConfig(({ command }) => ({
   server: {
     // firebase-config.js lives at the repo root, outside kit's default fs allow list
     fs: { allow: ['.'] },
-    ...(https ? { https, port: 443, host: true, strictPort: false, proxy: {} } : {}),
+    // hmr gets its own port: with `proxy` set, vite skips ws upgrades on the main server and the
+    // first client attempt fails before falling back (the dedicated port connects directly)
+    ...(https ? { https, port: 443, host: true, strictPort: false, proxy: {}, hmr: { port: 24678 } } : {}),
   },
   plugins: [
     sveltekit(),
