@@ -66,11 +66,13 @@ which writes to the seeded account. Use `--project admin --no-deps` to iterate o
 
 Notes on driving the app from tests:
 
-- Commands are fired with `_create(text, { command: true })` and asserted by their observable
-  effects: command results come back through the app's own promise plumbing, which does not always
-  resolve to the caller.
-- `_exists()` is true as soon as an item is created client-side; wait for `saved_id` before
-  reloading, or unsaved items are lost.
+- Commands run via `_create(text, { command: true, return_alerts: true })`, which returns the
+  command's promise (an alert message on failure). Root `/_install` and `/test` end with modals
+  ("Installed #x [OK]", then "recommends reloading ... [Reload] [Skip]" for new init/welcome items;
+  "Completed N tests ...") and resolve once those are dismissed, so tests click through them.
+- Items exist client-side before their Firestore saves complete. Users are protected by the
+  "Discard unsaved changes?" prompt, which headless navigation bypasses, so tests wait for every
+  item's `savedId` before loading the account again.
 - `/_install` prompts for a GitHub token unless one is stored, and installs are served from the local
   `../mind.items` checkout by `interceptMindItems` (set `MIND_ITEMS_DIR` to override), so tests can
   cover uncommitted item changes and never hit rate limits.

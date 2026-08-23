@@ -13,11 +13,30 @@ const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample',
 
 type TestResult = { ok: boolean; ms?: number; log?: string }
 
-// fires a MindBox command via _create without awaiting it: the promise _create returns for a command
-// is not a reliable completion signal (for /_install it never settled although the install had
-// completed), so tests assert the command's observable effects instead
-async function command(page: Page, text: string) {
-  await page.evaluate(text => void window._create(text, { command: true, return_alerts: true }), text)
+// installs a mind.items item via /_install and resolves to the alert message if the command failed,
+// otherwise null; a (root) install confirms with "Installed #x [OK]", then recommends reloading if
+// new items contain init or welcome code ([Reload] [Skip]), and resolves once these are dismissed
+async function install(page: Page, path: string): Promise<string | null> {
+  let out: string | null | undefined
+  const result = page
+    .evaluate(
+      text =>
+        Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out =>
+          typeof out == 'string' ? out : null
+        ),
+      `/_install ${path}`
+    )
+    .then(r => (out = r))
+  const settledOr = (button: string) => async () =>
+    out !== undefined || (await page.getByText(button, { exact: true }).isVisible())
+  await expect.poll(settledOr('OK'), { message: `/_install ${path}`, timeout: 120_000 }).toBe(true)
+  if (out === undefined) {
+    await page.getByText('OK', { exact: true }).click()
+    await expect.poll(settledOr('Skip'), { message: `/_install ${path} after OK`, timeout: 30_000 }).toBe(true)
+    if (out === undefined) await page.getByText('Skip', { exact: true }).click() // reload happens in later tests anyway
+    await result
+  }
+  return out ?? null
 }
 
 test('admin signs in and acts on the anonymous account with write access', async ({ page }) => {
@@ -35,20 +54,16 @@ test('installs mind.items with tests', async ({ page }) => {
   })
   await useGithubToken(page)
   await loadAdmin(page)
-  // an item exists client-side as soon as it is created, before its firestore save completes, so we
-  // wait for saved_id: items that are not yet saved are lost on the next load (see the /test test)
-  const saved = (name: string) => page.evaluate(name => !!window._item(name, true)?.saved_id, name)
+  const exists = (name: string) => page.evaluate(name => window._exists(name), name)
   for (const path of INSTALL) {
-    const name = `#${path}` // installed items are labeled by their path, minus the .md suffix
-    if (await saved(name)) continue // already installed, e.g. as a dependency of an earlier item
-    await command(page, `/_install ${path}`)
-    await expect.poll(() => saved(name), { message: `/_install ${path}`, timeout: 120_000 }).toBe(true)
+    if (await exists(`#${path}`)) continue // already installed as a dependency of an earlier item
+    expect(await install(page, path), `/_install ${path}`).toBeNull()
   }
-  // dependencies are installed too, so wait for every item to be saved before other tests load
+  // items exist client-side before their firestore saves complete, and the app guards navigation
+  // with a beforeunload prompt that headless tests bypass, so wait for every item to be saved
+  // before other tests load the account
   await expect
-    .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), {
-      timeout: 120_000,
-    })
+    .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 120_000 })
     .toBe(0)
 })
 

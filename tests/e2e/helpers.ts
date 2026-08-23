@@ -8,14 +8,7 @@ import { getAuth } from 'firebase-admin/auth'
 declare global {
   interface Window {
     _items: () => { id: string; name: string; text: string; global_store?: Record<string, unknown> }[]
-    _item: (
-      name: string,
-      silent?: boolean
-    ) => {
-      elem: HTMLElement | null
-      delete: (confirm?: boolean) => void
-      saved_id?: string
-    } | null
+    _item: (name: string, silent?: boolean) => { elem: HTMLElement | null; delete: (confirm?: boolean) => void } | null
     _render_item: (item: unknown) => Promise<HTMLElement>
     _create: (text: string, options?: object) => unknown
     _exists: (name: string) => boolean
