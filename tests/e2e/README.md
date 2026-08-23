@@ -50,8 +50,9 @@ Tests run as two projects (see `playwright.config.ts`): `chromium` (read-only) f
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their
   manifests, host-dependent icons and titles, `/server_id`, `/user/<uid>`, the webhook endpoints
   (stored documents checked through firebase-admin), the cors proxy against a local backend, and the
-  localhost-only dev routes. The server-side item preload is disabled in `server.ts`, so the ssr
-  contract is the shell plus these fields.
+  localhost-only dev routes. The server-side item preload is disabled in `server.ts` and items were
+  never rendered server-side, so the ssr contract is the shell plus these fields; two `fixme` cases
+  pin the crawlability target (public and shared pages readable without javascript).
 - `rules.spec.ts` - `firestore.rules` via `@firebase/rules-unit-testing` (no browser): anonymous and
   shared reads, owner-only writes, admin writes to anonymous items, blocked users. These run against
   their own emulator project (`rules-test`) so their documents stay invisible to the app.

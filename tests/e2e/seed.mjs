@@ -16,5 +16,12 @@ for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), d
 // user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
 batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
 batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test', mindpageDisplayName: 'Alice (custom)' })
+// a shared item of another user, readable by anyone (see firestore.rules) via ?shared=crawl_e2e/public
+batch.set(db.collection('items').doc('e2e-crawl-shared'), {
+  user: 'crawl_e2e',
+  time: Date.now(),
+  text: '#e2e_crawl a shared item for crawlers',
+  attr: { shared: { keys: ['public'] } },
+})
 await batch.commit()
 console.log(`seeded ${items.length} anonymous items into firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`)
