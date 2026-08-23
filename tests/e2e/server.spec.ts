@@ -98,13 +98,13 @@ test.describe('icons', () => {
     test(`are served for ${host}`, async ({ request }) => {
       const headers: Record<string, string> = host == 'localhost' ? {} : { Host: host }
       for (const [path, type] of [
-        ['/favicon.ico', 'image/x-icon'],
-        ['/icon.png', 'image/x-icon'], // favicon.ico under another name
-        ['/apple-touch-icon.png', 'image/png'],
-      ]) {
+        ['/favicon.ico', /image\/(x-icon|vnd\.microsoft\.icon)/], // express 5 serves the iana type
+        ['/icon.png', /image\/(x-icon|vnd\.microsoft\.icon)/], // favicon.ico under another name
+        ['/apple-touch-icon.png', /image\/png/],
+      ] as [string, RegExp][]) {
         const res = await request.get(path, { headers })
         expect(res.status(), path).toBe(200)
-        expect(res.headers()['content-type'], path).toContain(type)
+        expect(res.headers()['content-type'], path).toMatch(type)
         expect((await res.body()).length, path).toBeGreaterThan(100)
       }
     })

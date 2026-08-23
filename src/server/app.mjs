@@ -53,8 +53,8 @@ paths.push('/b/')
 // default global-scope standalone-display prefix
 paths.push('/')
 
-const app = express().use(
-  paths,
+const scoped = express.Router()
+scoped.use(
 
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
@@ -280,6 +280,13 @@ const app = express().use(
     }
   }
 )
+
+// the stack is mounted at the root and again at the pwa scope prefixes, which strip the prefix so
+// that e.g. /2f/apple-touch-icon.png resolves within the scope (express 5 no longer accepts '/'
+// inside a path array, hence the separate root mount)
+const app = express()
+app.use(scoped)
+app.use(paths.filter(path => path != '/'), scoped)
 
 app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
 
