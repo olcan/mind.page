@@ -469,7 +469,7 @@
         }
       })
 
-    const regexTerms = Array.from(matchingTerms)
+    const regexTerms = Array.from(matchingTerms as Iterable<string>)
       .map(_.escapeRegExp)
       .sort((a, b) => b.length - a.length)
     let mathTermRegex = new RegExp(`\$\`.*(?:${regexTerms.join('|')}).*\`\$`, 'i')
@@ -1113,7 +1113,7 @@
       // show item again, but cancel highlights if itemdiv is missing or mindbox modified
       if (!itemdiv || window['_mindboxLastModified'] != mindboxModifiedAtDispatch) return
 
-      let terms = highlightTerms.split(' ').filter(t => t)
+      let terms: string[] = highlightTerms.split(' ').filter(t => t)
       if (label) {
         // expand terms for shortening, mirroring "reltag" logic in toHTML
         // one difference here is that terms are lowercased so labelText is irrelevant

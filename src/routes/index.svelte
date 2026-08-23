@@ -1622,7 +1622,7 @@
               // we need to decrypt the image blob using personal secret ...
               return blob.arrayBuffer().then(buffer => {
                 const decrypt_start = Date.now()
-                return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
+                return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array<ArrayBuffer>) => {
                   let type = blob.type
                   if (type == 'application/octet-stream') {
                     // image type is prefixed (older images only)
@@ -2097,7 +2097,7 @@
           // we need to decrypt the image blob using personal secret ...
           return blob.arrayBuffer().then(buffer => {
             const decrypt_start = Date.now()
-            return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array) => {
+            return decrypt_bytes(new Uint8Array(buffer)).then((array: Uint8Array<ArrayBuffer>) => {
               let type = blob.type
               if (type == 'application/octet-stream') {
                 // image type is prefixed (older images only)
@@ -3811,7 +3811,7 @@
 
   // encrypt arbitrary bytes (uint8)
   // ideal for firebase storage of large binary data such as images
-  async function encrypt_bytes(bytes: Uint8Array): Promise<Uint8Array> {
+  async function encrypt_bytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
     secret = await Promise.resolve(secret) // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
@@ -3844,7 +3844,7 @@
     return new TextDecoder().decode(text_buffer) // utf8-decode text
   }
 
-  async function decrypt_bytes(cipher: Uint8Array): Promise<Uint8Array> {
+  async function decrypt_bytes(cipher: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
     const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret

@@ -332,7 +332,7 @@ const sapper_server = express().use(
       // see https://code-maze.com/http-series-part-3/#headers for some more info about relevant headers
       client_ip: req['ip'], // see https://stackoverflow.com/a/14631683
     }),
-  })
+  }) as any // sapper's request/response types predate current @types/express (via @types/compression)
 )
 
 sapper_server.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
