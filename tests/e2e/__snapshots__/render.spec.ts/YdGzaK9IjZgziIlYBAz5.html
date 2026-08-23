@@ -1,0 +1,51 @@
+<p>
+<mark class="label unique" title="#features/_listen" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#features/_listen','#features/_listen',event)" onclick="event.preventDefault();event.stopPropagation();">features/_listen</mark> tag enables code to be evaluated on certain events:</p>
+<ul>
+<li>
+<span class="list-item">
+<code>_on_change(text)</code> is evaluated at each change to <mark title="#MindBox" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> triggered by user typing in, or programmatically. Text can be empty.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_search(text)</code> is evaluated at each new search via <mark title="#MindBox" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> triggered by user typing in (subject to debounce), or programmatically. Search text can be empty.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_create(text)</code> is evaluated each time new text is submitted on <mark title="#MindBox" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> using <code>create</code> button, keyboard shortcut, or programmatically.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_command_&lt;name&gt;(`…`)</code> is evaluated when <a href="#commands" onclick="_handleLinkClick('YdGzaK9IjZgziIlYBAz5','#commands',event)">command</a>
+<code>/name …</code> is submitted on <mark title="#MindBox" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark>. Argument <code>…</code> can be empty. Valid return values are in listed in <mark title="#commands" onmousedown="_handleTagClick('YdGzaK9IjZgziIlYBAz5','#commands','#commands',event)" onclick="event.preventDefault();event.stopPropagation();">commands</mark>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_focus()</code> is evaluated each time MindPage window (or tab) is "focused" to receive keyboard, touch, or other input.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_item_change(id, label, prev_label, deleted, remote, dependency)</code> is evaluated at each change to an item or its dependencies.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_local_store_change(id)</code> is evaluated at each change to <code>local_store</code> of an item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_global_store_change(id, remote)</code> is evaluated at each change to <code>global_store</code> of an item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_on_attr_change(id, remote)</code> is evaluated at each change to <code>attr</code> of an item.</span>
+</li>
+<li>
+<span class="list-item">Example code:</span>
+</li>
+</ul>
+<pre>
+<code class="js_example">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_on_search</span>(<span class="hljs-params">text</span>) { <span class="hljs-title function_">alert</span>(<span class="hljs-string">"You searched for: "</span> + text) }
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_on_create</span>(<span class="hljs-params">text</span>) { <span class="hljs-title function_">alert</span>(<span class="hljs-string">"You created: "</span> + text) }</code>
+</pre>

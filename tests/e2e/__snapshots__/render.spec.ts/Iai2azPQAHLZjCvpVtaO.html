@@ -1,0 +1,15 @@
+<p>
+<mark class="label unique" title="#code/util" onmousedown="_handleTagClick('Iai2azPQAHLZjCvpVtaO','#code/util','#code/util',event)" onclick="event.preventDefault();event.stopPropagation();">code/util</mark>
+</p>
+<pre>
+<code class="js">
+<span class="hljs-comment">// from <a href="https://stackoverflow.com/a/175787" target="_blank" title="https://stackoverflow.com/a/175787" onclick="_handleLinkClick('Iai2azPQAHLZjCvpVtaO','https://stackoverflow.com/a/175787',event)">stackoverflow.com/…</a>
+</span>
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">isNumeric</span>(<span class="hljs-params">str</span>) {
+  <span class="hljs-keyword">if</span> (<span class="hljs-keyword">typeof</span> str != <span class="hljs-string">"string"</span>) <span class="hljs-keyword">return</span>
+<span class="hljs-literal">false</span>
+<span class="hljs-keyword">return</span> !<span class="hljs-built_in">isNaN</span>(str) &amp;&amp; <span class="hljs-comment">// require _entire_ string to be numeric</span>
+         !<span class="hljs-built_in">isNaN</span>(<span class="hljs-built_in">parseFloat</span>(str)) <span class="hljs-comment">// handle whitespace-only strings</span>
+}</code>
+</pre>

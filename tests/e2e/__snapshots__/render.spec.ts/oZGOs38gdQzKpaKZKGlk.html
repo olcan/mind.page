@@ -1,0 +1,14 @@
+<p>
+<mark class="label unique" title="#c3" onmousedown="_handleTagClick('oZGOs38gdQzKpaKZKGlk','#c3','#c3',event)" onclick="event.preventDefault();event.stopPropagation();">c3</mark> is a <a href="https://c3js.org" onclick="_handleLinkClick('oZGOs38gdQzKpaKZKGlk','https://c3js.org',event)">charting library</a>
+<mark title="#preloaded" onmousedown="_handleTagClick('oZGOs38gdQzKpaKZKGlk','#preloaded','#preloaded',event)" onclick="event.preventDefault();event.stopPropagation();">preloaded</mark> as <code>c3</code> (or <code>window.c3</code>) and extended here with <code>c3._chart</code>, the preferred constructor for <code>c3</code> charts on MindPage.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_init</span>(<span class="hljs-params">
+</span>) {
+  c3.<span class="hljs-property">_chart</span> = c3_chart; <span class="hljs-comment">// see below</span>
+<span class="hljs-variable language_">document</span>.<span class="hljs-property">head</span>.<span class="hljs-title function_">insertAdjacentHTML</span>(<span class="hljs-string">"beforeend"</span>, <span class="hljs-string">"&lt;style&gt;"</span> +
+    _this.<span class="hljs-title function_">read</span>(<span class="hljs-string">'css'</span>) + <span class="hljs-string">"&lt;/style&gt;"</span>) <span class="hljs-comment">// see below</span>
+}</code>
+</pre>
+<mark class="hidden" title="#init" onmousedown="_handleTagClick('oZGOs38gdQzKpaKZKGlk','#init','#init',event)" onclick="event.preventDefault();event.stopPropagation();">init</mark>

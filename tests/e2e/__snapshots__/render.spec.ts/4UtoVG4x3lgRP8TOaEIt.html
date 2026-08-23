@@ -1,0 +1,47 @@
+<p>
+<mark class="label unique" title="#macros/animation" onmousedown="_handleTagClick('4UtoVG4x3lgRP8TOaEIt','#macros/animation','#macros/animation',event)" onclick="event.preventDefault();event.stopPropagation();">macros/animation</mark> macro generates animation on a <a href="https://www.w3schools.com/html/html5_canvas.asp" onclick="_handleLinkClick('4UtoVG4x3lgRP8TOaEIt','https://www.w3schools.com/html/html5_canvas.asp',event)">canvas</a>. Tap canvas to play/pause. Can be customized using an initializer (<code>init</code>) function that returns the context for drawing. The initializer can be async or return a promise, e.g. for <a href="#load" onclick="_handleLinkClick('4UtoVG4x3lgRP8TOaEIt','#load',event)">loading</a> external libraries. See <mark title="#webgl" onmousedown="_handleTagClick('4UtoVG4x3lgRP8TOaEIt','#webgl','#webgl',event)" onclick="event.preventDefault();event.stopPropagation();">webgl</mark> for a basic initializer for GPU acceleration.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">animation_options</span> = (<span class="hljs-params">options={}</span>) =&gt; _.<span class="hljs-title function_">merge</span>({
+  <span class="hljs-attr">zoom</span>: <span class="hljs-number">1</span>/devicePixelRatio, <span class="hljs-comment">// zoom factor (visible px / canvas px)</span>
+<span class="hljs-attr">target_fps</span>: <span class="hljs-number">60</span>,  <span class="hljs-comment">// target frames/sec (lower to reduce load)</span>
+<span class="hljs-attr">autoplay</span>: <span class="hljs-literal">false</span>, <span class="hljs-comment">// start playing immediately or require click</span>
+<span class="hljs-attr">start</span>: <span class="hljs-number">0</span>,        <span class="hljs-comment">// starting time (secs, determines initial frame)</span>
+<span class="hljs-attr">period</span>: <span class="hljs-number">3</span>,       <span class="hljs-comment">// period (secs) for repeats (0 means infinite)</span>
+<span class="hljs-attr">style</span>: <span class="hljs-string">''</span>,       <span class="hljs-comment">// canvas element style (anything except zoom)</span>
+<span class="hljs-attr">div_style</span>: <span class="hljs-string">''</span>,   <span class="hljs-comment">// style for animation container div</span>
+<span class="hljs-attr">reset_style</span>: <span class="hljs-string">''</span>, <span class="hljs-comment">// style for reset button</span>
+<span class="hljs-attr">play_style</span>: <span class="hljs-string">''</span>,  <span class="hljs-comment">// style for play button</span>
+<span class="hljs-attr">time_style</span>: <span class="hljs-string">''</span>,  <span class="hljs-comment">// style for time text element</span>
+<span class="hljs-attr">fps_style</span>: <span class="hljs-string">''</span>,   <span class="hljs-comment">// style for fps text element</span>
+<span class="hljs-attr">status_style</span>: <span class="hljs-string">''</span>,<span class="hljs-comment">// style for status text element</span>
+<span class="hljs-attr">time_format</span>: <span class="hljs-string">'.1f'</span>, <span class="hljs-comment">// time (secs) text format</span>
+<span class="hljs-attr">time_prefix</span>: <span class="hljs-string">''</span>,    <span class="hljs-comment">// prefix for time text</span>
+<span class="hljs-attr">time_suffix</span>: <span class="hljs-string">'s'</span>,   <span class="hljs-comment">// suffix for time text</span>
+<span class="hljs-attr">fps_suffix</span>: <span class="hljs-string">' fps'</span>, <span class="hljs-comment">// suffix for fps text</span>
+<span class="hljs-attr">show_reset</span>: options.<span class="hljs-property">period</span>==<span class="hljs-number">0</span>, <span class="hljs-comment">// show reset button?</span>
+<span class="hljs-attr">show_fps</span>: <span class="hljs-literal">true</span>,                <span class="hljs-comment">// display fps?</span>
+<span class="hljs-comment">// context initializer function (can be async return promise)</span>
+<span class="hljs-attr">init</span>: <span class="hljs-function">(<span class="hljs-params">canvas</span>) =&gt;</span> canvas.<span class="hljs-title function_">getContext</span>(<span class="hljs-string">'2d'</span>)
+}, options)
+
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">animation</span>(<span class="hljs-params">draw = (ctx, t, w, h) =&gt; {}, options = {}</span>) {  
+  options = <span class="hljs-title function_">animation_options</span>(options)
+  <span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">_animations</span>) <span class="hljs-variable language_">window</span>.<span class="hljs-property">_animations</span> = {}
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">_animations</span>[<span class="hljs-string">'$cid'</span>] = {<span class="hljs-attr">init</span>:options.<span class="hljs-property">init</span>, draw, <span class="hljs-attr">cid</span>:<span class="hljs-string">'$cid'</span>, <span class="hljs-attr">item</span>:_this}
+  <span class="hljs-keyword">return</span>
+<span class="hljs-title function_">html</span>(<span class="hljs-title function_">_item</span>(<span class="hljs-string">'$id'</span>).<span class="hljs-title function_">read</span>(<span class="hljs-string">'html'</span>) <span class="hljs-comment">// see html section</span>
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%cid'</span>, <span class="hljs-string">'$cid'</span>) <span class="hljs-comment">// use $cid of macro instead of script</span>
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%div_style'</span>, options.<span class="hljs-property">div_style</span>)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%style'</span>, options.<span class="hljs-property">style</span>)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%div_style'</span>, options.<span class="hljs-property">div_style</span>)    
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%fps_style'</span>, options.<span class="hljs-property">fps_style</span>)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%time_style'</span>, options.<span class="hljs-property">time_style</span>)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%status_style'</span>, options.<span class="hljs-property">status_style</span>)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%reset_style'</span>, options.<span class="hljs-property">reset_style</span>)    
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%options'</span>, <span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>(options)))
+}</code>
+</pre>
+<mark class="hidden" title="#init" onmousedown="_handleTagClick('4UtoVG4x3lgRP8TOaEIt','#init','#init',event)" onclick="event.preventDefault();event.stopPropagation();">init</mark>

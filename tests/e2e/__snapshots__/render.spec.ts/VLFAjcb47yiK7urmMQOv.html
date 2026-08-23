@@ -1,0 +1,26 @@
+<p>
+<mark class="label unique" title="#gapi/examples/gmail" onmousedown="_handleTagClick('VLFAjcb47yiK7urmMQOv','#gapi/examples/gmail','#gapi/examples/gmail',event)" onclick="event.preventDefault();event.stopPropagation();">gapi/examples/gmail</mark> is an example for <a href="https://developers.google.com/gmail/api" onclick="_handleLinkClick('VLFAjcb47yiK7urmMQOv','https://developers.google.com/gmail/api',event)">Gmail API</a>. <a href="https://developers.google.com/gmail/api/quickstart/js" onclick="_handleLinkClick('VLFAjcb47yiK7urmMQOv','https://developers.google.com/gmail/api/quickstart/js',event)">Quick Start Guide</a> explains how to <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" onclick="_handleLinkClick('VLFAjcb47yiK7urmMQOv','https://console.cloud.google.com/apis/library/gmail.googleapis.com',event)">enable in console</a> and create <a href="https://console.cloud.google.com/apis/credentials" onclick="_handleLinkClick('VLFAjcb47yiK7urmMQOv','https://console.cloud.google.com/apis/credentials',event)">credentials</a> for access.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> scope = <span class="hljs-string">'https://www.googleapis.com/auth/gmail.readonly'</span>
+<span class="hljs-keyword">const</span> doc = <span class="hljs-string">'https://gmail.googleapis.com/$discovery/rest?version=v1'</span>
+<span class="hljs-keyword">await</span> gapi.<span class="hljs-property">client</span>.<span class="hljs-title function_">_auth</span>({ <span class="hljs-attr">scope</span>: scope, <span class="hljs-attr">discoveryDocs</span>: doc })
+<span class="hljs-keyword">await</span> gapi.<span class="hljs-property">client</span>.<span class="hljs-title function_">_try</span>(<span class="hljs-keyword">async</span> ({gmail})=&gt;{
+  <span class="hljs-comment">// get list of emails in inbox (max 1 to print top email only)</span>
+<span class="hljs-comment">// see <a href="https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list" target="_blank" title="https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list" onclick="_handleLinkClick('VLFAjcb47yiK7urmMQOv','https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list',event)">developers.google.com/…</a>
+</span>
+<span class="hljs-keyword">let</span> messages = (<span class="hljs-keyword">await</span> gmail.<span class="hljs-property">users</span>.<span class="hljs-property">messages</span>.<span class="hljs-title function_">list</span>({
+    <span class="hljs-attr">userId</span>:<span class="hljs-string">'me'</span>, <span class="hljs-attr">labelIds</span>:[<span class="hljs-string">'INBOX'</span>], <span class="hljs-attr">maxResults</span>: <span class="hljs-number">1</span> }))?.<span class="hljs-property">result</span>?.<span class="hljs-property">messages</span> ?? []
+  _this.<span class="hljs-title function_">log</span>(<span class="hljs-string">`found <span class="hljs-subst">${messages?.length}</span> messages`</span>)
+  <span class="hljs-keyword">if</span> (!messages?.<span class="hljs-property">length</span>) <span class="hljs-keyword">return</span> _this.<span class="hljs-title function_">remove</span>(<span class="hljs-string">'_output'</span>) <span class="hljs-comment">// no emails, stop</span>
+<span class="hljs-comment">// retrieve email contents</span>
+  messages = <span class="hljs-keyword">await</span>
+<span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">all</span>(messages.<span class="hljs-title function_">map</span>(<span class="hljs-function">
+<span class="hljs-params">msg</span>=&gt;</span>
+    gmail.<span class="hljs-property">users</span>.<span class="hljs-property">messages</span>.<span class="hljs-title function_">get</span>({ <span class="hljs-attr">userId</span>:<span class="hljs-string">'me'</span>, <span class="hljs-attr">id</span>:msg.<span class="hljs-property">id</span> })))
+  _this.<span class="hljs-title function_">log</span>(<span class="hljs-string">`retrieved <span class="hljs-subst">${messages.length}</span> messages`</span>)
+  <span class="hljs-keyword">return</span>
+<span class="hljs-title function_">summarize_email</span>(messages[<span class="hljs-number">0</span>].<span class="hljs-property">result</span>)
+})</code>
+</pre>
+<mark class="hidden" title="#gapi" onmousedown="_handleTagClick('VLFAjcb47yiK7urmMQOv','#gapi','#gapi',event)" onclick="event.preventDefault();event.stopPropagation();">gapi</mark>

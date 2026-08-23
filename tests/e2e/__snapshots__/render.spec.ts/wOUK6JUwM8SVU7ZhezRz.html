@@ -1,0 +1,165 @@
+<p>
+<mark class="label unique" title="#animations/ornstein_uhlenbeck" onmousedown="_handleTagClick('wOUK6JUwM8SVU7ZhezRz','#animations/ornstein_uhlenbeck','#animations/ornstein_uhlenbeck',event)" onclick="event.preventDefault();event.stopPropagation();">animations/ornstein_uhlenbeck</mark>
+</p>
+<ul>
+<li>
+<span class="list-item">Velocity of massive particle under friction</span>
+</li>
+<li>
+<span class="list-item">SDE: <span class="math" _cache_key="wOUK6JUwM8SVU7ZhezRz-963d761f29f8514e-1">
+<mjx-container class="MathJax CtxtMenu_Attached_0" jax="SVG" role="presentation" tabindex="-1" style="position: relative;">
+<svg xmlns="http://www.w3.org/2000/svg" width="26.074ex" height="2.084ex" role="img" focusable="false" viewBox="0 -705 11524.5 921" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" style="vertical-align: -0.489ex;">
+<g stroke="currentColor" fill="currentColor" stroke-width="0" transform="matrix(1 0 0 -1 0 0)">
+<g data-mml-node="math">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(520, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44B">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(828, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mo" transform="translate(1931, 0)">
+<use xlink:href="#MJX-TEX-N-3D">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(2986.8, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D707">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(603, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mi" transform="translate(3895.1, 0)">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(4415.1, 0)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+<g data-mml-node="mo" transform="translate(4998.3, 0)">
+<use xlink:href="#MJX-TEX-N-2B">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(5998.5, 0)">
+<use xlink:href="#MJX-TEX-I-1D70E">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(6569.5, 0)">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(7089.5, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44A">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(944, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mo" transform="translate(8561, 0)">
+<use xlink:href="#MJX-TEX-N-2212">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(9561.2, 0)">
+<use xlink:href="#MJX-TEX-I-1D703">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(10030.2, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44B">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(828, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mi" transform="translate(11163.5, 0)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+</g>
+</svg>
+<mjx-assistive-mml role="presentation" unselectable="on" display="inline">
+<math xmlns="http://www.w3.org/1998/Math/MathML">
+<mi>d</mi>
+<msub>
+<mi>X</mi>
+<mi>t</mi>
+</msub>
+<mo>=</mo>
+<msub>
+<mi>μ</mi>
+<mi>t</mi>
+</msub>
+<mi>d</mi>
+<mi>t</mi>
+<mo>+</mo>
+<mi>σ</mi>
+<mi>d</mi>
+<msub>
+<mi>W</mi>
+<mi>t</mi>
+</msub>
+<mo>−</mo>
+<mi>θ</mi>
+<msub>
+<mi>X</mi>
+<mi>t</mi>
+</msub>
+<mi>t</mi>
+</math>
+</mjx-assistive-mml>
+</mjx-container>
+</span>
+</span>
+</li>
+</ul>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span> sigma = <span class="hljs-number">0.05</span>
+<span class="hljs-comment">// diffusion rate (∝1/mass)</span>
+<span class="hljs-keyword">const</span> theta = <span class="hljs-number">0.1</span>
+<span class="hljs-comment">// mean reversion rate</span>
+<span class="hljs-keyword">const</span> tail_time = <span class="hljs-number">5</span>
+<span class="hljs-comment">// past length in seconds</span>
+<span class="hljs-keyword">const</span> sim_time = <span class="hljs-number">5</span>
+<span class="hljs-comment">// future sim time (in secs, when paused)</span>
+<span class="hljs-keyword">const</span> sim_count = <span class="hljs-number">1000</span>
+<span class="hljs-comment">// number of future simulations (when paused)</span>
+<span class="hljs-comment">// const drift = (t) =&gt; ({x:0,y:0})</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">drift</span> = (<span class="hljs-params">t</span>) =&gt; ({ <span class="hljs-comment">// ∞-shaped periodic drift</span>
+<span class="hljs-attr">x</span>: <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">cos</span>(<span class="hljs-number">.5</span> * t * <span class="hljs-number">2</span>*<span class="hljs-title class_">Math</span>.<span class="hljs-property">PI</span>),
+  <span class="hljs-attr">y</span>: <span class="hljs-number">1.5</span> * <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">cos</span>(t * <span class="hljs-number">2</span>*<span class="hljs-title class_">Math</span>.<span class="hljs-property">PI</span>)
+})</code>
+</pre>
+<!-- *_removed block is not included in rendered item -->
+<!-- wOUK6JUwM8SVU7ZhezRz-50617133ecb5cd62-1 is a unique content identifier based on macro usage -->
+<div class="animation initialized" style="cursor: pointer;" _cache_key="wOUK6JUwM8SVU7ZhezRz-50617133ecb5cd62-4">
+<div class="fps" style="display: none;">⋯ fps</div>
+<div class="time">0.0s</div>
+<div class="status">
+</div>
+<div class="play" style="display: block;">
+</div>
+<div class="reset" style="display: block;">reset</div>
+<canvas style="width: 500px; height: 500px; zoom: 1;" width="500" height="500">
+</canvas>
+</div>
+<mark class="hidden" title="#macros/animation" onmousedown="_handleTagClick('wOUK6JUwM8SVU7ZhezRz','#macros/animation','#macros/animation',event)" onclick="event.preventDefault();event.stopPropagation();">macros/animation</mark>
+<mark class="hidden" title="#jStat" onmousedown="_handleTagClick('wOUK6JUwM8SVU7ZhezRz','#jStat','#jStat',event)" onclick="event.preventDefault();event.stopPropagation();">jStat</mark>

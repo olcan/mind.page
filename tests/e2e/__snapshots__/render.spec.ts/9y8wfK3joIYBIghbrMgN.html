@@ -1,0 +1,69 @@
+<p>
+<mark class="label unique" title="#commands" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands','#commands',event)" onclick="event.preventDefault();event.stopPropagation();">commands</mark> are <mark title="#code" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#code','#code',event)" onclick="event.preventDefault();event.stopPropagation();">code</mark> run via <mark title="#MindBox" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark>. Examples: <mark title="#commands/hello" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/hello','#/hello',event)" onclick="event.preventDefault();event.stopPropagation();">hello</mark>
+<mark title="#commands/hello_again" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/hello_again','#/hello_again',event)" onclick="event.preventDefault();event.stopPropagation();">hello_again</mark>
+<mark title="#commands/js" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/js','#/js',event)" onclick="event.preventDefault();event.stopPropagation();">js</mark>
+<mark title="#commands/alert" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/alert','#/alert',event)" onclick="event.preventDefault();event.stopPropagation();">alert</mark>
+<mark title="#commands/copy" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/copy','#/copy',event)" onclick="event.preventDefault();event.stopPropagation();">copy</mark>
+<mark title="#commands/export" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/export','#/export',event)" onclick="event.preventDefault();event.stopPropagation();">export</mark>
+<mark title="#commands/restore" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/restore','#/restore',event)" onclick="event.preventDefault();event.stopPropagation();">restore</mark>
+<mark title="#commands/agenda" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/agenda','#/agenda',event)" onclick="event.preventDefault();event.stopPropagation();">agenda</mark>
+<mark title="#commands/invert" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/invert','#/invert',event)" onclick="event.preventDefault();event.stopPropagation();">invert</mark>
+<mark title="#commands/weight" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/weight','#/weight',event)" onclick="event.preventDefault();event.stopPropagation();">weight</mark>.</p>
+<ul>
+<li>
+<span class="list-item">Type command as <code>/name …</code> and hit <mark title="#⇧⏎" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#⇧⏎','#⇧⏎',event)" onclick="event.preventDefault();event.stopPropagation();">⇧⏎</mark>.</span>
+</li>
+<li>
+<span class="list-item">Evaluates <code>run(`…`)</code> from item named <code>#commands/&lt;name&gt;</code>.<ul>
+<li>
+<span class="list-item">If missing, evaluates <code>_on_command_&lt;name&gt;(`…`)</code> in <a href="#features/_listen" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#features/_listen',event)">listeners</a>.</span>
+</li>
+<li>
+<span class="list-item">Function can be <code>async</code> or return promise, e.g. <mark title="#commands/agenda" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/agenda','#/agenda',event)" onclick="event.preventDefault();event.stopPropagation();">agenda</mark>.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Return nothing (or <code>undefined</code>) to clear text and defocus.</span>
+</li>
+<li>
+<span class="list-item">Return string (can be empty) to replace text.</span>
+</li>
+<li>
+<span class="list-item">Return object <code>{ text:"…" }</code> to create new item.<ul>
+<li>
+<span class="list-item">
+<code>edit:true|false</code> to start editing created item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>run:true|false</code> to run <code>js_input</code> in item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>init:(item)=&gt;{...}</code> to initialize item.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Return <code>null</code> or <a href="#MindPage/core/_Item" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item',event)">_Item</a> to do nothing.<ul>
+<li>
+<span class="list-item">Allows command to handle any changes to <mark title="#MindBox" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> as needed.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Commands can also be triggered programmatically.<ul>
+<li>
+<span class="list-item">e.g. via <a href="#MindPage/core/functions" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/functions',event)">window._create</a> or <a href="#MindBox" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindBox',event)">MindBox.create</a>.</span>
+</li>
+<li>
+<span class="list-item">Any created or returned <a href="#MindPage/core/_Item" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item',event)">_Item</a> (or <code>null</code>) is also returned to the programmatic context where command is triggered.</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>

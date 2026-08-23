@@ -1,0 +1,23 @@
+<p>
+<mark class="label unique" title="#webppl/summarize" onmousedown="_handleTagClick('8PkrCDFk8WIvoS1znGtx','#webppl/summarize','#webppl/summarize',event)" onclick="event.preventDefault();event.stopPropagation();">webppl/summarize</mark>
+<mark class="hidden" title="#code/util" onmousedown="_handleTagClick('8PkrCDFk8WIvoS1znGtx','#code/util','#code/util',event)" onclick="event.preventDefault();event.stopPropagation();">code/util</mark> outputs most likely (discrete) values and their probabilities in in a format suitable for charting, e.g. using <mark title="#macros/bar_chart" onmousedown="_handleTagClick('8PkrCDFk8WIvoS1znGtx','#macros/bar_chart','#macros/bar_chart',event)" onclick="event.preventDefault();event.stopPropagation();">macros/bar_chart</mark>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">webppl_summarize</span>(<span class="hljs-params">dist, prior=<span class="hljs-literal">null</span>, limit=<span class="hljs-number">10</span>, format=<span class="hljs-string">".2f"</span>
+</span>) {
+  dist = dist.<span class="hljs-title function_">getDist</span>() <span class="hljs-comment">// get value:prob object</span>
+<span class="hljs-keyword">const</span> vJ = _.<span class="hljs-title function_">keys</span>(dist).<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">v</span>) =&gt;</span> v.<span class="hljs-title function_">toString</span>())
+  <span class="hljs-keyword">const</span> pJ = _.<span class="hljs-title function_">values</span>(dist).<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">p</span>) =&gt;</span> p.<span class="hljs-property">prob</span>).<span class="hljs-title function_">map</span>(d3.<span class="hljs-title function_">format</span>(format))
+  <span class="hljs-keyword">let</span> jJ = _.<span class="hljs-title function_">sortBy</span>(_.<span class="hljs-title function_">range</span>(pJ.<span class="hljs-property">length</span>), <span class="hljs-function">(<span class="hljs-params">j</span>) =&gt;</span> -pJ[j])
+  jJ = _.<span class="hljs-title function_">take</span>(jJ.<span class="hljs-title function_">filter</span>(<span class="hljs-function">(<span class="hljs-params">j</span>) =&gt;</span> pJ[j] &gt; <span class="hljs-number">0</span>), limit)
+  <span class="hljs-keyword">let</span> columns = _.<span class="hljs-title function_">zip</span>([<span class="hljs-string">'x'</span>,<span class="hljs-string">'p'</span>], ...jJ.<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">j</span>)=&gt;</span>[vJ[j],pJ[j]]))
+  <span class="hljs-keyword">if</span> (prior) {
+    prior = prior?.<span class="hljs-title function_">getDist</span>()
+    <span class="hljs-keyword">const</span> qJ = jJ.<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">j</span>) =&gt;</span> prior[vJ[j]]?.<span class="hljs-property">prob</span> || <span class="hljs-string">"0"</span>)
+    columns.<span class="hljs-title function_">push</span>([<span class="hljs-string">'prior'</span>, ...qJ.<span class="hljs-title function_">map</span>(d3.<span class="hljs-title function_">format</span>(format))])
+    columns[<span class="hljs-number">1</span>][<span class="hljs-number">0</span>] = <span class="hljs-string">'posterior'</span>
+  }
+  <span class="hljs-keyword">return</span> columns
+}</code>
+</pre>

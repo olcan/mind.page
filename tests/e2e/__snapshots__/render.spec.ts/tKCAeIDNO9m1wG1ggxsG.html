@@ -1,0 +1,15 @@
+<p>
+<mark class="label unique" title="#graphviz" onmousedown="_handleTagClick('tKCAeIDNO9m1wG1ggxsG','#graphviz','#graphviz',event)" onclick="event.preventDefault();event.stopPropagation();">graphviz</mark> is a <a href="https://www.graphviz.org" onclick="_handleLinkClick('tKCAeIDNO9m1wG1ggxsG','https://www.graphviz.org',event)">graph visualization library</a>
+<mark title="#preloaded" onmousedown="_handleTagClick('tKCAeIDNO9m1wG1ggxsG','#preloaded','#preloaded',event)" onclick="event.preventDefault();event.stopPropagation();">preloaded</mark> via its <a href="https://github.com/hpcc-systems/hpcc-js-wasm" onclick="_handleLinkClick('tKCAeIDNO9m1wG1ggxsG','https://github.com/hpcc-systems/hpcc-js-wasm',event)">js/wasm port</a> and extended here with <code>graphviz._graph</code>, the preferred constructor for <code>graphviz</code> graphs on MindPage.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_init</span>(<span class="hljs-params">
+</span>) {
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">graphviz</span> = <span class="hljs-variable language_">window</span>[<span class="hljs-string">"@hpcc-js/wasm"</span>].<span class="hljs-property">graphviz</span>
+  graphviz.<span class="hljs-property">_graph</span> = graphviz_graph; <span class="hljs-comment">// see below</span>
+<span class="hljs-variable language_">document</span>.<span class="hljs-property">head</span>.<span class="hljs-title function_">insertAdjacentHTML</span>(<span class="hljs-string">"beforeend"</span>, <span class="hljs-string">"&lt;style&gt;"</span> +
+    _this.<span class="hljs-title function_">read</span>(<span class="hljs-string">'css'</span>) + <span class="hljs-string">"&lt;/style&gt;"</span>) <span class="hljs-comment">// see below</span>
+}</code>
+</pre>
+<mark class="hidden" title="#init" onmousedown="_handleTagClick('tKCAeIDNO9m1wG1ggxsG','#init','#init',event)" onclick="event.preventDefault();event.stopPropagation();">init</mark>

@@ -1,0 +1,44 @@
+<p>
+<mark class="label unique" title="#load" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark> function loads external libraries. Examples: <mark title="#mathjs" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#mathjs','#mathjs',event)" onclick="event.preventDefault();event.stopPropagation();">mathjs</mark>
+<mark title="#jStat" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#jStat','#jStat',event)" onclick="event.preventDefault();event.stopPropagation();">jStat</mark>
+<mark title="#webppl" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#webppl','#webppl',event)" onclick="event.preventDefault();event.stopPropagation();">webppl</mark>
+<mark title="#TensorFlow" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#TensorFlow','#TensorFlow',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow</mark>
+<mark title="#gapi" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#gapi','#gapi',event)" onclick="event.preventDefault();event.stopPropagation();">gapi</mark>, ...</p>
+<ul>
+<li>
+<span class="list-item">
+<mark title="#features/_async" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#features/_async','#features/_async',event)" onclick="event.preventDefault();event.stopPropagation();">features/_async</mark> can simplify syntax.</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#features/_init" onmousedown="_handleTagClick('HqnAEzzDvjJuExBje0mD','#features/_init','#features/_init',event)" onclick="event.preventDefault();event.stopPropagation();">features/_init</mark> can trigger preloading.</span>
+</li>
+<li>
+<span class="list-item">Can load multiple libraries.</span>
+</li>
+<li>
+<span class="list-item">Can resolve additional promises.</span>
+</li>
+<li>
+<span class="list-item">Typically used w/ boolean checks.</span>
+</li>
+<li>
+<span class="list-item">Example usage:</span>
+</li>
+</ul>
+<pre>
+<code class="js_example">
+<span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">lib1</span> || <span class="hljs-string">"url1"</span>, <span class="hljs-comment">// load only if !window.lib1</span>
+<span class="hljs-variable language_">window</span>.<span class="hljs-property">lib2</span> || <span class="hljs-string">"url2"</span>, <span class="hljs-comment">// load only if !window.lib2</span>
+<span class="hljs-comment">// custom_init(),</span>
+)
+<span class="hljs-comment">// ... post-load init</span>
+<span class="hljs-comment">// Alternative Usage (assuming lib1 primary)</span>
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">lib1</span>) { <span class="hljs-comment">// skip load+init if lib1 loaded</span>
+<span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(<span class="hljs-string">"url1"</span>, <span class="hljs-string">"url2"</span>, <span class="hljs-comment">/* custom_init() */</span>)
+  <span class="hljs-comment">// ... post-load init</span>
+}</code>
+</pre>

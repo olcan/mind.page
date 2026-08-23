@@ -1,0 +1,24 @@
+<p>
+<mark class="label unique" title="#TensorFlow/vis" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#TensorFlow/vis','#TensorFlow/vis',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow/vis</mark> is the official <a href="https://github.com/tensorflow/tfjs/tree/master/tfjs-vis" onclick="_handleLinkClick('PBmXEkGcwZvZB4ILRfZZ','https://github.com/tensorflow/tfjs/tree/master/tfjs-vis',event)">Visualization Library</a> for <mark title="#TensorFlow" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#TensorFlow','#TensorFlow',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow</mark>. Keyboard shortcuts <code>`</code> (toggle visor) and <code>⇧`</code> (=<code>~</code>, to toggle maximize once open) can be used to toggle the "visor" (sidebar) once library is loaded. Macro <code>&lt;&lt;visor_toggle&gt;&gt;</code> (defined below) can also be used to render a toggle link in items. See basic <mark title="#TensorFlow/vis/example" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#TensorFlow/vis/example','#/example',event)" onclick="event.preventDefault();event.stopPropagation();">example</mark> and <a href="#TensorFlow/examples/linear_regression" onclick="_handleLinkClick('PBmXEkGcwZvZB4ILRfZZ','#TensorFlow/examples/linear_regression',event)">linear_regression</a> tutorial.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">tfvis</span>) {
+  <span class="hljs-keyword">const</span> base = <span class="hljs-string">'https://cdn.jsdelivr.net/npm/@tensorflow'</span>
+<span class="hljs-keyword">const</span> tfjs = base + <span class="hljs-string">'/tfjs/dist/tf.min.js'</span>
+<span class="hljs-keyword">const</span> tfjs_vis = base + <span class="hljs-string">'/tfjs-vis/dist/tfjs-vis.umd.min.js'</span>
+<span class="hljs-keyword">if</span> (<span class="hljs-variable language_">window</span>.<span class="hljs-property">tf</span>) { <span class="hljs-comment">// load tfjs-vis only</span>
+<span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(tfjs_vis)
+  } <span class="hljs-keyword">else</span> { <span class="hljs-comment">// load together with tfjs and then set backend</span>
+<span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(tfjs, tfjs_vis)
+    <span class="hljs-keyword">await</span> tf.<span class="hljs-title function_">setBackend</span>(<span class="hljs-string">'webgl'</span>)
+  }
+  tfvis.<span class="hljs-title function_">visor</span>().<span class="hljs-title function_">close</span>() <span class="hljs-comment">// initialize visor closed, minimized</span>
+<span class="hljs-keyword">if</span> (tfvis.<span class="hljs-title function_">visor</span>().<span class="hljs-title function_">isFullscreen</span>()) tfvis.<span class="hljs-title function_">visor</span>().<span class="hljs-title function_">toggleFullscreen</span>()
+}</code>
+</pre>
+<mark class="hidden" title="#load" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>
+<mark class="hidden" title="#init" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#init','#init',event)" onclick="event.preventDefault();event.stopPropagation();">init</mark>
+<mark class="hidden" title="#TensorFlow" onmousedown="_handleTagClick('PBmXEkGcwZvZB4ILRfZZ','#TensorFlow','#TensorFlow',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow</mark>

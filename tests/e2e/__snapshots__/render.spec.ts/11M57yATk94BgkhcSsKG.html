@@ -1,0 +1,13 @@
+<p>
+<mark class="label unique" title="#MindPage/core/functions/_modal/example" onmousedown="_handleTagClick('11M57yATk94BgkhcSsKG','#MindPage/core/functions/_modal/example','#MindPage/core/functions/_modal/example',event)" onclick="event.preventDefault();event.stopPropagation();">MindPage/core/functions/_modal/example</mark> shows a <a href="#MindPage/core/functions/_modal" onclick="_handleLinkClick('11M57yATk94BgkhcSsKG','#MindPage/core/functions/_modal',event)">modal</a> that triggers <code>MindBox.focus()</code> from its confirmation click handler, as required by some browsers (e.g. iOS Safari) that otherwise block keyboard focus actions.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-title function_">_modal</span>({
+  <span class="hljs-attr">content</span>: <span class="hljs-string">"This is an example modal dialog."</span>, 
+  <span class="hljs-attr">confirm</span>: <span class="hljs-string">"Focus on MindBox"</span>,
+  <span class="hljs-attr">cancel</span>: <span class="hljs-string">"Cancel"</span>,
+  <span class="hljs-attr">background</span>: <span class="hljs-string">"cancel"</span>,
+  <span class="hljs-attr">onConfirm</span>: <span class="hljs-function">() =&gt;</span>
+<span class="hljs-title class_">MindBox</span>.<span class="hljs-title function_">focus</span>()
+})</code>
+</pre>

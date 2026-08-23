@@ -1,0 +1,115 @@
+<p>
+<mark class="label unique" title="#macros" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#macros','#macros',event)" onclick="event.preventDefault();event.stopPropagation();">macros</mark> are <mark title="#code" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#code','#code',event)" onclick="event.preventDefault();event.stopPropagation();">code</mark> that generate content.</p>
+<ul>
+<li>
+<span class="list-item">Syntax is <code>&lt;&lt;...&gt;&gt;</code> where <code>...</code> is <mark title="#code" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#code','#code',event)" onclick="event.preventDefault();event.stopPropagation();">code</mark>.</span>
+</li>
+<li>
+<span class="list-item">Output is treated same as typed-in content.<ul>
+<li>
+<span class="list-item">HTML content can be wrapped in <code>_html</code> block<ul>
+<li>
+<span class="list-item">See convenient <code>html(…)</code> macro below.</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#features/_init" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#features/_init','#features/_init',event)" onclick="event.preventDefault();event.stopPropagation();">features/_init</mark> can be used for <em>global</em> macros.<ul>
+<li>
+<span class="list-item">
+<mark title="#dependencies" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#dependencies','#dependencies',event)" onclick="event.preventDefault();event.stopPropagation();">dependencies</mark> become optional, for auto-updating.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Examples:<ul>
+<li>
+<span class="list-item">
+<code>&lt;&lt;say_hello()&gt;&gt;</code> from <mark title="#code" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#code','#code',event)" onclick="event.preventDefault();event.stopPropagation();">code</mark>
+<mark class="hidden" title="#code" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#code','#code',event)" onclick="event.preventDefault();event.stopPropagation();">code</mark> gives: hello world!</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#macros/bar_chart" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#macros/bar_chart','#/bar_chart',event)" onclick="event.preventDefault();event.stopPropagation();">bar_chart</mark> macro in <mark title="#charts" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#charts','#charts',event)" onclick="event.preventDefault();event.stopPropagation();">charts</mark>.</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#macros/graph" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#macros/graph','#/graph',event)" onclick="event.preventDefault();event.stopPropagation();">graph</mark> macro in <mark title="#graphs" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#graphs','#graphs',event)" onclick="event.preventDefault();event.stopPropagation();">graphs</mark>.</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#macros/animation" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#macros/animation','#/animation',event)" onclick="event.preventDefault();event.stopPropagation();">animation</mark> macro in <mark title="#animations" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#animations','#animations',event)" onclick="event.preventDefault();event.stopPropagation();">animations</mark>.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Basic macros (import as <code>#_macros</code>):</span>
+</li>
+</ul>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">px</span> = (<span class="hljs-params">s</span>) =&gt; <span class="hljs-keyword">typeof</span> s == <span class="hljs-string">'number'</span> ? s+<span class="hljs-string">'px'</span> : s
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">img</span> = (<span class="hljs-params">u, w=<span class="hljs-string">'auto'</span>, h=<span class="hljs-string">'auto'</span>, style=<span class="hljs-string">''</span>
+</span>) =&gt; <span class="hljs-string">`&lt;img src="<span class="hljs-subst">${u}</span>" style="width:<span class="hljs-subst">${px(w)}</span>;height:<span class="hljs-subst">${px(h)}</span>;<span class="hljs-subst">${style}</span>"&gt;`</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">code</span> = (<span class="hljs-params">text</span>) =&gt; <span class="hljs-string">"`"</span> + text + <span class="hljs-string">"`"</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">block</span> = (<span class="hljs-params">type, content</span>) =&gt; <span class="hljs-string">'```'</span>+type+<span class="hljs-string">'\n'</span> + content + <span class="hljs-string">'\n```'</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">html</span> = (<span class="hljs-params">content</span>) =&gt; <span class="hljs-title function_">block</span>(<span class="hljs-string">'_html'</span>, content)
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">json</span> = (<span class="hljs-params">obj</span>) =&gt; <span class="hljs-title function_">block</span>(<span class="hljs-string">'json'</span>,<span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>(obj, <span class="hljs-literal">null</span>, <span class="hljs-number">2</span>)
+  ?.<span class="hljs-title function_">replace</span>(<span class="hljs-regexp">/"([^"]+)":/g</span>,<span class="hljs-string">'$1:'</span>)<span class="hljs-comment">/*?.replace(/,([^\s\d])/g,", $1")*/</span>)
+<span class="hljs-comment">// <span class="hljs-doctag">NOTE:</span> using onmousedown + cancelled onclick maintains keyboard focus and is generally more robust, especially on mobile devices w/ virtual keyboards</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">jslink</span> = (<span class="hljs-params">js, text=js, classes=<span class="hljs-string">''</span>, style=<span class="hljs-string">''</span>, title=js</span>) =&gt; 
+  <span class="hljs-string">`&lt;a href="#" onmousedown="`</span> + _.<span class="hljs-built_in">escape</span>(js) + 
+    <span class="hljs-string">`;event.preventDefault();event.stopPropagation()" `</span> +
+    <span class="hljs-string">`onclick="event.preventDefault();event.stopPropagation()" `</span> +
+    <span class="hljs-string">`class="<span class="hljs-subst">${classes}</span>" style="<span class="hljs-subst">${style}</span>" title="<span class="hljs-subst">${_.<span class="hljs-built_in">escape</span>(title)}</span>"&gt;<span class="hljs-subst">${text}</span>&lt;/a&gt;`</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">evallink</span> = (<span class="hljs-params">item, js, text=js, classes=<span class="hljs-string">''</span>, style=<span class="hljs-string">''</span>, title=js</span>) =&gt;
+  <span class="hljs-title function_">jslink</span>(<span class="hljs-string">`_item('<span class="hljs-subst">${item.id}</span>')`</span> +
+    <span class="hljs-string">'.eval(`'</span> + js.<span class="hljs-title function_">replace</span>(<span class="hljs-regexp">/([`\\$])/g</span>,<span class="hljs-string">"\\$1"</span>) + <span class="hljs-string">'`)'</span>, text, classes, style, title)
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">cmdlink</span> = (<span class="hljs-params">cmd, text=cmd, options=<span class="hljs-string">''</span>, classes=<span class="hljs-string">''</span>, style=<span class="hljs-string">''</span>, title=cmd</span>) =&gt;
+  <span class="hljs-title function_">jslink</span>(<span class="hljs-string">`MindBox.create(\`<span class="hljs-subst">${cmd}</span>\`,{<span class="hljs-subst">${options}</span>})`</span>, text, classes, style, title)
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">spacer</span> = (<span class="hljs-params">height=<span class="hljs-number">10</span>, width=<span class="hljs-number">10</span>
+</span>) =&gt; 
+  <span class="hljs-string">`&lt;div style="height:<span class="hljs-subst">${height}</span>px; width:<span class="hljs-subst">${width}</span>px"&gt;&lt;/div&gt;`</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">time_short</span> = (<span class="hljs-params">ms</span>) =&gt; (
+    ms &lt; <span class="hljs-number">60</span>*<span class="hljs-number">1000</span> ? <span class="hljs-string">"&lt;1m"</span> :
+    ms &lt; <span class="hljs-number">60</span>*<span class="hljs-number">60</span>*<span class="hljs-number">1000</span> ? <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">floor</span>(ms/(<span class="hljs-number">60</span>*<span class="hljs-number">1000</span>)) + <span class="hljs-string">"m"</span> :
+    ms &lt; <span class="hljs-number">24</span>*<span class="hljs-number">60</span>*<span class="hljs-number">60</span>*<span class="hljs-number">1000</span> ? <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">floor</span>(ms/(<span class="hljs-number">60</span>*<span class="hljs-number">60</span>*<span class="hljs-number">1000</span>)) + <span class="hljs-string">"h"</span> :
+    <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">floor</span>(ms/(<span class="hljs-number">24</span>*<span class="hljs-number">60</span>*<span class="hljs-number">60</span>*<span class="hljs-number">1000</span>)) + <span class="hljs-string">"d"</span>
+  )
+<span class="hljs-comment">// register most common macros globally</span>
+<span class="hljs-comment">// importing via <a href="#" title="#_macros" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#_macros','#_macros',event)" onclick="event.preventDefault();event.stopPropagation();">#_macros</a> is optional for auto-updating</span>
+<span class="hljs-comment">// also allows _this to refer to invoking item (vs <a href="#" title="#macros" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#macros','#macros',event)" onclick="event.preventDefault();event.stopPropagation();">#macros</a>) as expected</span>
+<span class="hljs-comment">// we avoid use of _this in global macros to avoid this ambiguity</span>
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_init</span>(<span class="hljs-params">
+</span>) {
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">img</span> = img
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">code</span> = code
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">block</span> = block
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">html</span> = html
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">json</span> = json
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">jslink</span> = jslink
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">evallink</span> = evallink
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">cmdlink</span> = cmdlink
+  <span class="hljs-variable language_">window</span>.<span class="hljs-property">spacer</span> = spacer
+}</code>
+</pre>
+<mark class="hidden" title="#init" onmousedown="_handleTagClick('Ae2P6VW26wxVFhB3p69g','#init','#init',event)" onclick="event.preventDefault();event.stopPropagation();">init</mark>

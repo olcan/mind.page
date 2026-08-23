@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Serves the e2e stack interactively: firebase emulators seeded with the anonymous items plus the
+# production build on http://localhost:3100 (its own origin, so storage, cache and sign-in state
+# stay apart from sapper dev on 3000; requires a prior `sapper build`), until Ctrl-C.
+# Open http://localhost:3100/ to browse the seeded account, or run playwright against it
+# with `npx playwright test --ui` (or --headed) in another terminal; the tests reuse the server.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+[ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
+export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first" # see deploy_mind_page.sh
+[ -f __sapper__/build/server/server.js ] || { echo "missing production build; run: npx sapper build" >&2; exit 1; }
+firebase emulators:exec --only auth,firestore \
+    'node tests/e2e/seed.mjs && echo "serving seeded anonymous account at http://localhost:3100/ (Ctrl-C to stop)" && env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node __sapper__/build'

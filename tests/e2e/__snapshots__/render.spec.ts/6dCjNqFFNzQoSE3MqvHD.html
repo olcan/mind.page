@@ -1,0 +1,44 @@
+<p>
+<mark class="label unique" title="#webgl" onmousedown="_handleTagClick('6dCjNqFFNzQoSE3MqvHD','#webgl','#webgl',event)" onclick="event.preventDefault();event.stopPropagation();">webgl</mark> defines a basic <code>webgl</code> canvas context initializer <code>webgl_init</code> that only requires a "pixel" shader that assigns a color to each pixel. An example shader and basic animation drawing function (for <mark title="#macros/animation" onmousedown="_handleTagClick('6dCjNqFFNzQoSE3MqvHD','#macros/animation','#macros/animation',event)" onclick="event.preventDefault();event.stopPropagation();">macros/animation</mark>) is also defined and demonstrated below.</p>
+<!-- *_removed block is not included in rendered item -->
+<!-- 6dCjNqFFNzQoSE3MqvHD-ff0d46e23153da73-1 is a unique content identifier based on macro usage -->
+<div id="animation-6dCjNqFFNzQoSE3MqvHD-ff0d46e23153da73-1" class="animation initialized" style="cursor: pointer;" _cache_key="6dCjNqFFNzQoSE3MqvHD-ff0d46e23153da73-3">
+<div class="fps" style="display: none;">⋯ fps</div>
+<div class="time">0.0s</div>
+<div class="status">
+</div>
+<div class="play" style="display: block;">
+</div>
+<div class="reset" style="display: none;">reset</div>
+<canvas style="zoom: 1;" width="300" height="150">
+</canvas>
+</div>
+<pre>
+<code class="glsl_example">
+<span class="hljs-keyword">precision</span>
+<span class="hljs-keyword">mediump</span>
+<span class="hljs-type">float</span>; 
+<span class="hljs-keyword">uniform</span>
+<span class="hljs-type">float</span> t, w, h;
+<span class="hljs-type">void</span> main(<span class="hljs-type">void</span>) {
+  <span class="hljs-type">float</span> x = <span class="hljs-built_in">gl_FragCoord</span>.x / w;
+  <span class="hljs-type">float</span> y = <span class="hljs-number">1.0</span> - <span class="hljs-built_in">gl_FragCoord</span>.y / h;
+  <span class="hljs-type">float</span> r = (x + y) * <span class="hljs-number">0.5</span>;
+  <span class="hljs-type">float</span> a = <span class="hljs-built_in">pow</span>(<span class="hljs-built_in">min</span>(<span class="hljs-number">1.0</span>, <span class="hljs-built_in">max</span>(<span class="hljs-number">0.0</span>, <span class="hljs-number">1.0</span> - <span class="hljs-built_in">abs</span>(t/<span class="hljs-number">3.0</span> - r))), <span class="hljs-number">10.0</span>);
+  <span class="hljs-built_in">gl_FragColor</span> = <span class="hljs-type">vec4</span>(a); <span class="hljs-comment">// premultiplied alpha reduces fringing</span>
+}</code>
+</pre>
+<pre>
+<code class="js">
+<span class="hljs-comment">// basic reusable drawing function</span>
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">webgl_draw</span>(<span class="hljs-params">gl, t, w, h</span>) {
+  gl.<span class="hljs-title function_">viewport</span>(<span class="hljs-number">0</span>, <span class="hljs-number">0</span>, w, h)
+  <span class="hljs-comment">// write t, w, h for shader (see webgl_init below for setup)</span>
+  gl.<span class="hljs-title function_">uniform1f</span>(t_loc, t)
+  gl.<span class="hljs-title function_">uniform1f</span>(w_loc, w)
+  gl.<span class="hljs-title function_">uniform1f</span>(h_loc, h)
+  gl.<span class="hljs-title function_">drawArrays</span>(gl.<span class="hljs-property">TRIANGLE_FAN</span>, <span class="hljs-number">0</span>, <span class="hljs-number">4</span>) <span class="hljs-comment">// invokes shader</span>
+}</code>
+</pre>
+<mark class="hidden" title="#macros/animation" onmousedown="_handleTagClick('6dCjNqFFNzQoSE3MqvHD','#macros/animation','#macros/animation',event)" onclick="event.preventDefault();event.stopPropagation();">macros/animation</mark>

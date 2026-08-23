@@ -1,0 +1,22 @@
+<p>
+<mark class="label unique" title="#commands/weight" onmousedown="_handleTagClick('QWL7xrcssw0YsVQgjfhJ','#commands/weight','#commands/weight',event)" onclick="event.preventDefault();event.stopPropagation();">commands/weight</mark> command <code>/weight weight</code> records today's weight in item <mark title="#weight" onmousedown="_handleTagClick('QWL7xrcssw0YsVQgjfhJ','#weight','#weight',event)" onclick="event.preventDefault();event.stopPropagation();">weight</mark>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">run</span>(<span class="hljs-params">weight</span>) {
+  <span class="hljs-keyword">if</span> (!(weight &gt; <span class="hljs-number">0</span>)) { <span class="hljs-comment">// also rejects empty/non-numeric strings</span>
+<span class="hljs-title function_">alert</span>(<span class="hljs-string">`invalid weight '<span class="hljs-subst">${weight}</span>'`</span>)
+    <span class="hljs-keyword">return</span>
+<span class="hljs-string">'/weight '</span>
+<span class="hljs-comment">// clear for easy re-entry</span>
+  }
+  <span class="hljs-keyword">const</span> data_item = <span class="hljs-string">'#weight'</span>
+<span class="hljs-comment">// item containing _data</span>
+<span class="hljs-keyword">const</span> today = <span class="hljs-keyword">new</span>
+<span class="hljs-title class_">Date</span>().<span class="hljs-title function_">toLocaleDateString</span>()
+  <span class="hljs-keyword">let</span> data = <span class="hljs-title function_">_item</span>(data_item).<span class="hljs-title function_">read</span>(<span class="hljs-string">'_data'</span>)
+  <span class="hljs-keyword">if</span> (data.<span class="hljs-title function_">startsWith</span>(today)) data = data.<span class="hljs-title function_">replace</span>(<span class="hljs-regexp">/^.+?\n/</span>,<span class="hljs-string">""</span>)
+  <span class="hljs-title function_">_item</span>(data_item).<span class="hljs-title function_">write</span>(<span class="hljs-string">`<span class="hljs-subst">${today}</span>
+<span class="hljs-subst">${weight}</span>\n`</span> + data, <span class="hljs-string">'_data'</span>)
+}</code>
+</pre>

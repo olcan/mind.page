@@ -1,0 +1,22 @@
+<p>
+<mark class="label unique" title="#webppl/run" onmousedown="_handleTagClick('kRWUHGBW7Yq3stKHBfpZ','#webppl/run','#webppl/run',event)" onclick="event.preventDefault();event.stopPropagation();">webppl/run</mark> is a promise-based wrapper for <code>webppl.run</code>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">webppl_run</span>(<span class="hljs-params">code, options</span>) {
+  <span class="hljs-keyword">return</span> webppl.<span class="hljs-property">__run</span> = <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">allSettled</span>([webppl.<span class="hljs-property">__run</span>]).<span class="hljs-title function_">then</span>(<span class="hljs-function">()=&gt;</span>
+<span class="hljs-keyword">new</span>
+<span class="hljs-title class_">Promise</span>(<span class="hljs-function">(<span class="hljs-params">resolve, reject</span>) =&gt;</span> {
+      <span class="hljs-keyword">const</span> start = <span class="hljs-title class_">Date</span>.<span class="hljs-title function_">now</span>()
+      <span class="hljs-keyword">try</span> { 
+        webppl.<span class="hljs-title function_">run</span>(code, <span class="hljs-function">(<span class="hljs-params">s, x</span>) =&gt;</span> {
+          <span class="hljs-keyword">if</span> (_.<span class="hljs-title function_">keys</span>(s).<span class="hljs-property">length</span> &gt; <span class="hljs-number">0</span>) <span class="hljs-comment">// log webppl state</span>
+<span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">"webppl state:"</span>, <span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>(s));
+          <span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">`webppl took <span class="hljs-subst">${<span class="hljs-built_in">Date</span>.now()-start}</span>ms`</span>)
+          <span class="hljs-title function_">resolve</span>(x);
+        }, _.<span class="hljs-title function_">merge</span>({ <span class="hljs-attr">errorHandlers</span>: [reject] }, options))
+      } <span class="hljs-keyword">catch</span> (e) { <span class="hljs-title function_">reject</span>(e) }
+    })
+  )
+}</code>
+</pre>

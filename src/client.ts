@@ -22,6 +22,18 @@ initializeFirestore(firebase, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })
 
+// connect to local firebase emulators (see firebase.json) when served on the port dedicated to the
+// e2e test stack (see tests/e2e), which is its own origin with its own storage, cache and sign-in
+// state; must precede any auth/firestore use
+import { connectAuthEmulator } from 'firebase/auth'
+import { connectFirestoreEmulator } from 'firebase/firestore'
+const EMULATOR_PORT = '3100'
+if (['localhost', '127.0.0.1'].includes(location.hostname) && location.port == EMULATOR_PORT) {
+  connectAuthEmulator(getAuth(firebase), 'http://127.0.0.1:9099', { disableWarnings: true })
+  connectFirestoreEmulator(getFirestore(firebase), '127.0.0.1', 8080)
+  console.warn(`using local firebase emulators (served on port ${EMULATOR_PORT})`)
+}
+
 // import/expose firebase/auth on window
 import {
   getAuth,

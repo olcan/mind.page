@@ -8,3 +8,8 @@ ssl-dev/
 
 # dot/git symlinked from .git by init.py
 dot/git
+
+# e2e tests (see tests/e2e)
+test-results/
+playwright-report/
+*-debug.log

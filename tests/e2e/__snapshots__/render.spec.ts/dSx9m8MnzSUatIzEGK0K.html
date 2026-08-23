@@ -1,0 +1,13 @@
+<p>
+<mark class="label unique" title="#macros/graph" onmousedown="_handleTagClick('dSx9m8MnzSUatIzEGK0K','#macros/graph','#macros/graph',event)" onclick="event.preventDefault();event.stopPropagation();">macros/graph</mark>
+<mark class="hidden" title="#graphviz" onmousedown="_handleTagClick('dSx9m8MnzSUatIzEGK0K','#graphviz','#graphviz',event)" onclick="event.preventDefault();event.stopPropagation();">graphviz</mark> macro generates a graph using <mark title="#graphviz" onmousedown="_handleTagClick('dSx9m8MnzSUatIzEGK0K','#graphviz','#graphviz',event)" onclick="event.preventDefault();event.stopPropagation();">graphviz</mark>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">graph</span>(<span class="hljs-params">dot, style</span>) {
+  <span class="hljs-keyword">return</span>
+<span class="hljs-title function_">html</span>(<span class="hljs-title function_">_item</span>(<span class="hljs-string">'$id'</span>).<span class="hljs-title function_">read</span>(<span class="hljs-string">'html'</span>) <span class="hljs-comment">// from html block (edit to see)</span>
+          .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%dot'</span>, dot)
+          .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%style'</span>, style))
+}</code>
+</pre>

@@ -1,0 +1,26 @@
+<p>
+<mark class="label unique" title="#commands/debug" onmousedown="_handleTagClick('6gQvmslvkGTwiU0fZyEH','#commands/debug','#commands/debug',event)" onclick="event.preventDefault();event.stopPropagation();">commands/debug</mark> creates a <em>debug version</em> of an item to help debug a recent evaluation performed on that item.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">run</span>(<span class="hljs-params">args</span>) {
+  <span class="hljs-comment">// parse args as: /debug name [trigger = run]</span>
+<span class="hljs-keyword">let</span> name, trigger;
+  ({name, trigger} = _.<span class="hljs-title function_">merge</span>({ <span class="hljs-attr">trigger</span>: <span class="hljs-string">"run"</span> },
+    args.<span class="hljs-title function_">match</span>(<span class="hljs-regexp">/^(?&lt;name&gt;\S+)\s*(?&lt;trigger&gt;\S+)?\s*$/</span>)?.<span class="hljs-property">groups</span>))
+  <span class="hljs-keyword">if</span> (!name) { 
+    <span class="hljs-title function_">alert</span>(<span class="hljs-string">"usage: /debug name [trigger = run]"</span>);
+    <span class="hljs-keyword">return</span>
+<span class="hljs-string">"/debug "</span>;
+  }
+  <span class="hljs-keyword">const</span> item = <span class="hljs-title function_">_item</span>(name)
+  <span class="hljs-keyword">const</span> text = item.<span class="hljs-property">debug_store</span>[trigger];
+  <span class="hljs-keyword">if</span> (!text) {
+    <span class="hljs-keyword">const</span> triggers = _.<span class="hljs-title function_">keys</span>(item.<span class="hljs-property">debug_store</span>)
+    <span class="hljs-title function_">alert</span>(<span class="hljs-string">`/debug: eval trigger '<span class="hljs-subst">${trigger}</span>' not found for item '<span class="hljs-subst">${name}</span>'; available triggers are: `</span> + triggers.<span class="hljs-title function_">join</span>(<span class="hljs-string">", "</span>))
+    <span class="hljs-keyword">return</span>
+<span class="hljs-string">`/debug <span class="hljs-subst">${args}</span>`</span>;
+  }
+  <span class="hljs-keyword">return</span> {<span class="hljs-attr">text</span>:<span class="hljs-string">"#_debug "</span> + text, <span class="hljs-attr">run</span>:<span class="hljs-literal">false</span>}
+}</code>
+</pre>

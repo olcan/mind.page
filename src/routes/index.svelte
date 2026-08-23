@@ -319,6 +319,7 @@
     Object.defineProperty(window, '__items', { get: () => items })
     Object.defineProperty(window, '__toggles', { get: () => toggles })
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
+    Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
     window['_exists'] = _exists
@@ -4983,10 +4984,12 @@
         item.rendered = true
         just_rendered = true
         // console.debug('item rendered', item.name, trigger)
-        if (item.resolve_render) {
-          item.resolve_render(container.closest('.super-container'))
-          item.resolve_render = null
-        }
+      }
+      // resolve any pending render promise (see renderItem), regardless of the rendered flag, which
+      // persists when an item is unmounted (e.g. beyond hideIndex) and mounted again to be rendered
+      if (item.resolve_render) {
+        item.resolve_render(container.closest('.super-container'))
+        item.resolve_render = null
       }
     } else if (item.rendered) {
       item.rendered = false

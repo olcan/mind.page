@@ -1,0 +1,45 @@
+<p>
+<mark class="label unique" title="#commands/restore" onmousedown="_handleTagClick('5W1IN9l28QzgLMtNoaR2','#commands/restore','#commands/restore',event)" onclick="event.preventDefault();event.stopPropagation();">commands/restore</mark> command <code>/restore [name|version]</code> restores an existing or deleted item from a past version.</p>
+<ul>
+<li>
+<span class="list-item">
+<code>/restore</code> lists valid names (<code>id:&lt;id&gt;</code>) for recently deleted items.</span>
+</li>
+<li>
+<span class="list-item">
+<code>/restore name</code> lists valid versions (<code>version:…</code>) for item <code>name</code>.<ul>
+<li>
+<span class="list-item">
+<code>name</code> can be existing item <code>#label</code> or <code>id</code> or deleted item <code>id</code>.</span>
+</li>
+<li>
+<span class="list-item">Labels are not available for deleted items due to encryption.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">
+<code>/restore version</code> creates a new item with text from <code>version</code>.<ul>
+<li>
+<span class="list-item">Remove label <code>#restored</code> or copy text into existing item.</span>
+</li>
+<li>
+<span class="list-item">Copying text into existing item maintains its history.</span>
+</li>
+<li>
+<span class="list-item">Switching to new item <em>splits</em> history across items.<ul>
+<li>
+<span class="list-item">Older versions remain on older (deleted) items.</span>
+</li>
+<li>
+<span class="list-item">Unavoidable when recovering deleted items.</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('5W1IN9l28QzgLMtNoaR2','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

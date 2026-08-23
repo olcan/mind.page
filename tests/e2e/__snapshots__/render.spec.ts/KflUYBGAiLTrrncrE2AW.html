@@ -1,0 +1,34 @@
+<p>
+<mark class="label unique" title="#features/_init" onmousedown="_handleTagClick('KflUYBGAiLTrrncrE2AW','#features/_init','#features/_init',event)" onclick="event.preventDefault();event.stopPropagation();">features/_init</mark> tag enables initialization code.</p>
+<ul>
+<li>
+<span class="list-item">
+<code>_init()</code> function is evaluated <em>once</em> during page load.<ul>
+<li>
+<span class="list-item">Read from <code>js_init</code> block if it exists (otherwise from <code>js</code>).</span>
+</li>
+<li>
+<span class="list-item">Ignores <mark title="#dependencies" onmousedown="_handleTagClick('KflUYBGAiLTrrncrE2AW','#dependencies','#dependencies',event)" onclick="event.preventDefault();event.stopPropagation();">dependencies</mark> (assumed self-contained).</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Ideal for extending external libraries (e.g. <mark title="#c3" onmousedown="_handleTagClick('KflUYBGAiLTrrncrE2AW','#c3','#c3',event)" onclick="event.preventDefault();event.stopPropagation();">c3</mark>, <mark title="#graphviz" onmousedown="_handleTagClick('KflUYBGAiLTrrncrE2AW','#graphviz','#graphviz',event)" onclick="event.preventDefault();event.stopPropagation();">graphviz</mark>).</span>
+</li>
+<li>
+<span class="list-item">Ideal for triggering <mark title="#load" onmousedown="_handleTagClick('KflUYBGAiLTrrncrE2AW','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark> for dynamically loaded libraries. </span>
+</li>
+<li>
+<span class="list-item">New or modified <code>_init</code> functions require reload to take effect.</span>
+</li>
+<li>
+<span class="list-item">Example initialization code:</span>
+</li>
+</ul>
+<pre>
+<code class="js_example">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">_init</span>(<span class="hljs-params">
+</span>) { <span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">"Welcome to MindPage!"</span>) }</code>
+</pre>

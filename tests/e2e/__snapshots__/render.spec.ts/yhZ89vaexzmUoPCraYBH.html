@@ -1,0 +1,188 @@
+<p>
+<mark class="label unique" title="#MindPage/core/functions" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/functions','#MindPage/core/functions',event)" onclick="event.preventDefault();event.stopPropagation();">MindPage/core/functions</mark> are:</p>
+<ul>
+<li>
+<span class="list-item">
+<mark title="#load" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark> function for loading external libraries.</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#macros" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#macros','#macros',event)" onclick="event.preventDefault();event.stopPropagation();">macros</mark> attached to <code>window</code>, e.g. <code>html(content)</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<mark title="#MindBox" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> functions, e.g. <code>set(text)</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_item(name,[log_errors])</code> returns <a href="#MindPage/core/_item" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item',event)">_Item</a> with name (label or id).</span>
+</li>
+<li>
+<span class="list-item">
+<code>_items([label])</code> returns array of <a href="#MindPage/core/_item" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/_item',event)">_Items</a>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_exists(name,[allow_multiple])</code> returns true if item <code>name</code> exists.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_create(text,[options])</code> creates new item w/ given text.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_labels([selector])</code> returns array of labels matching optional selector.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_sublabels(parent)</code> returns array of labels nested under parent label.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_host</code> returns (canonical) hostname for client</span>
+</li>
+<li>
+<span class="list-item">
+<code>_is_local(host)</code> returns true if <code>host</code> is considered local</span>
+</li>
+<li>
+<span class="list-item">
+<a href="#MindPage/core/functions/_modal" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','#MindPage/core/functions/_modal',event)">_modal</a> opens modal confirmation/input prompts.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_delay(ms)</code> returns promise resolved after specified time.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_update_dom()</code> returns promise resolved after dom is up-to-date.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_scroll_to(y)</code> scroll vertically to position <code>y</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_encrypt(text)</code> encrypts a (text) string.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_decrypt(text)</code> decrypts an encrypted (text) string.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_encrypt_bytes(uint8array)</code> encrypts an byte array.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_decrypt_bytes(uint8array)</code> decrypts an encrypted byte array.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_encrypt_item(item)</code> encrypts an item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_decrypt_item(item)</code> decrypts an encrypted item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_render_item(item)</code> renders an item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_parse_tags(text)</code> parses tags in <code>text</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_parse_label(text)</code> parses label in <code>text</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_replace_tags(text, regex, replacer)</code> replaces tags in <code>text</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_resolve_tags(label, tags)</code> resolves <code>tags</code> relative to <code>label</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_resolve_tag(label, tag)</code> resolves <code>tag</code> relative to <code>label</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_special_tag(tag)</code> returns if <code>tag</code> enables any <mark title="#features" onmousedown="_handleTagClick('yhZ89vaexzmUoPCraYBH','#features','#features',event)" onclick="event.preventDefault();event.stopPropagation();">features</mark>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_extract_block(text, type)</code> extracts block(s) in <code>text</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_replace_block(text, type, replacer)</code> replaces block(s) in <code>text</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_stringify(x)</code> converts <code>x</code> to a string.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_byte_stringify(x)</code> converts <code>x</code> to a byte (binary) string.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_encode(string,[encoding='base64'])</code> encodes <code>string</code> into <code>encoding</code>:<ul>
+<li>
+<span class="list-item">
+<code>'base64'</code> string, <code>'utf8'</code> string, <code>'utf8_array'</code> (<code>Uint8Array</code>), or <code>'byte_array'</code> (<code>Uint8Array</code>).</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">
+<code>_decode(encoded,[encoding='base64'])</code> decodes string from specified encoding.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_concat_byte_arrays(...arrays)</code> concatenates byte arrays.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash(x,[hasher],[stringifier])</code> hashes <code>x</code> using <code>hasher</code> and <code>stringifier</code>. Default hasher is <code>_hash_64_fnv1a</code> (see below) and default stringifier is <code>toString</code> for functions and <code>JSON.stringify</code> for everything else. Returns integer (≤52-bit) or hex string (&gt;52-bit) depending on <code>hasher</code>:<ul>
+<li>
+<span class="list-item">
+<code>_hash_32_djb2(string)</code> hashes using <a href="http://www.cse.yorku.ca/~oz/hash.html" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','http://www.cse.yorku.ca/~oz/hash.html',event)">djb2</a> (xor variant).</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_32_fnv1a(string)</code> hashes using 32-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_32_murmur3(string)</code> hashes using 32-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_52_fnv1a(string)</code> hashes using 52-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_64_fnv1a(string)</code> hashes using 64-bit <a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_128_murmur3_x64(string)</code> hashes using 128-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x64 variant).</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_128_murmur3_x86(string)</code> hashes using 128-bit <a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> (x86 variant).</span>
+</li>
+<li>
+<span class="list-item">
+<code>_hash_160_sha1(string)</code> hashes using 160-bit <a href="https://en.wikipedia.org/wiki/SHA-1" onclick="_handleLinkClick('yhZ89vaexzmUoPCraYBH','https://en.wikipedia.org/wiki/SHA-1',event)">secure hash algo 1</a>.</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>

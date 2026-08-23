@@ -338,8 +338,9 @@ if (!on_firebase) {
     console.log(`HTTP server ${server_id} listening on http://localhost:${PORT}`)
   })
 
-  // also listen on HTTPS port
-  sapper_https_server = https
+  // also listen on HTTPS port, unless disabled (e.g. by the e2e test stack, see tests/e2e)
+  if (!process.env.NO_HTTPS)
+    sapper_https_server = https
     .createServer(
       {
         key: fs.readFileSync('ssl-dev/ca.key'),

@@ -7,13 +7,24 @@
     "rules": "firestore.rules"
   },
   "functions": {
-    "predeploy": ["git push"],
+    "predeploy": [
+      "git push"
+    ],
     "source": ".",
-    "ignore": ["**/node_modules/**", "**/dev/**", "ssl-dev/**"]
+    "ignore": [
+      "**/node_modules/**",
+      "**/dev/**",
+      "ssl-dev/**"
+    ]
   },
   "hosting": {
     "public": "static",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "**/ssl-dev/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "**/ssl-dev/**"
+    ],
     "redirects": [
       {
         "source": "/favicon.ico",
@@ -28,5 +39,19 @@
       }
     ],
     "postdeploy": []
+  },
+  "emulators": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }

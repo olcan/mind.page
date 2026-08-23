@@ -1,0 +1,21 @@
+<p>
+<mark class="label unique" title="#TensorFlow/example" onmousedown="_handleTagClick('7f4iq9XLc9HkKueQtB8v','#TensorFlow/example','#TensorFlow/example',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow/example</mark>
+<mark class="hidden" title="#TensorFlow" onmousedown="_handleTagClick('7f4iq9XLc9HkKueQtB8v','#TensorFlow','#TensorFlow',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow</mark>
+</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">main</span>(<span class="hljs-params">
+</span>) {
+  <span class="hljs-keyword">const</span> J = <span class="hljs-number">1024</span>
+<span class="hljs-keyword">const</span> xJJ = tf.<span class="hljs-title function_">randomNormal</span>([J,J])
+  <span class="hljs-keyword">const</span> yJJ = tf.<span class="hljs-title function_">randomNormal</span>([J,J])
+  <span class="hljs-keyword">const</span> zJJ = tf.<span class="hljs-title function_">dot</span>(xJJ, yJJ)
+}
+<span class="hljs-keyword">await</span> tf.<span class="hljs-title function_">_run</span>(main) <span class="hljs-comment">// use default backend (webgl)</span>
+<span class="hljs-keyword">await</span> tf.<span class="hljs-title function_">_run</span>(main, <span class="hljs-string">'wasm'</span>)</code>
+</pre>
+<pre>
+<code class="_log">tf._run took 75ms using webgl
+tf._run took 430ms using wasm</code>
+</pre>

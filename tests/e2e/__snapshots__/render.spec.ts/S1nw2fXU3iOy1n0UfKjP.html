@@ -1,0 +1,17 @@
+<p>
+<mark class="label unique" title="#commands/hello_again" onmousedown="_handleTagClick('S1nw2fXU3iOy1n0UfKjP','#commands/hello_again','#commands/hello_again',event)" onclick="event.preventDefault();event.stopPropagation();">commands/hello_again</mark> command <a href="#" onmousedown="MindBox.create(`/hello_again`,{});event.preventDefault();event.stopPropagation()" onclick="event.preventDefault();event.stopPropagation()" class="" title="/hello_again">/hello_again</a> creates an item named <code>#hello</code> and then writes output and log messages into it.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">run</span> = (<span class="hljs-params">
+</span>) =&gt; ({
+  <span class="hljs-attr">text</span>:<span class="hljs-string">'#hello world!'</span>,
+  <span class="hljs-attr">edit</span>:<span class="hljs-literal">false</span>, <span class="hljs-comment">// no editing</span>
+<span class="hljs-attr">init</span>:<span class="hljs-function">(<span class="hljs-params">item</span>) =&gt;</span> {
+    <span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">"initing item "</span>, item.<span class="hljs-property">name</span>);
+    item.<span class="hljs-title function_">invoke</span>(<span class="hljs-function">()=&gt;</span>{ <span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">"hello world!"</span>) })
+    item.<span class="hljs-title function_">write</span>(<span class="hljs-string">'hello world!'</span>) <span class="hljs-comment">// write _output</span>
+    item.<span class="hljs-title function_">write_log</span>() <span class="hljs-comment">// write _log</span>
+  }
+})</code>
+</pre>

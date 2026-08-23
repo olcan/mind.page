@@ -1,0 +1,27 @@
+<p>
+<mark class="label unique" title="#webppl" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl','#webppl',event)" onclick="event.preventDefault();event.stopPropagation();">webppl</mark> is a <a href="http://webppl.org" onclick="_handleLinkClick('h2Zp5dh5Au80vi84McDZ','http://webppl.org',event)">probabilistic programming language</a>. Here we load the library and extend it with <mark title="#webppl/run" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/run','#/run',event)" onclick="event.preventDefault();event.stopPropagation();">run</mark>, <mark title="#webppl/summarize" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/summarize','#/summarize',event)" onclick="event.preventDefault();event.stopPropagation();">summarize</mark>, and <mark title="#webppl/util" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/util','#/util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>. See example <a href="#webppl/examples/HMM" onclick="_handleLinkClick('h2Zp5dh5Au80vi84McDZ','#webppl/examples/HMM',event)">HMM</a>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">webppl</span>) {
+  <span class="hljs-comment">// cdn url from: <a href="https://probmods.github.io/webppl-editor/" target="_blank" title="https://probmods.github.io/webppl-editor/" onclick="_handleLinkClick('h2Zp5dh5Au80vi84McDZ','https://probmods.github.io/webppl-editor/',event)">probmods.github.io/…</a>
+</span>
+<span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(<span class="hljs-string">'https://s3-us-west-2.amazonaws.com'</span> +
+    <span class="hljs-string">'/cdn.webppl.org/webppl-v0.9.9.js'</span>)
+}
+<span class="hljs-comment">// enable 'run' for webppl_input blocks</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">_run</span> = (<span class="hljs-params">
+</span>) =&gt; webppl.<span class="hljs-title function_">_run</span>(_this.<span class="hljs-title function_">read_input</span>(<span class="hljs-string">'webppl'</span>))
+<span class="hljs-comment">// javascript functions attached to webppl</span>
+webppl.<span class="hljs-property">_run</span>       = webppl_run       <span class="hljs-comment">// for js</span>
+webppl.<span class="hljs-property">_summarize</span> = webppl_summarize <span class="hljs-comment">// for webppl</span>
+webppl.<span class="hljs-property">_samples</span>   = webppl_samples   <span class="hljs-comment">// for webppl</span>
+<span class="hljs-comment">// webppl functions from <a href="#" title="#webppl/util" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/util','#webppl/util',event)" onclick="event.preventDefault();event.stopPropagation();">#webppl/util</a>: _enumerate</span>
+</code>
+</pre>
+<mark class="hidden" title="#load" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>
+<mark class="hidden" title="#webppl/run" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/run','#/run',event)" onclick="event.preventDefault();event.stopPropagation();">run</mark>
+<mark class="hidden" title="#webppl/util" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/util','#/util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
+<mark class="hidden" title="#webppl/summarize" onmousedown="_handleTagClick('h2Zp5dh5Au80vi84McDZ','#webppl/summarize','#/summarize',event)" onclick="event.preventDefault();event.stopPropagation();">summarize</mark>

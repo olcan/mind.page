@@ -17,7 +17,10 @@
     "export": "sapper export",
     "serve_export": "npx serve __sapper__/export",
     "start": "node __sapper__/build",
-    "validate": "svelte-check --ignore src/node_modules/@sapper"
+    "validate": "svelte-check --ignore src/node_modules/@sapper",
+    "test:e2e": "tests/e2e/run.sh",
+    "test:e2e:update": "tests/e2e/run.sh --update-snapshots",
+    "test:e2e:serve": "tests/e2e/serve.sh"
   },
   "main": "lib/firebase/functions.js",
   "engines": {
@@ -44,9 +47,11 @@
     "@babel/preset-env": "^7.25.8",
     "@babel/runtime": "^7.25.7",
     "@firebase/app": "^0.10.13",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@firebase/storage": "^0.13.2",
     "@jupyterlab/services": "^7.2.5",
     "@octokit/rest": "^21.0.2",
+    "@playwright/test": "^1.62.1",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.1",
     "@rollup/plugin-node-resolve": "^15.3.0",

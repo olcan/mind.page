@@ -1,0 +1,19 @@
+<p>
+<mark class="label unique" title="#typescript" onmousedown="_handleTagClick('zNaVPShVTlVheLLZSygH','#typescript','#typescript',event)" onclick="event.preventDefault();event.stopPropagation();">typescript</mark> enables <a href="https://typescriptlang.org" onclick="_handleLinkClick('zNaVPShVTlVheLLZSygH','https://typescriptlang.org',event)">TypeScript</a>. See <mark title="#typescript/example" onmousedown="_handleTagClick('zNaVPShVTlVheLLZSygH','#typescript/example','#/example',event)" onclick="event.preventDefault();event.stopPropagation();">example</mark>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">ts</span>) {
+  <span class="hljs-keyword">const</span> url_base = <span class="hljs-string">'https://unpkg.com/typescript@4.2.3/lib'</span>
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">ts_libs</span>) <span class="hljs-variable language_">window</span>.<span class="hljs-property">ts_libs</span> = {}
+  <span class="hljs-keyword">const</span>
+<span class="hljs-title function_">ts_lib</span> = (<span class="hljs-params">n</span>) =&gt; !!<span class="hljs-variable language_">window</span>.<span class="hljs-property">ts_libs</span>[n] || <span class="hljs-title function_">fetch</span>(url_base + <span class="hljs-string">`/lib.<span class="hljs-subst">${n}</span>.d.ts`</span>).<span class="hljs-title function_">then</span>(<span class="hljs-function">
+<span class="hljs-params">r</span>=&gt;</span>r.<span class="hljs-title function_">text</span>()).<span class="hljs-title function_">then</span>(<span class="hljs-function">
+<span class="hljs-params">t</span>=&gt;</span>
+<span class="hljs-variable language_">window</span>.<span class="hljs-property">ts_libs</span>[n]=t)
+  <span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(url_base + <span class="hljs-string">'/typescriptServices.js'</span>,
+    <span class="hljs-title function_">ts_lib</span>(<span class="hljs-string">'es5'</span>), <span class="hljs-title function_">ts_lib</span>(<span class="hljs-string">'es6'</span>), <span class="hljs-title function_">ts_lib</span>(<span class="hljs-string">'dom'</span>))
+}</code>
+</pre>
+<mark class="hidden" title="#load" onmousedown="_handleTagClick('zNaVPShVTlVheLLZSygH','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('zNaVPShVTlVheLLZSygH','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

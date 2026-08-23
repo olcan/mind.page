@@ -1,0 +1,767 @@
+[
+ {
+  "id": "z6rKAQzi5qpyBoXEOFqM",
+  "user": "anonymous",
+  "time": 1704161840131,
+  "attr": null,
+  "text": "<<evallink(_this,'google()',icons.google)>> \\\n<<evallink(_this,'tweet()',icons.twitter)>> \\\n[<<icons.twitter>>](twitter://timeline) \\\n[<<icons.news>>](applenews://) \\\n[<<icons.youtube>>](youtube://) \\\n[<<icons.covid>>](<<urls.covid>>) \\\n[<<icons.covid_ctp>>](<<urls.covid_ctp>>)\n```js_removed\n// image macros for menu links above\nconst s = 24 // use 24px icons\nconst img_favicon = (d) => img(`https://${d}/favicon.ico`, s)\nconst img_touch = (d) => img(`https://${d}/apple-touch-icon.png`, s)\nconst img_db = (n) => img(`https://www.dropbox.com/s/${n}?dl=0`, s)\nconst img_wp = (n) => img('https://upload.wikimedia.org/wikipedia/'+n, s)\nconst icons = {\n  // google:    img_favicon('google.com'),\n  google:    img_wp(escape('commons/c/c1/Google_\"G\"_logo.svg')),\n  cnn:       img_db('j1vx346nq7x0ujw/cnn.png'),\n  news:      img_db('di7uv2b5d2lot26/apple_news.png'),\n  twitter:   img_db('bsgvkbn8gszx79x/twitter.png'),\n  youtube:   img_db('6ox8qfjpu1bn6a5/youtube.png'),\n  covid:     img_db('0fez9jgzueiosdf/covid.png'),\n  covid_ctp: img_db('em0t8h940oi55ka/covid_ctp.png')\n}\nconst urls = {\n  covid: 'https://www.worldometers.info/coronavirus/country/us/',\n  covid_ctp: 'https://covidtracking.com/data/charts/us-all-key-metrics'\n}\n// functions used in menu links above\nfunction google() {\n  const q = MindBox.get().trim(); MindBox.clear()\n  window.open(\"https://google.com/search?q=\"+encodeURIComponent(q))\n}\nfunction tweet() {\n  const t = MindBox.get().trim(); MindBox.clear()\n  // for web twitter: https://twitter.com/intent/tweet?text=...\n  location.href=\"twitter://post?message=\"+encodeURIComponent(t)\n}\n```\n#_pin/dot/1 #_menu"
+ },
+ {
+  "id": "UelJQQDOqS7RSIYyaO0e",
+  "user": "anonymous",
+  "time": 1677484674001,
+  "attr": null,
+  "text": "#items/naming/nested names have the form `#…/name`. \n- Nesting provides more context as you navigate.\n- For example, `items` and `items/naming` are context for this item.\n- Nested items are said to be _children/descendants_ of their _parents/ancestors_."
+ },
+ {
+  "id": "6mcUOVR4RMlbuYDHkVYe",
+  "user": "anonymous",
+  "time": 1677484202989,
+  "attr": null,
+  "text": "#Features are enabled by certain _special_ tags: #/log #/_pin #/_menu #/_context #/_async #/_init #/_welcome #/_listen #/_autorun #/_autodep #/_style #/_spell #/_debug."
+ },
+ {
+  "id": "XLflsovqtodTDohqsBee",
+  "user": "anonymous",
+  "time": 1677398627808,
+  "attr": null,
+  "text": "#Features/_autodep tag enables item _and all [descendants](#items/naming/nested)_ to automatically become first [dependency](#dependencies) on their [children](#items/naming/nested), thus forming a [dependency](#dependencies) chain/tree without having to use repetitive [hidden tags](#items/tagging)."
+ },
+ {
+  "id": "FBQyXvWMWtqSVeDAkK4O",
+  "user": "anonymous",
+  "time": 1677398627807,
+  "attr": null,
+  "text": "#Shortcuts are listed below using #key_symbols. Most shortcuts are not available on virtual keyboards due to modifiers that are either missing (e.g. `⌘`) or inconsistent (e.g. `⇧`). Equivalent functionality should be available using buttons (e.g. `create` and `save` buttons for #⇧⏎). Please report issues to support@mind.page.\n\n|Keys     |Item Editor |MindBox        |Window\n|:-       |:-          |:-             |:-\n|[⇧⏎](#⇧⏎)|Save        |Create¹        |Create\n|⌘S       |Save⁹       |Create         |Create\n|⌘⏎       |Save+Run    |Create+Run     |Create+Run\n|⌃⏎       |Save+Run    |Create+Run     |Create+Run\n|⌥⌘⁶⏎     |Save+Run    |Create²+Run    |Create²+Run\n|⌥⏎       |Run+Save⁹   |Create         |Create\n|⎋        |Cancel      |Cancel         |Clear⁸\n|⌫        |—           |—              |Clear\n|⇧⌫       |—           |Clear          |Clear\n|⌘⌫       |**Delete**  |Clear          |Clear\n|^⌫       |**Delete**  |Clear          |Clear\n|⇥        |Indent      |Indent         |MindBox⁷\n|⇧⇥       |Unindent    |Unindent       |MindBox\n|⌘/       |(Un)Comment |(Un)Comment    |MindBox\n|⇧⌘I      |Add Image   |Add Image      |Add Image\n|⇧⌘S      |Resume³     |Resume         |Resume\n|⇧⌘⏎      |Resume      |Create         |Resume\n|⇧⌃⏎      |Resume      |Create         |Resume\n|⇧⌥⌘⁷⏎    |Resume      |Save           |Resume\n|⌘↑       |Edit Prev   |History Prev⁴  |MindBox\n|⌘↓       |Edit Next   |History Next⁵  |MindBox\n\n|||\n|-|-\n|¹|Create & save new item, continue editing\n|²|Create & save new item (stop editing)\n|³|Resume last edit (after save)\n|⁴|Previous in MindBox history\n|⁵|Next in MindBox history, or edit top item\n|⁶|Any 2+ modifiers (⌃⌥⌘) allowed\n|⁷|Focus keyboard on #MindBox\n|⁸|Focus on #MindBox if already clear\n|⁹|Save item, continue editing"
+ },
+ {
+  "id": "KTPjuIQulTasy75XnHuC",
+  "user": "anonymous",
+  "time": 1677398274000,
+  "attr": null,
+  "text": "#Features/_style tag designates the item as a _style item_ such that its `css_style` block is automatically installed/updated on the page (under `<head><style …>`). In addition, any [dependents](#dependencies) of the style item are automatically styled (on their `<div class=\"item …\">`) using a special CSS class name derived from the style item name as in `dep_<name>`. Any invalid characters (outside `[A-Za-z0-9_]`) are replaced with `_`."
+ },
+ {
+  "id": "yhZ89vaexzmUoPCraYBH",
+  "user": "anonymous",
+  "time": 1674892674000,
+  "attr": null,
+  "text": "#MindPage/core/functions are:\n- #load function for loading external libraries.\n- #macros attached to `window`, e.g. `html(content)`.\n- #MindBox functions, e.g. `set(text)`.\n- `_item(name,[log_errors])` returns [_Item](#MindPage/core/_item) with name (label or id).\n- `_items([label])` returns array of [_Items](#MindPage/core/_item).\n- `_exists(name,[allow_multiple])` returns true if item `name` exists.\n- `_create(text,[options])` creates new item w/ given text.\n- `_labels([selector])` returns array of labels matching optional selector.\n- `_sublabels(parent)` returns array of labels nested under parent label.\n- `_host` returns (canonical) hostname for client\n- `_is_local(host)` returns true if `host` is considered local\n- [_modal](#MindPage/core/functions/_modal) opens modal confirmation/input prompts.\n- `_delay(ms)` returns promise resolved after specified time.\n- `_update_dom()` returns promise resolved after dom is up-to-date.\n- `_scroll_to(y)` scroll vertically to position `y`.\n- `_encrypt(text)` encrypts a (text) string.\n- `_decrypt(text)` decrypts an encrypted (text) string.\n- `_encrypt_bytes(uint8array)` encrypts an byte array.\n- `_decrypt_bytes(uint8array)` decrypts an encrypted byte array.\n- `_encrypt_item(item)` encrypts an item.\n- `_decrypt_item(item)` decrypts an encrypted item.\n- `_render_item(item)` renders an item.\n- `_parse_tags(text)` parses tags in `text`.\n- `_parse_label(text)` parses label in `text`.\n- `_replace_tags(text, regex, replacer)` replaces tags in `text`.\n- `_resolve_tags(label, tags)` resolves `tags` relative to `label`.\n- `_resolve_tag(label, tag)` resolves `tag` relative to `label`.\n- `_special_tag(tag)` returns if `tag` enables any #features.\n- `_extract_block(text, type)` extracts block(s) in `text`.\n- `_replace_block(text, type, replacer)` replaces block(s) in `text`.\n- `_stringify(x)` converts `x` to a string.\n- `_byte_stringify(x)` converts `x` to a byte (binary) string.\n- `_encode(string,[encoding='base64'])` encodes `string` into `encoding`:\n  - `'base64'` string, `'utf8'` string, `'utf8_array'` (`Uint8Array`), or `'byte_array'` (`Uint8Array`).\n- `_decode(encoded,[encoding='base64'])` decodes string from specified encoding.\n- `_concat_byte_arrays(...arrays)` concatenates byte arrays.\n- `_hash(x,[hasher],[stringifier])` hashes `x` using `hasher` and `stringifier`. Default hasher is `_hash_64_fnv1a` (see below) and default stringifier is `toString` for functions and `JSON.stringify` for everything else. Returns integer (≤52-bit) or hex string (>52-bit) depending on `hasher`:\n  - `_hash_32_djb2(string)` hashes using [djb2](http://www.cse.yorku.ca/~oz/hash.html) (xor variant).\n  - `_hash_32_fnv1a(string)` hashes using 32-bit [fnv-1a](https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function).\n  - `_hash_32_murmur3(string)` hashes using 32-bit [murmur v3](https://en.wikipedia.org/wiki/MurmurHash).\n  - `_hash_52_fnv1a(string)` hashes using 52-bit [fnv-1a](https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function).\n  - `_hash_64_fnv1a(string)` hashes using 64-bit [fnv-1a](https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function).\n  - `_hash_128_murmur3_x64(string)` hashes using 128-bit [murmur v3](https://en.wikipedia.org/wiki/MurmurHash) (x64 variant).\n  - `_hash_128_murmur3_x86(string)` hashes using 128-bit [murmur v3](https://en.wikipedia.org/wiki/MurmurHash) (x86 variant).\n  - `_hash_160_sha1(string)` hashes using 160-bit [secure hash algo 1](https://en.wikipedia.org/wiki/SHA-1)."
+ },
+ {
+  "id": "lWJ9PUj0R3Wa0hlq0ISp",
+  "user": "anonymous",
+  "time": 1669316514426,
+  "attr": null,
+  "text": "Welcome to #MindPage! <<bounce('◄ **tap!**')>>\n- Check out [intro](https://mind.page/?shared=y2swh7JY2ScO5soV7mJMHVltAOX2/intro) by founder Olcan.\n- Tap items to edit. <<jslink('location.reload()','Reload')>> to reset.\n- Tap <<_user.image>> above to sign in.\n#_pin #_bounce"
+ },
+ {
+  "id": "jU5O2IVPuQhz5Hw7iasg",
+  "user": "anonymous",
+  "time": 1669316252548,
+  "attr": null,
+  "text": "#video macro embeds a YouTube video into item.\n```js\nconst video_options = {\n  autoplay: false,\n  show_related: false // false may still show videos from same channel\n}\nfunction video(video_id, options) {\n  options = _.merge(video_options, options);\n  return html(_item('$id').read('html') // from html block (edit to see)\n          .replaceAll('%video_id', video_id)\n          .replaceAll('%autoplay', options.autoplay ? '1':'0')\n          .replaceAll('%rel', options.show_related ? '1' : '0'))\n}\n```\n```js_removed\n// optional toggle that can show/hide videos in item\nconst video_toggle = _item('$id').read('html_toggle') // see below\n  .replaceAll('%id', _that.id)\n// optional link to video on youtube\nconst video_link = (video_id) =>\n  `[↗︎ open](https://www.youtube.com/video/${video_id}?rel=0)`\n// optional link to replace embedded video in same item\nconst video_switch = (video_id, text) =>\n  _item('$id').read('html_switch') // see below\n    .replaceAll('%id', _that.id)\n    .replaceAll('%video_id', video_id)\n    .replaceAll('%text', text)\n```\n```html_removed\n<style>\n  /* .video { display: none } */\n  /* .video-toggle-hide { display: none } */\n  /* .video-toggle-show { display: inline } */\n  /* .item.show-videos .video { display: block } */\n  /* .item.show-videos .video-toggle-hide { display: inline } */\n  /* .item.show-videos .video-toggle-show { display: none } */\n  .video-toggle-show { display: none }\n  .hide-videos .item:not(.show-videos) .video { display: none }\n  .hide-videos .item:not(.show-videos) .video-toggle-hide { display: none }\n  .hide-videos .item:not(.show-videos) .video-toggle-show { display: inline }\n  .video-toggle-show, .video-toggle-hide { float: right }\n  .video-toggle-hide { border-radius: 4px 4px 0 0 !important; background: black !important }\n  /* NOTE: 2px vertical padding allows touching video below <ul> */\n  .video-toggle-show, .video-toggle-hide { padding: 2px 8px !important; }\n  \n</style>\n<div id=\"$cid\" class=\"video\" style=\"position:relative;width:100%;height:0;padding-bottom:56.25%;background:#171717;border-radius: 4px 0 4px 4px;overflow:hidden\">\n<iframe class=\"video\" src=\"https://www.youtube.com/embed/%video_id?autoplay=%autoplay&rel=%rel&playsinline=1\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" allowfullscreen style=\"position:absolute;top:0;left:0;width:100%;height:100%;border-radius:4px 0 4px 4px;overflow:hidden\"></iframe>\n</div>\n```\n```html_toggle_removed\n<a href=\"javascript:_item('%id').elem.classList.add('hide-videos');_item('%id').elem.querySelector('.item').classList.remove('show-videos')\" onclick=\"event.stopPropagation()\" class=\"video-toggle-hide\">▲ hide video</a> <a href=\"javascript:_item('%id').elem.classList.remove('hide-videos');_item('%id').elem.querySelector('.item').classList.add('show-videos')\" onclick=\"event.stopPropagation()\" class=\"video-toggle-show\">▼ show video</a>\n```\n```html_switch_removed\n<a href=\"javascript:_item('%id').elem.querySelector('iframe').contentWindow.location.replace(_item('%id').elem.querySelector('iframe').src.replace(/(embed\\/).+?(\\?|$)/,'$1%video_id$2'));_item('%id').elem.classList.remove('hide-videos');_item('%id').elem.querySelector('.item').classList.add('show-videos')\" onclick=\"event.stopPropagation()\">%text</a>\n```"
+ },
+ {
+  "id": "VLFAjcb47yiK7urmMQOv",
+  "user": "anonymous",
+  "time": 1667503737976,
+  "attr": null,
+  "text": "#gapi/examples/gmail is an example for [Gmail API](https://developers.google.com/gmail/api). [Quick Start Guide](https://developers.google.com/gmail/api/quickstart/js) explains how to [enable in console](https://console.cloud.google.com/apis/library/gmail.googleapis.com) and create [credentials](https://console.cloud.google.com/apis/credentials) for access.\n```js_input\nconst scope = 'https://www.googleapis.com/auth/gmail.readonly'\nconst doc = 'https://gmail.googleapis.com/$discovery/rest?version=v1'\nawait gapi.client._auth({ scope: scope, discoveryDocs: doc })\nawait gapi.client._try(async ({gmail})=>{\n  // get list of emails in inbox (max 1 to print top email only)\n  // see https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list\n  let messages = (await gmail.users.messages.list({\n    userId:'me', labelIds:['INBOX'], maxResults: 1 }))?.result?.messages ?? []\n  _this.log(`found ${messages?.length} messages`)\n  if (!messages?.length) return _this.remove('_output') // no emails, stop\n  // retrieve email contents\n  messages = await Promise.all(messages.map(msg=>\n    gmail.users.messages.get({ userId:'me', id:msg.id })))\n  _this.log(`retrieved ${messages.length} messages`)\n  return summarize_email(messages[0].result)\n})\n```\n```js_removed\nfunction summarize_email(email) {\n  const subject = email.payload.headers.find(h=>h.name=='Subject')\n    ?.value ?? '(missing subject)'\n  let parts = (email.payload.parts ?? []).map(p=>p.parts ?? p).flat()\n  let body = email.payload.body.data ??\n    parts.find(p=>p.mimeType=='text/plain')?.body.data\n  if (body) {\n    // see https://stackoverflow.com/a/28622096 for body decoding logic\n    body = _decode(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64')\n    body = body.replace(/\\r\\n/g, '\\n').trim() // replace CRLF w/ LF only then trim\n    // decode html entities using DOMParser, see https://stackoverflow.com/a/34064434\n    body = new DOMParser().parseFromString(body, \"text/html\")\n      .documentElement.textContent\n    body = body.replace(/#/g, '\\\\#') // escape hashtags\n    body = body.replace(/\\s+/g, ' ') // normalize whitespace for snippet\n  } else body = '(missing body)'\n  const url = 'https://mail.google.com/mail/u/0/#inbox/' + email.id\n  return [subject, _.truncate(body, {length:100}), url].join('\\n\\n')\n}\n```\n#_gapi"
+ },
+ {
+  "id": "ygfKBXIanOtbtQBi8LBZ",
+  "user": "anonymous",
+  "time": 1667502484590,
+  "attr": null,
+  "text": "#gapi/examples/profile is a basic example for [Google People API](https://developers.google.com/people).[Quick Start Guide](https://developers.google.com/people/quickstart/js) explains how to [enable in console](https://console.cloud.google.com/apis/library/people.googleapis.com) and create [credentials](https://console.cloud.google.com/apis/credentials) for access.\n```js_input\nconst scope = 'https://www.googleapis.com/auth/userinfo.profile'\nconst doc = 'https://people.googleapis.com/$discovery/rest'\nawait gapi.client._auth({ scope: scope, discoveryDocs: doc })\nawait gapi.client._try(async ({people:{people}})=>{\n  // fetch and output user name\n  const response = await people.get({\n    resourceName: 'people/me',\n    personFields: 'names'\n  })\n  return \"Your name is \" + response.result.names[0]?.displayName\n})\n```\n#_gapi"
+ },
+ {
+  "id": "A2fG1zs0sYow3P1YPf40",
+  "user": "anonymous",
+  "time": 1667502465990,
+  "attr": null,
+  "text": "#commands/agenda command <<cmdlink('/agenda')>> creates an item listing upcoming events. Follow #gapi/examples/calendar to set up the API before initial use.\n```js\nasync function run() {\n  const events = await fetch_events(5) // from #gapi/examples/calendar\n  let agenda = events.length == 0 ? 'No upcoming events.' :\n    [\"|||\", \"|-|-\", ...events.map((event) => {\n      const ms = event.start.local.getTime() - Date.now()\n      return '|' + [time_short(ms), event.summary].join('|')\n    })].map((s)=>\"> \"+s).join('\\n')\n  return {\n    text: \"**Upcoming Events** from #commands/agenda\\n\" + agenda,\n    // scroll to created item after dom update (so item.elem is non-null)\n    init: item => _update_dom().then(()=>_scroll_to(item.elem.offsetTop)),\n    edit: false\n  }\n}\n```\n#_gapi/examples/calendar #_macros"
+ },
+ {
+  "id": "TYZUL6gTmlzBXlk1KoZX",
+  "user": "anonymous",
+  "time": 1667501723826,
+  "attr": null,
+  "text": "#gapi/examples/calendar is an example for [Google Calendar API](https://developers.google.com/calendar/api). [Quick Start Guide](https://developers.google.com/calendar/quickstart/js) explains how to [enable in console](https://console.developers.google.com/apis/library/calendar-json.googleapis.com) and create [credentials](https://console.cloud.google.com/apis/credentials) for access.\n```js_input\nconst events = await fetch_events() // see helper definition below\n// output markdown table w/ event name, start date/time, calendar name\nif (events.length == 0) _this.write('No upcoming events found.','_md_output')\nelse _this.write(['|||||', '|:-|:-|:-|:-|', ...events.map(e=>{\n  const date = e.start.local.toLocaleDateString()\n  const time = e.start.local.toLocaleTimeString()\n  const cal = e.cal.summaryOverride || e.cal.summary || e.cal.id\n  return '|' + [ _.truncate(e.summary), date, time, _.truncate(cal)].join(' | ')\n})].join('\\n'),'_md_output')\n```\n```js_removed\n// helper to fetch events in all calendars, ordered by start time\nasync function fetch_events(limit_per_cal = 10) {\n  const scope = 'https://www.googleapis.com/auth/calendar.readonly'\n  const doc = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'\n  await gapi.client._auth({ scope: scope, discoveryDocs: doc })\n  return await gapi.client._try(async ({calendar})=>{\n    // get all calendars\n    const cals = (await calendar.calendarList.list()).result.items\n    // read future events (up to 10 per calendar)\n    let events = (await Promise.all(cals.map(async cal=>\n      (await calendar.events.list({\n        calendarId: cal.id, timeMin: new Date().toISOString(),\n        showDeleted: false, singleEvents: true, \n        maxResults: limit_per_cal, orderBy: 'startTime'\n      })).result.items.map(e=>Object.assign(e,{cal}))\n    ))).flat()\n    // compute event start-end times in local time zone, then sort by start time\n    events.forEach(e=>{\n      if (!e.start.dateTime) { // all-day event\n        e.start.local = new Date(e.start.date + ' 00:00:00')\n        e.end.local = new Date((e.end.date || e.start.date) + ' 00:00:00')\n      } else {\n        e.start.local = new Date(e.start.dateTime)\n        e.end.local = new Date(e.end.dateTime || e.start.dateTime)\n      }\n    })\n    return _.sortBy(events, 'start.local')\n  })\n}\n```\n#_gapi"
+ },
+ {
+  "id": "ecEWz9Ex8L3uJMAJed5B",
+  "user": "anonymous",
+  "time": 1667498632748,
+  "attr": null,
+  "text": "#gapi is [Google API client library](https://github.com/google/google-api-javascript-client). Here we load the core client library `gapi.client` and extend it with `_auth([options])` and `_try(func)` to simplify authenticated access to specific [scopes](https://developers.google.com/identity/protocols/oauth2/scopes) and [credentials](https://github.com/google/google-api-javascript-client/blob/master/docs/start.md#get-access-keys-for-your-application). See examples [profile](#/examples/profile), [calendar](#/examples/calendar), and [gmail](#/examples/gmail).\n```js\n// load GAPI, GIS (for auth), and GAPI client as needed\nif (!window.gapi?.client || !window.google?.accounts?.oauth2) {\n  await _load([\n    window.gapi || 'https://apis.google.com/js/api.js',\n    window.google?.accounts?.oauth2 || 'https://accounts.google.com/gsi/client'\n  ])\n  await new Promise((resolve, reject)=>gapi.load('client', \n    {callback: resolve, onerror: reject}))\n}\n```\n```js_removed\nconst _gapi = _item('$id') // this item\n\ngapi.client._auth = async function({\n  scope, discoveryDocs, // required scope & discovery urls\n  apiKey, clientId, clientSecret // optional auth info\n}) {\n  if (!scope) fatal('missing scope')\n  if (!discoveryDocs) fatal('missing discoveryDocs')\n  const scopes = scope.split(' ').map(s=>s.split('/').pop()).join(' ') // for logging\n  discoveryDocs = [discoveryDocs].flat() // allow singleton doc\n  \n  try {\n  \n    apiKey ||= _gapi.global_store.api_key ||= await _modal({\n      content:`${_this.name} needs your [API key](https://console.developers.google.com/apis/credentials)`,\n      confirm:\"Use API Key\",\n      cancel:\"Cancel\",\n      input:\"\"\n    })\n    if (!apiKey) throw new Error('missing api key')\n\n    clientId ||= _gapi.global_store.client_id ||= await _modal({\n      content:`${_this.name} needs your [Client ID](https://console.developers.google.com/apis/credentials)`,\n      confirm:\"Use Client ID\",\n      cancel:\"Cancel\",\n      input:\"\"\n    })\n    if (!clientId) throw new Error('missing client id')\n\n    clientSecret ||= _gapi.global_store.client_secret ||= await _modal({\n      content:`${_this.name} needs your [Client Secret](https://console.developers.google.com/apis/credentials)`,\n      confirm:\"Use Client Secret\",\n      cancel:\"Cancel\",\n      input:\"\"\n    })\n    if (!clientSecret) throw new Error('missing client secret')\n   \n    // init GAPI client (multiple init ok)\n    await gapi.client.init({ apiKey, discoveryDocs })\n\n    // get token if needed\n    if (!_gapi._global_store._token_response ||\n        !google.accounts.oauth2.hasGrantedAllScopes(\n          _gapi._global_store._token_response, ...scope.split(' '))) {\n      \n      // get authorization code (with user consent) for \"offline\" (refreshable) token\n      // note there are two cases where auth client fails to return/throw errors:\n      // if popups are blocked, then it simply logs an error via console.error\n      // if popup is closed w/o proceeding w/ auth, then it does nothing\n      // to handle these, we set up console.error and a focus handler\n      // see https://stackoverflow.com/q/72387245\n      const _console_error = console.error // to be restored below\n      let on_focus // to be removed as listener below\n      let start = Date.now()\n      _this.debug(`GAPI requesting authorization code for '${scopes}' ...`)\n      const auth_code = await new Promise(async (resolve, reject) => {\n        // set up console.error to handle popup errors (e.g. blocked by browser)\n        console.error = (...args) => {\n          if (args.join().includes('popup')) reject(new Error(args.join()))\n          else _console_error(...args)\n        }\n        // set up focus handler to handle return to window without authorization\n        on_focus = () => reject(new Error('failed to complete authorization'))\n        addEventListener('focus', on_focus)\n        try {\n          // display modal to clarify next step and help enable popups (esp. on ios)\n          const confirmed = await _modal({\n            content:`${_this.name} needs your permission for '${scopes}'`,\n            confirm:\"Continue\", \n            cancel:\"Cancel\",\n          })\n          if (!confirmed) return reject(new Error('cancelled by user'))          \n          const auth_client = await google.accounts.oauth2.initCodeClient({            \n            client_id: clientId, scope, ux_mode: 'popup',\n            hint: _user.email, // help skip account selection\n            select_account: false,\n            callback: (resp) => {\n              if (resp.error) return reject(resp.error)\n              _this.log(`GAPI received authorization code for '${scopes}' in ${Date.now()-start}ms`)\n              resolve(resp.code)\n            }\n          })\n          auth_client.requestCode()\n        } catch (e) {\n          console.error(e)\n          reject(resp)\n        }\n      }).finally(()=>{\n        console.error = _console_error\n        removeEventListener('focus', on_focus)\n      })\n\n      start = Date.now()\n      _this.debug(`GAPI requesting access/refresh tokens for '${scopes}' ...`)\n      // https://developers.google.com/identity/protocols/oauth2/web-server#httprest_3\n      const resp = await fetch('https://oauth2.googleapis.com/token', {\n        method:'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({\n          code: auth_code,\n          client_id: clientId,\n          client_secret: clientSecret,\n          grant_type: 'authorization_code',\n          redirect_uri: 'https://' + location.host\n        })\n      }).then(r=>r.json())\n      if (resp.error)\n        throw new Error(`GAPI token request failed: ${JSON.stringify(resp)}`)\n      _this.log(`GAPI received access/refresh tokens for '${scopes}' in ${Date.now()-start}ms`)\n      _gapi.global_store._token_response = resp\n    }\n    gapi.client.setToken(_gapi.global_store._token_response)\n\n    // set up gapi.client._refresh_token()\n    // NOTE: access tokens are short-lived (~1h based on inspection of token response in console), so caller should call gapi.client._refresh_token() on 401 or 403 errors w/ status PERMISSION_DENIED (see getToken function in example at https://developers.google.com/identity/oauth2/web/guides/migration-to-gis#gapi-asyncawait)\n    gapi.client._refresh_token ??= async () => {\n      let start = Date.now()\n      _this.debug(`GAPI requesting fresh access token ...`)\n      // https://developers.google.com/identity/protocols/oauth2/web-server#httprest_7\n      const resp = await fetch('https://oauth2.googleapis.com/token', {\n        method:'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({\n          client_id: clientId,\n          client_secret: clientSecret,\n          grant_type: 'refresh_token',\n          refresh_token: _gapi.global_store._token_response.refresh_token\n        })\n      }).then(r=>r.json())\n      if (resp.error)\n        throw new Error(`GAPI token request failed: ${JSON.stringify(resp)}`)\n      _this.log(`GAPI received new access token in ${Date.now()-start}ms`)\n      // keep refresh token in _token_response\n      // scopes are also maintained in _aggregate_ by google (server side)\n      // this allows the client to maintain a single access token w/ all permissions\n      resp.refresh_token = _gapi.global_store._token_response.refresh_token\n      _gapi.global_store._token_response = resp\n      gapi.client.setToken(resp)\n    }\n\n    // uncomment to test refresh\n    // await gapi.client._refresh_token()\n    \n  } catch(e) {\n    throw new Error(`GAPI init failed for '${scopes}': ${e}`)\n  }\n}\n\ngapi.client._try = async function(func, tries = 0) {\n  if (!gapi.client._refresh_token) fatal('gapi.client._auth is required before _try')\n  try {\n    return await func(gapi.client)\n  } catch (e) {\n    e = e.result?.error ?? e // dig into gapi error\n    // if html is returned in e.body, use title as error message\n    let title = e.body?.match(/<title>(.+?)<\\/title>/)?.pop()\n    if (title) {\n      // if code block is found in body, append to title\n      const code = e.body?.match(/<code>(.+?)<\\/code>/)?.pop()\n      if (code) title += ' (' + code + ')'\n      e = new Error(title)\n    }\n    if (tries == 0) { // consider retry\n      if (e.code == 401 || (e.code == 403 && e.status == 'PERMISSION_DENIED')) {\n        // access token is missing, invalid, or expired, so retry after refresh\n        _this.log(`GAPI retrying with fresh token after error ${e.code} (${e.status})`)\n        await gapi.client._refresh_token()\n        return await gapi.client._try(func, ++tries)\n      }\n    }\n    _this.error(e)\n  }\n}\n```\n#_load #_async"
+ },
+ {
+  "id": "YdDbsgF9h78OlcOHLoW1",
+  "user": "anonymous",
+  "time": 1667418857093,
+  "attr": null,
+  "text": "#MindPage is a secure #private notebook that renders plain text #items into #text, #images, #code, #math, #charts, #graphs, #animations, or any other web content. MindPage is readily [exportable](#commands/export), [extensible](#MindPage/core), [open source](https://github.com/olcan/mind.page), and in #beta stage. See also [intro](https://mind.page/?shared=y2swh7JY2ScO5soV7mJMHVltAOX2/intro) by founder Olcan.\n#_context"
+ },
+ {
+  "id": "Xj2OgyruMvxlXETDNBak",
+  "user": "anonymous",
+  "time": 1667417030290,
+  "attr": null,
+  "text": "#animations can be generated using #macros/animation ...\n<<animation(green_box, {autoplay:true})>>\n<<animation(red_box, {start:.5, show_reset:true})>>\n<<animation(explosion)>>\n<<animation(explosion_gradient)>>\n```js_removed\nfunction green_box(ctx, t, w, h) {\n  ctx.clearRect(0, 0, w, h)\n  ctx.fillStyle = 'green'\n  ctx.fillRect(t/3*w-25, (.5+.25*Math.sin(t*Math.PI))*h-25, 50, 50)\n}\nfunction red_box(ctx, t, w, h) {\n  ctx.clearRect(0, 0, w, h)\n  ctx.fillStyle = 'red'\n  ctx.fillRect(t/3*w-25, (.5+.25*Math.sin(t*4*Math.PI))*h-25, 50, 50)\n}\nfunction explosion(ctx, t, w, h) {\n  ctx.clearRect(0, 0, w, h)\n  const circles = 50\n  ctx.lineWidth = w/circles\n  ctx.strokeStyle = 'white'\n  for (let j=0; j<circles; ++j) {\n    const r = (j+0.5) / circles\n    ctx.globalAlpha = Math.pow(\n      Math.min(1, Math.max(0, 1 - Math.abs(t/3-r))), 10)\n    ctx.beginPath();\n    ctx.arc(w*.5, h*.5, r*w, 0, 2 * Math.PI);\n    ctx.stroke();\n  }\n}\nfunction explosion_gradient(ctx, t, w, h) {\n  ctx.clearRect(0, 0, w, h)\n  const stops = 50\n  let grd = ctx.createRadialGradient(w*.5, h*.5, 0, w*.5, h*.5, w)\n  for (let j=0; j<stops; ++j) {\n    const r = j/stops\n    const a = Math.pow(Math.min(1, Math.max(0, 1 - Math.abs(t/3-r))), 10)\n    grd.addColorStop(r, `rgba(255, 255, 255, ${a}`);\n  }\n  ctx.fillStyle = grd;\n  ctx.fillRect(0, 0, w, h);  \n}\n```\n... and can be GPU-accelerated using WebGL:\n<<animation(webgl_draw,{init:webgl_init(_this.read('glsl_shader'))})>>\n```glsl_shader_removed\nprecision mediump float; \nuniform float t, w, h;\nvoid main(void) {\n  float x = gl_FragCoord.x / w;\n  float y = 1.0 - gl_FragCoord.y / h;\n  y = ((y - 0.5) * h / w) + 0.5; // rescale y to get circles\n  float r = sqrt((x-0.5)*(x-0.5) + (y-0.5)*(y-0.5));\n  float a = pow(min(1.0, max(0.0, 1.0 - abs(t/3.0 - r))), 10.0);\n  gl_FragColor = vec4(a); // premultiplied alpha reduces fringing\n}\n```\nAlso see examples #/brownian_motion and #/ornstein_uhlenbeck.\n#_macros/animation #_webgl"
+ },
+ {
+  "id": "wOUK6JUwM8SVU7ZhezRz",
+  "user": "anonymous",
+  "time": 1667417001907,
+  "attr": null,
+  "text": "#animations/ornstein_uhlenbeck \n- Velocity of massive particle under friction\n- SDE: $`dX_t = \\mu_t dt + \\sigma dW_t -\\theta X_t t`$\n```js\nconst sigma = 0.05     // diffusion rate (∝1/mass)\nconst theta = 0.1      // mean reversion rate\nconst tail_time = 5    // past length in seconds\nconst sim_time = 5     // future sim time (in secs, when paused)\nconst sim_count = 1000 // number of future simulations (when paused)\n// const drift = (t) => ({x:0,y:0})\nconst drift = (t) => ({ // ∞-shaped periodic drift\n  x: Math.cos(.5 * t * 2*Math.PI),\n  y: 1.5 * Math.cos(t * 2*Math.PI)\n})\n```\n<<animation(draw, {period:0, style:'width:500px;height:500px', reset:true, init})>>\n```js_removed\nlet t0 = 0\nlet x = .5, y = .5 // start in center\nlet path = [[x,y]]\nconst max_points = tail_time * 60\nfunction draw(ctx, t, w, h, {pause, t_end=0, offset=0, alpha=1}) {\n  if (t > t0 + .1) { t0 = t; return } // ignore big time steps\n  if (t < t0) { t0 = 0; x = .5; y = .5; path = [[x,y]] } // reset\n  // on pause, simulate future paths\n  if (pause) {\n    path = [[x,y]] // clear tail on pause (could be optional)\n    const sim_start = Date.now()\n    const x_sim = x, y_sim = y, t0_sim = t0, path_sim = path.slice()\n    ctx.clearRect(0, 0, w, h)\n    for (let i=0; i<sim_count; ++i) {\n      draw(ctx, t, w, h, {\n        pause: false, \n        t_end: t + sim_time, \n        offset: i==0 ? 0 : path_sim.length-1, \n        alpha: 5/sim_count\n      })\n      x = x_sim; y = y_sim; t0 = t0_sim; path = path_sim.slice()\n    }\n    return {t} // rewind time to ignore simulation time\n  }\n  const pi = path.length - 1 // last point before drawing\n  do {\n    // update position, time, tail\n    const W = jStat.normal(0,sigma*Math.sqrt(t-t0))\n    const mu = drift(t)  \n    x += W.sample() + (mu.x - theta*(x-.5)) * (t-t0)\n    y += W.sample() + (mu.y - theta*(y-.5)) * (t-t0)\n    path.push([x,y])\n    t0 = t\n    if (t_end<=0) while (path.length > max_points) path.shift()\n    else t += 1/60 // simulate at 60fps\n  } while (t < t_end)\n  // draw tail \n  // do not clear canvas if simulating futures (t_end>0)\n  if (t_end<=0) ctx.clearRect(0, 0, w, h)\n  ctx.strokeStyle = 'white'\n  ctx.lineWidth = 3\n  for (let i=offset; i<path.length-1; ++i) {\n    ctx.globalAlpha = i < pi ? (i+1)/path.length : alpha\n    ctx.beginPath()\n    ctx.moveTo(path[i][0]*w, path[i][1]*h)\n    ctx.lineTo(path[i+1][0]*w,path[i+1][1]*h)\n    ctx.stroke()\n  }\n  // draw particle (at start of path if simulating futures)\n  ctx.globalAlpha = 1  \n  ctx.fillStyle = 'white'\n  ctx.beginPath()\n  if (t_end<=0) ctx.arc(w*x, h*y, 10, 0, 2*Math.PI)\n  else ctx.arc(w*path[pi][0], h*path[pi][1], 10, 0, 2*Math.PI)\n  ctx.fill()\n}\n// initializer to ensure jStat is loaded\nasync function init(canvas) {\n  await _load(window.jStat || 'https://cdn.jsdelivr.net/npm/jstat/dist/jstat.min.js')\n  return canvas.getContext('2d')\n}\n```\n#_macros/animation #_jStat"
+ },
+ {
+  "id": "0VNpemS9i4MXya8Iyial",
+  "user": "anonymous",
+  "time": 1667416915233,
+  "attr": null,
+  "text": "#animations/brownian_motion\n- Velocity of molecular motion\n- SDE: $`dX_t = \\mu_t dt + \\sigma dW_t`$\n```js\nconst sigma = 0.05 // inverse mass of particle\nconst tail = 10    // past length in seconds\nconst drift = (t) => ({ // ∞-shaped periodic drift\n  x: Math.cos(.5 * t * 2*Math.PI),\n  y: 1.5 * Math.cos(t * 2*Math.PI)\n})\n```\n<<animation(draw, {period:0, reset:true, init})>>\n```js_removed\nlet t0 = 0\nlet x = .5, y = .5 // start in center\nlet path = [[x,y]]\nconst maxPoints = tail * 60\nfunction draw(ctx, t, w, h) {\n  if (t > t0 + .1) { t0 = t; return } // ignore big time steps\n  if (t < t0) { t0 = 0; x = .5; y = .5; path = [[x,y]] } // reset\n  // update position, time, tail\n  const W = jStat.normal(0,sigma*Math.sqrt(t-t0))\n  const mu = drift(t)\n  x += W.sample() + mu.x * (t-t0)\n  y += W.sample() + mu.y * (t-t0)\n  t0 = t\n  path.push([x,y])\n  while (path.length > maxPoints) path.shift()\n  // draw tail\n  ctx.clearRect(0, 0, w, h)\n  ctx.strokeStyle = 'white'\n  ctx.lineWidth = 3\n  for (let i=0; i<path.length-1; ++i) {\n    ctx.globalAlpha = (i+1)/path.length\n    ctx.beginPath()\n    ctx.moveTo(path[i][0]*w, path[i][1]*h)\n    ctx.lineTo(path[i+1][0]*w,path[i+1][1]*h)\n    ctx.stroke()\n  }\n  // draw particle\n  ctx.globalAlpha = 1  \n  ctx.fillStyle = 'white'\n  ctx.beginPath()\n  ctx.arc(w*x, h*y, 10, 0, 2*Math.PI)\n  ctx.fill()\n}\n// initializer to ensure jStat is loaded\nasync function init(canvas) {\n  await _load(window.jStat || \"https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js\")\n  return canvas.getContext('2d')\n}\n```\n#_macros/animation #_jStat"
+ },
+ {
+  "id": "QSY2xq5Vz4DIsYi8aNfi",
+  "user": "anonymous",
+  "time": 1667328572937,
+  "attr": null,
+  "text": "#TensorFlow/examples/linear_regression is the official linear regression tutorial from [TensorFlow CodeLab](https://codelabs.developers.google.com/codelabs/tfjs-training-regression/index.html). We extend the example slightly with L2 regularization, early stopping criteria (to help avoid poor results), and support for WebAssembly (CPU), which can be faster than WebGL (GPU) on smaller problems.\n```js\nconst wasm = true // use WebAssembly (CPU) vs WebGL (GPU)\n```\n```js_input_removed\nasync function main() {\n\n  // define and summarize model\n  const model = tf.sequential()\n  model.add(tf.layers.dense({\n    inputShape: [1], units: 1, name:'linear_l2',\n    kernelRegularizer: tf.regularizers.l2({l2:.01})\n  }))\n  render(tfvis.show.modelSummary,\n    ['model', {name:'model', tab:_this.name}], model)\n\n  // fetch and plot data\n  let data = await fetch('https://storage.googleapis.com' +\n    '/tfjs-tutorials/carsData.json')\n  data = await data.json()\n  data = data.map(car => ({\n    mpg: car.Miles_per_Gallon, horsepower: car.Horsepower \n  })).filter(car => car.mpg && car.horsepower)\n  _this.log(`fetched ${data.length} data points`)\n  const obs = data.map(d => ({x:d.horsepower,y:d.mpg}))\n  render(tfvis.render.scatterplot,\n    ['data', {name: 'data', tab:_this.name}],\n    {values:obs, series:['observed']},\n    {xLabel:'horsepower',yLabel:'mpg',height:300})\n\n  // convert data into tensors\n  data = tf.tidy(()=>{ // auto-release temporary tensors\n    tf.util.shuffle(data)\n    const J = data.length  \n    let inputJ1 = tf.tensor2d(data.map(d=>d.horsepower), [J,1])\n    let labelJ1 = tf.tensor2d(data.map(d=>d.mpg), [J,1])\n    const [input_min, input_max] = [inputJ1.min(), inputJ1.max()]\n    const [label_min, label_max] = [labelJ1.min(), labelJ1.max()]\n    inputJ1 = inputJ1.sub(input_min).div(input_max.sub(input_min))\n    labelJ1 = labelJ1.sub(label_min).div(label_max.sub(label_min))\n    return { inputs: inputJ1, labels: labelJ1,\n             input_min, input_max, label_min, label_max } })\n  \n  // train model\n  model.compile({\n    optimizer: tf.train.sgd(.01),\n    loss: tf.losses.meanSquaredError,      \n    metrics: ['mse']\n  })\n  tfvis.visor().open() // open visor (sidebar)\n  const start = Date.now()\n  let history = []    \n  await model.fit(data.inputs, data.labels, { \n    batchSize: 16, epochs: 100, shuffle: true,\n    callbacks: [\n      tf.callbacks.earlyStopping({monitor:'mse',\n        minDelta:.0005, patience:5, verbose:1}),\n      new tf.CustomCallback({\n        onEpochEnd: (epoch, log) => {\n          history.push(log)\n          render(tfvis.show.history,\n            ['history', { name: 'training', tab:_this.name }],\n            history, ['mse'], {xLabel:'iteration',yLabel:'mse'})\n        }\n      })\n    ]\n  })\n  _this.log(`training done in ${Date.now()-start}ms`)\n  \n  // generate predictions\n  const [xK, predK] = tf.tidy(() => {\n    let xK = tf.range(0,100).div(100)\n    let predK1 = model.predict(xK.reshape([100, 1]))\n    const {input_min, input_max, label_min, label_max} = data\n    xK = xK.mul(input_max.sub(input_min)).add(input_min)\n    predK1 = predK1.mul(label_max.sub(label_min)).add(label_min)\n    return [xK.dataSync(), predK1.dataSync()]\n  })\n  // plot together with observed data\n  const preds = Array.from(xK).map((x,k)=>({x,y:predK[k]}))\n  render(tfvis.render.scatterplot,\n    ['data', {name: 'data', tab:_this.name}],\n    {values: [obs, preds], series:['observed','predicted']},\n    {xLabel:'horsepower',yLabel:'mpg',height:300})\n  \n  // clean up\n  tf.dispose(data)\n  tf.dispose(model)  \n}\nawait tf._run(main, wasm ? 'wasm' : 'webgl')\n```\n<<tfvis_container('model')>>\n<<tfvis_container('data')>>\n<<tfvis_container('history')>>\n<<tfvis_visor_toggle>>\n#_TensorFlow/vis\n```_log\nfetched 392 data points\nEpoch 42: early stopping.\ntraining done in 1325ms\ntf._run took 1810ms using wasm\n```"
+ },
+ {
+  "id": "HZOwFO1eL3FrwWLS3kD5",
+  "user": "anonymous",
+  "time": 1647024156488,
+  "attr": null,
+  "text": "### Videos\n- <<video_switch('FrxGqZu5XiU','6 Reasons I Use MindPage, in 60s')>>\n- <<video_switch('q7x9YyvFmfs','Creating and Editing Items')>>\n- <<video_switch('fWsv71UaIeQ','Naming and Tagging Items')>>\n- <<video_switch('oblYOzQgL84','Pinning & Special Tags')>> <<video_toggle>>\n<<video('FrxGqZu5XiU')>>\n#_pin/1 #_video"
+ },
+ {
+  "id": "XBj6SjYhP4tzWOec0H7E",
+  "user": "anonymous",
+  "time": 1646938544143,
+  "attr": null,
+  "text": "#beta means actively developed but stable enough for general public use, now open to anyone with a Google account for authentication. A GitHub account is also recommended for technical users."
+ },
+ {
+  "id": "2RG2rZTYpjyLEiXOWjwY",
+  "user": "anonymous",
+  "time": 1646938544142,
+  "attr": null,
+  "text": "#commands/export command <<cmdlink('/export')>> downloads a `MindPage.zip` file containing all of your items as plain text files:\n- Files are named by position (e.g. `000001`) and dated by last interaction time.\n- Uploaded images are placed in a corresponding directory (e.g. `000001/*.jpg`). \n- Default extension is `.markdown` since items often contain [Markdown](https://www.markdownguide.org/getting-started/) formatting.\n  - Specify any extension as `/export [extension]`, e.g. <<cmdlink('/export txt')>>. \n- All content is fully decrypted and thus no longer protected by your secret phrase.\n- Uses #MindPage/core, [JSZip](https://github.com/Stuk/jszip), and [FileSaver](https://github.com/eligrey/FileSaver.js/). \n  - Edit (tap) this item for full source code.\n```js_removed\nasync function run(extension) {\n  if (!extension) extension = \"markdown\"\n  const items = _items()\n  const modal = _modal({content: `Exporting ${items.length} items ...`});\n  await _load([\n    window.JSZip || 'https://cdn.jsdelivr.net/npm/jszip@3.6.0/dist/jszip.js',\n    window.saveAs || 'https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js'\n  ])\n  let zip = new JSZip()\n  let root = zip.folder('MindPage')\n  await Promise.all(items.map(async (item, index)=>{\n    let fname = (index+1).toString().padStart(6, '0')\n    let text = item.text;\n    const srcs = item.images() // private image srcs\n    if (srcs.length > 0) {\n      _modal_update(modal, {content: `Downloading ${srcs.length} images for item ${item.name} ...`})\n      const blobs = await item.images({output:'blob'});\n      let folder = root.folder(fname)\n      blobs.forEach((blob, i) => {\n        const img_fname = srcs[i]+'.'+mime2ext(blob.type)\n        text = text.replaceAll(srcs[i], fname + \"/\" + img_fname)\n        folder.file(img_fname, blob, {date:new Date(item.time)})\n      })\n    }\n    root.file(fname+'.'+extension, text, {date:new Date(item.time)})\n  }))\n  _modal_update(modal, {content: `Exporting ${items.length} items ...`})\n  saveAs(await zip.generateAsync({ type:'blob' }), `MindPage.zip`)\n  _modal_close(modal)\n}\n```\n```js_removed\n// from https://stackoverflow.com/a/8801399\nfunction mime2ext(type) {\n  switch(type) {\n    case \"image/gif\":  return \"gif\"\n    case \"image/jpeg\": return \"jpg\"\n    case \"image/png\":  return \"png\"\n    case \"image/tiff\": return \"tiff\"\n    case \"image/vnd.wap.wbmp\": return \"wbmp\"\n    case \"image/x-icon\": return \"ico\"\n    case \"image/x-jng\": return \"jng\"\n    case \"image/x-ms-bmp\": return \"bmp\"\n    case \"image/svg+xml\": return \"svg\"\n    case \"image/webp\": return \"webp\"\n    case \"application/pdf\": return \"pdf\"    \n    default: throw new Error(\"unknown image type: \"+type)\n  }\n}\n```\n#_async #_load"
+ },
+ {
+  "id": "pqqYx32Zn5ejGW7PlbZE",
+  "user": "anonymous",
+  "time": 1632328237947,
+  "text": "```_html\n<div id=\"time-$cid\" style=\"color:#aaa\">\n<div class=\"info\" style=\"float:right\"></div>\n<div class=\"time\"></div>\n<style> #item .unit { font-size: 80%; color:#666; margin-right:5px } </style>\n<script>\nconst unit = (s) => `<span class=\"unit\">${s}</span>`\n_this.dispatch_task('time', ()=>{\n  let div = _this.elem?.querySelector(\"#time-$cid\")\n  if (!div) return // div not on page (e.g. item being edited)\n  const date = new Date()\n  const day_time = date.toLocaleString()\n    .replace(\",\", \" &nbsp; \").replace(/ +(AM|PM)/, (_,u)=>unit(u))\n  const dow = date.toLocaleString(\n    navigator.language, {weekday:'short'})    \n  div.children[0].innerHTML = \n    _user.oldest_item_time_string.replace(/[mdh]/, (u)=>unit(u))\n    + \" &nbsp; \" + Math.floor(_user.total_text_length/1024) + unit('KB')\n  div.children[1].innerHTML = dow + \"&nbsp; \" + day_time\n}, 0, 1000) // dispatch now and every second\n</script>\n</div>\n```\n#_pin/dot/0"
+ },
+ {
+  "id": "S2qpSfCcdo9UA7imrFY8",
+  "user": "anonymous",
+  "time": 1617499454988,
+  "text": "#TensorFlow/examples/blazeface implements [blazeface](https://github.com/tensorflow/tfjs-models/tree/master/blazeface) ([paper](https://arxiv.org/abs/1907.05047)) face detection demo. Run item to start. Tap video to stop.\n```js\nconst width = 300     // separate from underlying video image size\nconst target_fps = 20 // lower target can make page more responsive\n```\n```_html\n<!-- _cache_key that depends on $id only ensures same div is used across edits, and _skip_invalidation ensures same div is used across runs; otherwise each run invalidates cache and replaces div by default, which is usually appropriate but not here since we manipulate the div directly and replacing it between runs can reset messages or leak video streams preventing proper stopping of camera -->\n<div id=\"faces-$id\" _cache_key=\"faces-$id\" _skip_invalidation style=\"position:relative;min-height:30px;cursor:pointer\">\n<video style=\"position:absolute\" autoplay playsinline></video>\n<canvas style=\"position:absolute\"></canvas>\n<span style=\"position:absolute\">Run item to start face detection.</span>\n</div>\n```\n```js_input_removed\nconst span = _this.elem?.querySelector('#faces-$id span')\nif (span) span.innerHTML = \"Loading ...\"\nconst tf_url = 'https://cdn.jsdelivr.net/npm/@tensorflow'\nawait _load([ window.tf || tf_url + '/tfjs/dist/tf.min.js',\n              window.blazeface || tf_url + '-models/blazeface' ])\nconst model = await blazeface.load()\nlet video, canvas, lastUpdateTime\nlet height, scale, div_initialized = false\nlet updateCount = 0\nlet fps = 0\nlet lastFPSCalcTime = Date.now()\nlet start = Date.now()\nconst update = async () => {\n  if (update != _this.store.update_task) return // cancelled\n  const div = _this.elem?.querySelector('#faces-$id')\n  // skip update if div is not on page (item hidden or editing)\n  if (!div) { setTimeout(()=>requestAnimationFrame(update), 250); return }\n  const span = div.querySelector('span')\n  if (video != div.children[0]) { // need to start video\n    video = div.children[0]\n    span.innerHTML = \"Initializing video ...\"\n    await _update_dom()\n    let stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:\"user\"}})\n    video.srcObject = stream\n    // video.play()  // fails on ios, but autoplay works\n    // wait until video is loaded and metadata (width/height) available\n    await new Promise((resolve)=>{video.onloadeddata = resolve})\n    console.log(\"started video\", video.videoWidth, video.videoHeight)\n    span.innerHTML = \"Detecting faces ...\"\n    scale = width / video.videoWidth\n    height = scale * video.videoHeight\n    video.width = width\n    video.height = height\n    // NOTE: div may no longer be available at this point (e.g. if item was hidden during video init), so we handle div init separately below\n    div_initialized = false\n  }\n  if (!div_initialized) {\n    // postpone if div is not on item (e.g. item hidden or editing)\n    if (!div.closest('.item')) {\n      setTimeout(()=>requestAnimationFrame(update), 250)\n      return \n    }  \n    canvas = div.children[1]\n    canvas.width = width\n    canvas.height = height\n    div.style.width = width + 'px'\n    div.style.height = height + 'px'\n    div.onclick = (e) => {\n      e.stopPropagation()\n      tf.dispose(model) // release memory used for model\n      _this.store.update_task = null // stop updates\n      video.pause() // just in case\n      video.srcObject.getTracks().forEach(track => track.stop())\n      video.srcObject = null // release stream\n      video.height = 0\n      canvas.height = 0\n      video = canvas = null\n      div.style.height = 'auto'\n      // div.style.zoom = '1'\n      span.innerHTML = 'Run item to start face detection.'\n      span.style.padding = 0\n      span.style.background = 'transparent'\n    }\n    span.style.padding = '0 10px' // insert for video overlay\n    span.style.background = 'rgba(0,0,0,.5)'\n    div_initialized = true\n    // start animation frames once dom is updated\n    _update_dom().then(()=>requestAnimationFrame(update))\n    return\n  }\n  // get face predictions from model\n  const faces = await model.estimateFaces(\n    video, false/*tensors*/, false /*flip*/, true /*annotate*/)\n  if (update != _this.store.update_task) return // cancelled\n  // draw predictions on canvas\n  const ctx = canvas.getContext('2d')\n  ctx.clearRect(0, 0, canvas.width, canvas.height)\n  if (lastUpdateTime && Date.now() - lastFPSCalcTime > 1000) {\n    fps = Math.floor(1000 * updateCount/(Date.now()-lastFPSCalcTime))\n    lastFPSCalcTime = Date.now()\n    updateCount = 0\n  }\n  span.innerHTML = `${faces.length} face(s), ${fps} fps`\n  for (let i = 0; i < faces.length; i++) {\n    const start = faces[i].topLeft\n    const end = faces[i].bottomRight\n    const size = [end[0] - start[0], end[1] - start[1]]\n    ctx.lineWidth = 5;\n    ctx.strokeStyle = 'rgb(0,255,0)'\n    ctx.strokeRect(start[0]*scale, start[1]*scale, size[0]*scale, size[1]*scale)\n    const landmarks = faces[i].landmarks\n    ctx.fillStyle = 'rgb(255,0,0)'\n    for (let j = 0; j < landmarks.length; j++)\n      ctx.fillRect(landmarks[j][0]*scale, landmarks[j][1]*scale, 5, 5)\n  }\n  updateCount++\n  lastUpdateTime = Date.now()\n  setTimeout(()=>{\n    start = Date.now()\n    requestAnimationFrame(update)\n  }, Math.max(0, 1000/target_fps - (Date.now()-start)))\n}\n_this.store.update_task = update // cancels any others\nawait update() // start updating, await first update\n```\n#_TensorFlow \n```_log\nstarted video 640 480\n```"
+ },
+ {
+  "id": "RBpnPRdXV0hIYnOZeO1m",
+  "user": "anonymous",
+  "time": 1617441790460,
+  "text": "#python/example #_python\n```python_input\nprint('hello world!')\n```\n```_log\nhello world!\n```"
+ },
+ {
+  "id": "A8O3KBoWZmpbMZVnIrWb",
+  "user": "anonymous",
+  "time": 1617441787290,
+  "text": "#typescript/example #_typescript\n```ts_input\nconst hello : string = 'hello world';\nconsole.log(hello) // log for _log block\nreturn hello // also return for _output block\n```\n```_output\nhello world\n```\n```_log\nhello world\n```"
+ },
+ {
+  "id": "zmcYxm4uwurDNXNXgGQA",
+  "user": "anonymous",
+  "time": 1617441787289,
+  "text": "#webppl/examples/HMM implements #/model.\n```webppl\nvar J = 4;         // total steps\nvar x0 = 1         // initial state\nvar yJ = [0,0,0,0] // observations (y0 ignored)\n```\n<<bar_chart(_this.read('_output'),'height:200px',{posterior:'#d61',prior:'gray'})>>\n<!--removed-->\n```webppl_input\nvar X_ = function(x) { Discrete({ps:x?[3,7]:[7,3]}) }\nvar Y_ = function(x) { Discrete({ps:x?[1,9]:[9,1]}) }\nvar xJ_ = function(J, _xJ, yJ) {\n  if (_xJ.length == J) return _xJ // done!\n  var x = sample(X_(_xJ[_xJ.length-1]))\n  if (yJ && yJ.length > _xJ.length) observe(Y_(x), yJ[_xJ.length])\n  xJ_(J, _xJ.concat(x), yJ)\n}\nvar prior = function() { xJ_(J,[x0]) }\nvar posterior = function() { xJ_(J,[x0],yJ) }\nwebppl._summarize(_enumerate(posterior), _enumerate(prior))\n```\n```_output\n[[\"x\",\"[1,0,0,0]\",\"[1,1,0,0]\",\"[1,0,0,1]\",\"[1,0,1,0]\",\"[1,1,1,0]\"],[\"posterior\",\"0.83\",\"0.09\",\"0.04\",\"0.02\",\"0.01\"],[\"prior\",\"0.15\",\"0.15\",\"0.06\",\"0.03\",\"0.15\"]]\n```\n<!--/removed-->\n#_webppl #_macros/bar_chart #_macros \n```_log\nwebppl took 364ms\n```"
+ },
+ {
+  "id": "NrWCiyTyAxuCpTRzdKAg",
+  "user": "anonymous",
+  "time": 1617441787288,
+  "text": "#webppl/examples/hmm/model follows the HMM example from http://dippl.org/chapters/04-factorseq.html.\n```_html\n<div id=\"dot-$id\" class=\"dot\" style=\"height:200px\">\n<script>\nvar dot = `digraph {\n  x0[shape=doublecircle]\n  subgraph { x1->y1 }\n  subgraph { x2->y2 }\n  subgraph cluster { xj->yj; label=\"J-2\"; class=stack }\n  x0->x1->x2[constraint=false,minlen=3]\n  x2->xj[constraint=false,minlen=5,style=dotted]\n  y1,y2,yj[shape=doublecircle]\n  x0[label=\"$x_0$\"]\n  x1[label=\"$x_1$\"]\n  x2[label=\"$x_2$\"]\n  xj[label=\"$x_j$\"]\n  y1[label=\"$y_1$\"]\n  y2[label=\"$y_2$\"]\n  yj[label=\"$y_j$\"]\n}`\ngraphviz._graph('#dot-$id', dot)\n</script>\n</div>\n```\n$`x_j \\mid (x_{j-1}=1) \\sim \\{ 0^.3, 1^.7 \\}`$\n$`x_j \\mid (x_{j-1}=0) \\sim \\{ 0^.7, 1^.3 \\}`$\n$`y_j \\mid (x_{j}=1) \\sim \\{ 0^.1, 1^.9 \\}`$\n$`y_j \\mid (x_{j}=0) \\sim \\{ 0^.9, 1^.1 \\}`$\n<<spacer(10)>>\n$`(x_j) \\mid x_0,(y_j) \\sim\\ ?`$\n#_graphviz #_macros "
+ },
+ {
+  "id": "t6iB3dOIEanGchrckMjl",
+  "user": "anonymous",
+  "time": 1617441774687,
+  "text": "#weight item charts your weight over time. You can enter your weight using #commands/weight or by editing this item (tap to see `_data` block).\n<!--removed-->\n```_data\n3/2/2021  187.8\n3/1/2021  188.7\n2/26/2021  188.8\n2/22/2021  189.2\n2/19/2021  189.5\n2/12/2021  188.9\n2/8/2021  191.4\n2/5/2021  192\n1/29/2021  193.7\n1/26/2021  195.2\n1/25/2021  195.3\n1/22/2021  195.3\n1/20/2021  196.1\n1/18/2021  197.2\n1/13/2021  198.7\n```\n<!--/removed-->\n```_html\n<div id=\"chart-$id\" class=\"c3\" style=\"height:120px\"> <script>\nvar data = _this.read('_data').split('\\n').map((line)=>\n  line.trim().replace(/[\"']?(\\S+?)[\"']?[\\s,:]+(\\S+?)/, '\"$1\": $2')\n).filter((t)=>t)\ndata = JSON.parse(\"{\"+data.join(',')+\"}\")\nc3._chart('#chart-$id', {\n  data: { \n    x:'x', \n    columns: [ ['x', ..._.keys(data).map(Date.parse)],\n               ['weight', ..._.values(data)] ] \n  },\n  axis: {\n    x: { type: 'timeseries' },\n    y: { tick: { count:5, format: d3.format('.4r') } }\n  },\n  padding: { top: 10, right: 10 } // avoid cutting off tick labels\n})\n</script> </div>\n```\n#_c3"
+ },
+ {
+  "id": "AWBCqaUzh2AX1m1oRDOp",
+  "user": "anonymous",
+  "time": 1617441676689,
+  "text": "#TensorFlow/util defines various utility functions for #TensorFlow.\n```js_removed\nif (window.tf) { // skip if tf is not loaded yet\n// _run invokes given function and checks for memory leaks\n// wraps sync functions (but NOT async functions) in tf.tidy\n// disposes globals both before and after invoking function\n// sets (or switches) to specified backend if necessary\ntf._run = async (func, backend = 'webgl') => {\n  const start = Date.now()\n  await tf._set_backend(backend)\n  tf._release_memory()\n  const _async = func.constructor.name == 'AsyncFunction'\n  const out = _async ? await _this.attach(func()) :\n                       tf.tidy(_this.attach(func))\n  _this.log(`tf._run took ${Date.now()-start}ms ` +\n    `using ${tf.getBackend()}`)\n  tf._release_memory()\n  await Promise.resolve(out).then(()=>\n    tf._check_memory_for_leaks())\n  return out\n}\n// sets backend, loading additional files as necessary\ntf._set_backend = async (backend) => {\n  if (tf.getBackend() == backend) return\n  if (backend == 'wasm' && !tf.engine()?.registryFactory?.wasm) {\n    await _load('https://cdn.jsdelivr.net/npm/@tensorflow' +\n      '/tfjs-backend-wasm/dist/tf-backend-wasm.js')\n  }\n  await tf.setBackend(backend)\n}\n// releases any disposable global state for memory check\ntf._release_memory = () => {\n  tf.disposeVariables()\n  // dispose store._tf in any animations\n  _.values(window._animations).forEach(anim=>{\n    if (!anim.store?._tf) return\n    tf.dispose(anim.store._tf)\n    anim.store._tf = {}\n  })\n}\n// checks memory for possible leaks usign tf.memory()\ntf._check_memory_for_leaks = () => {\n  const mem = tf.memory()\n  if (mem.unreliable) _this.warn('tf.memory unreliable')\n  if (mem.numBytes > 0) _this.error('tf.memory.numBytes', mem.numBytes)\n  if (mem.numBytesInGPU > 0) \n    _this.error('tf.memory.numBytesInGPU', mem.numBytesInGPU)\n}\n} // if (window.tf)\n```\n#_TensorFlow"
+ },
+ {
+  "id": "Fuv7qw7vWGCGc1uTfrC2",
+  "user": "anonymous",
+  "time": 1617413054988,
+  "text": "#commands/js command `/js code` evaluates JavaScript code by creating a new item with a `js_input` block and then running it. Example: <<cmdlink('/js 2+2','/js 2+2','edit:false,run:true')>>\n```js\nconst run = (js) => ({text: \"```js_input\\n\" + js + \"\\n```\"})\n```\n#_macros #_MindBox"
+ },
+ {
+  "id": "nZhgbC7fwxeXHzG9Xeqo",
+  "user": "anonymous",
+  "time": 1617413054987,
+  "attr": null,
+  "text": "#images/macros can help simplify image syntax. You can use the generic macro or define your own macros for special urls or formatting.\n|||\n|-:|-\n|<<img('icon.png')>> |`\\<<img('…')>>`\n|<<img('icon.png', 40)>> |`\\<<img('…', 40)>>`\n|<<img('icon.png', 32, 'auto', 'border:2px solid white; border-radius:8px')>> |`\\<<img('…', 32, 'auto', 'border:2px solid white; border-radius:8px')>>`"
+ },
+ {
+  "id": "BNEmOTe6dyD9S0eiAF2F",
+  "user": "anonymous",
+  "time": 1617413054987,
+  "attr": null,
+  "text": "#images are added using `+img` button or `⇧⌘I` [shortcut](#shortcuts).\n- Copy/paste support depends on your device. \n- Use _attributes_ (see below) for sizing or styling. \n- #/Macros can help simplify syntax.\n- Examples:\n|||\n|-:|-\n|<img src=\"icon.png\"> |`<img src=\"…\">`\n|<img src=\"icon.png\" width=40> |`<img src=\"…\" width=40>`\n|<img src=\"icon.png\" width=32 style=\"border:2px solid white; border-radius:8px\"> |`<img src=\"…\" width=32 style=\"border:1px solid white\">`"
+ },
+ {
+  "id": "PBmXEkGcwZvZB4ILRfZZ",
+  "user": "anonymous",
+  "time": 1617401038644,
+  "attr": null,
+  "text": "#TensorFlow/vis is the official [Visualization Library](https://github.com/tensorflow/tfjs/tree/master/tfjs-vis) for #TensorFlow. Keyboard shortcuts `` ` `` (toggle visor) and `` ⇧` `` (=`~`, to toggle maximize once open) can be used to toggle the \"visor\" (sidebar) once library is loaded. Macro `\\<<visor_toggle>>` (defined below) can also be used to render a toggle link in items. See basic #/example and [linear_regression](#TensorFlow/examples/linear_regression) tutorial.\n```js\nif (!window.tfvis) {\n  const base = 'https://cdn.jsdelivr.net/npm/@tensorflow'\n  const tfjs = base + '/tfjs/dist/tf.min.js'\n  const tfjs_vis = base + '/tfjs-vis/dist/tfjs-vis.umd.min.js'\n  if (window.tf) { // load tfjs-vis only\n    await _load(tfjs_vis)\n  } else { // load together with tfjs and then set backend\n    await _load(tfjs, tfjs_vis)\n    await tf.setBackend('webgl')\n  }\n  tfvis.visor().close() // initialize visor closed, minimized\n  if (tfvis.visor().isFullscreen()) tfvis.visor().toggleFullscreen()\n}\n```\n<!--removed-->\n```js\n// convenience function that can render to multiple containers\n// string targets are treated as container element ids, all other \n// targets are handled by tfvis (most common is a SurfaceInfo object)\nconst render = (tfvis_func, targets, ...args) => {\n  return Promise.all([targets].flat().map((target) => {\n    if (typeof target == 'string') { // interpret as container elem id\n      // NOTE: missing containers can happen if the item is run before\n      // first rendering, e.g. if it was typed/pasted into a new editor,\n      // or if the item is hidden as it is being run; in these cases we\n      // simply retry every 250ms for 3s and then log an error\n      const start = Date.now()\n      const try_render = () => {\n        const elem = _this.elem?.querySelector('#'+target)        \n        if (elem) _this.attach(tfvis_func(elem, ...args))\n        else if (Date.now() - start < 3000) setTimeout(try_render, 250)\n        else console.error(`render: missing container '${target}'`)\n      }\n      try_render()\n    } else return tfvis_func(target, ...args)\n  }))\n}\n// set log filter for \"Platform browser has already ...\" warning\n// so it does not get written into item (still logged in console)\n// also include the WebGLv2 filter from #TensorFlow\n_this.log_options.filter = (entry) =>\n  !entry.text.startsWith('Platform browser has already') &&\n  entry.text != 'Could not get context for WebGL version 2'\n// install css for when tfvis is loaded\ndocument.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n  _item('$id').read('css_loaded') + \"</style>\") // see below\n```\n```js_init\n// set up css and any (global) macros\nfunction _init() {\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n  // tfvis_visor_toggle macro for toggle link rendered in item\n  window.tfvis_visor_toggle = `<a _cached class=\"visor-toggle\" title=\"toggle visor (~)\" onclick=\"window.tfvis?.visor().toggle()\">visor</a>`\n  // tfvis_container macro for elements (divs) for rendering in item\n  // custom id-only _cache_key ensures element is shared across edits\n  // _skip_invalidation attribute ensures element is shared across runs\n  window.tfvis_container = (id) => \n    `<div class=\"tfjs-container\" id=\"${id}\" _cache_key=\"${id}-$id\" ` + \n      `_skip_invalidation></div>`\n}\n```\n```css\n#tfjs-visor-container { color:black; position:absolute; height: 100%; top:0; right:0; z-index:5 }\n#tfjs-visor-container button { border:0; cursor:pointer }\n#tfjs-visor-container { filter: invert(100%) }\n#tfjs-visor-container img { filter: invert(100%) }\n.item .tfjs-container { filter: invert(100%); margin-top: 5px }\n.item .tfjs-container img { filter: invert(100%) }\n.item .tfjs-container .tf-table { filter: invert(100%); border-spacing: 10px 5px; margin: 0 -10px; width: calc(100% + 20px); }\n.item .tfjs-container { filter: invert(100%) }\n.item .tf-table th { background:#171717; padding:0 5px; border-radius:4px; border:0 !important }\n.item .tf-table td { padding:0 5px; border:0 !important }\n.item .visor-toggle { position:absolute; z-index:1; right:10px; bottom:10px; cursor:pointer; visibility:hidden } /* hidden until tfvis loaded */\n/* workaround for width being too large on smaller iPhones */\n@media only screen and (max-width: 600px) {\n  #tfjs-visor-container { zoom: 0.6 }\n  /* hide useless (and buggy) Maximize button */\n  .visor button:first-of-type { display: none }\n}\n```\n```css_loaded\n.item .visor-toggle { visibility:visible }\n```\n<!--/removed-->\n#_load #_async #_init #_TensorFlow"
+ },
+ {
+  "id": "IkVXz7HWCXR3csbTBcc5",
+  "user": "anonymous",
+  "time": 1617390779009,
+  "text": "#TensorFlow is a [machine learning library](https://www.tensorflow.org/js). See basic #/example, [linear regression](#TensorFlow/examples/linear_regression) tutorial, or [face detection](#TensorFlow/examples/blazeface) demo. Default backend is WebGL (GPU). WebGL 2.0 is used if available (may need to be enabled in browser settings). Helper functions in #/util can help with memory management or with switching to the WebAssembly (CPU) backend, which can be faster on smaller problems.\n```js\nif (!window.tf) {\n  await _load('https://cdn.jsdelivr.net/npm/@tensorflow' +\n    '/tfjs/dist/tf.min.js')\n  await tf.setBackend('webgl') // default backend (can be changed)\n  // import #TensorFlow/util _after_ loading tf\n  _this.eval(_item('#TensorFlow/util').read('js'))\n}\n```\n```js_removed\n// set log filter for \"Could not get context for WebGL version 2\"\n// so it does not get written into item (still logged in console)\n_this.log_options.filter = (entry) =>\n  entry.text != 'Could not get context for WebGL version 2'\n```\n#_load #_async #_/util"
+ },
+ {
+  "id": "7f4iq9XLc9HkKueQtB8v",
+  "user": "anonymous",
+  "time": 1617390414693,
+  "text": "#TensorFlow/example #_TensorFlow\n```js_input\nfunction main() {\n  const J = 1024\n  const xJJ = tf.randomNormal([J,J])\n  const yJJ = tf.randomNormal([J,J])\n  const zJJ = tf.dot(xJJ, yJJ)\n}\nawait tf._run(main) // use default backend (webgl)\nawait tf._run(main, 'wasm')\n```\n```_log\ntf._run took 75ms using webgl\ntf._run took 430ms using wasm\n```"
+ },
+ {
+  "id": "p9XbZ3i53LH9scBAmGdc",
+  "user": "anonymous",
+  "time": 1617388645014,
+  "text": "#TensorFlow/vis/example renders a summary of a simple model into both the visor (sidebar) and a container element below. Also opens the visor and renders a toggle link on the lower right using the macro `\\<<visor_toggle>>`.\n```js\nconst backend = 'webgl' // try wasm for smaller models\n```\n```js_input_removed\nfunction main() {\n  const model = tf.sequential()\n  model.add(tf.layers.dense({inputShape: [1], units: 1}))\n  model.add(tf.layers.dense({units: 1}))\n  // model.summary(60) // log to console (and _log block)  \n  // render into 'summary' container and visor (sidebar)\n  render(tfvis.show.modelSummary, \n    ['summary', {name:'model', tab:_this.name}], model)\n  tfvis.visor().open()\n}\nawait tf._run(main, backend)\n```\n<<tfvis_container('summary')>>\n<<tfvis_visor_toggle>>\n#_TensorFlow/vis\n```_log\ntf._run took 5ms using webgl\n```"
+ },
+ {
+  "id": "oZGOs38gdQzKpaKZKGlk",
+  "user": "anonymous",
+  "time": 1617355387288,
+  "attr": null,
+  "text": "#c3 is a [charting library](https://c3js.org) #preloaded as `c3` (or `window.c3`) and extended here with `c3._chart`, the preferred constructor for `c3` charts on MindPage.\n```js\nfunction _init() {\n  c3._chart = c3_chart; // see below\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n}\n```\n```js_removed\nfunction c3_chart(selector, options) {\n  let elem = document.querySelector(selector)\n  // NOTE: single-item rendering can be useful for debugging\n  // if (_that.id != \"KqhfMvy3l5OXRzB18Sai\") return\n  if (!elem) return // element removed\n  const rotated = options.axis?.rotated\n  const labeled = options.data?.labels\n  const barchart = options.data?.type == 'bar'\n  let defaults = {\n    bindto: selector,\n    point: { r: 3 },\n    axis: {\n      x: {\n        show: true,\n        tick: { outer: false, multiline: false },\n      },\n      y: {\n        show: !labeled,\n        tick: { outer: false, multiline: false },\n        padding: {\n          bottom: 10,\n          top: rotated && labeled ? 70 : labeled ? 40 : 10,\n        },\n      },\n      y2: {\n        tick: { outer: false, multiline: false }\n      }\n    },\n    grid: { focus: { show: !barchart } },\n    legend: { show: false },\n    transition: { duration: 0 }, // disable animations\n    // NOTE: onrendered must be used carefully because it is invoked on every render (sometimes apparently multiple times per render) as well as during every tab switch and can cause unnecessary slowdown and potential memory leaks -- it can be useful for debugging chart rendering, e.g. to make sure that no \"zombie charts\" are getting rendered\n    // onrendered: _that.attach(() => {\n      // // console.debug('onrendered', elem.id)\n      // let elem = document.querySelector(selector)\n      // if (!elem) console.error(\"rendering zombie chart!\")\n      // if (elem.offsetWidth == 0)\n        // console.error(\"zero-width _chart elem\")\n    // })\n  }\n  options = _.merge(defaults, options);\n  if (labeled) elem.classList.add(\"c3-labeled\")\n  if (rotated) elem.classList.add(\"c3-rotated\")\n  if (barchart) elem.classList.add(\"c3-barchart\")\n  // ensure element height matches chart height if specified\n  if (options.size?.height)\n    elem.style.height = options.size.height + 'px';  \n\n  setTimeout(_that.attach(()=>{\n    let elem = document.querySelector(selector)\n    if (!elem) return; // element was removed\n    if (elem.offsetWidth == 0) {\n      // NOTE: seems to happen occasionally and without visible issue\n      console.warn(\"zero-width _chart elem\")\n      _that.invalidate_elem_cache()\n      // elem._destroy()\n      return;\n    }\n    // console.debug('c3.generate on ', elem)\n    const chart = c3.generate(options)\n    // enable various handler functions and required css selectors\n    elem.setAttribute(\"_resize\", \"\")\n    elem.setAttribute(\"_destroy\", \"\")\n    elem.setAttribute(\"_clickable\", \"\")\n    //elem._chart = chart\n    elem._resize = () => chart.resize() \n    elem._destroy = () => {\n      chart.destroy()\n      elem.classList.add('c3') // restore .c3 class removed by chart.destroy()\n    }      \n    elem._clickable = (e) => {\n      if (e.target.closest(\".c3-legend-item-event\")) return true\n      // cursor == 'pointer' covers most foreground elements (e.g. bars) but on mobile devices the background .c3-event-rect is also used for (persistent) tooltips since foreground elements can be small\n      if (e.target.style.cursor == \"pointer\") return true\n      if (e.target.closest(\".c3-event-rect\")) return true\n      return false // pass clicks through to item\n    }\n    // start monitoring element width, invalidate cache if 0\n    const monitorElemWidth = _that.attach(()=>{\n      const elem = document.querySelector(selector)\n      if (!elem) return // element removed, stop monitoring\n      if (elem.offsetWidth == 0) {\n        console.error(\"zero-width _chart elem\")\n        _that.invalidate_elem_cache()\n        // elem._destroy()\n        return // stop monitoring\n      }\n      setTimeout(monitorElemWidth, 1000)\n    })\n    monitorElemWidth()\n  }), 100);\n  // return chart;\n}\n```\n```css_removed\n/* original styles at https://github.com/c3js/c3/blob/master/c3.css */\n.c3 { background: #171717; border-radius: 4px; position: relative }\n.c3 { break-inside: avoid } /* for multi-column, can be slow */\n.c3:not(:first-child) { margin-top: 4px }\n.c3:not(:last-child) { margin-bottom: 4px }\n.c3 text {\n  fill: gray;\n  stroke: none;\n  font-size: 14px;\n  font-family: Avenir Next, Helvetica;\n}\n.c3 path.domain, .c3 .tick line { stroke: gray }\n.c3-tooltip { box-shadow: none }\n.c3-tooltip th, .c3-tooltip tr, .c3-tooltip td {\n  color: black;\n  font-weight: 600;\n  background-color: #999;\n  border: 1px solid #444;\n}\n/* reset .item table spacing styles intended for markdown tables */\n.item table.c3-tooltip { border-spacing: 0; margin-left: 0 }\n.c3-tooltip th { font-weight: 700 }\n.c3-grid { opacity: 0.5 }\n.c3-line { stroke-width: 3px }\n/* .c3-rotated, .c3-barchart are defined in c3_chart above */\n.c3:not(.c3-rotated) .c3-text { transform: translate(0, -5px) }\n.c3-rotated .c3-axis-x { transform: translate(0, 1px) }\n.c3-rotated .c3-texts .c3-text { transform: translate(0, -1px) }\n.c3-barchart .c3-axis-x .tick line { display: none }\n.c3-barchart .c3-axis-x .domain { display: none }\n```\n#_init "
+ },
+ {
+  "id": "b0pRt5k2bcG6FDBQIHBy",
+  "user": "anonymous",
+  "time": 1617326654988,
+  "attr": null,
+  "text": "#MindBox is the multi-purpose text box at the top of the page. \n- Type anything to search for existing items.\n- Tap `create` or hit #⇧⏎ to _create_ new item.\n- Run #code via #commands.\n- Use programmatically: #_init\n  - Available as `MindBox` (or `window.MindBox`)\n    - Also import as `#_MindBox` to auto-update.\n  - Functions (edit for source): `get()`, `set(text)`, `clear()`, `toggle(text)`, `focus()`, `create(text,[options])`, `elem` (property)\n```js_removed\nconst MindBox = {\n  get: () => MindBox.elem.value,\n  set: (text) => { \n    MindBox.elem.value = text\n    // also shift selection to the end\n    // on Safari, setting the selection can auto-focus so we have to blur\n    const wasFocused = document.activeElement.isSameNode(MindBox.elem)\n    MindBox.elem.selectionStart = MindBox.elem.value.length\n    if (!wasFocused) MindBox.elem.blur()\n    // trigger input event for handling of change\n    MindBox._input()   \n  },\n  clear: () => MindBox.set(''),\n  toggle: (text) => {\n    if (MindBox.get().trim() == text.trim()) MindBox.clear()\n    else MindBox.set(text)\n  },\n  focus: (text) => {\n    if (typeof text == 'string') MindBox.set(text)\n    MindBox.elem.selectionStart = MindBox.elem.value.length\n    MindBox.elem.focus()\n    // scroll up to header if necessary\n    const header = document.getElementById('header')\n    if (document.body.scrollTop > header.offsetTop)\n      document.body.scrollTo(0, header.offsetTop)    \n  },\n  // MindBox.create emulates 'create' button\n  // use window._create for creating items w/o history & command parsing\n  create: (text, {edit=false,run=false}={}) => {\n    if (typeof text == 'string') MindBox.set(text)\n    // simulate modified keydown for Enter, then keyup for modifiers\n    // modifier keyups are required by MindBox in case modifiers\n    // affect behavior of commands or other triggered code\n    MindBox._keydown({ \n      code:'Enter',\n      metaKey:true,  // first modifier is create shortcut\n      ctrlKey:!edit, // second modifier disables editing\n      shiftKey:!run  // shift disables running\n    })\n    MindBox._keyup({code:'Meta'})\n    MindBox._keyup({code:'Control'})\n    MindBox._keyup({code:'Shift'})\n    return window._mindbox_return // can be created item or promise\n  },\n  // elem getter\n  get elem() { \n    return document.getElementById('textarea-mindbox') \n  },\n  // event triggers for internal use\n  _input: () => { MindBox.elem.dispatchEvent(\n    new Event('input')) },\n  _keydown: (key) => { MindBox.elem.dispatchEvent(\n    new KeyboardEvent('keydown', key)) },\n  _keyup: (key) => { MindBox.elem.dispatchEvent(\n    new KeyboardEvent('keyup', key)) },\n}\n// make global for easy access from HTML and non-dependents\n// (only dependents will auto-update with latest code)\nfunction _init() { window.MindBox = MindBox; }\n```"
+ },
+ {
+  "id": "kRWUHGBW7Yq3stKHBfpZ",
+  "user": "anonymous",
+  "time": 1617240254988,
+  "attr": null,
+  "text": "#webppl/run is a promise-based wrapper for `webppl.run`.\n```js\nfunction webppl_run(code, options) {\n  return webppl.__run = Promise.allSettled([webppl.__run]).then(()=>\n    new Promise((resolve, reject) => {\n      const start = Date.now()\n      try { \n        webppl.run(code, (s, x) => {\n          if (_.keys(s).length > 0) // log webppl state\n            console.log(\"webppl state:\", JSON.stringify(s));\n          console.log(`webppl took ${Date.now()-start}ms`)\n          resolve(x);\n        }, _.merge({ errorHandlers: [reject] }, options))\n      } catch (e) { reject(e) }\n    })\n  )\n}\n```"
+ },
+ {
+  "id": "YdGzaK9IjZgziIlYBAz5",
+  "user": "anonymous",
+  "time": 1617240254988,
+  "attr": null,
+  "text": "#features/_listen tag enables code to be evaluated on certain events:\n- `_on_change(text)` is evaluated at each change to #MindBox triggered by user typing in, or programmatically. Text can be empty.\n- `_on_search(text)` is evaluated at each new search via #MindBox triggered by user typing in (subject to debounce), or programmatically. Search text can be empty.\n- `_on_create(text)` is evaluated each time new text is submitted on #MindBox using `create` button, keyboard shortcut, or programmatically.\n- ``_on_command_<name>(`…`)`` is evaluated when [command](#commands) `/name …` is submitted on #MindBox. Argument `…` can be empty. Valid return values are in listed in #commands.\n- `_on_focus()` is evaluated each time MindPage window (or tab) is \"focused\" to receive keyboard, touch, or other input.\n- `_on_item_change(id, label, prev_label, deleted, remote, dependency)` is evaluated at each change to an item or its dependencies.\n- `_on_local_store_change(id)` is evaluated at each change to `local_store` of an item.\n- `_on_global_store_change(id, remote)` is evaluated at each change to `global_store` of an item.\n- `_on_attr_change(id, remote)` is evaluated at each change to `attr` of an item.\n- Example code:\n```js_example\nfunction _on_search(text) { alert(\"You searched for: \" + text) }\nfunction _on_create(text) { alert(\"You created: \" + text) }\n```"
+ },
+ {
+  "id": "1eeOY8DkC12U9cSxqNa1",
+  "user": "anonymous",
+  "time": 1616740449063,
+  "attr": null,
+  "text": "#features/_async tag enables _async_ evaluation.\n- Code is wrapped as `_this.start(async()=>{ ... })`\n- Code must explicitly `return` any output.\n- Code must `await` on promises to avoid premature return.\n- Default log attribution is time-based (vs stack-based).\n  - Allows easy tracking of logs from external libraries.\n  - Upon return, logs are written into item via `write_log`.\n  - Log options can be configured via `_this.log_options`.\n- Item may not be on the stack for entire async evaluation.\n  - Item is always on stack for top-level async function call.\n  - Helper functions can bring item back on stack as needed.\n    - `invoke`, `attach`, `dispatch`, `promise`, `resolve`, ...\n    - For logging: `debug`, `info`, `log`, `warn`, `error`\n  - `_this` is still available from _lexical context_ of item.\n- Async evaluation is _propagated to [dependents](#dependencies)_.\n  - For example, see #mathjs/example."
+ },
+ {
+  "id": "wVevRIzwHAfOei1WlBJy",
+  "user": "anonymous",
+  "time": 1616740449062,
+  "text": "#Features/_autorun tag enables item to be auto-run on changes to #dependencies."
+ },
+ {
+  "id": "u1nlIQpcJXmZ4wT5pdim",
+  "user": "anonymous",
+  "time": 1616740449062,
+  "text": "#Features/_spell tag manually enables spell-checking on item. #//_nospell can be used to manually _disable_ spell-checking. Without these tags, spell-checking is enabled automatically for items that do not contain any code blocks (delimited by `` ``` ``)."
+ },
+ {
+  "id": "hZJI9knEyOLRs8zk1eiM",
+  "user": "anonymous",
+  "time": 1616740449062,
+  "text": "#Features/_nospell tag manually _disables_ spell-checking on item. Also see #//_spell."
+ },
+ {
+  "id": "Ae2P6VW26wxVFhB3p69g",
+  "user": "anonymous",
+  "time": 1616740449062,
+  "attr": null,
+  "text": "#macros are #code that generate content.\n- Syntax is `\\<<...>>` where `...` is #code.\n- Output is treated same as typed-in content.\n  - HTML content can be wrapped in `_html` block\n    - See convenient `html(…)` macro below.\n- #features/_init can be used for _global_ macros.\n  - #dependencies become optional, for auto-updating.\n- Examples:\n  - `\\<<say_hello()>>` from #code #_code gives: <<say_hello()>>\n  - #/bar_chart macro in #charts.\n  - #/graph macro in #graphs.\n  - #/animation macro in #animations.\n- Basic macros (import as `#_macros`):\n```js\nconst px = (s) => typeof s == 'number' ? s+'px' : s\nconst img = (u, w='auto', h='auto', style='') => `<img src=\"${u}\" style=\"width:${px(w)};height:${px(h)};${style}\">`\nconst code = (text) => \"`\" + text + \"`\"\nconst block = (type, content) => '```'+type+'\\n' + content + '\\n```'\nconst html = (content) => block('_html', content)\nconst json = (obj) => block('json',JSON.stringify(obj, null, 2)\n  ?.replace(/\"([^\"]+)\":/g,'$1:')/*?.replace(/,([^\\s\\d])/g,\", $1\")*/)\n// NOTE: using onmousedown + cancelled onclick maintains keyboard focus and is generally more robust, especially on mobile devices w/ virtual keyboards\nconst jslink = (js, text=js, classes='', style='', title=js) => \n  `<a href=\"#\" onmousedown=\"` + _.escape(js) + \n    `;event.preventDefault();event.stopPropagation()\" ` +\n    `onclick=\"event.preventDefault();event.stopPropagation()\" ` +\n    `class=\"${classes}\" style=\"${style}\" title=\"${_.escape(title)}\">${text}</a>`\nconst evallink = (item, js, text=js, classes='', style='', title=js) =>\n  jslink(`_item('${item.id}')` +\n    '.eval(`' + js.replace(/([`\\\\$])/g,\"\\\\$1\") + '`)', text, classes, style, title)\nconst cmdlink = (cmd, text=cmd, options='', classes='', style='', title=cmd) =>\n  jslink(`MindBox.create(\\`${cmd}\\`,{${options}})`, text, classes, style, title)\nconst spacer = (height=10, width=10) => \n  `<div style=\"height:${height}px; width:${width}px\"></div>`\nconst time_short = (ms) => (\n    ms < 60*1000 ? \"<1m\" :\n    ms < 60*60*1000 ? Math.floor(ms/(60*1000)) + \"m\" :\n    ms < 24*60*60*1000 ? Math.floor(ms/(60*60*1000)) + \"h\" :\n    Math.floor(ms/(24*60*60*1000)) + \"d\"\n  )\n// register most common macros globally\n// importing via #_macros is optional for auto-updating\n// also allows _this to refer to invoking item (vs #macros) as expected\n// we avoid use of _this in global macros to avoid this ambiguity\nfunction _init() {\n  window.img = img\n  window.code = code\n  window.block = block\n  window.html = html\n  window.json = json\n  window.jslink = jslink\n  window.evallink = evallink\n  window.cmdlink = cmdlink\n  window.spacer = spacer\n}\n```\n#_init"
+ },
+ {
+  "id": "gVxu66BJo7FlIHIMX0MD",
+  "user": "anonymous",
+  "time": 1616740098249,
+  "attr": null,
+  "text": "#MindPage/core/_Item object holds a reference to a MindPage item and provides access to a wide range of [properties](#MindPage/core/properties) and functions:\n- `eval([js, options])` evaluates code in context of item.\n- `eval_macros(text, [options])` evaluates macros in given text.\n- `read([type, options])` reads text from item.\n- `read_deep(type, [options])` reads text from item + dependencies.\n- `read_input(type, [options])` reads input from item + dependencies.\n- `write(text, [type], [options])` writes text into item.\n- `clear(type)` clears blocks in item.\n- `remove(type)` removes blocks in item.\n- `delete([confirm])` deletes item.\n- `get_log([options])` returns console log messages for item.\n- `write_log([options])` writes log messages into item.\n- `show_logs(autohide_after)` shows and auto-hides log messages.\n- `hide_logs()` hides log messages.\n- `show_status([status], [progress])` shows status on running item.\n- `clear_status()` clears (and hides) status on item\n- `touch([save=false])` updates (and optionally saves) time of item.\n- `save()` saves item.\n- `start(async_func)` starts async evaluation on item.\n- `invoke(func)` invokes function with item on the stack.\n- `attach(func)` attaches function to item by wrapping it with `invoke`.\n- `attach(promise)` attaches promise to item by wrapping `then`,`catch`,`finally`.\n- `dispatch(func, [delay_ms])` dispatches _attached_ function.\n- `dispatch_task(name, func, [delay_ms, period_ms])` dispatches named task.\n- `cancel_task(name)` cancels named task.\n- `pending_task(name)` returns true if named task is pending completion.\n- `promise(func)` returns new attached promise with attached executor.\n- `resolve(thing)` returns new attached promise that resolves `thing`.\n- `debug|info|log|warn|error(...)` invokes attached `console.*(...)`.\n- `fatal(...)` throws `Error(...)` including stack trace.\n- `delay(ms)` returns promise resolved after specified time.\n- `images([options])` returns array of uploaded images.\n- `invalidate_elem_cache()` invalidates rendered element cache for item.\n- `cached(key, value_function)` returns cached value from `item.cache`.\n- `invalidate_cache()` invalidates cache for next access via `item.cache`.\n- `validate_cache()` validates cache for current `item.deephash`.\n- `save_local_store()` saves `item.local_store` to `localStorage`.\n- `save_global_store()` saves `item.global_store` to `firebase`."
+ },
+ {
+  "id": "5W1IN9l28QzgLMtNoaR2",
+  "user": "anonymous",
+  "time": 1616721468528,
+  "attr": null,
+  "text": "#commands/restore command `/restore [name|version]` restores an existing or deleted item from a past version.\n- `/restore` lists valid names (`id:<id>`) for recently deleted items.\n- `/restore name` lists valid versions (`version:…`) for item `name`.\n  - `name` can be existing item `#label` or `id` or deleted item `id`.\n  - Labels are not available for deleted items due to encryption.\n- `/restore version` creates a new item with text from `version`.\n  - Remove label `#restored` or copy text into existing item.\n  - Copying text into existing item maintains its history.\n  - Switching to new item _splits_ history across items.\n    - Older versions remain on older (deleted) items.\n    - Unavoidable when recovering deleted items.\n```js_removed\nasync function run(arg) {\n  if (_user.uid == 'anonymous') {\n    alert('/restore command is not useful for anonymous accounts')\n    return\n  }\n  const limit_per_item = 50\n  const limit_for_deletions = 100 // need extra to skip non-deleted\n  if (!arg) { // list recent deletions\n    // const res = await window.firebase.firestore()\n      // .where(\"user\", \"==\", _user.uid) // security requirement\n      // .orderBy(\"time\", \"desc\")\n      // .limit(limit_for_deletions).get()\n    const { getDocs, query, collection, getFirestore, where, orderBy, limit } =\n      firebase.firestore\n    const res = await getDocs(query(\n      collection(getFirestore(firebase), \"history\"), \n        where(\"user\", \"==\", _user.uid), // security requirement\n        orderBy(\"time\", \"desc\"),\n        limit(limit_for_deletions)\n    ))\n    let versions = []\n    let deleted = new Set() // set of deleted item ids\n    res.forEach((doc)=>{\n      const version = doc.data()\n      if (deleted.has(version.item)) return // skip older version\n      if (_exists(version.item)) return // skip non-deleted\n      deleted.add(version.item) // found deleted item\n      if (!version.text && !version.cipher)\n        console.error('unexpected history item', version)\n      let bytes = (version.text || version.cipher || '').length + ' bytes'\n      if (version.text === undefined) bytes += ' (encrypted)'\n      const date = new Date(version.time)\n      versions.push(`id:${version.item}  ${date.toLocaleTimeString()}  ${date.toLocaleDateString()}  ${bytes}`)\n    })\n    if (versions.length == 0) {\n      alert(`no recent deletions found`)\n    } else {\n      const count = versions.length + \n        (versions.length == limit_per_item ? '+':'')\n      return { // create item for easy examination of listing\n        text:[`${count} deleted items found:`,\n              '```', versions, '```'].flat().join('\\n'),\n      }\n    }\n        \n  } else if (!arg.startsWith('version:') &&\n    (arg.startsWith('#') || arg.startsWith('id:') || _item(arg))) { \n    // treat arg as existing item #label|id or deleted item id\n    let id = arg.replace(/^id:/, '') // drop id: prefix\n    if (arg.startsWith('#')) { // look up id from #name\n      if (!_item(arg)) { alert(`item ${arg} not found`); return }\n      id = _item(arg).id\n    }\n    // const res = await window.firebase.firestore()\n      // .collection(\"history\")\n      // .where(\"user\", \"==\", _user.uid) // security requirement\n      // .where(\"item\", \"==\", id)\n      // .orderBy(\"time\", \"desc\")\n      // .limit(limit_per_item).get()\n    const { getDocs, query, collection, getFirestore, where, orderBy, limit } =\n      firebase.firestore\n    const res = await getDocs(query(\n      collection(getFirestore(firebase), \"history\"), \n        where(\"user\", \"==\", _user.uid), // security requirement\n        where(\"item\", \"==\", id),\n        orderBy(\"time\", \"desc\"),\n        limit(limit_per_item)\n    ))\n      \n    let versions = []\n    res.forEach((doc)=>{\n      const version = doc.data()\n      let bytes = (version.text || version.cipher || '').length + ' bytes'\n      if (version.text === undefined) bytes += ' (encrypted)'\n      const date = new Date(version.time)\n      versions.push(`version:${doc.id}  ${date.toLocaleTimeString()}  ${date.toLocaleDateString()}  ${bytes}`)\n    })\n    if (versions.length == 0) {\n      alert(`no versions found for item '${arg}'`)\n    } else {\n      const count = versions.length + \n        (versions.length == limit_per_item ? '+':'')\n      return { // create item for easy examination of listing\n        text:[`${count} versions found for item ${arg}:`,\n              '```', versions, '```'].flat().join('\\n'),\n      }\n    }\n\n  } else { // treat arg as version\n    const id = arg.replace(/^version:/, '') // drop version: prefix\n    let docref\n    try { // missing doc can throw permission error\n      // doc = await window.firebase.firestore()\n      //  .collection(\"history\").doc(id).get()\n      const { getDoc, doc, getFirestore } = firebase.firestore\n      docref = await getDoc(doc(getFirestore(firebase), 'history', id))      \n    } catch (e) { console.error(e) }\n    if (!docref.exists()) { alert(`could not find version '${arg}'`); return }\n    const item = await _decrypt_item(docref.data())\n    // NOTE: we prefix #restored label to avoid conflicts/errors\n    return { text:'#restored ' + item.text }\n  }\n}\n```\n#_async"
+ },
+ {
+  "id": "9y8wfK3joIYBIghbrMgN",
+  "user": "anonymous",
+  "time": 1616721074328,
+  "attr": null,
+  "text": "#commands are #code run via #MindBox. Examples: #/hello #/hello_again #/js #/alert #/copy #/export #/restore #/agenda #/invert #/weight.\n- Type command as `/name …` and hit #⇧⏎.\n- Evaluates ``run(`…`)`` from item named `#commands/<name>`.\n  - If missing, evaluates ``_on_command_<name>(`…`)`` in [listeners](#features/_listen).\n  - Function can be `async` or return promise, e.g. #/agenda.\n- Return nothing (or `undefined`) to clear text and defocus.\n- Return string (can be empty) to replace text.\n- Return object `{ text:\"…\" }` to create new item.\n  - `edit:true|false` to start editing created item.\n  - `run:true|false` to run `js_input` in item.\n  - `init:(item)=>{...}` to initialize item.\n- Return `null` or [_Item](#MindPage/core/_Item) to do nothing.\n  - Allows command to handle any changes to #MindBox as needed.\n- Commands can also be triggered programmatically.\n  - e.g. via [window._create](#MindPage/core/functions) or [MindBox.create](#MindBox).\n  - Any created or returned [_Item](#MindPage/core/_Item) (or `null`) is also returned to the programmatic context where command is triggered."
+ },
+ {
+  "id": "4shKugnkuaBJVW0a9bI9",
+  "user": "anonymous",
+  "time": 1616717168804,
+  "text": "#commands/copy command `/copy name` copies an item. Item `name` can be specified as either `#label` or `id`. For example, this item can be specified as either `<<_this.label>>` or `<<_this.id>>`.\n```js\nconst run = (name) => ({text:_item(name).read()})\n```"
+ },
+ {
+  "id": "zNaVPShVTlVheLLZSygH",
+  "user": "anonymous",
+  "time": 1616002770020,
+  "text": "#typescript enables [TypeScript](https://typescriptlang.org). See #/example.\n```js\nif (!window.ts) {\n  const url_base = 'https://unpkg.com/typescript@4.2.3/lib'\n  if (!window.ts_libs) window.ts_libs = {}\n  const ts_lib = (n) => !!window.ts_libs[n] || fetch(url_base + `/lib.${n}.d.ts`).then(r=>r.text()).then(t=>window.ts_libs[n]=t)\n  await _load(url_base + '/typescriptServices.js',\n    ts_lib('es5'), ts_lib('es6'), ts_lib('dom'))\n}\n```\n```js_removed\n// enable 'run' for (typescript|ts)_input blocks\nfunction _run() {\n  const ts = '(()=>{ ' + _this.read_input('(typescript|ts)') + '\\n})()'\n  const start = Date.now()\n  const js = transpile(ts).trim().split('\\n').slice(1,-1).join('\\n')\n  console.debug('typescript transpiler took', Date.now()-start, 'ms')\n  return _this.eval(js, {async:true}).catch((e)=>{})\n}\n// basic ts->js transpiler that logs all errors to console\nfunction transpile(input) {\n  // options mimic ts.transpileModule\n  // https://github.com/microsoft/TypeScript/ \n  //   blob/master/src/services/transpile.ts\n  const options = ts.getDefaultCompilerOptions()\n  options.suppressOutputPathCheck = true\n  options.allowNonTsExtensions = true\n  options.lib = Object.keys(ts_libs)\n  if (!window.ts_files) window.ts_files = Object.fromEntries(\n    Object.entries(ts_libs).map(([n, t])=>[n,ts.createSourceFile(n,t)]))  \n  const fname = _this.name\n  const file = ts.createSourceFile(fname, input, options.target)\n  window.ts_files[fname] = file  \n  const newLine = ts.getNewLineCharacter(options)\n  if (!window.ts_output) window.ts_output = {}\n  // NOTE: using fewer arguments for compiler host (vs transpileModule)\n  if (!window.ts_compiler) window.ts_compiler = {\n    getSourceFile: (name) => ts_files[name],\n    writeFile: (name, text) => { window.ts_output[name] = text },\n    getDefaultLibFileName: () => '',\n    useCaseSensitiveFileNames: () => false,\n    getCanonicalFileName: fileName => fileName,\n    getCurrentDirectory: () => '',\n    getNewLine: () => newLine\n  }\n  const program = ts.createProgram([fname], options, ts_compiler)\n  // diagnostics output mimics typescript-simple\n  // https://github.com/teppeis/typescript-simple/blob/master/index.ts\n  const diagnostics = program.getSyntacticDiagnostics(file)\n    .concat(program.getSemanticDiagnostics(file))\n    .concat(program.getOptionsDiagnostics())\n  if (diagnostics.length > 0) logDiagnostics(diagnostics)\n  program.emit()\n  return ts_output[fname+'.js'] // .js appended by compiler\n}\nfunction logDiagnostics(diagnostics) {\n  return diagnostics.forEach((d) => {\n    if (d.file && typeof d.start === 'number') console.error(d.messageText + ` (line:${d.file.getLineAndCharacterOfPosition(d.start).line})`)\n    else console.error(d.messageText)\n  })\n}\n```\n#_load #_async"
+ },
+ {
+  "id": "P2d2HvReFptx8ORC9NZw",
+  "user": "anonymous",
+  "time": 1615925918813,
+  "text": "#python enables Python via [Brython](https://github.com/brython-dev/brython). See #/example.\n```js\nif (!window.__BRYTHON__) {\n  const _brython = 'https://cdn.jsdelivr.net/npm/brython@3.9.1'\n  await _load(_brython + '/brython.min.js',\n              _brython + '/brython_stdlib.js')\n}\n```\n```js_removed\n// enable 'run' for python_input blocks\nfunction _run() {\n  try {\n    __BRYTHON__.debug = 0\n    const js = __BRYTHON__.python_to_js(_this.read_input('python'))\n    return _this.eval(js, {async:true})\n  } catch (e) {\n    console.error(`#python error: ${e.args[0]} (line:${e.$line_info})`)\n  }\n}\n```\n#_load #_async"
+ },
+ {
+  "id": "4UtoVG4x3lgRP8TOaEIt",
+  "user": "anonymous",
+  "time": 1615841747295,
+  "text": "#macros/animation macro generates animation on a [canvas](https://www.w3schools.com/html/html5_canvas.asp). Tap canvas to play/pause. Can be customized using an initializer (`init`) function that returns the context for drawing. The initializer can be async or return a promise, e.g. for [loading](#load) external libraries. See #webgl for a basic initializer for GPU acceleration.\n```js\nconst animation_options = (options={}) => _.merge({\n  zoom: 1/devicePixelRatio, // zoom factor (visible px / canvas px)\n  target_fps: 60,  // target frames/sec (lower to reduce load)\n  autoplay: false, // start playing immediately or require click\n  start: 0,        // starting time (secs, determines initial frame)\n  period: 3,       // period (secs) for repeats (0 means infinite)\n  style: '',       // canvas element style (anything except zoom)\n  div_style: '',   // style for animation container div\n  reset_style: '', // style for reset button\n  play_style: '',  // style for play button\n  time_style: '',  // style for time text element\n  fps_style: '',   // style for fps text element\n  status_style: '',// style for status text element\n  time_format: '.1f', // time (secs) text format\n  time_prefix: '',    // prefix for time text\n  time_suffix: 's',   // suffix for time text\n  fps_suffix: ' fps', // suffix for fps text\n  show_reset: options.period==0, // show reset button?\n  show_fps: true,                // display fps?\n  // context initializer function (can be async return promise)\n  init: (canvas) => canvas.getContext('2d')\n}, options)\n\nfunction animation(draw = (ctx, t, w, h) => {}, options = {}) {  \n  options = animation_options(options)\n  if (!window._animations) window._animations = {}\n  window._animations['$cid'] = {init:options.init, draw, cid:'$cid', item:_this}\n  return html(_item('$id').read('html') // see html section\n    .replaceAll('%cid', '$cid') // use $cid of macro instead of script\n    .replaceAll('%div_style', options.div_style)\n    .replaceAll('%style', options.style)\n    .replaceAll('%div_style', options.div_style)    \n    .replaceAll('%fps_style', options.fps_style)\n    .replaceAll('%time_style', options.time_style)\n    .replaceAll('%status_style', options.status_style)\n    .replaceAll('%reset_style', options.reset_style)    \n    .replaceAll('%options', JSON.stringify(options)))\n}\n```\n```html_removed\n<!-- *_removed block is not included in rendered item -->\n<!-- %cid is a unique content identifier based on macro usage -->\n<div id=\"animation-%cid\" class=\"animation\" style=\"%div_style\">\n<div class=\"fps\" style=\"%fps_style\"></div>\n<div class=\"time\" style=\"%time_style\"></div>\n<div class=\"status\" style=\"%status_style\"></div>\n<div class=\"play\" style=\"%play_style\"></div>\n<div class=\"reset\" style=\"%reset_style\">reset</div>\n<canvas style=\"%style\"></canvas>\n<script>\nconst options = JSON.parse(`%options`)\nconst div = document.querySelector('#animation-%cid')\nconst canvas = div.querySelector('canvas')\nconst fps_elem = div.querySelector('.fps')\nconst time_elem = div.querySelector('.time')\nconst status_elem = div.querySelector('.status')\nconst play_elem = div.querySelector('.play')\nconst reset_elem = div.querySelector('.reset')\nconst time_formatter = d3.format(options.time_format)\ncanvas.width = canvas.offsetWidth / options.zoom\ncanvas.height = canvas.offsetHeight / options.zoom\ncanvas.style.zoom = options.zoom\nlet pause = !options.autoplay\nif (options.autoplay) play_elem.style.display = 'none'\n// show/hide reset button based on option\n// show even if t=start because reset may affect first frame\nreset_elem.style.display = options.show_reset ? 'block' : 'none'\nlet stopped = false\nlet stopTime = 0\n// NOTE: startTime is used to calculate animation time (t) and can be adjusted arbitrarily by the animation drawing function to modify t\nlet startTime = 0 // set inside update() so first frame is t=start\ndiv.style.cursor = 'pointer'\ndiv.onclick = (e) => {\n  e.stopPropagation()\n  if (!pause) pause = true\n  else if (stopped) {\n    pause = stopped = false\n    play_elem.style.display = 'none'\n    fps_elem.style.display = options.show_fps ? 'block' : 'none'\n    if (startTime == 0) console.warn('unpaused with startTime==0')\n    else startTime += (Date.now() - stopTime) // skip stopped time\n    fps = 0\n    frameCount = 0\n    frameCountStartTime = Date.now()\n    lastFrameRequestTime = Date.now()\n    update() \n  }\n  _this.touch() // soft touch item\n}\nreset_elem.onclick = (e) => {\n  e.stopPropagation()\n  startTime = stopTime = 0\n  if (stopped) update() // update frame and set start/stopTime\n  _this.touch() // soft touch item\n}\nconst _draw = _animations['%cid'].draw\nconst store = _animations['%cid'].store = {}\n_animations['%cid'].elem = div\nlet fps = 0\nlet frameCount = 0\nlet frameCountStartTime = 0\nlet lastFrameRequestTime = 0\nlet update\n_this.resolve(_animations['%cid'].init(canvas)).then((ctx) => {\n  div.classList.add('initialized')\n  frameCountStartTime = Date.now()\n  lastFrameRequestTime = Date.now()\n  update = () => {\n    if (canvas._update != update) return // cancelled update loop\n    // pause animation if canvas is not on non-hidden item\n    if (!_this.elem?.contains(canvas) || _this.elem?.matches('.hidden'))\n      pause = true\n    // calculate time and draw frame\n    if (startTime == 0) startTime = Date.now() - options.start * 1000\n    let t = (Date.now() - startTime) * 0.001\n    if (options.period > 0) t = t % options.period\n    const obj = _draw(ctx, t, canvas.width, canvas.height, {pause, store, item:_this, cid:'%cid'})\n    // draw function can pause, reset, adjust t, display status\n    // (not documented yet, subject to change)\n    if (typeof obj == 'object') {\n      if (obj.reset) {\n        startTime = stopTime = 0 // ensures next frame is t=start\n        update() // update frame and set start/stopTime\n        return\n      }\n      if (obj.pause) pause = true\n      if (typeof obj.t == 'number') {\n        const t_now = (Date.now() - startTime) * 0.001\n        startTime += (t_now - obj.t) * 1000 // ensures t_now == obj.t\n      }\n      if (typeof obj.status == 'string') {\n        status_elem.textContent = obj.status\n        status_elem.style.display = obj.status ? 'block' : 'none'\n      }\n    }\n    // format and display time\n    time_elem.textContent = options.time_prefix + time_formatter(t) + options.time_suffix\n    // calculate and display fps\n    if (options.show_fps) {\n      frameCount++\n      const now = Date.now()\n      if (now - frameCountStartTime > 1000) {\n        fps = 1000 * frameCount / (now - frameCountStartTime)\n        frameCountStartTime = now\n        frameCount = 0\n      }\n      fps_elem.textContent = (fps == 0 ? '⋯' : fps.toFixed(0)) + options.fps_suffix\n    }\n    if (pause) { // paused, stop updating\n      stopped = true\n      stopTime = Date.now()\n      play_elem.style.display = 'block'\n      fps_elem.style.display = 'none'\n      return\n    } else if (stopped) console.warn('unpaused while stopped')\n    \n    // dispatch next frame, controlling for frame rate\n    const nextFrame = () => {\n      lastFrameRequestTime = Date.now()\n      requestAnimationFrame(update)\n    }\n    const fps_delay = Math.max(0, \n      1000/options.target_fps - (Date.now() - lastFrameRequestTime))\n    if (fps_delay == 0) nextFrame()\n    else setTimeout(nextFrame, fps_delay)\n  }\n  canvas._update = update // cancels any other update tasks\n  update() // start updating\n}).catch(console.error)\n</script></div>\n```\n```js_removed\nfunction _init() {\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n}\n```\n```css_removed\n.animation { background:#171717; width:fit-content; position: relative; display: inline-block; user-select: none; -webkit-user-select: none }\n.animation:not(.initialized) > * { visibility: hidden; }\n.animation > .fps { position: absolute; top:0; right:0; padding:5px; background:rgba(0,0,0,.75); border-bottom-left-radius: 4px; font-size: 80%; line-height: 100%; color:gray }\n.animation > .time { position: absolute; top:0; left:0; padding:5px; background:rgba(0,0,0,.75); border-bottom-right-radius: 4px; font-size: 80%; line-height: 100%; color:gray }\n.animation > .reset { position: absolute; bottom:0; left:0; padding:5px; background:rgba(0,0,0,.75); border-top-right-radius: 4px; font-size: 80%; line-height: 100%; color:gray }\n.animation > .status { position: absolute; bottom:0; right:0; padding:5px; background:rgba(0,0,0,.75); border-top-left-radius: 4px; font-size: 80%; line-height: 100%; color:gray; display: none }\n.animation > .play { position: absolute; top:50%; left:50%; margin-left:-20px; margin-top:-20px; border-left: 40px solid rgba(255,255,255,.5); border-top: 20px solid transparent; border-bottom: 20px solid transparent }\n.animation > canvas { border-radius: 4px; vertical-align: middle }\n.animation:not(:first-child) { margin-top: 4px; }\n.animation:not(:last-child) { margin-bottom: 4px; }\n```\n#_init"
+ },
+ {
+  "id": "h2Zp5dh5Au80vi84McDZ",
+  "user": "anonymous",
+  "time": 1615752641758,
+  "text": "#webppl is a [probabilistic programming language](http://webppl.org). Here we load the library and extend it with #/run, #/summarize, and #/util. See example [HMM](#webppl/examples/HMM).\n```js\nif (!window.webppl) {\n  // cdn url from: https://probmods.github.io/webppl-editor/ \n  await _load('https://s3-us-west-2.amazonaws.com' +\n    '/cdn.webppl.org/webppl-v0.9.9.js')\n}\n// enable 'run' for webppl_input blocks\nconst _run = () => webppl._run(_this.read_input('webppl'))\n// javascript functions attached to webppl\nwebppl._run       = webppl_run       // for js\nwebppl._summarize = webppl_summarize // for webppl\nwebppl._samples   = webppl_samples   // for webppl\n// webppl functions from #webppl/util: _enumerate\n```\n#_load #_async #_webppl/run #_webppl/util #_webppl/summarize"
+ },
+ {
+  "id": "QWL7xrcssw0YsVQgjfhJ",
+  "user": "anonymous",
+  "time": 1614823557663,
+  "text": "#commands/weight command `/weight weight` records today's weight in item #weight.\n```js\nfunction run(weight) {\n  if (!(weight > 0)) { // also rejects empty/non-numeric strings\n    alert(`invalid weight '${weight}'`)\n    return '/weight ' // clear for easy re-entry\n  }\n  const data_item = '#weight' // item containing _data\n  const today = new Date().toLocaleDateString()\n  let data = _item(data_item).read('_data')\n  if (data.startsWith(today)) data = data.replace(/^.+?\\n/,\"\")\n  _item(data_item).write(`${today}  ${weight}\\n` + data, '_data')\n}\n```"
+ },
+ {
+  "id": "6dCjNqFFNzQoSE3MqvHD",
+  "user": "anonymous",
+  "time": 1614811630840,
+  "text": "#webgl defines a basic `webgl` canvas context initializer `webgl_init` that only requires a \"pixel\" shader that assigns a color to each pixel. An example shader and basic animation drawing function (for #macros/animation) is also defined and demonstrated below.\n<<animation(webgl_draw,{init:webgl_init(_this.read('glsl_example'))})>>\n```glsl_example\nprecision mediump float; \nuniform float t, w, h;\nvoid main(void) {\n  float x = gl_FragCoord.x / w;\n  float y = 1.0 - gl_FragCoord.y / h;\n  float r = (x + y) * 0.5;\n  float a = pow(min(1.0, max(0.0, 1.0 - abs(t/3.0 - r))), 10.0);\n  gl_FragColor = vec4(a); // premultiplied alpha reduces fringing\n}\n```\n```js\n// basic reusable drawing function\nfunction webgl_draw(gl, t, w, h) {\n  gl.viewport(0, 0, w, h)\n  // write t, w, h for shader (see webgl_init below for setup)\n  gl.uniform1f(t_loc, t)\n  gl.uniform1f(w_loc, w)\n  gl.uniform1f(h_loc, h)\n  gl.drawArrays(gl.TRIANGLE_FAN, 0, 4) // invokes shader\n}\n```\n```js_removed\nlet t_loc, w_loc, h_loc\nfunction webgl_init(shader) { return (canvas) => {\n  const gl = canvas.getContext('webgl')\n  // enable alpha channel, premultiplied to reduce fringing\n  // http://www.realtimerendering.com/blog/gpus-prefer-premultiplication/\n  gl.enable(gl.BLEND)\n  //gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)  \n  gl.blendFunc(gl.ONE /*premultiplied*/, gl.ONE_MINUS_SRC_ALPHA)\n  // compile vertex shader\n  const vs = gl.createShader(gl.VERTEX_SHADER)\n  gl.shaderSource(vs, 'attribute vec2 c; void main(void) { gl_Position = vec4(c, 0.0, 1.0); }')\n  gl.compileShader(vs)\n  // compile fragment shader\n  const fs = gl.createShader(gl.FRAGMENT_SHADER)\n  gl.shaderSource(fs, shader)\n  gl.compileShader(fs)\n  // link program\n  const prog = gl.createProgram()\n  gl.attachShader(prog, vs)\n  gl.attachShader(prog, fs)\n  gl.linkProgram(prog)\n  gl.useProgram(prog)\n  // set up vertex shader coordinate array buffer\n  const vb = gl.createBuffer()\n  gl.bindBuffer(gl.ARRAY_BUFFER, vb)\n  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(\n    [-1, 1, -1, -1, 1, -1, 1, 1]), gl.STATIC_DRAW)\n  const c_loc = gl.getAttribLocation(prog, \"c\")\n  gl.vertexAttribPointer(c_loc, 2, gl.FLOAT, false, 0, 0)\n  gl.enableVertexAttribArray(c_loc)  \n  // set up fragment shader inputs\n  t_loc = gl.getUniformLocation(prog, \"t\")\n  w_loc = gl.getUniformLocation(prog, \"w\")\n  h_loc = gl.getUniformLocation(prog, \"h\")\n  return gl\n} }\n```\n#_macros/animation"
+ },
+ {
+  "id": "8Mff3qSeJUFUth1fUm6G",
+  "user": "anonymous",
+  "time": 1614767574774,
+  "text": "#features/_pin/dot tag designates _dotted items_:\n- _Minimized_ into dots (`···`) under #MindBox.\n  - Tap these dots to toggle visibility.\n- Can be ordered using suffix `#_pin/dot/...`.\n- Ideal for [menu items](#features/_menu) used occasionally."
+ },
+ {
+  "id": "jGulb2VBRZ8u6fEmjnQr",
+  "user": "anonymous",
+  "time": 1614736775686,
+  "text": "#bounce macro renders text that \"bounces\" text as in the `◄ tap!` prompt in the welcome item. The bounce starts at [welcome](#features/_welcome) ends after a prescribed [search](#features/_listen) or a timeout period. \n```js\nconst bounce = (text, search=\"#MindPage\", ms=60000) => `<span class=\"bounce\" _time=\"${ms}\" _search=\"${search}\" _cached>${text}</span>`\n```\n```js_removed\nfunction _on_welcome() {\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n  document.querySelectorAll('.bounce').forEach((elem)=>{\n    setTimeout(()=>{\n      elem.classList.add('stop')\n    }, parseInt(elem.getAttribute('_time')))\n  })\n}\nfunction _on_search(text) {\n  document.querySelectorAll('.bounce').forEach((elem)=>{\n    if (text.toLowerCase().startsWith(\n      elem.getAttribute('_search').toLowerCase())) {\n      elem.style.opacity = 0\n      elem.classList.remove('bounce')\n    }\n  })\n}\nfunction _on_create(text) {}\n```\n```css_removed\n@keyframes bounce {\n  0% { transform: translateX(0) scale(1); color: #aaa; }\n  100% { transform: translateX(25px) scale(1.3); color: #fff; }\n}\n.bounce {\n  display: inline-block;\n  animation-duration: .35s;\n  animation-name: bounce;\n  animation-iteration-count: 100;\n  animation-direction: alternate;\n  animation-timing-function: ease-out;\n}\n.bounce.stop {\n  animation-name: none;\n}\n```\n#_welcome #_listen"
+ },
+ {
+  "id": "x6zdaw4zxpgowWDqVmkO",
+  "user": "anonymous",
+  "time": 1614733178397,
+  "text": "#charts can be generated using #macros such as #macros/bar_chart  #_macros/bar_chart: \n<<bar_chart([['y1',4,2,5,10],['y2',2,3,6,12]],'height:200px')>>\n\nAlternatively, use #c3 directly from an `_html` block:\n```_html\n<div id=\"chart-$id\" class=\"c3\" style=\"height:160px\"><script>\nc3._chart('#chart-$id', {\n  data: { columns: [['y1',4,2,6,10],['y2',2,3,7,12]] },\n  axis: {\n    x: { padding: .1 },\n    y: {\n      min:0, tick: { values:[0, 5,10] },\n      padding: { bottom:0, top:10 }\n    }\n  }\n});\n</script></div>\n```"
+ },
+ {
+  "id": "HqnAEzzDvjJuExBje0mD",
+  "user": "anonymous",
+  "time": 1614625358147,
+  "text": "#load function loads external libraries. Examples: #mathjs #jStat #webppl #TensorFlow #gapi, ...\n- #features/_async can simplify syntax.\n- #features/_init can trigger preloading.\n- Can load multiple libraries.\n- Can resolve additional promises.\n- Typically used w/ boolean checks.\n- Example usage:\n```js_example\nawait _load(\n  window.lib1 || \"url1\", // load only if !window.lib1\n  window.lib2 || \"url2\", // load only if !window.lib2\n  // custom_init(),\n)\n// ... post-load init\n\n// Alternative Usage (assuming lib1 primary)\nif (!window.lib1) { // skip load+init if lib1 loaded\n  await _load(\"url1\", \"url2\", /* custom_init() */)\n  // ... post-load init\n}\n```\n```js_removed\n// loads given url string(s)\n// flattens out arrays, skips non-strings\n// resolves any Promise arguments simultaneously with url loads\n//   (allows simultaneous custom init besides url loading)\nwindow._load = (...urls) => \n  Promise.all(_.flattenDeep([...urls])\n    .filter((u)=>(typeof u === 'string')).map(\n      (src) => new Promise((resolve, reject) => {\n        const start = Date.now()\n        console.debug(`loading url '${src}' ...`)\n        let script = document.createElement('script')\n        script.src = src\n        script.onload = () => {\n          console.debug(`loaded url '${src}' in ${Date.now()-start}ms`)\n          resolve()\n        }\n        script.onerror = reject\n        document.head.appendChild(script)\n      })).concat(_.flattenDeep([...urls])\n        .filter((u)=>u instanceof Promise)))\n```"
+ },
+ {
+  "id": "FBUpz0QwT79WQJX5mvg4",
+  "user": "anonymous",
+  "time": 1614625250205,
+  "text": "#mathjs/example #_mathjs\n```js_input\nreturn math.stirlingS2(10,5)\n```\n```_output\n42525\n```"
+ },
+ {
+  "id": "cqkDWwGm8FiYs731jG0m",
+  "user": "anonymous",
+  "time": 1614624573399,
+  "text": "#jStat/example #_jStat\n```js_input\nreturn jStat.normal(0,1).sample()\n```\n```_output\n-1.138345570479304\n```"
+ },
+ {
+  "id": "iHBF5VmiMwUTNJKyima0",
+  "user": "anonymous",
+  "time": 1614624319994,
+  "text": "#MindPage/core consists of #/properties, #/functions, #/commands, and #preloaded libraries that you can use to build your own #macros and #commands. You can also #load any external libraries that you need. Full source code is available at https://github.com/olcan/mind.page. #_context"
+ },
+ {
+  "id": "yNmSbvmpRkb6pBsIYmp7",
+  "user": "anonymous",
+  "time": 1614534147619,
+  "text": "#code can be `inline` or inside _blocks_:\n```js\nconst say_hello = () =>  \"hello world!\"\n```\n- #/Run directly or via #macros or #commands.\n- Import from #dependencies via `#_hidden` tags."
+ },
+ {
+  "id": "swAwmbMOuDYB9K6sWRsI",
+  "user": "anonymous",
+  "time": 1614452401731,
+  "text": "#features/_welcome tag enables \"welcome\" code to be evaluated _after_ the initial page has been rendered and any welcome [modal](#MindPage/core/functions/_modal) has been dismissed.\n- `_on_welcome()` is evaluated _once_ at welcome time.\n- New or modified `_welcome` functions require reload.\n- Example welcome code:\n```js_example\nfunction _welcome() { alert(\"Welcome to MindPage!\") }\n```"
+ },
+ {
+  "id": "tKCAeIDNO9m1wG1ggxsG",
+  "user": "anonymous",
+  "time": 1614419488794,
+  "attr": null,
+  "text": "#graphviz is a [graph visualization library](https://www.graphviz.org) #preloaded via its [js/wasm port](https://github.com/hpcc-systems/hpcc-js-wasm) and extended here with `graphviz._graph`, the preferred constructor for `graphviz` graphs on MindPage.\n```js\nfunction _init() {\n  window.graphviz = window[\"@hpcc-js/wasm\"].graphviz\n  graphviz._graph = graphviz_graph; // see below\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n}\n```\n```css_removed\n.dot {\n  padding: 5px 0;\n  width: fit-content; /* left-aligns graph if width:auto */\n  display: inline-block;\n  vertical-align: top;\n  cursor: default;\n}\n.dot > svg {\n  display: block;\n  height: 100%;\n  width: auto;\n  max-width: 100%;\n  margin: auto;\n}\n.dot .graph text { stroke: none !important }\n.dot .node, .dot .edge { cursor: pointer }\n```\n```js_removed\n// best way to define defaults for dot graphs is to insert dot attributes, which are turned into SVG attributes by Graphviz (hpcc-js/wasm), which then take lowest priority and can be easily modified either in the dot code or using CSS\n// for layouts, see https://www.graphviz.org/documentation/\nfunction graphviz_graph(selector, dot, layout = \"dot\") {\n  const nodedefs = `color=\"#999999\", fontcolor=\"#999999\", fontname=\"Avenir Next, Helvetica\", fontsize=20, shape=circle, fixedsize=true`;\n  const edgedefs = `color=\"#999999\", fontcolor=\"#999999\", fontname=\"Avenir Next, Helvetica\",penwidth=1`;\n  const graphdefs = `bgcolor=invis; color=\"#666666\"; fontcolor=\"#666666\"; fontname=\"Avenir Next, Helvetica\"; fontsize=20; nodesep=.2; ranksep=.3; node[${nodedefs}]; edge[${edgedefs}]`;\n  const subgraphdefs = `labeljust=\"r\"; labelloc=\"b\"; edge[minlen=2]`;\n  dot = dot.replace(/(subgraph.*?{)/g, `$1\\n${subgraphdefs};\\n`);\n  dot = dot.replace(/(graph.*?{)/g, `$1\\n${graphdefs};\\n`);\n  graphviz.layout(dot, \"svg\", layout).then(_that.attach(svg => {\n    let elem = document.querySelector(selector);\n    if (!elem) {\n      // console.error(\"missing _graph elem\", selector)\n      _that.invalidate_elem_cache()\n      return \n    }\n    elem.innerHTML = svg;\n    // declare nodes/edges clickable and block default handlers\n    elem.setAttribute(\"_clickable\", \"\")\n    const clickables = '.node,.edge,.cluster' \n    elem._clickable = (e) => {\n      e.stopPropagation()\n      return e.target.closest(clickables)\n    }\n    // NOTE: additional handlers can prevent errors e.g. for long clicks\n    elem.onmousedown = (e) => {\n      if (e.target.closest(clickables)) e.stopPropagation() }\n    elem.onmouseup = (e) => {\n      if (e.target.closest(clickables)) e.stopPropagation() }\n    elem.onclick = _that.attach((e) => {\n      if (!e.target.closest(clickables)) return\n      e.stopPropagation()\n      _that.touch()\n      let text, title\n      if (e.target.closest('a')) { // extract xlink:title attribute\n        text = e.target.closest('a')\n          .querySelector('text')?.textContent\n        title = e.target.closest('a').getAttribute('xlink:title')\n      } else { // extract <title> tag\n        text = e.target.closest(clickables)\n          .querySelector('text')?.textContent\n        title = e.target.closest(clickables)\n          .querySelector('title')?.textContent\n      }\n      if (text && title && text != title) _modal(text+': '+title)\n      else if (text || title) _modal(text || title)\n    })\n    // dispatch to check rendering if element\n    setTimeout(_that.attach(()=>{\n      if (!_that.elem?.contains(elem)) {\n        // console.error(\"detached _graph elem\", selector)\n        _that.invalidate_elem_cache()\n        return \n      }\n      // _dot_rendered renders $math$ (via #mathjax)\n      // and implements class=stack for clusters\n      _dot_rendered(_that, elem)\n    }))\n  }))\n}\n```\n#_init"
+ },
+ {
+  "id": "7iisOC04Y2e5wBs75VG6",
+  "user": "anonymous",
+  "time": 1614418392192,
+  "text": "#graphs #_macros/graph can be generated using #macros/graph:\n<<graph('graph{a--b}')>>\n<<graph('digraph{rankdir=LR;a->c;b->c}')>>\n<<graph('digraph{a->c;b->c;c->c;b->d}')>>\n\nAlternatively, use #graphviz directly from an `_html` block:\n```_html\n<div id=\"dot-$cid\" class=\"dot\" style=\"height:120px\"><script>\ngraphviz._graph('#dot-$cid', _this.read('dot')) // see dot block below\n</script></div>\n```\n```dot_removed\ndigraph {\n  rankdir=LR; \n  x1->x2->x3->x4;\n  x1->x3; x2->x4;\n  x1[label=\"$x_1$\"];\n  x2[label=\"$x_2$\"];\n  x3[label=\"$x_3$\"];\n  x4[label=\"$x_4$\"];\n}\n```"
+ },
+ {
+  "id": "NH9UIxHUwfgOFbf8Picr",
+  "user": "anonymous",
+  "time": 1614191417667,
+  "text": "#private means that your items are readable **only by you, on your devices**. This is achieved using encryption based on a _personal secret_ that is never sent or stored anywhere, as can be verified from [open source code](https://github.com/olcan/mind.page). This is much more private than using authentication alone, which still leaves your content readable to service providers, who often also use closed source code that can not be verified."
+ },
+ {
+  "id": "ScRwskPJ9BbyCKNPNdgA",
+  "user": "anonymous",
+  "time": 1614150060185,
+  "text": "#Items are small units of content [ordered](#/ordering) dynamically by recency and relevance. Create items using `create` button or #⇧⏎ shortcut. Organize by #/naming or [tagging](#/tagging). #_context"
+ },
+ {
+  "id": "OarMtUtAIXoSRsULYmPQ",
+  "user": "anonymous",
+  "time": 1614134251637,
+  "text": "[intro](#MindPage) #todo #log #_menu #_pin/dot/2"
+ },
+ {
+  "id": "2lmqw8OgPNqFaHZcewzW",
+  "user": "anonymous",
+  "time": 1614062192666,
+  "text": "#items/ordering is determined primarily by _recency_ as you edit or interact with items, and _relevance_ as you type into #MindBox.\n- Navigate using [tags](#items/tagging) or keywords to bring items up.\n  - Use `back` button to restore a previous ordering.\n- Edit/save item to move it up permanently.\n  - Alternatively tap item number (upper right).\n- [Log items](#features/log) preserve their position in time."
+ },
+ {
+  "id": "Gse2BkFGaP9sWW4HoUOR",
+  "user": "anonymous",
+  "time": 1613853371367,
+  "attr": null,
+  "text": "#MindPage/core/functions/_modal opens a modal window for basic confirmation and input prompts. Programmable click handlers can be used to trigger certain actions that can otherwise be disallowed in some browsers (e.g. iOS Safari), such as:\n- `window.open` for API authorization (OAuth) flows, e.g. #gapi.\n- `HTMLElement.focus` to focus on input elements, e.g. #/example:\nCan be closed or updated using global functions `_modal_close([modal],[output])` and `_modal_update(modal, options)`. Visibility can be checked using `_modal_visible([modal])`.\nCan also be used to work around a [known issue](https://stackoverflow.com/questions/38083702/alert-confirm-and-prompt-not-working-after-using-history-api-on-safari-ios) with `alert`/`confirm`/`prompt` dialogs not working after using browser history (e.g. going back/forward) in iOS. `_modal_alert(msg, [done])`, `_modal_confirm(msg, [confirmed], [cancelled])`, and `_modal_prompt(msg, [default], [confirmed], [cancelled])` can be used as convenient async replacements."
+ },
+ {
+  "id": "QbtH06q6y6GY4ONPzq8N",
+  "user": "anonymous",
+  "time": 1613759912930,
+  "text": "Welcome <<_user.name>> to your [MindPage](https://mindbox.io/#MindPage)!\n- Your items are saved securely in the cloud.\n  - Encrypted with your personal secret phrase.\n  - Readable only by you, on your devices.\n\n#### Getting Started\n> **Edit**: just tap on an item. Try this one!\n> **Create**: tap button above or use [⇧⏎](https://mindbox.io/#⇧⏎) [shortcut](https://mindbox.io/#shortcuts).\n> **Learn more**: review [intro](https://mindbox.io/#MindPage) or [cheat sheet](https://www.markdownguide.org/cheat-sheet/).\n> **Sign out**: tap on your image <<_user.image>> above."
+ },
+ {
+  "id": "jiLknmRY7oeLEAGfSAGc",
+  "user": "anonymous",
+  "time": 1613759783833,
+  "text": "#items/naming is based on starting `#name` [tags](#items/tagging).\n- For example, this item is named `#items/naming`.\n- Non-unique names are also called _labels_.\n- Names can be #/nested or #flat."
+ },
+ {
+  "id": "1BxgZO6k2UVVEBiuRymy",
+  "user": "anonymous",
+  "time": 1613759701305,
+  "text": "#⇧⏎ is the universal [shortcut](#shortcuts) to `create` or `save` items in MindPage. You can also use the corresponding buttons indicated in <font color=#6f6>green</font>."
+ },
+ {
+  "id": "11M57yATk94BgkhcSsKG",
+  "user": "anonymous",
+  "time": 1613621265573,
+  "text": "#MindPage/core/functions/_modal/example shows a [modal](#MindPage/core/functions/_modal) that triggers `MindBox.focus()` from its confirmation click handler, as required by some browsers (e.g. iOS Safari) that otherwise block keyboard focus actions.\n```js_input\n_modal({\n  content: \"This is an example modal dialog.\", \n  confirm: \"Focus on MindBox\",\n  cancel: \"Cancel\",\n  background: \"cancel\",\n  onConfirm: () => MindBox.focus()\n})\n```"
+ },
+ {
+  "id": "KflUYBGAiLTrrncrE2AW",
+  "user": "anonymous",
+  "time": 1613360751017,
+  "text": "#features/_init tag enables initialization code.\n- `_init()` function is evaluated _once_ during page load.\n  - Read from `js_init` block if it exists (otherwise from `js`).\n  - Ignores #dependencies (assumed self-contained).\n- Ideal for extending external libraries (e.g. #c3, #graphviz).\n- Ideal for triggering #load for dynamically loaded libraries. \n- New or modified `_init` functions require reload to take effect.\n- Example initialization code:\n```js_example\nfunction _init() { console.log(\"Welcome to MindPage!\") }\n```"
+ },
+ {
+  "id": "Ow6nERSdKkFYj0DLIjxs",
+  "user": "anonymous",
+  "time": 1613274521972,
+  "text": "#text can be formatted with #/emphasis, #/lists, #/headings, #/blockquotes, and most other [Markdown syntax](https://www.markdownguide.org/basic-syntax/)."
+ },
+ {
+  "id": "75hzpSZ4iSNcyB2PDyTD",
+  "user": "anonymous",
+  "time": 1613125400067,
+  "text": "#commands/invert command <<cmdlink('/invert')>> inverts colors persistently.\n```js\nconst run = () => {\n  document.documentElement.classList.toggle(\"invert\",\n    _this.local_store.invert = !_this.local_store.invert)\n}\n```\n```js_removed\nfunction _init() {\n  document.head.insertAdjacentHTML(\"beforeend\", \"<style>\" +\n    _this.read('css') + \"</style>\") // see below\n  document.documentElement.classList.toggle(\"invert\",\n    _this.local_store.invert == true)\n}\n```\n```css_removed\nhtml.invert { filter: invert(100%) }\nhtml.invert img { filter: invert(100%) }\nhtml.invert textarea { caret-color: #0ff; } /* keep red caret */\n```\n#_init"
+ },
+ {
+  "id": "CwL7FYg1CitAAfS4Oe4f",
+  "user": "anonymous",
+  "time": 1613123870101,
+  "text": "#commands/alert command <<cmdlink('/alert text')>> displays an alert box with given text.\n```js\nfunction run(text) { alert(text); return '/alert ' }\n```"
+ },
+ {
+  "id": "S1nw2fXU3iOy1n0UfKjP",
+  "user": "anonymous",
+  "time": 1613123808695,
+  "text": "#commands/hello_again command <<cmdlink('/hello_again')>> creates an item named `#hello` and then writes output and log messages into it.\n```js\nconst run = () => ({\n  text:'#hello world!',\n  edit:false, // no editing\n  init:(item) => {\n    console.log(\"initing item \", item.name);\n    item.invoke(()=>{ console.log(\"hello world!\") })\n    item.write('hello world!') // write _output\n    item.write_log() // write _log\n  }\n})\n```"
+ },
+ {
+  "id": "Fp2FUlad5E7eKAFkr7av",
+  "user": "anonymous",
+  "time": 1613123798462,
+  "text": "#commands/hello command <<cmdlink('/hello')>> creates an item to say hello.\n```js\nconst run = () => ({text:`hello world!`})\n```"
+ },
+ {
+  "id": "C2D41TLbQsxkpxmnVXSX",
+  "user": "anonymous",
+  "time": 1613070138958,
+  "text": "#### Upcoming Events\n> ||||\n> |-|-|-\n> |2/13/2021|9:00:00 PM|Weekly Review\n> |2/14/2021|11:30:00 PM|Copleri hazirla\n> |2/17/2021|1:30:00 PM|Temizlik\n> |2/20/2021|9:00:00 PM|Weekly Review\n> |2/21/2021|11:30:00 PM|Copleri hazirla"
+ },
+ {
+  "id": "6gQvmslvkGTwiU0fZyEH",
+  "user": "anonymous",
+  "time": 1613032909105,
+  "text": "#commands/debug creates a _debug version_ of an item to help debug a recent evaluation performed on that item.\n```js\nfunction run(args) {\n  // parse args as: /debug name [trigger = run]\n  let name, trigger;\n  ({name, trigger} = _.merge({ trigger: \"run\" },\n    args.match(/^(?<name>\\S+)\\s*(?<trigger>\\S+)?\\s*$/)?.groups))\n  if (!name) { \n    alert(\"usage: /debug name [trigger = run]\");\n    return \"/debug \";\n  }\n  const item = _item(name)\n  const text = item.debug_store[trigger];\n  if (!text) {\n    const triggers = _.keys(item.debug_store)\n    alert(`/debug: eval trigger '${trigger}' not found for item '${name}'; available triggers are: ` + triggers.join(\", \"))\n    return `/debug ${args}`;\n  }\n  return {text:\"#_debug \" + text, run:false}\n}\n```"
+ },
+ {
+  "id": "m0qFIgl8omG5ThQKmg1q",
+  "user": "anonymous",
+  "time": 1612927981094,
+  "attr": null,
+  "text": "#MindPage/core/properties are:\n- Global (on `window`): #/_user #/_stack #/_this #/_that\n- On [_Item](#MindPage/core/_item), returned by `_item(name)`, `_items(label)`, #/_this, #/_that, #/_stack:\n|||\n|-:|:-\n|`id`          |<<code(_this.id)>>\n|`name`        |<<code(_this.name)>>\n|`label`       |<<code(_this.label)>>\n|`time`        |<<code(_this.time)>>\n|`text`        |`...`\n|`length`      |<<code(_this.length)>>\n|`hash`        |<<code(_this.hash)>>\n|`deephash`    |<<code(_this.deephash)>>\n|`async`       |<<code(_this.async)>>\n|`deepasync`   |<<code(_this.deepasync)>>\n|`index`       |<<code(_this.index)>>\n|`position`    |<<code(_this.position)>>\n|`tags`        |<<_this.tags.map(code).join(' ')>>\n|`tags_raw`    |<<_this.tags_raw.map(code).join(' ')>>\n|`tags_visible`|<<_this.tags_visible.map(code).join(' ')>>\n|`tags_hidden` |<<_this.tags_hidden.map(code).join(' ')>>\n|`dependencies`|<<_this.dependencies.map(code).join(' ')>>\n|`dependents`  |<<_this.dependents.map(code).join(' ')>>\n|`running`     |<<code(_this.running)>>\n|`status`      |<<code(_this.status)>>\n|`progress`    |<<code(_this.progress)>>\n|`saving`      |<<code(_this.saving)>>\n|`saving_global_store` |<<code(_this.saving_global_store)>>\n|`saved_id`    |<<code(_this.saved_id)>>\n|`editing`     |<<code(_this.editing)>>\n|`editable`    |<<code(_this.editable)>>\n|`pushable`    |<<code(_this.pushable)>>\n|`attr`        |<<code(_this.attr)>>\n|`elem`        |<<code(_this.elem)>>\n|`log_options` |<<code(JSON.stringify(_this.log_options))>>\n|`read_only`   |<<code(_this.read_only)>>\n|`store`       |<<code(JSON.stringify(_this.store))>>\n|`local_store` |<<code(JSON.stringify(_this.local_store))>>\n|`global_store`|<<code(JSON.stringify(_this.global_store))>>\n|`debug_store` |<<code(_this.debug_store)>> (can be large)\n|`cache`       |<<code(JSON.stringify(_this.cache))>>"
+ },
+ {
+  "id": "zVK0XUwAJInCVJxtDNKg",
+  "user": "anonymous",
+  "time": 1612872637874,
+  "text": "#MindPage/core/commands are:\n- `_signin` new user.\n- `_signout` current user.\n- `_undelete` recently deleted items (in current session).\n  - Creates new item with identical text as deleted item.\n- `_duplicate` selected (editing) item.\n  - Simple built-in version of #commands/copy.\n- `_dependencies` of selected (editing) item, listed in new item.\n  - Also listed below each item. See #dependencies.\n- `_dependents` of selected (editing) item, listed in new item.\n  - Also listed below each item. See #dependencies.\n- `_invert` colors.\n- `_zoom [factor]` page.\n- `_reload` page."
+ },
+ {
+  "id": "MtnltGVxQZp5zgyRH6fb",
+  "user": "anonymous",
+  "time": 1612658048337,
+  "text": "#text/blockquotes\n> this is   \n> a blockquote\n>> that can be nested\n>> inside another blockquote"
+ },
+ {
+  "id": "ee09j9kMO29aUbtJLmAj",
+  "user": "anonymous",
+  "time": 1612656946104,
+  "text": "#jStat #_load #_async is a [statistics library](https://github.com/jstat/jstat). See #jStat/example.\n```js\nif (!window.jStat) {\n  await _load('https://cdn.jsdelivr.net/npm' +\n    '/jstat@1.9.5/dist/jstat.min.js')\n}\n```"
+ },
+ {
+  "id": "aLFSK9UJtzL9Q9wqz9nn",
+  "user": "anonymous",
+  "time": 1612656766759,
+  "text": "#Dependencies are created using _hidden [tags](#items/tagging)_.\n- Import #code or #macros from other items.\n  - Tag order determines import order.\n  - Importing item is called a _dependent_.\n- Dependents auto-update on changes to dependencies.\n- Indicated as tiny dots (`···`) under item. Tap for listing."
+ },
+ {
+  "id": "tOkZRValTyVPktJW6jSB",
+  "user": "anonymous",
+  "time": 1612656449892,
+  "text": "#code/run code inside `js_input` blocks using blue `run` button or [⌥⏎](#shortcuts) while editing. #_code\n```js_input\nconsole.log(say_hello()) // goes into _log block\nsay_hello() // goes into _output block\n```\n```_output\nhello world!\n```\n```_log\nhello world!\n```"
+ },
+ {
+  "id": "J25C8wlMnoUNSixl6MKY",
+  "user": "anonymous",
+  "time": 1612655913451,
+  "text": "#features/_debug tag disables all code wrapping (e.g. for #features/_async) to enable debugging commands such as #commands/debug."
+ },
+ {
+  "id": "ht61o88g93yCKuMKYb1D",
+  "user": "anonymous",
+  "time": 1612655701818,
+  "text": "#features/_context tag enables item to be brought up as `context` for other items that are tagged in it. This feature is similar to using [nested](#items/naming/nested) names but allows arbitrary names as long as they are unique."
+ },
+ {
+  "id": "QhZN6W4bEQIG1QMb7Dko",
+  "user": "anonymous",
+  "time": 1612655660791,
+  "text": "#features/_menu tag enables special styling where tags and links expand to make them as large as possible for easy tapping."
+ },
+ {
+  "id": "kvjlUJ5EepY4Wui67XVU",
+  "user": "anonymous",
+  "time": 1612655517882,
+  "text": "#features/_pin tag _pins_ item at the top.\n- Pinned items can also be [dotted](#/dot).\n- An optional suffix `#_pin/...` can be used for [natural ordering](https://en.wikipedia.org/wiki/Natural_sort_order).\n- An optional prefix `#_context/pin/...` can be used to specify _context_.\n  - Item is pinned only when this context is being navigated."
+ },
+ {
+  "id": "fkXrk5DAwALjZyLvVIre",
+  "user": "anonymous",
+  "time": 1612655470529,
+  "attr": null,
+  "text": "#items/tagging is based on `#hashtags`.\n- Use custom text using link syntax `[text](#tag)`.\n- Hide tags using underscore prefix, e.g. `#_tag`.\n  - Hidden tags create #dependencies.\n  - Hidden tags can be anywhere, e.g. listed at bottom.\n- Certain _special_ tags enable #features. #_context"
+ },
+ {
+  "id": "k5hpT5uA2SX06wgrwutQ",
+  "user": "anonymous",
+  "time": 1612391390057,
+  "text": "#features/log label designates _log items_:\n- Can start with `#log` or contain hidden `#_log`.\n- Can be edited without updating their times.\n- Are listed in creation order under #log."
+ },
+ {
+  "id": "T2uFkRFG7688Sh1n7hxD",
+  "user": "anonymous",
+  "time": 1612206175453,
+  "text": "Yet another example #todo item."
+ },
+ {
+  "id": "2YGUs2TA1gUBTCKLNI2W",
+  "user": "anonymous",
+  "time": 1612206163730,
+  "text": "#todo This is another example todo item."
+ },
+ {
+  "id": "FzozhFix5EGDjJ62GJ4L",
+  "user": "anonymous",
+  "time": 1612206119693,
+  "text": "#todo tag is commonly used as a label for todo items. This is an example."
+ },
+ {
+  "id": "T0OT2A7ONbNxU67ehQXU",
+  "user": "anonymous",
+  "time": 1612168210380,
+  "text": "#math can be inline: $`e^x=\\sum_{k=a}^\\infty \\frac{x^k}{k!}`$, between lines:\n$$`e^x=\\sum_{k=a}^\\infty \\frac{x^k}{k!}`$$,\nin blockquotes:\n> $$`e^x=\\sum_{k=a}^\\infty \\frac{x^k}{k!}`$$,\nor inside `_math` blocks:\n```_math\ne^x=\\sum_{k=a}^\\infty \\frac{x^k}{k!}\n```\n- Syntax is ``\\$`...`$`` for inline math and ``\\$$`...`$$`` display math."
+ },
+ {
+  "id": "UY87OLareWq5Wsb2Vl4s",
+  "user": "anonymous",
+  "time": 1612168017301,
+  "text": "#Key_symbols\n|Symbol |Key\n|:-:    |:-\n|⇧      |Shift\n|⏎      |Return (Enter)\n|⌘      |Command (Windows)\n|⌃      |Control\n|⌥      |Option (Alt)\n|⇥      |Tab\n|⌫      |Backspace (Delete)\n|⎋      |Escape\n|↑      |Up Arrow\n|↓      |Down Arrow"
+ },
+ {
+  "id": "w66GJCsYhBqd7rM5X9nD",
+  "user": "anonymous",
+  "time": 1612142039794,
+  "text": "#webppl/util utility functions for #webppl.\n```webppl\nvar _enumerate = function(func) { Infer({method:'enumerate'}, func) }\n```\n```js\nconst webppl_samples = (dist) => dist.samples.map((s)=>s.value)\n```"
+ },
+ {
+  "id": "gn9omlcgneMHeAuVKH0s",
+  "user": "anonymous",
+  "time": 1612034726683,
+  "text": "#MindPage/core/properties/_that is the currently evaluating item at the _bottom_ of the evaluation stack, equivalent to `_item(_stack[0])` (see [stack](#MindPage/core/functions/_stack)). For example, below macros evaluate `_that.name` vs `_this.name` on #MindPage:\n- `_that.name` = <<_item('#MindPage').eval('_that.name')>>\n- `_this.name` = <<_item('#MindPage').eval('_this.name')>>"
+ },
+ {
+  "id": "FRcxktUzU6NExjJtIfFf",
+  "user": "anonymous",
+  "time": 1612034585648,
+  "text": "#MindPage/core/properties/_stack returns the current evaluation stack. For example, below is a macro that evaluates `_stack` on #MindPage:\n<<_item('#MindPage').eval('json(_stack.map((id)=>_item(id).name))')>>`"
+ },
+ {
+  "id": "dSx9m8MnzSUatIzEGK0K",
+  "user": "anonymous",
+  "time": 1611995940240,
+  "text": "#macros/graph #_graphviz macro generates a graph using #graphviz.\n```js\nfunction graph(dot, style) {\n  return html(_item('$id').read('html') // from html block (edit to see)\n          .replaceAll('%dot', dot)\n          .replaceAll('%style', style))\n}\n```\n```html_removed\n<!-- *_removed block is not included in rendered item -->\n<!-- $cid is a unique content id based on macro usage -->\n<div id=\"graph-$cid\" class=\"dot\" style=\"%style\"><script>\ngraphviz._graph('#graph-$cid', `%dot`)\n</script></div>\n```"
+ },
+ {
+  "id": "TeoqlzuAGfDPEQIaJJPm",
+  "user": "anonymous",
+  "time": 1611973227523,
+  "attr": null,
+  "text": "#macros/bar_chart macro generates a simple bar chart using #c3.\n```js\nfunction bar_chart(data, style='', bar_colors={}) {\n  if (data==\"\") return \"\"\n  return html(_item('$id').read('html') // from html block (edit to see)\n    .replaceAll('%data', typeof data == 'string' ? \n      data : JSON.stringify(data))\n    .replaceAll('%style', style)\n    .replaceAll('%bar_colors', JSON.stringify(bar_colors)))\n}\n```\n```html_removed\n<!-- *_removed block is not included in rendered item -->\n<!-- $cid is a unique content identifier based on macro usage -->\n<!-- c3._chart is defined in item #c3 referenced/imported above -->\n<div id=\"bar_chart-$cid\" class=\"c3\" style=\"%style\"><script>\nconst data = JSON.parse(`%data`)\nconst columns = Array.isArray(data) ? data :\n  [['x',..._.keys(data)], ['y',..._.values(data)]]\nconst x = columns[0][0] == 'x' ? 'x' : ''\nc3._chart('#bar_chart-$cid', {\n  data: { columns, x, type:'bar', colors:JSON.parse(`%bar_colors`) },\n  axis: { \n    rotated:true, \n    x: { type:'category', tick: { multiline:false } },\n    y: { show: false } // visible in tooltips\n  },\n  padding: { bottom: 7 }, // helps center rotated bar charts\n  legend: { show: (columns.length - (x?1:0) > 1) }\n})\n</script></div>\n```"
+ },
+ {
+  "id": "UYPNsdxKgnZ7wUJjmzK1",
+  "user": "anonymous",
+  "time": 1611948861425,
+  "text": "#MindPage/core/properties/_user is the current user:\n<<json(_user)>>"
+ },
+ {
+  "id": "lxeJK6YOHBwrf6EpH6Ln",
+  "user": "anonymous",
+  "time": 1611943586825,
+  "text": "#MindPage/core/properties/_this is the currently evaluating item at the _top_ of the evaluation stack, equivalent to `_item(_.last(_stack))` (see [stack](#MindPage/core/functions/_stack)). For example, below is the macro `\\<<json(_this)>>` evaluated as this item is rendered:\n<<json(_this)>>"
+ },
+ {
+  "id": "u93h8G6Ddwz2adRXI4cP",
+  "user": "anonymous",
+  "time": 1611555099196,
+  "text": "#flat names are not [nested](#items/naming/nested).\n- Flat names provide less context as you navigate.\n- Use #context feature to designate context items.\n- Use `back` button to restore a previous context."
+ },
+ {
+  "id": "uRqZAodpNlKaBqThfTtz",
+  "user": "anonymous",
+  "time": 1611539988357,
+  "text": "#log This is an example [log item](#features/log). Editing this item will _not_ move it up in time."
+ },
+ {
+  "id": "OxTCZMrjHfqBrOVz4n9s",
+  "user": "anonymous",
+  "time": 1611525690472,
+  "text": "#more types of content is possible using #preloaded and dynamically [loaded](#load) libraries such as #mathjs, #jstat, #tensorflow, #webppl, ..."
+ },
+ {
+  "id": "8PkrCDFk8WIvoS1znGtx",
+  "user": "anonymous",
+  "time": 1611303294811,
+  "text": "#webppl/summarize #_code/util outputs most likely (discrete) values and their probabilities in in a format suitable for charting, e.g. using #macros/bar_chart.\n```js\nfunction webppl_summarize(dist, prior=null, limit=10, format=\".2f\") {\n  dist = dist.getDist() // get value:prob object\n  const vJ = _.keys(dist).map((v) => v.toString())\n  const pJ = _.values(dist).map((p) => p.prob).map(d3.format(format))\n  let jJ = _.sortBy(_.range(pJ.length), (j) => -pJ[j])\n  jJ = _.take(jJ.filter((j) => pJ[j] > 0), limit)\n  let columns = _.zip(['x','p'], ...jJ.map((j)=>[vJ[j],pJ[j]]))\n  if (prior) {\n    prior = prior?.getDist()\n    const qJ = jJ.map((j) => prior[vJ[j]]?.prob || \"0\")\n    columns.push(['prior', ...qJ.map(d3.format(format))])\n    columns[1][0] = 'posterior'\n  }\n  return columns\n}\n```"
+ },
+ {
+  "id": "cZLCTRgUs7lZoT731Pgj",
+  "user": "anonymous",
+  "time": 1611253618178,
+  "text": "#text/headings \n# Heading\n## Heading\n### Heading\n#### ..."
+ },
+ {
+  "id": "rCjJL87kW5pBZWXewXrz",
+  "user": "anonymous",
+  "time": 1611217495558,
+  "text": "#preloaded libraries are #lodash, #mathjax, #c3, #d3, and #graphviz. You can #load other libraries as needed."
+ },
+ {
+  "id": "Iai2azPQAHLZjCvpVtaO",
+  "user": "anonymous",
+  "time": 1611214311899,
+  "text": "#code/util \n```js\n// from https://stackoverflow.com/a/175787\nfunction isNumeric(str) {\n  if (typeof str != \"string\") return false\n  return !isNaN(str) && // require _entire_ string to be numeric\n         !isNaN(parseFloat(str)) // handle whitespace-only strings\n}\n```"
+ },
+ {
+  "id": "AY2xiACctk2pAsMMce8K",
+  "user": "anonymous",
+  "time": 1611133926930,
+  "text": "#lodash is a [utility library](https://lodash.com) #preloaded as `_` (or `window._`)"
+ },
+ {
+  "id": "tkSD7IjIISL0KmGU9T1L",
+  "user": "anonymous",
+  "time": 1611133893212,
+  "text": "#mathjs #_load #_async is a [math library](https://mathjs.org). See #mathjs/example.\n```js\nif (!window.math) {\n  await _load('https://cdn.jsdelivr.net/npm' +\n    '/mathjs@9.4.4/lib/browser/math.min.js')\n}\n```"
+ },
+ {
+  "id": "3rkIlaPVEdl54eLZzmRi",
+  "user": "anonymous",
+  "time": 1611114044935,
+  "text": "#d3 is a [data visualization library](https://d3js.org) #preloaded as `d3` (or `window.d3`)."
+ },
+ {
+  "id": "QuXkznY9UtKmhhqUDg0B",
+  "user": "anonymous",
+  "time": 1611114024986,
+  "text": "#mathjax is a [math rendering library](https://www.mathjax.org) #preloaded as `MathJax` (or `window.MathJax`)."
+ },
+ {
+  "id": "pmcZIS1atPMipwUSlkgi",
+  "user": "anonymous",
+  "time": 1610922886719,
+  "text": "#text/emphasis can be *italic*, **bold**, ***italic bold***, or `monospaced`."
+ },
+ {
+  "id": "XWjIVbuPgfPMRm9v8K7K",
+  "user": "anonymous",
+  "time": 1610922849174,
+  "text": "#text/lists \n- can be\n- unordered\n  - or nested\n1. or ordered\n1. with automatic numbering\n   1. and nesting"
+ }
+]

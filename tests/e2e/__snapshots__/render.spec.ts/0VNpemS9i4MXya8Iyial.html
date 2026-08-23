@@ -1,0 +1,129 @@
+<p>
+<mark class="label unique" title="#animations/brownian_motion" onmousedown="_handleTagClick('0VNpemS9i4MXya8Iyial','#animations/brownian_motion','#animations/brownian_motion',event)" onclick="event.preventDefault();event.stopPropagation();">animations/brownian_motion</mark>
+</p>
+<ul>
+<li>
+<span class="list-item">Velocity of molecular motion</span>
+</li>
+<li>
+<span class="list-item">SDE: <span class="math" _cache_key="0VNpemS9i4MXya8Iyial-1fdb9042ccda2622-1">
+<mjx-container class="MathJax CtxtMenu_Attached_0" jax="SVG" role="presentation" tabindex="-1" style="position: relative;">
+<svg xmlns="http://www.w3.org/2000/svg" width="18.866ex" height="2.059ex" role="img" focusable="false" viewBox="0 -694 8338.8 910" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" style="vertical-align: -0.489ex;">
+<g stroke="currentColor" fill="currentColor" stroke-width="0" transform="matrix(1 0 0 -1 0 0)">
+<g data-mml-node="math">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(520, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44B">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(828, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mo" transform="translate(1931, 0)">
+<use xlink:href="#MJX-TEX-N-3D">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(2986.8, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D707">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(603, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+<g data-mml-node="mi" transform="translate(3895.1, 0)">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(4415.1, 0)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+<g data-mml-node="mo" transform="translate(4998.3, 0)">
+<use xlink:href="#MJX-TEX-N-2B">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(5998.5, 0)">
+<use xlink:href="#MJX-TEX-I-1D70E">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(6569.5, 0)">
+<use xlink:href="#MJX-TEX-I-1D451">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(7089.5, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44A">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(944, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D461">
+</use>
+</g>
+</g>
+</g>
+</g>
+</svg>
+<mjx-assistive-mml role="presentation" unselectable="on" display="inline">
+<math xmlns="http://www.w3.org/1998/Math/MathML">
+<mi>d</mi>
+<msub>
+<mi>X</mi>
+<mi>t</mi>
+</msub>
+<mo>=</mo>
+<msub>
+<mi>μ</mi>
+<mi>t</mi>
+</msub>
+<mi>d</mi>
+<mi>t</mi>
+<mo>+</mo>
+<mi>σ</mi>
+<mi>d</mi>
+<msub>
+<mi>W</mi>
+<mi>t</mi>
+</msub>
+</math>
+</mjx-assistive-mml>
+</mjx-container>
+</span>
+</span>
+</li>
+</ul>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span> sigma = <span class="hljs-number">0.05</span>
+<span class="hljs-comment">// inverse mass of particle</span>
+<span class="hljs-keyword">const</span> tail = <span class="hljs-number">10</span>
+<span class="hljs-comment">// past length in seconds</span>
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">drift</span> = (<span class="hljs-params">t</span>) =&gt; ({ <span class="hljs-comment">// ∞-shaped periodic drift</span>
+<span class="hljs-attr">x</span>: <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">cos</span>(<span class="hljs-number">.5</span> * t * <span class="hljs-number">2</span>*<span class="hljs-title class_">Math</span>.<span class="hljs-property">PI</span>),
+  <span class="hljs-attr">y</span>: <span class="hljs-number">1.5</span> * <span class="hljs-title class_">Math</span>.<span class="hljs-title function_">cos</span>(t * <span class="hljs-number">2</span>*<span class="hljs-title class_">Math</span>.<span class="hljs-property">PI</span>)
+})</code>
+</pre>
+<!-- *_removed block is not included in rendered item -->
+<!-- 0VNpemS9i4MXya8Iyial-f72621777df0fb1a-1 is a unique content identifier based on macro usage -->
+<div class="animation initialized" style="cursor: pointer;" _cache_key="0VNpemS9i4MXya8Iyial-f72621777df0fb1a-4">
+<div class="fps" style="display: none;">⋯ fps</div>
+<div class="time">0.0s</div>
+<div class="status">
+</div>
+<div class="play" style="display: block;">
+</div>
+<div class="reset" style="display: block;">reset</div>
+<canvas style="zoom: 1;" width="300" height="150">
+</canvas>
+</div>
+<mark class="hidden" title="#macros/animation" onmousedown="_handleTagClick('0VNpemS9i4MXya8Iyial','#macros/animation','#macros/animation',event)" onclick="event.preventDefault();event.stopPropagation();">macros/animation</mark>
+<mark class="hidden" title="#jStat" onmousedown="_handleTagClick('0VNpemS9i4MXya8Iyial','#jStat','#jStat',event)" onclick="event.preventDefault();event.stopPropagation();">jStat</mark>

@@ -1,0 +1,16 @@
+<p>
+<mark class="label unique" title="#macros/bar_chart" onmousedown="_handleTagClick('TeoqlzuAGfDPEQIaJJPm','#macros/bar_chart','#macros/bar_chart',event)" onclick="event.preventDefault();event.stopPropagation();">macros/bar_chart</mark> macro generates a simple bar chart using <mark title="#c3" onmousedown="_handleTagClick('TeoqlzuAGfDPEQIaJJPm','#c3','#c3',event)" onclick="event.preventDefault();event.stopPropagation();">c3</mark>.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">bar_chart</span>(<span class="hljs-params">data, style=<span class="hljs-string">''</span>, bar_colors={}</span>) {
+  <span class="hljs-keyword">if</span> (data==<span class="hljs-string">""</span>) <span class="hljs-keyword">return</span>
+<span class="hljs-string">""</span>
+<span class="hljs-keyword">return</span>
+<span class="hljs-title function_">html</span>(<span class="hljs-title function_">_item</span>(<span class="hljs-string">'$id'</span>).<span class="hljs-title function_">read</span>(<span class="hljs-string">'html'</span>) <span class="hljs-comment">// from html block (edit to see)</span>
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%data'</span>, <span class="hljs-keyword">typeof</span> data == <span class="hljs-string">'string'</span> ? 
+      data : <span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>(data))
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%style'</span>, style)
+    .<span class="hljs-title function_">replaceAll</span>(<span class="hljs-string">'%bar_colors'</span>, <span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>(bar_colors)))
+}</code>
+</pre>

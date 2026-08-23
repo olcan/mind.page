@@ -1,0 +1,62 @@
+<p>
+<mark class="label unique" title="#features/_async" onmousedown="_handleTagClick('1eeOY8DkC12U9cSxqNa1','#features/_async','#features/_async',event)" onclick="event.preventDefault();event.stopPropagation();">features/_async</mark> tag enables <em>async</em> evaluation.</p>
+<ul>
+<li>
+<span class="list-item">Code is wrapped as <code>_this.start(async()=&gt;{ ... })</code>
+</span>
+</li>
+<li>
+<span class="list-item">Code must explicitly <code>return</code> any output.</span>
+</li>
+<li>
+<span class="list-item">Code must <code>await</code> on promises to avoid premature return.</span>
+</li>
+<li>
+<span class="list-item">Default log attribution is time-based (vs stack-based).<ul>
+<li>
+<span class="list-item">Allows easy tracking of logs from external libraries.</span>
+</li>
+<li>
+<span class="list-item">Upon return, logs are written into item via <code>write_log</code>.</span>
+</li>
+<li>
+<span class="list-item">Log options can be configured via <code>_this.log_options</code>.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Item may not be on the stack for entire async evaluation.<ul>
+<li>
+<span class="list-item">Item is always on stack for top-level async function call.</span>
+</li>
+<li>
+<span class="list-item">Helper functions can bring item back on stack as needed.<ul>
+<li>
+<span class="list-item">
+<code>invoke</code>, <code>attach</code>, <code>dispatch</code>, <code>promise</code>, <code>resolve</code>, ...</span>
+</li>
+<li>
+<span class="list-item">For logging: <code>debug</code>, <code>info</code>, <code>log</code>, <code>warn</code>, <code>error</code>
+</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">
+<code>_this</code> is still available from <em>lexical context</em> of item.</span>
+</li>
+</ul>
+</span>
+</li>
+<li>
+<span class="list-item">Async evaluation is <em>propagated to <a href="#dependencies" onclick="_handleLinkClick('1eeOY8DkC12U9cSxqNa1','#dependencies',event)">dependents</a>
+</em>.<ul>
+<li>
+<span class="list-item">For example, see <mark title="#mathjs/example" onmousedown="_handleTagClick('1eeOY8DkC12U9cSxqNa1','#mathjs/example','#mathjs/example',event)" onclick="event.preventDefault();event.stopPropagation();">mathjs/example</mark>.</span>
+</li>
+</ul>
+</span>
+</li>
+</ul>

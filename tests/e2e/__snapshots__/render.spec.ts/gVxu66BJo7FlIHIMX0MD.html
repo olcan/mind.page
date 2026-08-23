@@ -1,0 +1,152 @@
+<p>
+<mark class="label unique" title="#MindPage/core/_Item" onmousedown="_handleTagClick('gVxu66BJo7FlIHIMX0MD','#MindPage/core/_Item','#MindPage/core/_Item',event)" onclick="event.preventDefault();event.stopPropagation();">MindPage/core/_Item</mark> object holds a reference to a MindPage item and provides access to a wide range of <a href="#MindPage/core/properties" onclick="_handleLinkClick('gVxu66BJo7FlIHIMX0MD','#MindPage/core/properties',event)">properties</a> and functions:</p>
+<ul>
+<li>
+<span class="list-item">
+<code>eval([js, options])</code> evaluates code in context of item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>eval_macros(text, [options])</code> evaluates macros in given text.</span>
+</li>
+<li>
+<span class="list-item">
+<code>read([type, options])</code> reads text from item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>read_deep(type, [options])</code> reads text from item + dependencies.</span>
+</li>
+<li>
+<span class="list-item">
+<code>read_input(type, [options])</code> reads input from item + dependencies.</span>
+</li>
+<li>
+<span class="list-item">
+<code>write(text, [type], [options])</code> writes text into item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>clear(type)</code> clears blocks in item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>remove(type)</code> removes blocks in item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>delete([confirm])</code> deletes item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>get_log([options])</code> returns console log messages for item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>write_log([options])</code> writes log messages into item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>show_logs(autohide_after)</code> shows and auto-hides log messages.</span>
+</li>
+<li>
+<span class="list-item">
+<code>hide_logs()</code> hides log messages.</span>
+</li>
+<li>
+<span class="list-item">
+<code>show_status([status], [progress])</code> shows status on running item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>clear_status()</code> clears (and hides) status on item</span>
+</li>
+<li>
+<span class="list-item">
+<code>touch([save=false])</code> updates (and optionally saves) time of item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>save()</code> saves item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>start(async_func)</code> starts async evaluation on item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>invoke(func)</code> invokes function with item on the stack.</span>
+</li>
+<li>
+<span class="list-item">
+<code>attach(func)</code> attaches function to item by wrapping it with <code>invoke</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>attach(promise)</code> attaches promise to item by wrapping <code>then</code>,<code>catch</code>,<code>finally</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>dispatch(func, [delay_ms])</code> dispatches <em>attached</em> function.</span>
+</li>
+<li>
+<span class="list-item">
+<code>dispatch_task(name, func, [delay_ms, period_ms])</code> dispatches named task.</span>
+</li>
+<li>
+<span class="list-item">
+<code>cancel_task(name)</code> cancels named task.</span>
+</li>
+<li>
+<span class="list-item">
+<code>pending_task(name)</code> returns true if named task is pending completion.</span>
+</li>
+<li>
+<span class="list-item">
+<code>promise(func)</code> returns new attached promise with attached executor.</span>
+</li>
+<li>
+<span class="list-item">
+<code>resolve(thing)</code> returns new attached promise that resolves <code>thing</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>debug|info|log|warn|error(...)</code> invokes attached <code>console.*(...)</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>fatal(...)</code> throws <code>Error(...)</code> including stack trace.</span>
+</li>
+<li>
+<span class="list-item">
+<code>delay(ms)</code> returns promise resolved after specified time.</span>
+</li>
+<li>
+<span class="list-item">
+<code>images([options])</code> returns array of uploaded images.</span>
+</li>
+<li>
+<span class="list-item">
+<code>invalidate_elem_cache()</code> invalidates rendered element cache for item.</span>
+</li>
+<li>
+<span class="list-item">
+<code>cached(key, value_function)</code> returns cached value from <code>item.cache</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>invalidate_cache()</code> invalidates cache for next access via <code>item.cache</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>validate_cache()</code> validates cache for current <code>item.deephash</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>save_local_store()</code> saves <code>item.local_store</code> to <code>localStorage</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<code>save_global_store()</code> saves <code>item.global_store</code> to <code>firebase</code>.</span>
+</li>
+</ul>

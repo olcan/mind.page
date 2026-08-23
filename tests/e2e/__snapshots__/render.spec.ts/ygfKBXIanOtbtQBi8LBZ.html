@@ -1,0 +1,18 @@
+<p>
+<mark class="label unique" title="#gapi/examples/profile" onmousedown="_handleTagClick('ygfKBXIanOtbtQBi8LBZ','#gapi/examples/profile','#gapi/examples/profile',event)" onclick="event.preventDefault();event.stopPropagation();">gapi/examples/profile</mark> is a basic example for <a href="https://developers.google.com/people" onclick="_handleLinkClick('ygfKBXIanOtbtQBi8LBZ','https://developers.google.com/people',event)">Google People API</a>.<a href="https://developers.google.com/people/quickstart/js" onclick="_handleLinkClick('ygfKBXIanOtbtQBi8LBZ','https://developers.google.com/people/quickstart/js',event)">Quick Start Guide</a> explains how to <a href="https://console.cloud.google.com/apis/library/people.googleapis.com" onclick="_handleLinkClick('ygfKBXIanOtbtQBi8LBZ','https://console.cloud.google.com/apis/library/people.googleapis.com',event)">enable in console</a> and create <a href="https://console.cloud.google.com/apis/credentials" onclick="_handleLinkClick('ygfKBXIanOtbtQBi8LBZ','https://console.cloud.google.com/apis/credentials',event)">credentials</a> for access.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> scope = <span class="hljs-string">'https://www.googleapis.com/auth/userinfo.profile'</span>
+<span class="hljs-keyword">const</span> doc = <span class="hljs-string">'https://people.googleapis.com/$discovery/rest'</span>
+<span class="hljs-keyword">await</span> gapi.<span class="hljs-property">client</span>.<span class="hljs-title function_">_auth</span>({ <span class="hljs-attr">scope</span>: scope, <span class="hljs-attr">discoveryDocs</span>: doc })
+<span class="hljs-keyword">await</span> gapi.<span class="hljs-property">client</span>.<span class="hljs-title function_">_try</span>(<span class="hljs-keyword">async</span> ({<span class="hljs-attr">people</span>:{people}})=&gt;{
+  <span class="hljs-comment">// fetch and output user name</span>
+<span class="hljs-keyword">const</span> response = <span class="hljs-keyword">await</span> people.<span class="hljs-title function_">get</span>({
+    <span class="hljs-attr">resourceName</span>: <span class="hljs-string">'people/me'</span>,
+    <span class="hljs-attr">personFields</span>: <span class="hljs-string">'names'</span>
+  })
+  <span class="hljs-keyword">return</span>
+<span class="hljs-string">"Your name is "</span> + response.<span class="hljs-property">result</span>.<span class="hljs-property">names</span>[<span class="hljs-number">0</span>]?.<span class="hljs-property">displayName</span>
+})</code>
+</pre>
+<mark class="hidden" title="#gapi" onmousedown="_handleTagClick('ygfKBXIanOtbtQBi8LBZ','#gapi','#gapi',event)" onclick="event.preventDefault();event.stopPropagation();">gapi</mark>

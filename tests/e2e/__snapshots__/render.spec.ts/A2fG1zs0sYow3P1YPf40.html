@@ -1,0 +1,31 @@
+<p>
+<mark class="label unique" title="#commands/agenda" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#commands/agenda','#commands/agenda',event)" onclick="event.preventDefault();event.stopPropagation();">commands/agenda</mark> command <a href="#" onmousedown="MindBox.create(`/agenda`,{});event.preventDefault();event.stopPropagation()" onclick="event.preventDefault();event.stopPropagation()" class="" title="/agenda">/agenda</a> creates an item listing upcoming events. Follow <mark title="#gapi/examples/calendar" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#gapi/examples/calendar','#gapi/examples/calendar',event)" onclick="event.preventDefault();event.stopPropagation();">gapi/examples/calendar</mark> to set up the API before initial use.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">async</span>
+<span class="hljs-keyword">function</span>
+<span class="hljs-title function_">run</span>(<span class="hljs-params">
+</span>) {
+  <span class="hljs-keyword">const</span> events = <span class="hljs-keyword">await</span>
+<span class="hljs-title function_">fetch_events</span>(<span class="hljs-number">5</span>) <span class="hljs-comment">// from <a href="#" title="#gapi/examples/calendar" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#gapi/examples/calendar','#gapi/examples/calendar',event)" onclick="event.preventDefault();event.stopPropagation();">#gapi/examples/calendar</a>
+</span>
+<span class="hljs-keyword">let</span> agenda = events.<span class="hljs-property">length</span> == <span class="hljs-number">0</span> ? <span class="hljs-string">'No upcoming events.'</span> :
+    [<span class="hljs-string">"|||"</span>, <span class="hljs-string">"|-|-"</span>, ...events.<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">event</span>) =&gt;</span> {
+      <span class="hljs-keyword">const</span> ms = event.<span class="hljs-property">start</span>.<span class="hljs-property">local</span>.<span class="hljs-title function_">getTime</span>() - <span class="hljs-title class_">Date</span>.<span class="hljs-title function_">now</span>()
+      <span class="hljs-keyword">return</span>
+<span class="hljs-string">'|'</span> + [<span class="hljs-title function_">time_short</span>(ms), event.<span class="hljs-property">summary</span>].<span class="hljs-title function_">join</span>(<span class="hljs-string">'|'</span>)
+    })].<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">s</span>)=&gt;</span>
+<span class="hljs-string">"&gt; "</span>+s).<span class="hljs-title function_">join</span>(<span class="hljs-string">'\n'</span>)
+  <span class="hljs-keyword">return</span> {
+    <span class="hljs-attr">text</span>: <span class="hljs-string">"**Upcoming Events** from #commands/agenda\n"</span> + agenda,
+    <span class="hljs-comment">// scroll to created item after dom update (so item.elem is non-null)</span>
+<span class="hljs-attr">init</span>: <span class="hljs-function">
+<span class="hljs-params">item</span> =&gt;</span>
+<span class="hljs-title function_">_update_dom</span>().<span class="hljs-title function_">then</span>(<span class="hljs-function">()=&gt;</span>
+<span class="hljs-title function_">_scroll_to</span>(item.<span class="hljs-property">elem</span>.<span class="hljs-property">offsetTop</span>)),
+    <span class="hljs-attr">edit</span>: <span class="hljs-literal">false</span>
+  }
+}</code>
+</pre>
+<mark class="hidden" title="#gapi/examples/calendar" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#gapi/examples/calendar','#gapi/examples/calendar',event)" onclick="event.preventDefault();event.stopPropagation();">gapi/examples/calendar</mark>
+<mark class="hidden" title="#macros" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#macros','#macros',event)" onclick="event.preventDefault();event.stopPropagation();">macros</mark>

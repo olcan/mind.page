@@ -1,0 +1,18 @@
+<p>
+<mark class="label unique" title="#gapi/examples/calendar" onmousedown="_handleTagClick('TYZUL6gTmlzBXlk1KoZX','#gapi/examples/calendar','#gapi/examples/calendar',event)" onclick="event.preventDefault();event.stopPropagation();">gapi/examples/calendar</mark> is an example for <a href="https://developers.google.com/calendar/api" onclick="_handleLinkClick('TYZUL6gTmlzBXlk1KoZX','https://developers.google.com/calendar/api',event)">Google Calendar API</a>. <a href="https://developers.google.com/calendar/quickstart/js" onclick="_handleLinkClick('TYZUL6gTmlzBXlk1KoZX','https://developers.google.com/calendar/quickstart/js',event)">Quick Start Guide</a> explains how to <a href="https://console.developers.google.com/apis/library/calendar-json.googleapis.com" onclick="_handleLinkClick('TYZUL6gTmlzBXlk1KoZX','https://console.developers.google.com/apis/library/calendar-json.googleapis.com',event)">enable in console</a> and create <a href="https://console.cloud.google.com/apis/credentials" onclick="_handleLinkClick('TYZUL6gTmlzBXlk1KoZX','https://console.cloud.google.com/apis/credentials',event)">credentials</a> for access.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> events = <span class="hljs-keyword">await</span>
+<span class="hljs-title function_">fetch_events</span>() <span class="hljs-comment">// see helper definition below</span>
+<span class="hljs-comment">// output markdown table w/ event name, start date/time, calendar name</span>
+<span class="hljs-keyword">if</span> (events.<span class="hljs-property">length</span> == <span class="hljs-number">0</span>) _this.<span class="hljs-title function_">write</span>(<span class="hljs-string">'No upcoming events found.'</span>,<span class="hljs-string">'_md_output'</span>)
+<span class="hljs-keyword">else</span> _this.<span class="hljs-title function_">write</span>([<span class="hljs-string">'|||||'</span>, <span class="hljs-string">'|:-|:-|:-|:-|'</span>, ...events.<span class="hljs-title function_">map</span>(<span class="hljs-function">
+<span class="hljs-params">e</span>=&gt;</span>{
+  <span class="hljs-keyword">const</span> date = e.<span class="hljs-property">start</span>.<span class="hljs-property">local</span>.<span class="hljs-title function_">toLocaleDateString</span>()
+  <span class="hljs-keyword">const</span> time = e.<span class="hljs-property">start</span>.<span class="hljs-property">local</span>.<span class="hljs-title function_">toLocaleTimeString</span>()
+  <span class="hljs-keyword">const</span> cal = e.<span class="hljs-property">cal</span>.<span class="hljs-property">summaryOverride</span> || e.<span class="hljs-property">cal</span>.<span class="hljs-property">summary</span> || e.<span class="hljs-property">cal</span>.<span class="hljs-property">id</span>
+<span class="hljs-keyword">return</span>
+<span class="hljs-string">'|'</span> + [ _.<span class="hljs-title function_">truncate</span>(e.<span class="hljs-property">summary</span>), date, time, _.<span class="hljs-title function_">truncate</span>(cal)].<span class="hljs-title function_">join</span>(<span class="hljs-string">' | '</span>)
+})].<span class="hljs-title function_">join</span>(<span class="hljs-string">'\n'</span>),<span class="hljs-string">'_md_output'</span>)</code>
+</pre>
+<mark class="hidden" title="#gapi" onmousedown="_handleTagClick('TYZUL6gTmlzBXlk1KoZX','#gapi','#gapi',event)" onclick="event.preventDefault();event.stopPropagation();">gapi</mark>

@@ -1,0 +1,19 @@
+<p>
+<mark class="label unique" title="#gapi" onmousedown="_handleTagClick('ecEWz9Ex8L3uJMAJed5B','#gapi','#gapi',event)" onclick="event.preventDefault();event.stopPropagation();">gapi</mark> is <a href="https://github.com/google/google-api-javascript-client" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','https://github.com/google/google-api-javascript-client',event)">Google API client library</a>. Here we load the core client library <code>gapi.client</code> and extend it with <code>_auth([options])</code> and <code>_try(func)</code> to simplify authenticated access to specific <a href="https://developers.google.com/identity/protocols/oauth2/scopes" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','https://developers.google.com/identity/protocols/oauth2/scopes',event)">scopes</a> and <a href="https://github.com/google/google-api-javascript-client/blob/master/docs/start.md#get-access-keys-for-your-application" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','https://github.com/google/google-api-javascript-client/blob/master/docs/start.md#get-access-keys-for-your-application',event)">credentials</a>. See examples <a href="#/examples/profile" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','#/examples/profile',event)">profile</a>, <a href="#/examples/calendar" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','#/examples/calendar',event)">calendar</a>, and <a href="#/examples/gmail" onclick="_handleLinkClick('ecEWz9Ex8L3uJMAJed5B','#/examples/gmail',event)">gmail</a>.</p>
+<pre>
+<code class="js">
+<span class="hljs-comment">// load GAPI, GIS (for auth), and GAPI client as needed</span>
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">gapi</span>?.<span class="hljs-property">client</span> || !<span class="hljs-variable language_">window</span>.<span class="hljs-property">google</span>?.<span class="hljs-property">accounts</span>?.<span class="hljs-property">oauth2</span>) {
+  <span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>([
+    <span class="hljs-variable language_">window</span>.<span class="hljs-property">gapi</span> || <span class="hljs-string">'https://apis.google.com/js/api.js'</span>,
+    <span class="hljs-variable language_">window</span>.<span class="hljs-property">google</span>?.<span class="hljs-property">accounts</span>?.<span class="hljs-property">oauth2</span> || <span class="hljs-string">'https://accounts.google.com/gsi/client'</span>
+  ])
+  <span class="hljs-keyword">await</span>
+<span class="hljs-keyword">new</span>
+<span class="hljs-title class_">Promise</span>(<span class="hljs-function">(<span class="hljs-params">resolve, reject</span>)=&gt;</span>gapi.<span class="hljs-title function_">load</span>(<span class="hljs-string">'client'</span>, 
+    {<span class="hljs-attr">callback</span>: resolve, <span class="hljs-attr">onerror</span>: reject}))
+}</code>
+</pre>
+<mark class="hidden" title="#load" onmousedown="_handleTagClick('ecEWz9Ex8L3uJMAJed5B','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('ecEWz9Ex8L3uJMAJed5B','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

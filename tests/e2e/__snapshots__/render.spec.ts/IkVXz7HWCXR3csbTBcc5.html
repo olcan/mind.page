@@ -1,0 +1,16 @@
+<p>
+<mark class="label unique" title="#TensorFlow" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow','#TensorFlow',event)" onclick="event.preventDefault();event.stopPropagation();">TensorFlow</mark> is a <a href="https://www.tensorflow.org/js" onclick="_handleLinkClick('IkVXz7HWCXR3csbTBcc5','https://www.tensorflow.org/js',event)">machine learning library</a>. See basic <mark title="#TensorFlow/example" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/example','#/example',event)" onclick="event.preventDefault();event.stopPropagation();">example</mark>, <a href="#TensorFlow/examples/linear_regression" onclick="_handleLinkClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/examples/linear_regression',event)">linear regression</a> tutorial, or <a href="#TensorFlow/examples/blazeface" onclick="_handleLinkClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/examples/blazeface',event)">face detection</a> demo. Default backend is WebGL (GPU). WebGL 2.0 is used if available (may need to be enabled in browser settings). Helper functions in <mark title="#TensorFlow/util" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/util','#/util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark> can help with memory management or with switching to the WebAssembly (CPU) backend, which can be faster on smaller problems.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">if</span> (!<span class="hljs-variable language_">window</span>.<span class="hljs-property">tf</span>) {
+  <span class="hljs-keyword">await</span>
+<span class="hljs-title function_">_load</span>(<span class="hljs-string">'https://cdn.jsdelivr.net/npm/@tensorflow'</span> +
+    <span class="hljs-string">'/tfjs/dist/tf.min.js'</span>)
+  <span class="hljs-keyword">await</span> tf.<span class="hljs-title function_">setBackend</span>(<span class="hljs-string">'webgl'</span>) <span class="hljs-comment">// default backend (can be changed)</span>
+<span class="hljs-comment">// import <a href="#" title="#TensorFlow/util" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/util','#TensorFlow/util',event)" onclick="event.preventDefault();event.stopPropagation();">#TensorFlow/util</a> _after_ loading tf</span>
+  _this.<span class="hljs-built_in">eval</span>(<span class="hljs-title function_">_item</span>(<span class="hljs-string">'#TensorFlow/util'</span>).<span class="hljs-title function_">read</span>(<span class="hljs-string">'js'</span>))
+}</code>
+</pre>
+<mark class="hidden" title="#load" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#load','#load',event)" onclick="event.preventDefault();event.stopPropagation();">load</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>
+<mark class="hidden" title="#TensorFlow/util" onmousedown="_handleTagClick('IkVXz7HWCXR3csbTBcc5','#TensorFlow/util','#/util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
