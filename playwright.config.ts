@@ -27,7 +27,7 @@ export default defineConfig({
   webServer: {
     // note FIREBASE_CONFIG (set by firebase emulators:exec) must be removed, since server.ts takes it
     // to mean running on cloud functions and then does not listen
-    command: 'env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node __sapper__/build',
+    command: 'env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs',
     url: 'http://localhost:3100/server_id',
     reuseExistingServer: true,
     timeout: 30_000,

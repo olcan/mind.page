@@ -8,6 +8,6 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 [ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first" # see deploy_mind_page.sh
-[ -f __sapper__/build/server/server.js ] || { echo "missing production build; run: npx sapper build" >&2; exit 1; }
+[ -f build/handler.js ] || { echo "missing production build; run: npm run build" >&2; exit 1; }
 firebase emulators:exec --only auth,firestore \
-    'node tests/e2e/seed.mjs && echo "serving seeded anonymous account at http://localhost:3100/ (Ctrl-C to stop)" && env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node __sapper__/build'
+    'node tests/e2e/seed.mjs && echo "serving seeded anonymous account at http://localhost:3100/ (Ctrl-C to stop)" && env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs'
