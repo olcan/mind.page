@@ -14,7 +14,11 @@ export default defineConfig(({ command }) => ({
   // lan address is part of the usual dev flow (device testing via the ssl-dev cert sans)
   // the empty proxy config downgrades the dev server to http/1.1: vite serves https with http/2 by
   // default, which its connect stack and the express middleware below cannot handle
-  server: https ? { https, port: 443, host: true, strictPort: false, proxy: {} } : {},
+  server: {
+    // firebase-config.js lives at the repo root, outside kit's default fs allow list
+    fs: { allow: ['.'] },
+    ...(https ? { https, port: 443, host: true, strictPort: false, proxy: {} } : {}),
+  },
   plugins: [
     sveltekit(),
     {
