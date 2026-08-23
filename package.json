@@ -60,8 +60,6 @@
     "chokidar": "^4.0.1",
     "cookie-parser": "^1.4.7",
     "eslint": "^9.13.0",
-    "eslint-plugin-promise": "^7.1.0",
-    "firebase-functions-test": "^3.3.0",
     "js-sha1": "^0.7.0",
     "lodash": "^4.17.21",
     "marked": "^15.0.12",
