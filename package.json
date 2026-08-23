@@ -46,7 +46,7 @@
     "@babel/runtime": "^7.25.7",
     "@firebase/rules-unit-testing": "^5.0.2",
     "@jupyterlab/services": "^7.2.5",
-    "@octokit/rest": "^21.0.2",
+    "@octokit/rest": "^22.0.1",
     "@playwright/test": "^1.62.1",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.1",
