@@ -1,0 +1,351 @@
+<p>
+<mark class="label unique" title="#util/core/array" onmousedown="_handleTagClick('CUjV9QfACGgUqAe2KQ5k','#util/core/array','#util/core/array',event)" onclick="event.preventDefault();event.stopPropagation();">util/core/array</mark> defines array-related utilities.  </p>
+<div class="core_js_table ready">
+<div class="function name_array scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">array</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>J<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>J = 0<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>array <code>xJ</code> of length <code>J</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>x</code> can be given to fill as <code>xJ[j]=x ∀j</code>
+<br>
+<code>x</code> can be a function of index, e.g. <code>j=&gt;j</code>
+<br>same as <code>Array.from(…)</code> if first argument is not a number<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_zeroes scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">zeroes</span>
+<span class="args">
+<span class="parens">(</span>J<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>J<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>array(J, 0)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_ones scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ones</span>
+<span class="args">
+<span class="parens">(</span>J<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>J<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>array(J, 1)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_fill scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">fill</span>
+<span class="args">
+<span class="parens">(</span>xJ,x,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,x,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>fills <code>xJ</code> as <code>xJ[j]=x ∀j</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>x</code> can be a function of index, e.g. <code>j=&gt;j</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_remove scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">remove</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>removes all <code>x</code> from <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>x</code> can be a predicate (boolean) function <code>(xj,j)=&gt;…</code>
+<br>
+<code>x</code> can be <code>undefined</code> (or omitted)<br>uses <code>===</code> for comparisons<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_copy scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">copy</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>yJ<span class="parens">]</span>,<span class="parens">[</span>f<span class="parens">]</span>,<span class="parens">[</span>g<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>yJ<span class="parens">]</span>,<span class="parens">[</span>f<span class="parens">]</span>,<span class="parens">[</span>g<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>copies <code>xJ</code> into new array<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can copy <code>yJ</code> into existing <code>xJ</code>
+<br>can map copied elements as <code>f(x,j,yJ)</code>
+<br>can filter copied elements via <code>g(x,j,yJ)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_copy_at scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">copy_at</span>
+<span class="args">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>ks<span class="parens">]</span>,<span class="parens">[</span>ke<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>ks = 0<span class="parens">]</span>,<span class="parens">[</span>ke = K<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>copies <code>yK[ks…ke-1]</code> into <code>xJ[js…]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_each scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">each</span>
+<span class="args">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invokes <code>f(x,j,xJ)</code> for each <code>x</code> in <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_scan scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">scan</span>
+<span class="args">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invokes <code>f(j,x,xJ)</code> for each <code>x</code> in <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_repeat scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">repeat</span>
+<span class="args">
+<span class="parens">(</span>J,f<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>J,f<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invokes <code>f(j,J)</code> for <code>j=0,…,J-1</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>stops early if <code>f</code> returns <code>null</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_map2 scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">map2</span>
+<span class="args">
+<span class="parens">(</span>xJ,yJ,f,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,yJ,f,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>maps <code>yJ</code> into <code>xJ</code> as <code>f(x,y,j,xJ,yJ)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_apply scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">apply</span>
+<span class="args">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,f,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>applies <code>f(x,j,xJ)</code> to <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_swap scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">swap</span>
+<span class="args">
+<span class="parens">(</span>y,y_x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>y,y_x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>swaps <code>x&lt;=&gt;y</code> as <code>x = swap(y, y=x)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>apply+swap</code> can be faster than <code>map</code> or <code>copy</code>
+<br>e.g. <code>xJ = swap(apply(yJ,y=&gt;y*y), yJ=xJ)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+</div>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('CUjV9QfACGgUqAe2KQ5k','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

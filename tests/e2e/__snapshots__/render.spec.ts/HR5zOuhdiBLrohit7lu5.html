@@ -1,0 +1,1724 @@
+<p>
+<mark class="label unique" title="#util/core/item" onmousedown="_handleTagClick('HR5zOuhdiBLrohit7lu5','#util/core/item','#util/core/item',event)" onclick="event.preventDefault();event.stopPropagation();">util/core/item</mark> defines global aliases for functions on <a href="https://mindbox.io/#MindPage/core/properties/_this" onclick="_handleLinkClick('HR5zOuhdiBLrohit7lu5','https://mindbox.io/#MindPage/core/properties/_this',event)">
+<code>_this</code>
+</a>, also available on any <a href="https://mindbox.io/#MindPage/core/_Item" onclick="_handleLinkClick('HR5zOuhdiBLrohit7lu5','https://mindbox.io/#MindPage/core/_Item',event)">
+<code>_Item</code>
+</a>. Below <code>{…}</code> is shorthand for <code>[options={}]</code>, an optional object argument for passing options.  </p>
+<div class="core_js_table ready">
+<div class="function name__Item scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_Item</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>class for all items<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>as returned by <code>_item(…)</code>, <code>_items(…)</code>, <code>_create(…)</code>, etc<br>extendable as <code>_Item.prototype.method = function(…) { … }</code>
+<br>can be <code>null</code> in non-window contexts, e.g. web workers<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_is_item scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_item</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof _Item</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name___eval scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">item.eval</span>
+<span class="args">
+<span class="parens">(</span>js,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>js,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>evaluates <code>js</code> in context of <code>item</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<em>invoke on item; can't be aliased for <code>_this</code>
+</em>
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>type</code>
+</td>
+<td align="left">string</td>
+<td align="left">
+<code>js</code>
+</td>
+<td align="left">prefix code block type</td>
+</tr>
+<tr>
+<td align="left">
+<code>async</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">async mode</td>
+</tr>
+<tr>
+<td align="left">
+<code>async_simple</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">async w/o <code>start(…)</code> wrapper</td>
+</tr>
+<tr>
+<td align="left">
+<code>debug</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">eval w/o any wrappers</td>
+</tr>
+<tr>
+<td align="left">
+<code>exclude_prefix</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">eval w/o prefix code</td>
+</tr>
+<tr>
+<td align="left">
+<code>trigger</code>
+</td>
+<td align="left">string</td>
+<td align="left">
+<code>other</code>
+</td>
+<td align="left">eval trigger name</td>
+</tr>
+<tr>
+<td align="left">
+<code>context</code>
+</td>
+<td align="left">any</td>
+<td align="left">
+</td>
+<td align="left">optional context</td>
+</tr>
+<tr>
+<td align="left">
+<code>skip_eval</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">skip eval, just return (expanded) code</td>
+</tr>
+</tbody>
+</table>
+<p>forwards options to <code>read</code> for code prefix w/ modified defaults:</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>exclude_async_deps</code>
+</td>
+<td align="left">
+<code>!async</code>,</td>
+</tr>
+<tr>
+<td align="left">
+<code>replace_ids</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_empty_lines</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_comment_lines</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_tests_and_benchmarks</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_eval_macros scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">eval_macros</span>
+<span class="args">
+<span class="parens">(</span>text,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>text,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>evaluates <code>&lt;&lt;macros&gt;&gt;</code> in <code>text</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>options are same as <code>item.eval</code> (see above)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_read scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">read</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>type<span class="parens">]</span>,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>type = ''<span class="parens">]</span>,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>reads text from item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>reads <em>whole item</em> if <code>type==''</code> (default)<br>
+<code>type</code> can indicate block(s) to read, e.g. <code>js</code>
+<br>
+<code>type</code> can be regex, e.g. <code>js|js_tests?</code>
+<br>blocks matching <code>type</code> are concentenated<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>include_deps</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">include dependencies</td>
+</tr>
+<tr>
+<td align="left">
+<code>exclude_async_deps</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">exclude async dependencies</td>
+</tr>
+<tr>
+<td align="left">
+<code>exclude_async</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">also exclude self if async</td>
+</tr>
+<tr>
+<td align="left">
+<code>comment_deps</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">include delimiter comments</td>
+</tr>
+<tr>
+<td align="left">
+<code>replace_items</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">replace items for this read</td>
+</tr>
+<tr>
+<td align="left">
+<code>eval_macros</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">evaluate <code>&lt;&lt;macros&gt;&gt;</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>replace_ids</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">replace <code>$id</code> (w/ item.id)</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_empty_lines</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">remove empty lines</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_comment_lines</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">remove comment lines (<code>js</code> only)</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_tests_and_benchmarks</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">remove tests &amp; benchmarks (<code>js</code> only)</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_hidden</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">remove hidden sections (whole item only)</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_removed</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">remove "removed" sections (whole item only)</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_blocks</code>
+</td>
+<td align="left">
+<code>''</code>
+</td>
+<td align="left">remove specified blocks (whole item only)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_read_deep scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">read_deep</span>
+<span class="args">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>reads from block <code>type</code> in item <em>&amp; dependencies</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>uses <code>include_deps=true</code> by default<br>other options same as <code>read</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_read_input scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">read_input</span>
+<span class="args">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>reads <em>input</em> for <code>type</code> from item <em>&amp; dependencies</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>reads <code>&lt;type&gt;_input</code> from item, <code>type</code> from deps<br>options are same as <code>read</code> w/ defaults modified as follows:<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>replace_ids</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_empty_lines</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_comment_lines</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>remove_tests_and_benchmarks</code>
+</td>
+<td align="left">
+<code>true</code>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_write scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">write</span>
+<span class="args">
+<span class="parens">(</span>text,<span class="parens">[</span>type<span class="parens">]</span>,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>text,<span class="parens">[</span>type<span class="parens">]</span>,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>writes <code>text</code> to block <code>type</code> in item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>default block <code>type</code> is <code>'_output'</code>
+<br>writes <em>whole item</em> if <code>type==''</code>
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>keep_time</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">write w/o updating time</td>
+</tr>
+<tr>
+<td align="left">
+<code>skip_save</code>
+</td>
+<td align="left">bool</td>
+<td align="left">
+<code>item.editing</code>
+</td>
+<td align="left">write w/o saving</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_write_lines scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">write_lines</span>
+<span class="args">
+<span class="parens">(</span>...lines<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...lines<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>writes <code>lines</code> to item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>replaces existing item text<br>
+<code>≡ write(flat(lines).filter(defined).join('\n').trim(),'')</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name___clear scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">item.clear</span>
+<span class="args">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>clears (empties out) <code>type</code> blocks<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>invoke on item; <em>not aliased for <code>_this</code>
+</em>
+<br>forwards options (second argument) to <code>write</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name___remove scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">item.remove</span>
+<span class="args">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>type,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>removes <code>type</code> blocks<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>invoke on item; <em>not aliased for <code>_this</code>
+</em>
+<br>forwards options (second argument) to <code>write</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name___delete scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">item.delete</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>deletes <code>item</code>
+<em>
+<strong>permanently</strong>
+</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>confirmed only for <code>#named</code> items<br>invoke on item; <em>can't be aliased for <code>_this</code>
+</em>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_get_log scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">get_log</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>log messages for item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>source</code>
+</td>
+<td align="left">string</td>
+<td align="left">
+<code>self</code>, <code>any</code>, item <code>#name</code> or id</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">
+</td>
+<td align="left">append <code>?</code> to include unknown (empty stack)</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">
+</td>
+<td align="left">
+<em>default</em>: <code>self?</code> (from self or unknown sources)</td>
+</tr>
+<tr>
+<td align="left">
+<code>level</code>
+</td>
+<td align="left">string</td>
+<td align="left">
+<code>debug</code>, <code>info*</code>, <code>log</code>, <code>warn</code>, <code>error</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>since</code>
+</td>
+<td align="left">string</td>
+<td align="left">
+<code>eval*</code>, <code>run</code>, or ms since epoch</td>
+</tr>
+<tr>
+<td align="left">
+<code>filter</code>
+</td>
+<td align="left">function</td>
+<td align="left">custom predicate, passed object <code>{time,level,stack,type,text}</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>last</code>
+</td>
+<td align="left">bool</td>
+<td align="left">last matching entry pre-filter? (<em>additive</em> w/ <code>filter</code>)</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">
+</td>
+<td align="left">
+<code>*</code> indicates defaults</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_write_log scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">write_log</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>writes log messages into item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>takes default options from <code>_this.log_options</code>
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>type</code>
+</td>
+<td align="left">output block type, default <code>'_log'</code>
+</td>
+</tr>
+<tr>
+<td align="left">...</td>
+<td align="left">options for <code>get_log</code> and <code>write</code>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_show_logs scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">show_logs</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>t<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>t = 15000<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>show logs (<code>_log</code> block) in item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>autohide after <code>t</code> ms or never if <code>t&lt;0</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_hide_logs scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">hide_logs</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>hide logs (<code>_log</code> block) in item</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_show_status scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">show_status</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>status<span class="parens">]</span>,<span class="parens">[</span>progress<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>status<span class="parens">]</span>,<span class="parens">[</span>progress<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>show <code>status</code> on running item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>item must be running (<code>item.running==true</code>)<br>can also indicate <code>progress∈[0,1]</code> in background<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_clear_status scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">clear_status</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>clear (and hide) status on item</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_touch scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">touch</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>save<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>save = false<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<em>touches</em> item by updating its time<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>optionally saves item<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_save scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">save</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>saves item</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_start scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">start</span>
+<span class="args">
+<span class="parens">(</span>async_func<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>async_func<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>starts <a href="https://mindbox.io/#features/_async" onclick="_handleLinkClick('HR5zOuhdiBLrohit7lu5','https://mindbox.io/#features/_async',event)">async</a> evaluation in context of item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns promise that resolves <code>async_func()</code>
+<br>writes logs into item via <code>write_log</code>
+<br>takes log options via <code>_this.log_options</code>
+<br>invokes <code>invalidate_elem_cache</code> on error<br>updates <code>_this.running</code> property<br>item is <em>
+<strong>not</strong>
+</em> on <a href="https://mindbox.io/#MindPage/core/properties/_stack" onclick="_handleLinkClick('HR5zOuhdiBLrohit7lu5','https://mindbox.io/#MindPage/core/properties/_stack',event)">stack</a> unless added explicitly<br>functions below can put item onto stack or associate logs w/ item as needed<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_invoke scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">invoke</span>
+<span class="args">
+<span class="parens">(</span>func<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>func<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invokes <code>func</code> w/ item on <a href="https://mindbox.io/#MindPage/core/properties/_stack" onclick="_handleLinkClick('HR5zOuhdiBLrohit7lu5','https://mindbox.io/#MindPage/core/properties/_stack',event)">stack</a>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>forwards returns &amp; throws from <code>func</code>
+<br>function can be async or return promise<br>invokes <code>invalidate_elem_cache</code> on error<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_attach scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">attach</span>
+<span class="args">
+<span class="parens">(</span>thing<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>thing<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<em>attaches</em> function or promise to item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>ensures item on stack for function/promise<br>wraps function to invoke via <code>invoke</code>
+<br>wraps promise to auto-attach in then/catch/finally<br>returns all other types as is<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_dispatch scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">dispatch</span>
+<span class="args">
+<span class="parens">(</span>func,<span class="parens">[</span>delay<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>func,<span class="parens">[</span>delay = 0<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invokes attached function after <code>delay</code> ms<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ setTimeout(attach(func), delay)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_dispatch_task scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">dispatch_task</span>
+<span class="args">
+<span class="parens">(</span>name,func,<span class="parens">[</span>delay<span class="parens">]</span>,<span class="parens">[</span>repeat<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>name,func,<span class="parens">[</span>delay = 0<span class="parens">]</span>,<span class="parens">[</span>repeat = -1<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>dispatches function as <em>named</em> task<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>named tasks are <em>repeatable</em> and <em>cancellable</em>
+<br>if <code>repeat&gt;=0</code>, repeats task every <code>repeat</code> ms<br>cancels any existing task under <code>name</code>!<br>cancels if <code>func</code> throws error or returns <code>null</code>
+<br>cancels (w/o invoking function) if item is deleted<br>modifies <code>repeat</code> (once) if <code>func</code> returns number ≥ 0<br>function <code>func</code> can be async or return promise<br>returns task object (dispatched wrapper function)<br>
+<code>_on_cancel</code>, <code>_on_error(e)</code>, <code>_on_done(out)</code> can be set on task object<br>exactly one of these will always get invoked for every dispatched task<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_cancel_task scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">cancel_task</span>
+<span class="args">
+<span class="parens">(</span>name<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>name<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>cancels named task</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_pending_task scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">pending_task</span>
+<span class="args">
+<span class="parens">(</span>name<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>name<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is named task pending completion? (can be waiting or running)<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can be used to avoid re-dispatch, e.g. for throttling (vs debouncing) runs<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_promise scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">promise</span>
+<span class="args">
+<span class="parens">(</span>func<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>func<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>new promise <em>attached</em> to item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>func</code> is <em>executor</em> w/ args <code>(resolve[,reject])</code>
+<br>
+<code>≡ attach(new Promise(attach(func)))</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_resolve scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">resolve</span>
+<span class="args">
+<span class="parens">(</span>thing<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>thing<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>resolves promise <em>attached</em> to item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ attach(Promise.resolve(thing))</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_debug scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">debug</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>logs debug messages to console<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>associates w/ item on stack via <code>invoke</code>
+<br>
+<code>≡ invoke(() =&gt; console.debug(...))</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_print scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">print</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>invoke(() =&gt; console.log(...))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_info scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">info</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>invoke(() =&gt; console.info(...))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_warn scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">warn</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>invoke(() =&gt; console.warn(...))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_error scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">error</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>invoke(() =&gt; console.error(...))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_fatal scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">fatal</span>
+<span class="args">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>throws error message w/ stack trace</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_delay scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">delay</span>
+<span class="args">
+<span class="parens">(</span>ms<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>ms<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>promise w/ dispatched resolve<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ promise(resolve =&gt; dispatch(resolve, ms))</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_images scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">images</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<em>uploaded</em> images in item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>as sources (<code>src</code> in text), urls, or blob<br>returns string array for sources<br>returns promise for urls and blobs<br>urls are <em>local</em> urls for <em>downloaded</em> images<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>output</code>
+</td>
+<td align="left">
+<code>src</code> (default), <code>url</code>, or <code>blob</code>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_cached scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">cached</span>
+<span class="args">
+<span class="parens">(</span>key,func<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>key,func<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>value <em>cached</em> on item under <code>key</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>computed as <code>func(item)</code> as needed<br>cache is accessible as <code>_this.cache</code>
+<br>cleared on changes to item via <code>_this.deephash</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_validate_cache scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">validate_cache</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>validates cache for current <code>_this.deephash</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_invalidate_cache scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">invalidate_cache</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>invalidates cache (cleared on next access)</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_save_local_store scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">save_local_store</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>saves <code>_this.local_store</code> to <code>localStorage</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_save_global_store scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">save_global_store</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>saves <code>_this.global_store</code> to firebase</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_invalidate_elem_cache scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">invalidate_elem_cache</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>invalidates element cache for item<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can force rendering, delayed to help avoid tight render ⇄ trigger loops<br>forced rendering also forces re-eval of any macros in item<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>force_render</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">force rendering of item</td>
+</tr>
+<tr>
+<td align="left">
+<code>render_delay</code>
+</td>
+<td align="left">
+<code>1000</code>
+</td>
+<td align="left">render delay (ms)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_elem scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">elem</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>selector<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>selector<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>(!s ? _this.elem : _this.elem?.querySelector(s))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_elems scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">elems</span>
+<span class="args">
+<span class="parens">(</span>selector<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>selector<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>_this.elem?.querySelectorAll(s)</code>
+</p>
+</span>
+</div>
+</div>
+<p>
+</p>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('HR5zOuhdiBLrohit7lu5','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

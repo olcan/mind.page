@@ -1,0 +1,30 @@
+<p>
+<mark class="label unique" title="#util/sample/examples/8" onmousedown="_handleTagClick('0DMA8JLowHwcwfPlK4j8','#util/sample/examples/8','#util/sample/examples/8',event)" onclick="event.preventDefault();event.stopPropagation();">util/sample/examples/8</mark> Sample <code>A∈(0,1)</code>, <code>B∈(a,1)</code>, <code>C∈(a,b)</code> conditioned on <code>C'≈.5</code>
+<em>without computing likelihood</em>
+<code>p(c'==.5|a,b)</code>, which is often not practical. To do this we define a custom <em>relaxation function</em>
+<code>log_wr(r), r∈(0,1]</code> that guides samples toward <code>c'==.5</code> by <em>relaxing</em> this condition based on a parameter <code>r∈(0,1]</code> adjusted automatically by the system to move samples as efficiently as possible. We consider two types of relaxation:</p>
+<ul>
+<li>
+<span class="list-item">
+<em>Domain relaxation</em> uses a <em>binary</em> relaxation function <code>log_wr(r) ∈ {0,-inf}</code> that indicates a <em>relaxed domain</em> that <em>shrinks down to</em> a target domain as <code>r↗︎1</code>. Here we use the relaxed domain <code>(.5-ε,.5+ε), ε=.0001**r</code> that shrinks down to target domain <code>(.4999,.5001)</code> for <code>r=1</code>.</span>
+</li>
+<li>
+<span class="list-item">
+<em>Weight relaxation</em> uses <em>relaxed weights</em>
+<code>log_wr(r) ∈ (0,-inf)</code> that converge to target weights as <code>r↗︎1</code>. Here we use relaxed weights <code>-abs(c'-.5) * 100**r</code> that converge to target weights <code>-abs(c'-.5) * 100</code> for <code>r=1</code>. Weight relaxation allows much more fine-grained guidance by introducing a weight differential over the entire sample space, but the differences are smaller (and updates less aggressive) than in domain relaxation.</span>
+</li>
+</ul>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> a = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>, <span class="hljs-number">1</span>))
+<span class="hljs-keyword">const</span> b = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, <span class="hljs-number">1</span>))
+<span class="hljs-keyword">const</span> c = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, b))
+<span class="hljs-keyword">const</span> cc = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, b))
+<span class="hljs-keyword">const</span> ε = <span class="hljs-number">.0001</span>
+<span class="hljs-comment">// condition(abs(cc-.5) &lt; ε) // typically too slow</span>
+<span class="hljs-comment">// condition(abs(cc-.5) &lt; ε, r =&gt; log(abs(cc-.5) &lt; ε**r))</span>
+<span class="hljs-title function_">weight</span>(-<span class="hljs-title function_">abs</span>(cc-<span class="hljs-number">.5</span>) * <span class="hljs-number">100</span>, <span class="hljs-title function_">capture</span>(<span class="hljs-function">
+<span class="hljs-params">r</span> =&gt;</span> -<span class="hljs-title function_">abs</span>(cc-<span class="hljs-number">.5</span>) * <span class="hljs-number">100</span>**r, {cc}))</code>
+</pre>
+<mark class="hidden" title="#util" onmousedown="_handleTagClick('0DMA8JLowHwcwfPlK4j8','#util','#util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('0DMA8JLowHwcwfPlK4j8','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

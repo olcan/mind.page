@@ -1,0 +1,276 @@
+<p>
+<mark class="label unique" title="#util/core/hash" onmousedown="_handleTagClick('arAjfYO4RIweKSu8W6oe','#util/core/hash','#util/core/hash',event)" onclick="event.preventDefault();event.stopPropagation();">util/core/hash</mark> defines hashing and encoding/decoding utilities or <a href="https://mindbox.io/#MindPage/core/functions" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://mindbox.io/#MindPage/core/functions',event)">aliases</a>.  </p>
+<div class="core_js_table ready">
+<div class="function name_hash scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">hash</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>hasher<span class="parens">]</span>,<span class="parens">[</span>stringifier<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>hasher = _hash_64_fnv1a<span class="parens">]</span>,<span class="parens">[</span>stringifier<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>hashes <code>x</code> using <code>hasher</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>applies <code>stringifier</code> to non-string <code>x</code>
+<br>integer for ≤52 bits, hex string for &gt;52<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">hasher</td>
+<td align="left">bits</td>
+<td align="left">algorithm</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_32_djb2</code>
+</td>
+<td align="left">32</td>
+<td align="left">
+<a href="http://www.cse.yorku.ca/~oz/hash.html" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','http://www.cse.yorku.ca/~oz/hash.html',event)">djb2</a> (xor)</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_32_fnv1a</code>
+</td>
+<td align="left">32</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_32_murmur3</code>
+</td>
+<td align="left">32</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_52_fnv1a</code>
+</td>
+<td align="left">52</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>
+</td>
+</tr>
+<tr>
+<td align="left">default ➡ <code>_hash_64_fnv1a</code>
+</td>
+<td align="left">64</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function',event)">fnv-1a</a>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_128_murmur3_x86</code>
+</td>
+<td align="left">128</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> x86</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_128_murmur3_x64</code>
+</td>
+<td align="left">128</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/MurmurHash" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/MurmurHash',event)">murmur v3</a> x64</td>
+</tr>
+<tr>
+<td align="left">
+<code>_hash_160_sha1</code>
+</td>
+<td align="left">160</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/SHA-1" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/SHA-1',event)">secure hash algo 1</a>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_encode scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">encode</span>
+<span class="args">
+<span class="parens">(</span>string,<span class="parens">[</span>encoding<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>string,<span class="parens">[</span>encoding = 'base64'<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>encodes <code>string</code> into <code>encoding</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>string</code> is assumed <a href="https://en.wikipedia.org/wiki/UTF-16" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/UTF-16',event)">UTF-16</a> (<code>js</code> default)<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>'utf8'</code>
+</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/UTF-8" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/UTF-8',event)">UTF-8</a> string</td>
+</tr>
+<tr>
+<td align="left">
+<code>'utf8_array'</code>
+</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/UTF-8" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/UTF-8',event)">UTF-8</a> array (<code>Uint8Array</code>)</td>
+</tr>
+<tr>
+<td align="left">
+<code>'byte_array'</code>
+</td>
+<td align="left">raw byte array (<code>Uint8Array</code>) for code points ≤255 only</td>
+</tr>
+<tr>
+<td align="left">default ➡ <code>'base64'</code>
+</td>
+<td align="left">
+<a href="https://en.wikipedia.org/wiki/Base64" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/Base64',event)">Base64</a> ASCII string</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_decode scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">decode</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>encoding<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>encoding = 'base64'<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>decodes string from <code>x</code> in <code>encoding</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>see <code>encode</code> for supported encodings<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_byte_stringify scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">byte_stringify</span>
+<span class="args">
+<span class="parens">(</span>buffer|view<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>buffer|view<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>convert <code>ArrayBuffer</code> or <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView',event)">view</a> to <em>byte string</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<em>byte strings</em> (a.k.a. "binary") encode 8-bit binary numbers using <a href="https://en.wikipedia.org/wiki/Code_point" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/Code_point',event)">code points</a> ≤255<br>in contrast, regular strings in <code>js</code> encode <a href="https://en.wikipedia.org/wiki/List_of_Unicode_characters" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/List_of_Unicode_characters',event)">unicode characters</a> in <a href="https://en.wikipedia.org/wiki/UTF-16" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://en.wikipedia.org/wiki/UTF-16',event)">UTF-16</a>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_hex_stringify scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">hex_stringify</span>
+<span class="args">
+<span class="parens">(</span>buffer|view<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>buffer|view<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>convert <code>ArrayBuffer</code> or <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView" onclick="_handleLinkClick('arAjfYO4RIweKSu8W6oe','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView',event)">view</a> to <em>hex string</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>each byte is 0-padded to 2 digits, e.g. <code>[0,255]</code> → <code>00ff</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+</div>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('arAjfYO4RIweKSu8W6oe','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

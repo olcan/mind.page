@@ -1,0 +1,762 @@
+<p>
+<mark class="label unique" title="#util/core/types" onmousedown="_handleTagClick('uH2MfzsWo8pkhB4JbNXT','#util/core/types','#util/core/types',event)" onclick="event.preventDefault();event.stopPropagation();">util/core/types</mark> defines type-related utilities.  </p>
+<div class="core_js_table ready">
+<div class="function name_defined scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">defined</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x !== undefined</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>for known variable <code>x</code> only<br>use <code>typeof x != 'undefined'</code> for unknown <code>x</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_is scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is</span>
+<span class="args">
+<span class="parens">(</span>x,type<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,type<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is <code>x</code> of <code>type</code>?<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ is_&lt;type&gt;(x)</code> for known <code>type</code>
+<br>
+<code>false</code> for unknown <code>type</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_is_defined scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_defined</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>defined</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_null scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_null</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x === null</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_nullish scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_nullish</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x === null || x === undefined</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_finite scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_finite</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite',event)">
+<code>Number.isFinite</code>
+</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_infinite scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_infinite</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>!Number.isFinite(x)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_inf scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_inf</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>is_infinite</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_inf scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">inf</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>Infinity</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_nan scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_nan</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN',event)">
+<code>Number.isNaN</code>
+</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_integer scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_integer</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger',event)">
+<code>Number.isInteger</code>
+</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_probability scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_probability</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'number' &amp;&amp; x &gt;= 0 &amp;&amp; x &lt;= 1</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_prob scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_prob</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>is_probability</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_number scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_number</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'number'</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_numeric scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_numeric</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is <code>x</code> number or <a href="https://stackoverflow.com/a/175787" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://stackoverflow.com/a/175787',event)">numeric string</a>?</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_boolean scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_boolean</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'boolean'</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_binary scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_binary</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x === 0 || x === 1</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_string scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_string</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'string'</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_function scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_function</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'function'</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_AsyncFunction scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">AsyncFunction</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>(async () =&gt; {}).__proto__.constructor</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_async_function scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_async_function</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof AsyncFunction</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_object scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_object</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>typeof x == 'object' &amp;&amp; x !== null</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_plain_object scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_plain_object</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>NOTE: is_object is not same as POJO<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<pre>
+<code>  (Object.getPrototypeOf(x) == Object.prototype)
+  https://masteringjs.io/tutorials/fundamentals/pojo</code>
+</pre>
+</div>
+</span>
+</div>
+<div class="function name_is_primitive scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_primitive</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>const is_primitive = x =&gt; !(x instanceof Object)</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_set scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_set</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof Set</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_map scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_map</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof Map</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_promise scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_promise</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof Promise</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_TypedArray scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">TypedArray</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>NOTE: is_array allows typed arrays, e.g. Int32Array<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can also be detected as: ArrayBuffer.isView(x) &amp;&amp; !(x instanceof DataView)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_is_array scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_array</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>Array.isArray(x) || x instanceof TypedArray</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_untyped_array scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_untyped_array</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/isArray" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/isArray',event)">
+<code>Array.isArray</code>
+</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_typed_array scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_typed_array</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x instanceof TypedArray</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_indexed scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_indexed</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is <code>x</code> array or object w/ keys <code>0,1,2...</code>?</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_empty scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">empty</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://lodash.com/docs/4.17.15#isEmpty" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://lodash.com/docs/4.17.15#isEmpty',event)">
+<code>_.isEmpty</code>
+</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_equal scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">equal</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://lodash.com/docs/4.17.15#isEqual" onclick="_handleLinkClick('uH2MfzsWo8pkhB4JbNXT','https://lodash.com/docs/4.17.15#isEqual',event)">
+<code>_.isEqual</code>
+</a>
+</p>
+</span>
+</div>
+</div>
+<p>
+</p>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('uH2MfzsWo8pkhB4JbNXT','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

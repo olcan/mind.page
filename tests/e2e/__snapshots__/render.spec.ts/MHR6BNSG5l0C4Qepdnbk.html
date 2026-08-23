@@ -1,0 +1,15 @@
+<p>
+<mark class="label unique" title="#util/sample/examples/3" onmousedown="_handleTagClick('MHR6BNSG5l0C4Qepdnbk','#util/sample/examples/3','#util/sample/examples/3',event)" onclick="event.preventDefault();event.stopPropagation();">util/sample/examples/3</mark> Sample <code>A∈(0,1)</code>, <code>B∈(a,1)</code>, <code>C∈(a,b)</code>. Confine <code>C∈(.4999,.5001)</code> using <a href="#///domains" onclick="_handleLinkClick('MHR6BNSG5l0C4Qepdnbk','#///domains',event)">domain</a>
+<code>within(.5,.0001)</code>. Distances <code>distance(x,dom)</code> are used for guidance when <code>x∉dom</code>, which can be critical for <em>rare domains</em> that are <em>unlikely to contain any prior samples</em>. Distances are not defined for all values or domains (e.g. because there may be no sensible default notion of distance), but are defined for <em>all domains over finite numbers</em>
+<code>(-∞,∞) ≡ {is:'finite'}</code> as <em>minimum distance</em>
+<code>|x-y|</code> over <code>y∈(.4999,.5001)</code>. Other measures of distance (or methods of guidance) can be used, see <mark title="#util/sample/examples/8" onmousedown="_handleTagClick('MHR6BNSG5l0C4Qepdnbk','#util/sample/examples/8','#/8',event)" onclick="event.preventDefault();event.stopPropagation();">8</mark>.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> a = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>, <span class="hljs-number">1</span>))
+<span class="hljs-keyword">const</span> b = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, <span class="hljs-number">1</span>))
+<span class="hljs-keyword">const</span> c = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, b))
+<span class="hljs-comment">// condition(c &gt; .4999 &amp;&amp; c &lt; .5001)</span>
+<span class="hljs-title function_">confine</span>(c, <span class="hljs-title function_">within</span>(<span class="hljs-number">.5</span>, <span class="hljs-number">.0001</span>))</code>
+</pre>
+<mark class="hidden" title="#util" onmousedown="_handleTagClick('MHR6BNSG5l0C4Qepdnbk','#util','#util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('MHR6BNSG5l0C4Qepdnbk','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

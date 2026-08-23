@@ -1,0 +1,269 @@
+<p>
+<mark class="label unique" title="#util/plot" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#util/plot','#util/plot',event)" onclick="event.preventDefault();event.stopPropagation();">util/plot</mark> defines plotting utilities.  </p>
+<div class="core_js_table ready">
+<div class="function name_plot scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">plot</span>
+<span class="args">
+<span class="parens">(</span>obj,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>obj,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>plot <code>obj</code> in item <code>name</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>name</code> string can be first argument<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_hist scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">hist</span>
+<span class="args">
+<span class="parens">(</span>xJ|xSJ,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ|xSJ,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>histogram(s) for <code>xJ</code> or <code>xSJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>labeled counts or weights<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_bin scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">bin</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>K<span class="parens">]</span>,<span class="parens">[</span>d<span class="parens">]</span>,<span class="parens">[</span>s<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>K = 10<span class="parens">]</span>,<span class="parens">[</span>d = 2<span class="parens">]</span>,<span class="parens">[</span>s = inf<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>bin <code>xJ</code> into <code>≤K</code> bins <code>xB</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>B</code> values encode <code>B-1</code>
+<em>right-open intervals</em>
+<span class="math" _cache_key="WzkfBRXkdhxjHzgqbAhj-01dad0e9ba7616a3-1">
+<mjx-container class="MathJax CtxtMenu_Attached_0" jax="SVG" role="presentation" tabindex="-1">
+<svg xmlns="http://www.w3.org/2000/svg" width="8.747ex" height="2.262ex" role="img" focusable="false" viewBox="0 -750 3866 1000" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" style="vertical-align: -0.566ex;">
+<g stroke="currentColor" fill="currentColor" stroke-width="0" transform="matrix(1 0 0 -1 0 0)">
+<g data-mml-node="math">
+<g data-mml-node="mo">
+<use xlink:href="#MJX-TEX-N-5B">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(278, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D465">
+</use>
+</g>
+<g data-mml-node="mi" transform="translate(572, -150) scale(0.707)">
+<use xlink:href="#MJX-TEX-I-1D44F">
+</use>
+</g>
+</g>
+<g data-mml-node="mo" transform="translate(1203.3, 0)">
+<use xlink:href="#MJX-TEX-N-2C">
+</use>
+</g>
+<g data-mml-node="msub" transform="translate(1648, 0)">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D465">
+</use>
+</g>
+<g data-mml-node="TeXAtom" transform="translate(572, -150) scale(0.707)" data-mjx-texclass="ORD">
+<g data-mml-node="mi">
+<use xlink:href="#MJX-TEX-I-1D44F">
+</use>
+</g>
+<g data-mml-node="mo" transform="translate(429, 0)">
+<use xlink:href="#MJX-TEX-N-2B">
+</use>
+</g>
+<g data-mml-node="mn" transform="translate(1207, 0)">
+<use xlink:href="#MJX-TEX-N-31">
+</use>
+</g>
+</g>
+</g>
+<g data-mml-node="mo" transform="translate(3477, 0)">
+<use xlink:href="#MJX-TEX-N-29">
+</use>
+</g>
+</g>
+</g>
+</svg>
+<mjx-assistive-mml role="presentation" unselectable="on" display="inline">
+<math xmlns="http://www.w3.org/1998/Math/MathML">
+<mo stretchy="false">[</mo>
+<msub>
+<mi>x</mi>
+<mi>b</mi>
+</msub>
+<mo>,</mo>
+<msub>
+<mi>x</mi>
+<mrow>
+<mi>b</mi>
+<mo>+</mo>
+<mn>1</mn>
+</mrow>
+</msub>
+<mo stretchy="false">)</mo>
+</math>
+</mjx-assistive-mml>
+</mjx-container>
+</span>
+<br>can be given only range pair <code>[xs,xe]</code> or <code>min_max_in(xJ)</code>
+<br>rounds boundary values to <code>d</code> decimal places<br>can also round to at most <code>s</code> significant digits<br>drops empty or small bins to return <code>≤K</code> bins<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_count_bins scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">count_bins</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>xB<span class="parens">]</span>,<span class="parens">[</span>wJ<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ, <span class="parens">[</span>xB = bin<span class="parens">(</span>xJ<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>wJ<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>count <code>xJ</code> into bins <code>xB</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can aggregate optional weights <code>wJ</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_bars scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">bars</span>
+<span class="args">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>bar chart</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_hbars scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">hbars</span>
+<span class="args">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>horizontal bar chart</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_lines scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">lines</span>
+<span class="args">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>data,<span class="parens">{</span>…<span class="parens">}</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>line chart</p>
+</span>
+</div>
+</div>
+<p>
+</p>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>
+<mark class="hidden" title="#util/math" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#util/math','#/math',event)" onclick="event.preventDefault();event.stopPropagation();">math</mark>
+<mark class="hidden" title="#util/stat" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#util/stat','#/stat',event)" onclick="event.preventDefault();event.stopPropagation();">stat</mark>
+<mark class="hidden" title="#util/cloud" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#util/cloud','#/cloud',event)" onclick="event.preventDefault();event.stopPropagation();">cloud</mark>
+<mark class="hidden" title="#c3" onmousedown="_handleTagClick('WzkfBRXkdhxjHzgqbAhj','#c3','#c3',event)" onclick="event.preventDefault();event.stopPropagation();">c3</mark>

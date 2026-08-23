@@ -1,0 +1,501 @@
+<p>
+<mark class="label unique" title="#util/cloud" onmousedown="_handleTagClick('sFgJjDcknEWsmIjU0LSh','#util/cloud','#util/cloud',event)" onclick="event.preventDefault();event.stopPropagation();">util/cloud</mark> defines utilities for using <a href="https://firebase.google.com/docs/storage" onclick="_handleLinkClick('sFgJjDcknEWsmIjU0LSh','https://firebase.google.com/docs/storage',event)">firebase cloud storage</a>.</p>
+<div class="core_js_table ready">
+<div class="function name_upload scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">upload</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>upload <code>x</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<strong>option</strong>
+</td>
+<td align="left">
+</td>
+<td colspan="2" align="left">
+<strong>default</strong>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>path</code>
+</td>
+<td align="left">upload path</td>
+<td colspan="2" align="left">
+<code>hash(…)</code> of uploaded bytes + type</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">
+</td>
+<td colspan="2" align="left">paths <code>public/…</code> are special (see below)</td>
+</tr>
+<tr>
+<td align="left">
+<code>type</code>
+</td>
+<td align="left">
+<a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types" onclick="_handleLinkClick('sFgJjDcknEWsmIjU0LSh','https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types',event)">MIME</a> type</td>
+<td colspan="2" align="left">inferred from <code>x</code> (see below)</td>
+</tr>
+<tr>
+<td align="left">
+<code>force</code>
+</td>
+<td align="left">force upload?</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">
+<code>true</code> replaces any remote or cached value for <code>path</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>cache</code>
+</td>
+<td align="left">cache in memory?</td>
+<td align="left">
+<code>true</code>
+</td>
+<td align="left">
+<code>false</code> deletes any memory-based cache entry for <code>path</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>public</code>
+</td>
+<td align="left">make public?</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">
+<code> true</code> uploads to path <code>public/…</code>
+</td>
+</tr>
+</tbody>
+</table>
+<p>does not replace any existing value at <code>path</code> unless <code>force</code> is <code>true</code>
+<br>all uploads are encrypted &amp; private, <em>except under path</em>
+<code>public/…</code>
+<br>authentication <em>does not apply</em> to downloads via url (see <code>get_url</code>)<br>encryption ensures privacy even if download url is leaked<br>uploads to <code>public/…</code> are unencrypted &amp; readable by anyone<br>default <code>type</code> is inferred from <code>x</code>:</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">string</td>
+<td align="left">
+<code>text/plain</code>
+<font style="font-size:80%">(UTF-8 encoded)</font>
+</td>
+</tr>
+<tr>
+<td align="left">JSON value</td>
+<td align="left">
+<code>application/json</code>
+<font style="font-size:80%">(JSON-stringified, UTF-8 encoded)</font>
+</td>
+</tr>
+<tr>
+<td align="left">Blob</td>
+<td align="left">
+<code>Blob.type</code>
+<font style="font-size:80%">(treated as <code>ArrayBuffer</code>)</font>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>ArrayBuffer</code> &amp; <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView" onclick="_handleLinkClick('sFgJjDcknEWsmIjU0LSh','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView',event)">views</a>
+</td>
+<td align="left">
+<code>application/octet-stream</code>
+</td>
+</tr>
+</tbody>
+</table>
+<p>JSON value types are plain object, array, number, boolean, or null<br>returns upload path as specified or computed (via hash)</p>
+</div>
+</span>
+</div>
+<div class="function name_download scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">download</span>
+<span class="args">
+<span class="parens">(</span>path,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>download from <code>path</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<strong>option</strong>
+</td>
+<td align="left">
+</td>
+<td colspan="2" align="left">
+<strong>default</strong>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>type</code>
+</td>
+<td align="left">
+<a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types" onclick="_handleLinkClick('sFgJjDcknEWsmIjU0LSh','https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types',event)">MIME</a> type</td>
+<td colspan="2" align="left">specified on upload</td>
+</tr>
+<tr>
+<td align="left">
+<code>force</code>
+</td>
+<td align="left">force download?</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">
+<code>true</code> replaces any cached value for <code>path</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>cache</code>
+</td>
+<td align="left">cache in memory?</td>
+<td align="left">
+<code>true</code>
+</td>
+<td align="left">
+<code>false</code> deletes any memory-based cache entry for <code>path</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>cache2</code>
+</td>
+<td align="left">cache on disk?</td>
+<td align="left">
+<code>true</code>
+</td>
+<td align="left">
+<code>false</code> deletes any disk-based cache entry for <code>path</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>use_url</code>
+</td>
+<td align="left">use download url?</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">
+<code>true</code> uses download url</td>
+</tr>
+</tbody>
+</table>
+<p>return value depends on <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types" onclick="_handleLinkClick('sFgJjDcknEWsmIjU0LSh','https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types',event)">MIME</a> type:</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>text/*</code>
+</td>
+<td align="left">string <font style="font-size:80%">(UTF-8 decoded)</font>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>application/json</code>
+</td>
+<td align="left">JSON value <font style="font-size:80%">(UTF-8 decoded, JSON-parsed)</font>
+</td>
+</tr>
+<tr>
+<td align="left">other</td>
+<td align="left">byte array (<code>Uint8Array</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>returns <code>undefined</code> if missing<br>throws any other errors</p>
+</div>
+</span>
+</div>
+<div class="function name_delete_upload scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">delete_upload</span>
+<span class="args">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>delete upload at <code>path</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>does nothing if missing<br>throws other errors<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_get_metadata scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">get_metadata</span>
+<span class="args">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>get metadata for <code>path</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns <code>null</code> if missing<br>logs any other errors<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_get_url scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">get_url</span>
+<span class="args">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>get download url for <code>path</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns <code>null</code> if missing<br>logs any other errors<br>url can be used by <em>anyone</em> (i.e. w/o authentication)<br>url includes token that <em>never expires</em> but can be revoked<br>url (token) can be revoked by deleting or re-uploading path<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_abs_path scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">abs_path</span>
+<span class="args">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>absolute upload path for <code>path</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_exists scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">exists</span>
+<span class="args">
+<span class="parens">(</span>path,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>path,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>does upload exist at <code>path</code>?<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>uses local cache if <code>options.cache</code> is <code>true</code> (default <code>false</code>)<br>deletes any existing cache entry if <code>path</code> is missing<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_upload_store scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">upload_store</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>item<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>item = _this<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>upload <code>item.store</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>default upload path is <code>item.saved_id</code>
+<br>default upload is forced since path is fixed as contents change<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_download_store scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">download_store</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>item<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>item = _this<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>download <code>item.store</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>default download path is <code>item.saved_id</code>
+<br>default download is forced since path is fixed as contents change<p>
+</p>
+</div>
+</span>
+</div>
+</div>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('sFgJjDcknEWsmIjU0LSh','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

@@ -1,0 +1,16 @@
+<p>
+<mark class="label unique" title="#util/sample/examples/1" onmousedown="_handleTagClick('iL5lBZXz9IqLfeUo2NMv','#util/sample/examples/1','#util/sample/examples/1',event)" onclick="event.preventDefault();event.stopPropagation();">util/sample/examples/1</mark> Sample unknowns <code>A∈(0,1)</code>, <code>B∈(a,1)</code>. Confine <code>B∈(.9,∞)</code> using <a href="#///domains" onclick="_handleLinkClick('iL5lBZXz9IqLfeUo2NMv','#///domains',event)">domain</a>
+<code>above(.9)</code>. Confining <code>B∈(.9,∞)</code> is equivalent to conditioning on <code>B&gt;.9</code> and can be interpreted as <em>observing</em>
+<code>B&gt;.9</code> in a random run <code>{A,B}</code> while <code>A</code> (and specific value <code>b&gt;.9</code>) remains unknown. The effect of confining/conditioning <code>B</code> on <code>A</code> can then be interpreted as an <em>inference</em> or <em>prediction</em> on unknown variable <code>A</code>
+<em>having observed</em>
+<code>B&gt;.9</code>
+<em>(and nothing else) in the same run or in a past run</em>. In this interpretation the sampling distributions of <code>sample(domain)</code> act as <em>prior beliefs or knowledge</em> (see comments below) that are updated given observations.</p>
+<pre>
+<code class="js_input">
+<span class="hljs-keyword">const</span> a = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>, <span class="hljs-number">1</span>)) <span class="hljs-comment">// uniform prior</span>
+<span class="hljs-keyword">const</span> b = <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(a, <span class="hljs-number">1</span>)) <span class="hljs-comment">// uniform prior given a (non-uniform overall)</span>
+<span class="hljs-comment">// condition(b &gt; .9)</span>
+<span class="hljs-title function_">confine</span>(b, <span class="hljs-title function_">above</span>(<span class="hljs-number">.9</span>))</code>
+</pre>
+<mark class="hidden" title="#util" onmousedown="_handleTagClick('iL5lBZXz9IqLfeUo2NMv','#util','#util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('iL5lBZXz9IqLfeUo2NMv','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

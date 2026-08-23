@@ -1,0 +1,1339 @@
+<p>
+<mark class="label unique" title="#util/sim" onmousedown="_handleTagClick('6eNRpURjc8hPYmkbhBN5','#util/sim','#util/sim',event)" onclick="event.preventDefault();event.stopPropagation();">util/sim</mark> defines utilities for simulating the evolution of a state object <code>x</code> subject to random mutation events. See <a href="#util/sample/examples/12" onclick="_handleLinkClick('6eNRpURjc8hPYmkbhBN5','#util/sample/examples/12',event)">example</a>.  </p>
+<div class="core_js_table ready">
+<div class="function name__state scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_state</span>
+<span class="args">
+<span class="parens">(</span>obj<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>obj<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>create state from <code>obj</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>functions are invoked in <a href="https://stackoverflow.com/a/38218582" onclick="_handleLinkClick('6eNRpURjc8hPYmkbhBN5','https://stackoverflow.com/a/38218582',event)">property order</a>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_is_state scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_state</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is <code>x</code> a state object?</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_merge_state scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">merge_state</span>
+<span class="args">
+<span class="parens">(</span>x,obj<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,obj<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>merge <code>obj</code> into state <code>x</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_merge_params scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">merge_params</span>
+<span class="args">
+<span class="parens">(</span>x,obj<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,obj<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>merge <code>obj</code> into <code>x</code> as <em>parameters</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>parameters are treated as <em>constants</em> during simulation<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_path scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">path</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>path<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>path<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>path for (nested) state <code>x</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>path is <code>undefined</code> for root state<br>optional <code>path</code> relative to <code>x</code> can be specified<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_root scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">root</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>root state for (nested) state <code>x</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_trace scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">trace</span>
+<span class="args">
+<span class="parens">(</span>obj<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>obj<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>enable tracing for nested state<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>enables access (dependency) from schedulers<br>certain nested state (e.g. plain objects) are traced by default<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_weight_state scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">weight_state</span>
+<span class="args">
+<span class="parens">(</span>x,log_w<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,log_w<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>weight state <code>x</code> as <code>log_w</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>log_w</code> can be a function <code>x=&gt;…</code>
+<br>weights are accumulated at <code>root(x)._log_w</code>
+<br>simulation is terminated early when <code>_log_w==-inf</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_name_events scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">name_events</span>
+<span class="args">
+<span class="parens">(</span>...fE<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...fE<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>create <em>named</em> events from functions <code>fE</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>creates events as <code>set(e(), '_name', str(e))</code>
+<br>allows object arguments that specify names as keys<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_name_event scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">name_event</span>
+<span class="args">
+<span class="parens">(</span>name,event<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>name,event<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>name <code>event</code> as <code>name</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>attaches <code>name</code> string to <code>event</code> as <code>_name</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_attach_events scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">attach_events</span>
+<span class="args">
+<span class="parens">(</span>x,...eJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,...eJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>attach events <code>eJ</code> to (nested) state <code>x</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>event functions will be invoked on <code>x</code> instead of <code>root(x)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name__event scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_event</span>
+<span class="args">
+<span class="parens">(</span>fx,<span class="parens">[</span>ft<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>fx, <span class="parens">[</span>ft = daily<span class="parens">(</span>0<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>create mutation event <code>x → fx(x,…)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>state <code>x</code>
+<em>mutates</em> to <code>fx(x)</code> at time <code>ft(x)</code>
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>fx</code>
+</td>
+<td align="left">
+<em>mutator function</em>
+<code>fx(x)</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">must modify (i.e. <em>mutate</em>) state <code>x</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can return <code>null</code> to indicate cancelled (or hidden) mutation</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can return mutation parameters to be recorded in <code>x._events</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can be object to be merged into x (w/ functions invoked)</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can be identifier primitive (e.g. integer or string)</td>
+</tr>
+<tr>
+<td align="left">
+<code>ft</code>
+</td>
+<td align="left">
+<em>scheduler function</em>
+<code>ft(x)</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">must return future time <code>t &gt; x.t</code>, can be <code>inf</code> (never)</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">state variables accessed in <code>ft</code> are considered <em>dependencies</em>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">schedule is considered valid while dependencies are unchanged</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">default scheduler triggers daily at midnight (<code>t=0,1,2,…</code>)</td>
+</tr>
+<tr>
+<td align="left">
+<code>fc</code>
+</td>
+<td align="left">optional <em>conditioner function</em>
+<code>fc(x)</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">wraps <code>ft(x)</code> to return <code>inf</code> for <code>!fc(x)</code> state</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">state variables accessed in <code>fc</code> are considered <em>dependencies</em>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can be non-function treated as <em>domain</em> for <code>x</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">can be identifier primitive (as domain)</td>
+</tr>
+<tr>
+<td align="left">
+<code>x</code>
+</td>
+<td align="left">optional (nested) state object, attached to event as <code>_x</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">all functions will be invoked on <code>x</code> instead of <code>root(x)</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>name</code>
+</td>
+<td align="left">optional event name string, attached as <code>_name</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">extended as <code>path(x,name)</code> if <code>x</code> is also specified</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name__do scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_do</span>
+<span class="args">
+<span class="parens">(</span>fx,<span class="parens">[</span>ft<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>fx, <span class="parens">[</span>ft = daily<span class="parens">(</span>0<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>alias for <code>_event(…)</code>, mutator (<code>fx</code>) first</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name__at scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_at</span>
+<span class="args">
+<span class="parens">(</span>ft,<span class="parens">[</span>fx<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>ft,<span class="parens">[</span>fx<span class="parens">]</span>,<span class="parens">[</span>fc<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>alias for <code>_event(…)</code>, scheduler (<code>ft</code>) first</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name__if scope_ has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_if</span>
+<span class="args">
+<span class="parens">(</span>fc,<span class="parens">[</span>ft<span class="parens">]</span>,<span class="parens">[</span>fx<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>fc, <span class="parens">[</span>ft = daily<span class="parens">(</span>0<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>fx<span class="parens">]</span>,<span class="parens">[</span>x<span class="parens">]</span>,<span class="parens">[</span>name<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>alias for <code>_event(…)</code>, conditioner (<code>fc</code>) first</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_is_event scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">is_event</span>
+<span class="args">
+<span class="parens">(</span>e<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>e<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>is <code>e</code> an event object?</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_and scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">and</span>
+<span class="args">
+<span class="parens">(</span>...fJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...fJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>logical <em>and</em> conditioner</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_or scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">or</span>
+<span class="args">
+<span class="parens">(</span>...fJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...fJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>logical <em>or</em> conditioner</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_not scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">not</span>
+<span class="args">
+<span class="parens">(</span>f<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>f<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>logical <em>not</em> conditioner</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_mut scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">mut</span>
+<span class="args">
+<span class="parens">(</span>...yJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...yJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>generic mutator<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>handles args <code>...yJ</code> in order, by type:<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">function <code>f</code>
+</td>
+<td align="left">invoke as <code>r = f(x,r)</code>, <code>r</code> last returned value</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">if last arg, handle <code>r</code> as arg (by type), return <code>r</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">else if <code>r==null</code>, return <code>null</code>, else continue</td>
+</tr>
+<tr>
+<td align="left">
+<code>undefined</code>
+</td>
+<td align="left">skipped</td>
+</tr>
+<tr>
+<td align="left">
+<code>null</code>
+</td>
+<td align="left">returned (cancels event)</td>
+</tr>
+<tr>
+<td align="left">
+<code>p∈[0,1]</code>
+</td>
+<td align="left">continue mutations w/ probability <code>p</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">otherwise (w/ prob. <code>1-p</code>) cancel, return <code>null</code>
+</td>
+</tr>
+<tr>
+<td align="left">primitive</td>
+<td align="left">mutate state identifier primitive (x.state)</td>
+</tr>
+<tr>
+<td align="left">array</td>
+<td align="left">mutate recursively, passing array as args</td>
+</tr>
+<tr>
+<td align="left">object</td>
+<td align="left">merge object into state, invoke functions as f(old_val,x)</td>
+</tr>
+</tbody>
+</table>
+<p>returns last returned value from last function arg, if any</p>
+</div>
+</span>
+</div>
+<div class="function name_inc scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">inc</span>
+<span class="args">
+<span class="parens">(</span>...yJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...yJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>increment mutator<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>handles args <code>...yJ</code> in order, by type:<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">function <code>f</code>
+</td>
+<td align="left">invoke as <code>r = f(x,r)</code>, <code>r</code> last returned value</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">if last arg, handle <code>r</code> as arg (by type), return <code>r</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">else if <code>r==null</code>, return <code>null</code>, else continue</td>
+</tr>
+<tr>
+<td align="left">
+<code>undefined</code>
+</td>
+<td align="left">skipped</td>
+</tr>
+<tr>
+<td align="left">
+<code>null</code>
+</td>
+<td align="left">returned (cancels event)</td>
+</tr>
+<tr>
+<td align="left">
+<code>p∈[0,1]</code>
+</td>
+<td align="left">continue increments w/ probability <code>p</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">otherwise (w/ prob. <code>1-p</code>) cancel, return <code>null</code>
+</td>
+</tr>
+<tr>
+<td align="left">string</td>
+<td align="left">increment property or path (e.g. <code>x.a.b.c</code>) in <code>x</code>
+</td>
+</tr>
+<tr>
+<td align="left">array</td>
+<td align="left">increment recursively, passing array as args</td>
+</tr>
+<tr>
+<td align="left">object</td>
+<td align="left">increment all properties or paths in object</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">objects can be nested, e.g. <code>{a:{b:{c:1}}}</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">functions are invoked as f(old_val,x)</td>
+</tr>
+<tr>
+<td align="left">
+</td>
+<td align="left">non-numbers are set (no coercion)</td>
+</tr>
+</tbody>
+</table>
+<p>returns last returned value from last function arg, if any</p>
+</div>
+</span>
+</div>
+<div class="function name_daily scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">daily</span>
+<span class="args">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>daily scheduler<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>triggers daily at hour-of-day <code>h∈[0,24)</code>
+<br>
+<code>h</code> can be number, sampler, or function <code>x=&gt;…</code>
+<br>
+<code>h∉[0,24)</code> is mapped into <code>[0,24)</code> as <code>mod(h,24)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_after scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">after</span>
+<span class="args">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>interval scheduler<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>triggers <em>after</em>
+<code>h&gt;0</code> hours (from <code>x.t</code>)<br>
+<code>h</code> can be positive number, sampler, or function <code>x=&gt;…</code>
+<br>often used w/ conditioner <code>fc</code> to trigger <code>h</code> hours <em>after</em>
+<code>fc(x)</code> state<br>cancelled by <code>!fc(x)</code> states, especially for larger intervals <code>h</code>
+<br>triggers repeatedly <em>every</em>
+<code>h</code> hours unless cancelled<br>
+<em>memoryless</em> iff exponential, see <code>randomly</code> below<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_randomly scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">randomly</span>
+<span class="args">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>h<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>random interval scheduler<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>triggers randomly every <code>h&gt;0</code> hours <em>on average</em>
+<br>
+<code>h</code> can be positive number, sampler, or function <code>x=&gt;…</code>
+<br>consistent under rescheduling, <em>memoryless</em>: <code>P(T&gt;s+t|T&gt;s) = P(T&gt;t)</code>
+<br>corresponds <em>uniquely</em> to transitions of <em>continuous-time markov chain</em>
+<br>can be used w/ conditioner <code>fc</code> to trigger only in <code>fc(x)</code> states<br>
+<code>h==r*log(1/(1-p))</code> triggers within <code>r</code> hours w/ prob. <code>p</code>
+<br>
+<code>≡ after(exponential(0, h))</code> (but more efficient)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_at scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">at</span>
+<span class="args">
+<span class="parens">(</span>...tJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>...tJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>specific time scheduler<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>triggers <em>at</em> specific times <code>tJ</code>
+<br>
+<code>tJ</code> must be sorted (oldest first), in <code>event_time</code> units (see below)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_event_time scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">event_time</span>
+<span class="args">
+<span class="parens">(</span>date<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>date<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>convert <code>date</code> to <em>event time</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>date</code> must be a <code>Date</code> or valid argument for <code>new Date(…)</code>
+<br>
+<code>date</code> can be omitted (or <code>undefined</code>) to use current date/time<br>event times are <em>days</em> since <code>_t0_monday_midnight</code> (see below)<br>integer part is <em>midnights</em> since <code>_t0_monday_midnight</code>
+<br>fractional part times 24 is <em>hours since last midnight</em>
+<br>days are assumed 24 hours, ignoring daylight savings<br>one hour (2am in US) is effectively skipped or repeated<br>e.g. Mar 13 2022 (PST-&gt;PDT) is 23 hours (2am dropped)<br>e.g. Nov 6 2022 (PDT-&gt;PST) is 25 hours (2am repeated)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_now scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">now</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>event_time()</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name__t0_monday_midnight scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">_t0_monday_midnight</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>new Date(2021, 0, 4)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>Mon Jan 04 2021 00:00:00 GMT-0800 (PST)</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_last_hour scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">last_hour</span>
+<span class="args">
+<span class="parens">(</span>h,<span class="parens">[</span>t<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>h, <span class="parens">[</span>t = event_time<span class="parens">(</span>
+<span class="parens">)</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>time of last hour-of-day <code>h</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>event time for last occurrence of <code>h</code> before <code>t</code>
+<br>
+<code>t</code> is current time by default, but can be any event time<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_event_date scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">event_date</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>t<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>t = event_time<span class="parens">(</span>
+<span class="parens">)</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>convert event time to <code>Date</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_date_string scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">date_string</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>d<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>d = newDate<span class="parens">(</span>
+<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>event date string <code>YYYY/MM/DD</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>drop_year</code>
+</td>
+<td align="left">drop year prefix <code>YYYY/</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>drop_current_year</code>
+</td>
+<td align="left">drop year prefix if current year</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_time_string scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">time_string</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>d<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>d = newDate<span class="parens">(</span>
+<span class="parens">)</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>event time string <code>HH:MM</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_date_time_string scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">date_time_string</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>d<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>d = newDate<span class="parens">(</span>
+<span class="parens">)</span>
+<span class="parens">]</span>,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>event date-time string <code>YYYY/MM/DD HH:MM</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>options</code> same as <code>date_string</code> (see above)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_parse_date_time scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">parse_date_time</span>
+<span class="args">
+<span class="parens">(</span>date,time<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>date,time<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>parse event date-time <code>YYYY/MM/DD HH:MM</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns <code>Date</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_parse_date scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">parse_date</span>
+<span class="args">
+<span class="parens">(</span>date<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>date<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>parse event date <code>YYYY/MM/DD</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns <code>Date</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_parse_time scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">parse_time</span>
+<span class="args">
+<span class="parens">(</span>text<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>text<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>parse event time <code>HH:MM ...</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns as event time or <code>undefined</code> if invalid<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_print_event scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">print_event</span>
+<span class="args">
+<span class="parens">(</span>e<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>e<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>print event</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_print_state scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">print_state</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>print state</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_print_trace scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">print_trace</span>
+<span class="args">
+<span class="parens">(</span>m<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>m<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>print trace</p>
+</span>
+</div>
+</div>
+<p>
+</p>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('6eNRpURjc8hPYmkbhBN5','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>
+<mark class="hidden" title="#util/stat" onmousedown="_handleTagClick('6eNRpURjc8hPYmkbhBN5','#util/stat','#/stat',event)" onclick="event.preventDefault();event.stopPropagation();">stat</mark>

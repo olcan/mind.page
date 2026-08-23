@@ -1,0 +1,140 @@
+<p>
+<mark class="label unique" title="#util/worker" onmousedown="_handleTagClick('FO1QbC2v2ZOdfO6otYXi','#util/worker','#util/worker',event)" onclick="event.preventDefault();event.stopPropagation();">util/worker</mark> defines utilities for using <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers" onclick="_handleLinkClick('FO1QbC2v2ZOdfO6otYXi','https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers',event)">web workers</a>.</p>
+<div class="core_js_table ready">
+<div class="function name_init_worker scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">init_worker</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>initialize worker<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can be <em>closed</em> using <code>close_worker</code> (see below)<br>
+<code>options.imports</code> can be (array of) <code>/path</code> or <code>#item</code> strings<br>default imports are lodash (<code>/lodash.min.js</code>) and <code>_this.name</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_eval_on_worker scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">eval_on_worker</span>
+<span class="args">
+<span class="parens">(</span>worker,js,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>worker,js,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>evaluate <code>js</code> on <code>worker</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>js</code> can be string or function<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>deps</code>
+</td>
+<td align="left">dependency item names</td>
+</tr>
+<tr>
+<td align="left">
+<code>context</code>
+</td>
+<td align="left">context object (can contain transferables)</td>
+</tr>
+<tr>
+<td align="left">
+<code>transfer</code>
+</td>
+<td align="left">transferables (e.g. typed array buffers)</td>
+</tr>
+<tr>
+<td align="left">
+<code>done</code>
+</td>
+<td align="left">done message handler, can return <code>null</code> to fall back to default</td>
+</tr>
+<tr>
+<td align="left">
+<code>error</code>
+</td>
+<td align="left">error message handler</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_close_worker scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">close_worker</span>
+<span class="args">
+<span class="parens">(</span>worker<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>worker<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>closes worker<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>resolves any pending eval or messages, unlike <code>worker.terminate()</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+</div>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('FO1QbC2v2ZOdfO6otYXi','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>

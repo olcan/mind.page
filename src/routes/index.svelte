@@ -6545,10 +6545,10 @@
       // if sharer is known (on shared page, via shared=... param), fetch name immediately
       if (sharer)
         fetch('/user/' + sharer)
-          .then(r => r.text())
+          .then(r => (r.ok ? r.text() : '')) // empty if missing or on error (logged on server)
           .then(name => {
             sharer_name = name
-            sharer_short_name = sharer_name.match(/\S+/)?.pop()
+            sharer_short_name = sharer_name?.match(/\S+/)?.pop() // undefined if no name (no subtitle)
           })
 
       // pre-fetch user from localStorage instead of waiting for onAuthStateChanged
@@ -6648,7 +6648,7 @@
             if (!sharer) {
               sharer = user.uid
               sharer_name = user.mindpageDisplayName || user.displayName
-              sharer_short_name = sharer_name.match(/\S+/)?.pop()
+              sharer_short_name = sharer_name?.match(/\S+/)?.pop() // undefined if no name (no subtitle)
             }
             readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
 
@@ -8452,6 +8452,7 @@
       flex-grow: 2;
       display: flex;
       flex-direction: column;
+      justify-content: center; /* center title vertically when there is no subtitle */
       padding: 4px; /* minimal padding to avoid crowding title and subtitle */
       padding-left: 10px; /* extra padding to match padding of .left */
     }

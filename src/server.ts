@@ -236,10 +236,13 @@ const sapper_server = express().use(
         .doc(uid)
         .get()
         .then(doc => {
-          const name = doc.data().mindpageDisplayName || doc.data().displayName
+          const data = doc.data() ?? {} // missing user doc
+          const name = data.mindpageDisplayName || data.displayName || '' // empty if no display name
           res.status(200).contentType('text/plain').send(name)
         })
         .catch(e => {
+          // NOTE: on dev server, admin credentials require `gcloud auth application-default login`
+          console.error(`could not retrieve user path ${req.path}:`, e)
           return res.status(400).send('could not retrieve user path ' + req.path)
         })
     } else {

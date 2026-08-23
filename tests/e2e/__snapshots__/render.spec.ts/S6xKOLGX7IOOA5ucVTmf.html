@@ -1,0 +1,58 @@
+<p>
+<mark class="label unique" title="#util/sample/examples/12" onmousedown="_handleTagClick('S6xKOLGX7IOOA5ucVTmf','#util/sample/examples/12','#util/sample/examples/12',event)" onclick="event.preventDefault();event.stopPropagation();">util/sample/examples/12</mark> Sample or confine <a href="#util/sim" onclick="_handleLinkClick('S6xKOLGX7IOOA5ucVTmf','#util/sim',event)">simulation</a> parameters or state. Here we simulate a <em>hungry flipper</em> person who sleeps at 3am, wakes at 8-10am, eats a meal by 11am if hungry, and flips a biased coin at noon. We sample unknown parameters <code>p_hungry</code> and <code>p_heads</code> and initial state <code>flips</code> and <code>heads</code>, and then confine final state <code>meals</code> and <code>heads</code> after simulation. We use a shared block for all state and event definitions and use the sampling block exclusively for sampling and simulation.</p>
+<pre>
+<code class="js">
+<span class="hljs-keyword">const</span>
+<span class="hljs-title function_">hungry_flipper</span> = (<span class="hljs-params">mods</span>) =&gt; <span class="hljs-title function_">_state</span>({
+  <span class="hljs-attr">_params</span>: { <span class="hljs-attr">p_heads</span>: <span class="hljs-number">.5</span>, <span class="hljs-attr">p_hungry</span>: <span class="hljs-number">.5</span> },
+  <span class="hljs-attr">t</span>:      <span class="hljs-title function_">last_hour</span>(<span class="hljs-number">6</span>),
+  <span class="hljs-attr">awake</span>:  <span class="hljs-literal">false</span>,
+  <span class="hljs-attr">hungry</span>: <span class="hljs-literal">false</span>,
+  <span class="hljs-attr">meals</span>:  <span class="hljs-number">0</span>,
+  <span class="hljs-attr">flips</span>:  <span class="hljs-number">0</span>,
+  <span class="hljs-attr">heads</span>:  <span class="hljs-number">0</span>
+}).<span class="hljs-title function_">merge</span>(mods) <span class="hljs-comment">// may include existing params outside _params {…}</span>
+<span class="hljs-comment">// wake up at 8-10am, hungry w/ p_hungry</span>
+<span class="hljs-keyword">const</span> wake = <span class="hljs-title function_">_if</span>(<span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>!x.<span class="hljs-property">awake</span>, <span class="hljs-title function_">daily</span>(<span class="hljs-title function_">within</span>(<span class="hljs-number">9</span>,<span class="hljs-number">1</span>)), <span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>{
+  x.<span class="hljs-property">hungry</span> = <span class="hljs-title function_">random_boolean</span>(x.<span class="hljs-property">p_hungry</span>)
+  x.<span class="hljs-property">awake</span> = <span class="hljs-literal">true</span>
+})
+
+<span class="hljs-comment">// eat within 1h (of wake) if hungry</span>
+<span class="hljs-keyword">const</span> eat = <span class="hljs-title function_">_if</span>(<span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>x.<span class="hljs-property">awake</span> &amp;&amp; x.<span class="hljs-property">hungry</span>, <span class="hljs-title function_">after</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>,<span class="hljs-number">1</span>)),
+  <span class="hljs-title function_">inc</span>({ <span class="hljs-attr">meals</span>:<span class="hljs-number">1</span>, <span class="hljs-attr">hungry</span>:<span class="hljs-literal">false</span> }))
+
+<span class="hljs-comment">// flip coin at noon w/ p_heads</span>
+<span class="hljs-keyword">const</span> flip = <span class="hljs-title function_">_if</span>(<span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>x.<span class="hljs-property">awake</span>, <span class="hljs-title function_">daily</span>(<span class="hljs-number">12</span>), <span class="hljs-title function_">inc</span>(<span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>({
+  <span class="hljs-attr">heads</span>:<span class="hljs-title function_">random_binary</span>(x.<span class="hljs-property">p_heads</span>),
+  <span class="hljs-attr">flips</span>:<span class="hljs-number">1</span>,
+})))
+
+<span class="hljs-comment">// sleep at 3am</span>
+<span class="hljs-keyword">const</span> sleep = <span class="hljs-title function_">_if</span>(<span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>x.<span class="hljs-property">awake</span>, <span class="hljs-title function_">daily</span>(<span class="hljs-number">3</span>), <span class="hljs-function">
+<span class="hljs-params">x</span>=&gt;</span>{ x.<span class="hljs-property">awake</span>=<span class="hljs-literal">false</span> })
+<span class="hljs-keyword">const</span> events = { wake, eat, flip, sleep }</code>
+</pre>
+<hr>
+<pre>
+<code class="js_input">
+<span class="hljs-comment">// sample params &amp; initial state</span>
+<span class="hljs-keyword">const</span> x = <span class="hljs-title function_">hungry_flipper</span>({
+  <span class="hljs-attr">p_heads</span>: <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>,<span class="hljs-number">1</span>)),
+  <span class="hljs-attr">p_hungry</span>: <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">between</span>(<span class="hljs-number">0</span>,<span class="hljs-number">1</span>)),
+  <span class="hljs-attr">flips</span>: <span class="hljs-title function_">sample</span>(<span class="hljs-title function_">integer</span>(<span class="hljs-number">0</span>,<span class="hljs-number">5</span>)),
+  <span class="hljs-attr">heads</span>: <span class="hljs-function">(<span class="hljs-params">{p_heads, flips }</span>) =&gt;</span>
+<span class="hljs-title function_">random_binomial</span>(flips, p_heads)
+})
+<span class="hljs-keyword">const</span> { meals, heads } = <span class="hljs-title function_">simulate</span>(x, x.<span class="hljs-property">t</span> + <span class="hljs-number">3</span>, events)
+<span class="hljs-title function_">confine</span>(meals, <span class="hljs-number">2</span>)
+<span class="hljs-title function_">confine</span>(heads, <span class="hljs-number">6</span>)</code>
+</pre>
+<mark class="hidden" title="#util" onmousedown="_handleTagClick('S6xKOLGX7IOOA5ucVTmf','#util','#util',event)" onclick="event.preventDefault();event.stopPropagation();">util</mark>
+<mark class="hidden" title="#async" onmousedown="_handleTagClick('S6xKOLGX7IOOA5ucVTmf','#async','#async',event)" onclick="event.preventDefault();event.stopPropagation();">async</mark>

@@ -1,0 +1,1786 @@
+<p>
+<mark class="label unique" title="#util/stat" onmousedown="_handleTagClick('L3uAJBPTZBq6N5p5TofS','#util/stat','#util/stat',event)" onclick="event.preventDefault();event.stopPropagation();">util/stat</mark> defines statistical utilities.  </p>
+<div class="core_js_table ready">
+<div class="function name_random scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random',event)">Math.random</a> on <code>(0,1)</code>, excluding <code>0</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_boolean scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_boolean</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>p<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>p = 0.5<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>random() &lt; p</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_binary scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_binary</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>p<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>p = 0.5<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>(random() &lt; p ? 1 : 0)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_uniform scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_uniform</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Continuous_uniform_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Continuous_uniform_distribution',event)">uniform</a> on <code>(0,1)</code>,<code>(0,a)</code>, or <code>(a,b)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>(0,1)</code>
+</td>
+<td align="left">if <code>a</code> and <code>b</code> omitted</td>
+</tr>
+<tr>
+<td align="left">
+<code>(0,a)</code>
+</td>
+<td align="left">if <code>b</code> omitted</td>
+</tr>
+<tr>
+<td align="left">
+<code>(a,b)</code>
+</td>
+<td align="left">otherwise</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_random_uniform_array scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_uniform_array</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>fills <code>xJ</code> with <code>random_uniform(a,b)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_discrete_uniform scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_discrete_uniform</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Discrete_uniform_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Discrete_uniform_distribution',event)">uniform</a> on <code>{0,1}</code>,<code>{0,…,a-1}</code>, or <code>{a,…,b}</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>{0,1}</code>
+</td>
+<td align="left">if <code>a</code> and <code>b</code> omitted</td>
+</tr>
+<tr>
+<td align="left">
+<code>{0,…,a-1}</code>
+</td>
+<td align="left">if <code>b</code> omitted</td>
+</tr>
+<tr>
+<td align="left">
+<code>{a,…,b}</code>
+</td>
+<td align="left">otherwise</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_random_element scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_element</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>xJ[random_discrete_uniform(xJ.length)]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_discrete_uniform_array scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_discrete_uniform_array</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>fills <code>xJ</code> with <code>random_discrete_uniform(a,b)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_discrete scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_discrete</span>
+<span class="args">
+<span class="parens">(</span>wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Categorical_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Categorical_distribution',event)">discrete</a> on <code>{0,…,J-1}</code> w/ prob. <code>P(j)∝wJ[j]</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>faster if <code>wJ</code> is sorted by decreasing weight<br>normalizer <code>sum_wj</code> can be passed if known<br>
+<code>≡ random_discrete_uniform(J)</code> if <code>sum_wj==0</code>
+<br>assumes <code>wj&gt;=0</code> and <code>sum_wj&gt;=0</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_discrete_array scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_discrete_array</span>
+<span class="args">
+<span class="parens">(</span>jK,wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>jK,wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>fills <code>jK</code> with <code>discrete(wJ, sum_wj)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>faster if <code>wJ</code> is sorted by decreasing weight<br>normalizer <code>sum_wj</code> can be passed if known<br>
+<code>≡ random_discrete_uniform_array(jK, J)</code> if <code>sum_wj==0</code>
+<br>indices <code>jK</code> are ordered due to sampling method<br>use <code>random_shuffle(jK)</code> for random ordering<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_geometric scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_geometric</span>
+<span class="args">
+<span class="parens">(</span>p<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>p<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Geometric_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Geometric_distribution',event)">geometric</a> on <code>{0,1,2,…}</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_binomial scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_binomial</span>
+<span class="args">
+<span class="parens">(</span>n,p<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>n,p<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Binomial_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Binomial_distribution',event)">binomial</a> on <code>{0,1,2,…,n}</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_triangular scope_ truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_triangular</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>,<span class="parens">[</span>c<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>,<span class="parens">[</span>c<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Triangular_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Triangular_distribution',event)">triangular</a> on <code>(0,1)</code>, <code>(0,a)</code>, or <code>(a,b)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_normal scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_normal</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Normal_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Normal_distribution',event)">normal</a> on <code>(-∞,∞)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>scale by <code>σ&gt;0</code> &amp; shift by <code>μ</code> for location-scale family<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_exponential scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_exponential</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Exponential_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Exponential_distribution',event)">exponential</a> on <code>(0,∞)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>scale by <code>θ&gt;0</code> for scale family<br>scale by <code>1/λ&gt;0</code> for rate (inverse scale) family<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_gamma scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_gamma</span>
+<span class="args">
+<span class="parens">(</span>
+<span class="parens">[</span>α<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>
+<span class="parens">[</span>α = 1<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Gamma_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Gamma_distribution',event)">gamma</a> w/ shape <code>α</code> on <code>(0,∞)</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>scale by <code>θ&gt;0</code> for shape-scale family<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_beta scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_beta</span>
+<span class="args">
+<span class="parens">(</span>α,β<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>α,β<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Beta_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Beta_distribution',event)">beta</a> on <code>(0,1)</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_random_array scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_array</span>
+<span class="args">
+<span class="parens">(</span>J|xJ,<span class="parens">[</span>sampler<span class="parens">]</span>,<span class="parens">[</span>filter<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>J|xJ,<span class="parens">[</span>sampler = uniform<span class="parens">]</span>,<span class="parens">[</span>filter<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>sample array of <code>J</code> values from <code>sampler</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can skip values <code>x</code> s.t. <code>!filter(x)</code>, a.k.a. <a href="https://en.wikipedia.org/wiki/Rejection_sampling" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Rejection_sampling',event)">rejection sampling</a>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_random_shuffle scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">random_shuffle</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>js<span class="parens">]</span>,<span class="parens">[</span>je<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>js = 0<span class="parens">]</span>,<span class="parens">[</span>je = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>shuffles elements of array <code>xJ</code>
+<em>in place</em>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>returns array w/ elements shuffled in place<br>can be restricted to indices <code>js,…,je-1</code>
+<br>uses <a href="https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm',event)">Fisher-Yates-Durstenfeld algorithm</a>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_approx_equal scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">approx_equal</span>
+<span class="args">
+<span class="parens">(</span>x,y,<span class="parens">[</span>ε<span class="parens">]</span>,<span class="parens">[</span>εa<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,y,<span class="parens">[</span>ε = 1e-6<span class="parens">]</span>,<span class="parens">[</span>εa = 0<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>x≈y ≡ |x-y|/max(|x|,|y|))≤ε OR |x-y|≤εa</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>default <code>εa=0</code> means <code>x==y</code> is required for small <code>x,y</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_binomial_cdf scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">binomial_cdf</span>
+<span class="args">
+<span class="parens">(</span>x,n,p<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,n,p<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>P(X&lt;=x)</code> for <a href="https://en.wikipedia.org/wiki/Binomial_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Binomial_distribution',event)">binomial distribution</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_binomial_test scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">binomial_test</span>
+<span class="args">
+<span class="parens">(</span>n,k,p<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>n,k,p<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>p-value for two-tailed <a href="https://en.wikipedia.org/wiki/Binomial_test" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Binomial_test',event)">binomial test</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_beta_cdf scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">beta_cdf</span>
+<span class="args">
+<span class="parens">(</span>x,a,b<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,a,b<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>P(X&lt;=x)</code> for <a href="https://en.wikipedia.org/wiki/Beta_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Beta_distribution',event)">beta distribution</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_ks2 scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks2</span>
+<span class="args">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>two-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov</a> statistic<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can modify arrays <code>xJ</code>,<code>yK</code>,<code>wJ</code>,<code>wK</code>, to sort, filter, or map<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>wJ</code>
+</td>
+<td align="left">
+<code>1,…,1</code>
+</td>
+<td align="left">weights for <code>xJ</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>wK</code>
+</td>
+<td align="left">
+<code>1,…,1</code>
+</td>
+<td align="left">weights for <code>yK</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>wj_sum</code>
+</td>
+<td align="left">
+<code>J</code>
+</td>
+<td align="left">sum of weights <code>wJ</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>wk_sum</code>
+</td>
+<td align="left">
+<code>K</code>
+</td>
+<td align="left">sum of weights <code>wK</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>xj_sorted</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">assume <code>xJ</code> already sorted</td>
+</tr>
+<tr>
+<td align="left">
+<code>yk_sorted</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">assume <code>yK</code> already sorted</td>
+</tr>
+<tr>
+<td align="left">
+<code>discrete</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">allow identical (discrete) values?</td>
+</tr>
+<tr>
+<td align="left">
+<code>filter</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">filter <code>undefined</code> values?</td>
+</tr>
+<tr>
+<td align="left">
+<code>numberize</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">map values to random numbers?</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_ks1 scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks1</span>
+<span class="args">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>one-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov</a> statistic<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>can modify arrays <code>xJ</code>,<code>wJ</code>, to sort or filter<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>wJ</code>
+</td>
+<td align="left">
+<code>1,…,1</code>
+</td>
+<td align="left">weights for <code>xJ</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>wj_sum</code>
+</td>
+<td align="left">
+<code>J</code>
+</td>
+<td align="left">sum of weights <code>wJ</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>xj_sorted</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">assume <code>xJ</code> already sorted</td>
+</tr>
+<tr>
+<td align="left">
+<code>discrete</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">allow identical (discrete) values?</td>
+</tr>
+<tr>
+<td align="left">
+<code>filter</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">filter <code>undefined</code> values?</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_kolmogorov_cdf scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">kolmogorov_cdf</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>ε<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>ε = 1e-10<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>P(X&lt;=x)</code> for <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov_distribution',event)">Kolmogorov distribution</a>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>= jacobiTheta(4, 0, exp(-2*x*x))</code> using algorithm at <a href="https://github.com/paulmasson/math/blob/29146e1a18b52d709770d1cbe17d8f0ad6bbdfd0/src/functions/elliptic-functions.js#L2" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://github.com/paulmasson/math/blob/29146e1a18b52d709770d1cbe17d8f0ad6bbdfd0/src/functions/elliptic-functions.js#L2',event)">math.js</a>
+<br>
+<code>≡ EllipticTheta[4, 0, Exp[-2*x*x]]</code> in Mathematica (used for testing)<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_ks2_cdf scope_ has_more has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks2_cdf</span>
+<span class="args">
+<span class="parens">(</span>x,J,<span class="parens">[</span>K<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,J,<span class="parens">[</span>K = J<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>P(X&lt;=x)</code> for two-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov statistic</a>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>exact asymptotically (<code>J-&gt;∞,K-&gt;∞</code>) for continuous samples<br>approximate (within <code>0.27%</code> for <code>J,K≥20</code>) for small <code>J,K</code>
+<br>
+<em>invalid for discrete or mixed samples</em>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_ks1_cdf scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks1_cdf</span>
+<span class="args">
+<span class="parens">(</span>x,J<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,J<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>P(X&lt;=x)</code> for one-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov</a> statistic<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>exact asymptotically (<code>J-&gt;∞</code>) for continuous samples<br>approximate (within <code>0.27%</code> for <code>J≥10</code>) for small <code>J</code>
+<br>
+<em>invalid for discrete or mixed samples</em>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_ks2_test scope_ has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks2_test</span>
+<span class="args">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>p-value for two-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test',event)">Kolmogorov-Smirnov test</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_ks1_test scope_ has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks1_test</span>
+<span class="args">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>p-value for one-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test',event)">Kolmogorov-Smirnov test</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_kolmogorov_density scope_ has_more truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">kolmogorov_density</span>
+<span class="args">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>(Log) density for <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov_distribution" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov_distribution',event)">Kolmogorov distribution</a>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ Log[D[EllipticTheta[4, 0, Exp[-2*x*x]], x]]</code> in Mathematica<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_ks2_density scope_ has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks2_density</span>
+<span class="args">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,yK,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>(Log) density for two-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov statistic</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_ks1_density scope_ has_defaults truncated">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ks1_density</span>
+<span class="args">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,cdf,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>(Log) density for one-sample <a href="https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test#Kolmogorov%E2%80%93Smirnov_statistic',event)">Kolmogorov-Smirnov statistic</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_erf_inverse scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">erf_inverse</span>
+<span class="args">
+<span class="parens">(</span>z<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>z<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Error_function#Inverse_functions" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Error_function#Inverse_functions',event)">inverse error function</a>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_min_in scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">min_in</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>minimum element in <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_min_of scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">min_of</span>
+<span class="args">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f=x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f = x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>minimum of <code>f(x,j)</code> over <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>integer argument <code>J≥0</code> is treated as array <code>xJ=[0,1,2,…,J-1]</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_max_in scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">max_in</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>maximum element in <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_max_of scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">max_of</span>
+<span class="args">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f=x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f = x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>maximum of <code>f(x,j)</code> over <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>integer argument <code>J≥0</code> is treated as array <code>xJ=[0,1,2,…,J-1]</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_min_max_in scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">min_max_in</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>≡ [min_in(xJ), max_in(xJ)]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_min_max scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">min_max</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>min_max_in</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_min_max_of scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">min_max_of</span>
+<span class="args">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f=x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f = x=&gt;x<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>≡ [min_of(xJ|J, f), max_of(xJ|J, f)]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_sum scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">sum</span>
+<span class="args">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ|J,<span class="parens">[</span>f<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>sum of <code>xJ</code>, or <code>f(x,j)</code> over <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>integer argument <code>J≥0</code> is treated as array <code>xJ=[0,1,2,…,J-1]</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_sum_of scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">sum_of</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>sum</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_mean scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">mean</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>f<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>f<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>sum(xJ, f) / xJ.length</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_mean_of scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">mean_of</span>
+<span class="args">
+</span>
+<span class="args expanded">
+</span>
+</span>
+<span class="desc">
+<p>
+<code>mean</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_sum_normalize scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">sum_normalize</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>≡ scale(xJ, 1/sum(xJ))</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>
+<code>≡ xJ</code> if <code>sum(xJ) ≤ 0</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_variance scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">variance</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>variance of sample <code>xJ</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_stdev scope_     ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">stdev</span>
+<span class="args">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>sqrt(variance(xJ))</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_circular_mean scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">circular_mean</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>r<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>r = pi<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Circular_mean" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Circular_mean',event)">circular mean</a> of <code>xJ</code> on <code>[-r,r]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_circular_stdev scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">circular_stdev</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>r<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>r = pi<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<a href="https://en.wikipedia.org/wiki/Directional_statistics#Dispersion" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://en.wikipedia.org/wiki/Directional_statistics#Dispersion',event)">circular stdev</a> of <code>xJ</code> on <code>[-r,r]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_median scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">median</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>median of sample <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>sorted</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">assume <code>xJ</code> already sorted</td>
+</tr>
+<tr>
+<td align="left">
+<code>filter</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">filter undefined values</td>
+</tr>
+<tr>
+<td align="left">
+<code>copy</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">copy <code>xJ</code> before sorting/filtering</td>
+</tr>
+</tbody>
+</table>
+</div>
+</span>
+</div>
+<div class="function name_quantiles scope_  has_more has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">quantiles</span>
+<span class="args">
+<span class="parens">(</span>xJ,qK,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,qK,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>sample quantiles <code>qK</code> for <code>xJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<p>
+</p>
+<table>
+<thead>
+<tr>
+<th align="left">
+</th>
+<th align="left">
+</th>
+<th align="left">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">
+<code>sorted</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">assume <code>xJ</code> already sorted</td>
+</tr>
+<tr>
+<td align="left">
+<code>copy</code>
+</td>
+<td align="left">
+<code>false</code>
+</td>
+<td align="left">copy <code>xJ</code> before sorting</td>
+</tr>
+<tr>
+<td align="left">
+<code>α</code>
+</td>
+<td align="left">
+<code>.375</code>
+</td>
+<td align="left">estimation/interpolation parameter <code>α</code>
+</td>
+</tr>
+<tr>
+<td align="left">
+<code>β</code>
+</td>
+<td align="left">
+<code>.375</code>
+</td>
+<td align="left">estimation/interpolation parameter <code>β</code>
+</td>
+</tr>
+</tbody>
+</table>
+<p>default parameters <code>α=β=.375</code> are ~unbiased for normal <code>X</code>
+<br>see <a href="https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mstats.mquantiles.html#scipy-stats-mstats-mquantiles" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mstats.mquantiles.html#scipy-stats-mstats-mquantiles',event)">scipy.stats docs</a> for details and alternatives</p>
+</div>
+</span>
+</div>
+<div class="function name_quantile scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">quantile</span>
+<span class="args">
+<span class="parens">(</span>xJ,q,<span class="parens">[</span>options<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,q,<span class="parens">[</span>options = <span class="parens">{</span>
+<span class="parens">}</span>
+<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>
+<code>quantiles(xJ, [q], options)[0]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_ess scope_  has_more   ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">ess</span>
+<span class="args">
+<span class="parens">(</span>wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>wJ,<span class="parens">[</span>sum_wj<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>effective sample size for weights <code>wJ</code>
+<span class="less">
+<span class="more-indicator">
+</span>
+</span>
+</p>
+<div class="more">
+<br>approximates ideal value <code>J*Var(target)/MSE(sample)</code>
+<br>equivalent sample size <em>if we could sample from target</em>
+<br>see <a href="https://arxiv.org/abs/1809.04129" onclick="_handleLinkClick('L3uAJBPTZBq6N5p5TofS','https://arxiv.org/abs/1809.04129',event)">Rethinking the Effective Sample Size</a> for derivation<br>esp. section 3.2 "Summary of assumptions and approximations"<br>can be used as sample size for <code>ks1_cdf</code> or <code>ks2_cdf</code>
+<p>
+</p>
+</div>
+</span>
+</div>
+<div class="function name_clip scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">clip</span>
+<span class="args">
+<span class="parens">(</span>x,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>x,<span class="parens">[</span>a = 0<span class="parens">]</span>,<span class="parens">[</span>b = 1<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>clips <code>x</code> to <code>[a,b]</code>
+</p>
+</span>
+</div>
+<p>
+</p>
+<div class="function name_clip_in scope_   has_defaults  ">
+<span class="usage">
+<span class="bullet">
+</span>
+<span class="bullet">
+</span>
+<span class="name">clip_in</span>
+<span class="args">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a<span class="parens">]</span>,<span class="parens">[</span>b<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+<span class="args expanded">
+<span class="parens">(</span>xJ,<span class="parens">[</span>a = 0<span class="parens">]</span>,<span class="parens">[</span>b = 1<span class="parens">]</span>
+<span class="parens">)</span>
+</span>
+</span>
+<span class="desc">
+<p>clips <code>xJ</code> to <code>[a,b]</code>
+</p>
+</span>
+</div>
+</div>
+<p>
+</p>
+<mark class="hidden" title="#util/core" onmousedown="_handleTagClick('L3uAJBPTZBq6N5p5TofS','#util/core','#/core',event)" onclick="event.preventDefault();event.stopPropagation();">core</mark>
+<mark class="hidden" title="#util/math" onmousedown="_handleTagClick('L3uAJBPTZBq6N5p5TofS','#util/math','#/math',event)" onclick="event.preventDefault();event.stopPropagation();">math</mark>
