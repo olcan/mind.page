@@ -6883,6 +6883,13 @@
                 `received first snapshot (${snapshot.docs.length} items, ` +
                   `${snapshot.metadata.fromCache ? 'cache' : 'current'})`
               )
+              // a fresh (empty) persistent cache can produce an empty snapshot before the server
+              // has responded; initializing then would treat a populated account as empty and offer
+              // the new-account welcome (and a NEW secret phrase), so wait for the server instead
+              if (!initTime && snapshot.empty && snapshot.metadata.fromCache) {
+                init_log('ignoring empty first snapshot from cache (waiting for server) ...')
+                return
+              }
               if (!initTime) {
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
