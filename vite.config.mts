@@ -26,6 +26,9 @@ export default defineConfig(({ command }) => {
   server: {
     // firebase-config.js lives at the repo root, outside kit's default fs allow list
     fs: { allow: ['.'] },
+    // the hmr websocket rejects unknown hosts (vite's backported host check); allow the dev-cert
+    // hostnames (see ssl-dev/ and build_mind_page.sh in the vault; ip literals are always allowed)
+    allowedHosts: ['localhost', 'local.dev', 'localhost.dev', '.local'],
     // hmr gets its own port: with `proxy` set, vite skips ws upgrades on the main server and the
     // first client attempt fails before falling back (the dedicated port connects directly)
     ...(https ? { https, port: 443, host: true, strictPort: false, proxy: {}, hmr: { server: hmrServer, clientPort: hmrPort } } : {}),
