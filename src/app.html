@@ -89,9 +89,6 @@
 
   <body>
     <!-- index.svelte is rendered here -->
-    <!-- the app container keeps the sapper-era id (used by styles, tests and items); kit link
-         handling is disabled since the app manages its own links and history -->
-    <div id="sapper" data-sveltekit-reload data-sveltekit-preload-data="off">%sveltekit.body%</div>
     <div id="cache-div" style="position: fixed; left: -100000px; width: 750px"></div>
     <script>
       MathJax = {
@@ -161,5 +158,10 @@
     <script>
       delete window.s
     </script>
+    <!-- the app container keeps the sapper-era id (used by styles, tests and items); kit link
+         handling is disabled since the app manages its own links and history; it sits after the
+         parser-blocking cdn scripts above so that kit's inline import() bootstrap (not parser
+         ordered, unlike sapper's classic bundle tag) cannot start the app before they load -->
+    <div id="sapper" data-sveltekit-reload data-sveltekit-preload-data="off">%sveltekit.body%</div>
   </body>
 </html>

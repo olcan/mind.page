@@ -43,9 +43,11 @@ function markdownItem(file) {
 }
 const markdownDir = join(dir, 'fixtures/markdown')
 const markdownFiles = readdirSync(markdownDir).filter(file => file.endsWith('.md'))
-const markdownOrder = [...markdownFiles].sort((a, b) =>
-  a == 'markdown.md' ? -1 : b == 'markdown.md' ? 1 : a < b ? -1 : 1
-)
+// page order: the root item first (its label heads the page), then its children in the order their
+// tags appear in the root item's text, then (as a fallback) any unlisted files alphabetically
+const rootTags = readFileSync(join(markdownDir, 'markdown.md'), 'utf8').match(/#[\w/]+/g) ?? []
+const fileForTag = tag => tag.slice(1).replace(/\//g, '-') + '.md'
+const markdownOrder = [...new Set(['markdown.md', ...rootTags.map(fileForTag), ...[...markdownFiles].sort()])]
 for (const file of markdownFiles) {
   const item = markdownItem(join(markdownDir, file))
   batch.set(db.collection('items').doc(item.id), (({ id, ...data }) => data)(item))

@@ -3059,6 +3059,16 @@
   function onLinkClick(id: string, href: string, e: MouseEvent) {
     const index = indexFromId.get(id)
     if (index === undefined) return // deleted
+    // ##fragment links scroll to the (heading) id without navigating: a real anchor navigation
+    // creates a history entry outside the app's own state management, and the app's next
+    // replaceState (e.g. recording the scroll position) drops the anchor from the url anyway,
+    // leaving the back button out of sync
+    if (href.startsWith('##')) {
+      e.preventDefault()
+      const fragment = href.substring(2)
+      const elem = _item(id, true)?.elem?.querySelector(`#${CSS.escape(fragment)}`) ?? document.getElementById(fragment)
+      elem?.scrollIntoView()
+    }
     // "soft touch" item if not already newest and not pinned and not log
     // if (items[index].time > newestTime) console.warn('invalid item time')
     if (items[index].time > newestTime) newestTime = items[index].time
@@ -8523,10 +8533,12 @@
     } */
     /* note label hiding on shared pages is handled per item (see hideLabel in Item.svelte) */
     {#if items[0].title}
-      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
+      /* hide the focused item's first heading (in document order), which the header shows as the
+         page title; note :first-of-type would hide the first heading of every level */
+      .header + .super-container :is(h1, h2, h3, h4, h5, h6):not(:is(h1, h2, h3, h4, h5, h6) ~ :is(h1, h2, h3, h4, h5, h6)) {
         display: none;
       }
-      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type + br {
+      .header + .super-container :is(h1, h2, h3, h4, h5, h6):not(:is(h1, h2, h3, h4, h5, h6) ~ :is(h1, h2, h3, h4, h5, h6)) + br {
         display: none;
       }
     {/if}

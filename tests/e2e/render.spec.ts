@@ -19,6 +19,20 @@ test('anonymous account loads from the emulator', async ({ page }) => {
   expect(await page.evaluate(() => window._items().length)).toBe(120)
 })
 
+test('the app waits for the cdn scripts even when they are slow', async ({ page }) => {
+  // kit's bootstrap is an inline import(), which unlike sapper's classic bundle tag is not parser
+  // ordered: the app container sits below the parser-blocking cdn script tags (see app.html) so
+  // that items cannot evaluate before the globals (c3, hljs, graphviz, ...) exist
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(String(error)))
+  await page.route(
+    /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com/,
+    route => void setTimeout(() => route.continue(), 2_500)
+  )
+  await loadAnonymous(page)
+  expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
+})
+
 test('every anonymous item renders as before', async ({ page }) => {
   await loadAnonymous(page)
   const ids: string[] = await page.evaluate(() => window._items().map(item => item.id))

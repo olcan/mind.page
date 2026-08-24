@@ -14,10 +14,14 @@ export async function renderedHtml(page: Page, id: string, timeout = 15_000): Pr
       if (!elem) return null
       const content = elem.querySelector('.content') ?? elem
       let html = content.innerHTML
-      for (let i = 0; i < 10; i++) {
-        await sleep(100)
-        if (content.innerHTML == html) break // settled
-        html = content.innerHTML
+      for (let i = 0; i < 50; i++) {
+        await sleep(200)
+        const current = content.innerHTML
+        // graphviz (dot) renders after a lazy wasm fetch, so a dot container without its svg is
+        // still pending even if the html has not changed between polls
+        const pending = /class="dot"/.test(current) && !/<svg/.test(current)
+        if (current == html && !pending) break // settled
+        html = current
       }
       return html
     },
