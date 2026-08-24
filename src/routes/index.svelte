@@ -1758,17 +1758,7 @@
     const documentWidth = getDocumentWidth()
     const minColumnWidth = 500 // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
-    let columnHeights = new Array(columnCount).fill(0)
-    let columnLastItem = new Array(columnCount).fill(-1)
-    let columnItemCount = new Array(columnCount).fill(0)
-    columnHeights[0] = headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight // first column includes header
-    let topMovers = new Array(columnCount).fill(items.length) // see definition of "mover" below
     let target = null
-    let lastTimeString = ''
-    newestTime = 0
-    oldestTime = Infinity
-    oldestTimeString = ''
-    totalItemHeight = 0
     lastLayoutTime = Date.now()
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
@@ -1778,6 +1768,7 @@
     tick().then(resizeHiddenColumn)
     updateVerticalPadding()
 
+    // bookkeeping pass (component state the layout does not depend on)
     items.forEach((item, index) => {
       item.index = index
       indexFromId.set(item.id, index)
@@ -1786,103 +1777,26 @@
       if (item.dotted && item.editing) showDotted = true
       if (item.focused) focusedItem = index
       if (item.target) target = item
-
-      let lastItem = items[index - 1]
-      let timeString = itemTimeString(item.time)
-      if (item.time < oldestTime) {
-        oldestTime = item.time
-        oldestTimeString = timeString
-      }
-      if (item.time > newestTime) newestTime = item.time
-
-      item.timeString = ''
-      item.timeOutOfOrder = false
-      if (!fixed && !item.pinned && (index == 0 || timeString != lastTimeString)) {
-        item.timeString = timeString
-        item.timeOutOfOrder = index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString
-        lastTimeString = timeString // for grouping of subsequent items
-      }
-
-      // calculate item height (zero if dotted, or not yet calculated and default is zero)
-      item.outerHeight = item.dotted ? 0 : item.height || defaultItemHeight
-      // add item margins + time string height
-      if (item.outerHeight > 0) item.outerHeight += 8 + (item.timeString ? 24 : 0)
-      totalItemHeight += item.height // used to hide items until height available
-
-      // determine item column
-      item.nextColumn = -1
-      item.nextItemInColumn = -1
-
-      if (index == 0) item.column = 0
-      else {
-        // stay on same column unless column height would exceed minimum column height by 90% of screen height
-        const lastColumn = lastItem.column
-        const minColumnHeight = Math.min(...columnHeights)
-        if (
-          columnHeights[lastColumn] <= minColumnHeight + 0.5 * outerHeight ||
-          columnHeights[lastColumn] + item.outerHeight + separatorHeight <= minColumnHeight + 0.9 * outerHeight
-        )
-          item.column = lastColumn
-        else item.column = columnHeights.indexOf(minColumnHeight)
-        if (item.column != lastColumn) {
-          lastItem.nextColumn = item.column
-          lastItem.arrows = item.column < lastColumn ? '↖' : ''
-          for (let i = 0; i < Math.abs(item.column - lastColumn) - 1; ++i)
-            lastItem.arrows += item.column < lastColumn ? '←' : '→'
-          lastItem.arrows += item.column < lastColumn ? '' : '↗'
-          // NOTE: we include .section-separator height but ignore show which is dynamic (like dotted items)
-          columnHeights[lastColumn] += separatorHeight // .section-separator height including margins
-        }
-      }
-      // mark item as aboveFold if it is pinned or item is visible (at least partially) on first screen
-      // if item heights are not available, then we use item index in column and assume top 5 are above fold
-      item.aboveFold =
-        item.pinned || (item.height ? columnHeights[item.column] < outerHeight : columnItemCount[item.column] < 5)
-      // if (item.aboveFold)
-      //   console.debug(
-      //     'aboveFold',
-      //     index,
-      //     item.height,
-      //     columnHeights[item.column],
-      //     outerHeight,
-      //     columnItemCount[item.column]
-      //   )
-      // // item "prominence" i position in screen heights, always 0 if pinned, 1+ if !aboveFold
-      // item.prominence = item.pinned
-      //   ? 0
-      //   : totalItemHeight > 0
-      //   ? columnHeights[item.column] / outerHeight
-      //   : columnItemCount[item.column] / 5;
-      columnItemCount[item.column]++
-
-      // if non-pinned item is first in its column or section and missing time string, add it now
-      // also mark it as a "leader" for styling its index number
-      item.leader = !item.pinned && (columnLastItem[item.column] < 0 || item.column != lastItem.column)
-      if (!fixed && item.leader && !item.timeString) {
-        item.timeString = timeString
-        lastTimeString = timeString // for grouping of subsequent items
-        // add time string height now, assuming we are not ignoring item height
-        if (item.outerHeight > 0) item.outerHeight += 24
-      }
-      item.pos = columnHeights[item.column] // position in column
-      columnHeights[item.column] += item.outerHeight
-      if (columnLastItem[item.column] >= 0) {
-        items[columnLastItem[item.column]].nextItemInColumn = index
-        // if item is below section-separator and has timeString, discount -24px negative margin
-        if (columnLastItem[item.column] != index - 1 && item.timeString) columnHeights[item.column] -= 24
-      }
-      columnLastItem[item.column] = index
-
-      // mark item as "mover" if it becomes visible or changes column or position (within column)
-      // note visibility (hideIndex) can change between layouts, but we use mover flags only for immediately scrolling
-      item.mover =
-        index < hideIndex && (!item.lastVisible || item.column != item.lastColumn || item.pos != item.lastPos)
-
-      if (item.mover && index < topMovers[item.column]) topMovers[item.column] = index
-      item.lastVisible = index < hideIndex
-      item.lastColumn = item.column
-      item.lastPos = item.pos
     })
+
+    // the per-item layout pass is extracted and table-tested with synthetic heights (see
+    // layoutItems in src/layout.ts); it mutates the items' layout fields and returns the
+    // aggregates used for scrolling below
+    const layout = layoutItems(items, {
+      columnCount,
+      headerHeight: headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight,
+      screenHeight: outerHeight,
+      defaultItemHeight,
+      separatorHeight,
+      hideIndex,
+      fixed,
+      timeString: itemTimeString,
+    })
+    const topMovers = layout.topMovers
+    newestTime = layout.newestTime
+    oldestTime = layout.oldestTime
+    oldestTimeString = layout.oldestTimeString
+    totalItemHeight = layout.totalItemHeight
 
     checkIfRenderingVisibleItems()
 
@@ -6119,6 +6033,7 @@
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotAction } from '../snapshot'
   import { buildHiddenIndex, registerHidden, applyRemoteAdded, applyRemoteModified, removeHidden } from '../hidden'
+  import { layoutItems } from '../layout'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
