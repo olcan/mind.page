@@ -101,5 +101,12 @@ Notes on driving the app from tests:
   auth change does not start as an anonymous visitor, whose welcome prompt would stay open and
   queue every later modal behind it.
 
+- `markdown.spec.ts` - the markdown rendering conformance corpus: `fixtures/markdown/*.md` (one
+  item per file, first `#label` in the file is the item label; source of truth in this repo) is
+  seeded as items shared by `markdown_e2e` and rendered on `/?shared=markdown_e2e/markdown` as a
+  signed-out visitor, each compared to `__snapshots__/markdown.spec.ts/<slug>.html`. To view and
+  edit the corpus, run `npm run test:e2e:serve` and open that url: saving a fixture file re-seeds
+  it and the app applies it live. Add a case by adding a file.
+
 Each item's golden is reviewed like any diff: if a change is intended, run `test:e2e:update` and
 commit the updated snapshot files.

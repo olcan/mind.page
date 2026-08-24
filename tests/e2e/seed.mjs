@@ -1,7 +1,7 @@
 // Seeds the Firestore emulator with the anonymous account's items (tests/e2e/fixtures), using the
 // admin sdk without credentials (the emulator accepts any writes); run with the emulators up.
-import { readFileSync } from 'fs'
-import { dirname, join } from 'path'
+import { existsSync, readFileSync, readdirSync, watch } from 'fs'
+import { basename, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
@@ -16,6 +16,7 @@ for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), d
 // user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
 batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
 batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test', mindpageDisplayName: 'Alice (custom)' })
+batch.set(db.collection('users').doc('markdown_e2e'), { displayName: 'Markdown' })
 // a shared item of another user, readable by anyone (see firestore.rules) via ?shared=crawl_e2e/public
 batch.set(db.collection('items').doc('e2e-crawl-shared'), {
   user: 'crawl_e2e',
@@ -23,5 +24,49 @@ batch.set(db.collection('items').doc('e2e-crawl-shared'), {
   text: '#e2e_crawl a shared item for crawlers',
   attr: { shared: { keys: ['public'] } },
 })
+// the markdown rendering corpus (fixtures/markdown/*.md, one item per file, first #label is the
+// item label): shared by the markdown_e2e user under key 'markdown', so it can be browsed and
+// tested at /?shared=markdown_e2e/markdown without auth, isolated from the anonymous account
+function markdownItem(file) {
+  const text = readFileSync(file, 'utf8').replace(/\n$/, '')
+  const label = text.match(/#[\w/]+/)?.[0] ?? basename(file, '.md')
+  return {
+    id: 'md-' + label.slice(1).replace(/\//g, '-'), // deterministic ids keep the goldens stable
+    user: 'markdown_e2e',
+    time: 1700000000000 - [...markdownFiles].sort().indexOf(basename(file)), // stable order
+    text,
+    attr: { shared: { keys: ['markdown'] } },
+  }
+}
+const markdownDir = join(dir, 'fixtures/markdown')
+const markdownFiles = readdirSync(markdownDir).filter(file => file.endsWith('.md'))
+for (const file of markdownFiles) {
+  const item = markdownItem(join(markdownDir, file))
+  batch.set(db.collection('items').doc(item.id), (({ id, ...data }) => data)(item))
+}
 await batch.commit()
-console.log(`seeded ${items.length} anonymous items into firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`)
+console.log(
+  `seeded ${items.length} anonymous and ${markdownFiles.length} markdown items ` +
+    `into firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`
+)
+
+// with --watch, re-seed a markdown fixture whenever its file changes, so edits appear live in the
+// app (the firestore listener applies them as remote updates); used by serve.sh
+if (process.argv.includes('--watch')) {
+  console.log(`watching ${markdownDir} for changes ...`)
+  watch(markdownDir, (event, file) => {
+    if (!file?.endsWith('.md')) return
+    const path = join(markdownDir, file)
+    if (!existsSync(path)) return // deletions are ignored (re-run serve.sh to remove items)
+    try {
+      const item = markdownItem(path)
+      db.collection('items')
+        .doc(item.id)
+        .set((({ id, ...data }) => data)(item))
+        .then(() => console.log(`re-seeded ${file}`))
+    } catch (e) {
+      console.error(`failed to re-seed ${file}:`, e.message)
+    }
+  })
+  await new Promise(() => {}) // keep watching until killed
+}
