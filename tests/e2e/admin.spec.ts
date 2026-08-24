@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { interceptMindItems, loadAdmin, loadAnonymous, useGithubToken } from './helpers'
+import { interceptMindItems, loadAdmin, loadAnonymous, useGithubToken } from './helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the read-only project

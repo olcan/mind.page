@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { loadAnonymous } from './helpers'
+import { loadAnonymous } from './helpers.js'
 
 // column layout (see updateItemLayout in index.svelte): columnCount is max(1, floor(width / 500)),
 // items keep their order across reflows, and the hidden render column tracks the first column's

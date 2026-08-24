@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { loadAnonymous } from './helpers'
-import { normalize, renderedHtml } from './rendering'
+import { loadAnonymous } from './helpers.js'
+import { normalize, renderedHtml } from './rendering.js'
 
 // rendering goldens: the anonymous account (seeded from fixtures, see seed.mjs) is loaded as a
 // signed-out visitor and every item is rendered via the app's own _render_item; the rendered html is

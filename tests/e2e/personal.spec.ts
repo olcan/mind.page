@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers'
+import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers.js'
 
 // personal account path: first sign-in (welcome item, secret phrase), encrypted items, the secret on
 // a new device, sharing by key with anonymous visitors, and sign-out

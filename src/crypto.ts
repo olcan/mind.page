@@ -3,6 +3,7 @@
 // mode, or '~' + iv hex + raw cipher bytes in uint8 ("bytes") mode; the key is the sha-256 of
 // the utf8-encoded secret, and the stored form of a secret phrase is base64(sha-256(uid+phrase))
 
+// @ts-ignore util.js is untyped (the strict tsc pass over tests reaches this module)
 import { byteArrayToString, byteStringToArray, concatByteArrays } from './util.js'
 
 // aes-gcm key for the secret, usable for the given operations
@@ -16,7 +17,7 @@ const ivToHex = (iv: Uint8Array) =>
     .map(b => ('00' + b.toString(16)).slice(-2))
     .join('') // 24 hex chars for the 96-bit iv
 
-const ivFromHex = (hex: string) => new Uint8Array(hex.match(/.{2}/g).map(byte => parseInt(byte, 16)))
+const ivFromHex = (hex: string) => new Uint8Array(hex.match(/.{2}/g)!.map(byte => parseInt(byte, 16)))
 
 // the stored form of the secret phrase: base64 of sha-256(uid + phrase)
 export async function hashSecretPhrase(uid: string, phrase: string): Promise<string> {

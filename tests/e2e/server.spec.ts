@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'fs'
 import { createServer, type Server } from 'http'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { ADMIN, ALICE, firestore } from './helpers'
+import { ADMIN, ALICE, firestore } from './helpers.js'
 
 // server.ts contract over http (no browser): the ssr shell and its session fields, pwa scopes and
 // manifests, host-dependent icons, /user, webhooks, the cors proxy and the localhost-only dev routes

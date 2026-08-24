@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { waitForApp } from './helpers'
-import { normalize, renderedHtml } from './rendering'
+import { waitForApp } from './helpers.js'
+import { normalize, renderedHtml } from './rendering.js'
 import { readdirSync } from 'fs'
 import { resolve, basename } from 'path'
 import { fileURLToPath } from 'url'

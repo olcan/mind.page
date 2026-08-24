@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { firestore, loadAdmin } from './helpers'
+import { firestore, loadAdmin } from './helpers.js'
 
 // editor flows driven by keyboard and mouse, as admin on the anonymous account: creating items from
 // the mindbox, searching and url state, tag navigation and history, editing items in place, undelete
