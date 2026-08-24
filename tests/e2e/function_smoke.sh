@@ -20,9 +20,10 @@ firebase emulators:exec --only auth,firestore,functions,hosting '
   code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5050/manifest.json)
   [ "$code" = 200 ] || { echo "FAIL: manifest -> $code"; exit 1; }
   # a seeded uid exercises handler mounting, the async firestore read and display-name precedence
-  # (mindpageDisplayName over displayName, see seed.mjs); an invalid uid must get a client error
-  user=$(curl -s http://127.0.0.1:5050/user/alice_e2e)
-  echo "$user" | grep -q "Alice (custom)" || { echo "FAIL: /user/alice_e2e -> $user"; exit 1; }
+  # (mindpageDisplayName over displayName, see seed.mjs); status and exact body are both required
+  code=$(curl -s -o /tmp/fn_smoke_user -w "%{http_code}" http://127.0.0.1:5050/user/alice_e2e)
+  [ "$code" = 200 ] || { echo "FAIL: /user/alice_e2e -> $code"; exit 1; }
+  [ "$(cat /tmp/fn_smoke_user)" = "Alice (custom)" ] || { echo "FAIL: /user/alice_e2e body -> $(cat /tmp/fn_smoke_user)"; exit 1; }
   code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5050/user/nonexistent-uid)
   case "$code" in 4??) ;; *) echo "FAIL: /user (invalid uid) -> $code (expected a client error)"; exit 1;; esac
   echo "function smoke passed: page, crawler content, manifest and /user served through the ssr function"
