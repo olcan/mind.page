@@ -120,7 +120,7 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   await page.evaluate(() => void window._create('#e2e_shared hello visitors'))
   await expect.poll(() => savedId(page, '#e2e_shared'), { timeout: 30_000 }).toBeTruthy()
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
-  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key'))
+  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key', 0)) // indexed, so it is shown (not just accessible)
   await expect
     .poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 })
     .toMatchObject({
@@ -135,6 +135,7 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
     await waitForApp(visitor)
     expect(await visitor.evaluate(() => window._readonly)).toBe(true)
     expect(await visitor.evaluate(() => window._items().map(item => item.name))).toEqual(['#e2e_shared'])
+    expect(await visitor.evaluate(() => window.__hideIndex)).toBe(1) // shown, not just accessible
     // the header names the sharer via /user/<uid> (the display name of the signed-in profile)
     await expect(visitor.locator('.header .status .center .subtitle')).toHaveText(/shared by Alice/)
   } finally {

@@ -30,12 +30,15 @@ batch.set(db.collection('items').doc('e2e-crawl-shared'), {
 function markdownItem(file) {
   const text = readFileSync(file, 'utf8').replace(/\n$/, '')
   const label = text.match(/#[\w/]+/)?.[0] ?? basename(file, '.md')
+  const index = [...markdownFiles].sort().indexOf(basename(file))
   return {
     id: 'md-' + label.slice(1).replace(/\//g, '-'), // deterministic ids keep the goldens stable
     user: 'markdown_e2e',
-    time: 1700000000000 - [...markdownFiles].sort().indexOf(basename(file)), // stable order
+    time: 1700000000000 - index, // stable order
     text,
-    attr: { shared: { keys: ['markdown'] } },
+    // note a shared index is required for the item to be shown (not just accessible) on the
+    // shared page: fixed mode shows the first hideIndex = count(indices[key] >= 0) items
+    attr: { shared: { keys: ['markdown'], indices: { markdown: index } } },
   }
 }
 const markdownDir = join(dir, 'fixtures/markdown')
