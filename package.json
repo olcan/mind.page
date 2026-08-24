@@ -38,7 +38,9 @@
     "sirv": "^3.0.0"
   },
   "overrides": {
-    "http-proxy": "npm:http-proxy-3@^1.23.3"
+    "http-proxy": "npm:http-proxy-3@^1.23.3",
+    "uuid": "^13.0.0",
+    "cookie": "^0.7.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
