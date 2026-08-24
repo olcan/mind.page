@@ -545,15 +545,17 @@
             : selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1# $2')
         } else if (html_comment_languages.has(language)) {
           // NOTE: technically multi-line html comments are allowed, but are not highlighted by highlightjs (causing confusion in editor), and would also require special-casing in preserve-line-breaks logic, so we comment individual lines for now for simplicity ...
-          // if (selectedText.match(/^\s*<!--/) && selectedText.match(/-->\s*$/))
-          //   selectedText = selectedText.replace(/^(\s*)<!--\s*/g, '$1').replace(/\s*-->(\s*)$/g, '$1')
-          // else if (!selectedText.match(/^\s*<!--/) && !selectedText.match(/-->\s*$/))
-          //   selectedText = selectedText.replace(/^(\s*)(.*)$/gs, '$1<!-- $2').replace(/^(.*)(\s*)$/gs, '$1 -->$2')
-          if (selectedText.match(/^\s*<!--/))
-            selectedText = selectedText.replace(/((?:^|\n)\s*)<!--\s*(.*?)\s*-->/g, '$1$2')
+          // note the escaped <\!-- avoids a literal html comment opener, which breaks vite's
+          // dev-time script scanner (same idiom as in index.svelte)
+          // if (selectedText.match(/^\s*<\!--/) && selectedText.match(/-->\s*$/))
+          //   selectedText = selectedText.replace(/^(\s*)<\!--\s*/g, '$1').replace(/\s*-->(\s*)$/g, '$1')
+          // else if (!selectedText.match(/^\s*<\!--/) && !selectedText.match(/-->\s*$/))
+          //   selectedText = selectedText.replace(/^(\s*)(.*)$/gs, '$1<' + '!-- $2').replace(/^(.*)(\s*)$/gs, '$1 -->$2')
+          if (selectedText.match(/^\s*<\!--/))
+            selectedText = selectedText.replace(/((?:^|\n)\s*)<\!--\s*(.*?)\s*-->/g, '$1$2')
           else {
             const prev_length = selectedText.length
-            selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1<!-- $2 -->')
+            selectedText = selectedText.replace(/((?:^|\n)\s*)(.*)/g, '$1<' + '!-- $2 -->')
             caretOffset = ((selectedText.length - prev_length) * 5) / 9 // 5 of 9 chars are left delimiters
           }
         } else if (mathematica_comment_languages.has(language)) {

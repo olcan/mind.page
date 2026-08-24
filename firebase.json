@@ -14,7 +14,9 @@
     "ignore": [
       "**/node_modules/**",
       "**/dev/**",
-      "ssl-dev/**"
+      "ssl-dev/**",
+      ".svelte-kit/**",
+      "tests/**"
     ]
   },
   "hosting": {
@@ -41,6 +43,14 @@
     "postdeploy": []
   },
   "emulators": {
+    "hosting": {
+      "host": "127.0.0.1",
+      "port": 5050
+    },
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5051
+    },
     "auth": {
       "host": "127.0.0.1",
       "port": 9099

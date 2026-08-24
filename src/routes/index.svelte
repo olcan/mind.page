@@ -1,11 +1,3 @@
-<script context="module" lang="ts">
-  // server-side preload function, see server.ts for comments
-  export async function preload(page, session) {
-    // this.error(404, 'Not found')
-    return process['server-preload'](page, session) // see server.ts
-  }
-</script>
-
 <script lang="ts">
   const isClient = typeof window !== 'undefined'
   // import firebase via client.ts (can also be via server.ts if preloading used again)
@@ -2254,6 +2246,12 @@
   function onEditorChange(text: string, keep_times = false) {
     // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
+    // in fixed mode, navigating to the item at shared index 0 (e.g. by clicking its label) is
+    // treated as the main page, instead of a lone-item view without even the back triangle
+    if (fixed && text.trim()) {
+      const root = items.find(item => item.shared?.indices?.[shared_key] == 0)
+      if (root?.labelText && text.trim().toLowerCase() == root.labelText.toLowerCase()) text = ''
+    }
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -2281,7 +2279,8 @@
     }
 
     // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used when considering auto-hide/show (hideIndex change) below
-    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state.editorText
+    // note history.state is null after a browser-native hash navigation (e.g. a ##fragment link)
+    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != history.state?.editorText
 
     // if editor text is cleared while a target is selected, we force new state just as in onTagClick
     // only exception is when replaceStateOnEditorChange is set, e.g. to clear query for deleted items in deleteItem
@@ -2890,7 +2889,7 @@
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
       const orderHash = hash(items.map(item => item.id).join())
-      if (editorText != history.state.editorText || orderHash != history.state.orderHash) {
+      if (editorText != history.state?.editorText || orderHash != history.state?.orderHash) {
         // need to update history
         const state = {
           index: undefined, // set below depending on push vs replace
@@ -2903,7 +2902,7 @@
           intro,
         }
         // console.debug(history.state.final ? "push" : "replace", state);
-        if (forceNewStateOnEditorChange || (history.state.final && !replaceStateOnEditorChange)) {
+        if (forceNewStateOnEditorChange || (history.state?.final && !replaceStateOnEditorChange)) {
           // console.debug({
           //   forceNewStateOnEditorChange,
           //   replaceStateOnEditorChange,
@@ -2969,7 +2968,7 @@
   function toggleItems(index: number) {
     hideIndex = index
     checkIfRenderingVisibleItems()
-    replaceState(Object.assign(history.state, { hideIndex }))
+    replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { hideIndex }))
   }
 
   function scrollToTarget() {
@@ -3060,6 +3059,16 @@
   function onLinkClick(id: string, href: string, e: MouseEvent) {
     const index = indexFromId.get(id)
     if (index === undefined) return // deleted
+    // ##fragment links scroll to the (heading) id without navigating: a real anchor navigation
+    // creates a history entry outside the app's own state management, and the app's next
+    // replaceState (e.g. recording the scroll position) drops the anchor from the url anyway,
+    // leaving the back button out of sync
+    if (href.startsWith('##')) {
+      e.preventDefault()
+      const fragment = href.substring(2)
+      const elem = _item(id, true)?.elem?.querySelector(`#${CSS.escape(fragment)}`) ?? document.getElementById(fragment)
+      elem?.scrollIntoView()
+    }
     // "soft touch" item if not already newest and not pinned and not log
     // if (items[index].time > newestTime) console.warn('invalid item time')
     if (items[index].time > newestTime) newestTime = items[index].time
@@ -3070,6 +3079,15 @@
     }
   }
 
+  // clear the mindbox (back to the main page): via the #mindbox item's controller when installed
+  // (e.g. the anonymous account), else directly (e.g. shared pages, whose items define no globals)
+  function clearMindbox() {
+    if (window['MindBox']?.clear) window['MindBox'].clear()
+    else {
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange('')
+    }
+  }
   function onLogSummaryClick(id: string) {
     let index = indexFromId.get(id)
     if (index === undefined) return
@@ -5733,7 +5751,7 @@
       historyUpdatePending = true
       setTimeout(() => {
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
-        replaceState(Object.assign(history.state, { scrollPosition: document.body.scrollTop }))
+        replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { scrollPosition: document.body.scrollTop }))
         historyUpdatePending = false
       }, 250)
     }
@@ -6883,11 +6901,18 @@
                 `received first snapshot (${snapshot.docs.length} items, ` +
                   `${snapshot.metadata.fromCache ? 'cache' : 'current'})`
               )
-              // a fresh (empty) persistent cache can produce an empty snapshot before the server
-              // has responded; initializing then would treat a populated account as empty and offer
-              // the new-account welcome (and a NEW secret phrase), so wait for the server instead
-              if (!initTime && snapshot.empty && snapshot.metadata.fromCache) {
-                init_log('ignoring empty first snapshot from cache (waiting for server) ...')
+              // the persistent cache can produce an empty first snapshot (fresh cache) or a partial
+              // one (e.g. only the plaintext shared items cached by a visit to a shared page)
+              // before the server has responded; initializing from those would treat a populated
+              // account as empty or unencrypted and prompt for a NEW secret phrase over the
+              // existing items, so wait for the server unless this device holds the secret (a
+              // returning device still initializes offline from its complete cache)
+              if (
+                !initTime &&
+                snapshot.metadata.fromCache &&
+                (snapshot.empty || (!anonymous && !fixed && !localStorage.getItem('mindpage_secret')))
+              ) {
+                init_log('ignoring first snapshot from cache (waiting for server) ...')
                 return
               }
               if (!initTime) {
@@ -8074,7 +8099,7 @@
   function onWebcamClick(e) {
     intro = !intro
     // replace state except for first (always intro)
-    if (history.state.index > 0) replaceState(Object.assign(history.state, { intro }))
+    if (history.state?.index > 0) replaceState(Object.assign(history.state, { intro }))
     e.stopPropagation()
     ;(e.target as HTMLElement).classList.toggle('intro')
   }
@@ -8143,7 +8168,7 @@
               {#if fixed && items.length > 0}
                 <div class="left">
                   {#if items[0].shared.indices?.[shared_key] != 0}
-                    <span class="triangle" on:click={() => window['MindBox'].clear()}>◀</span>
+                    <span class="triangle" on:click={clearMindbox}>◀</span>
                   {/if}
                   <span title={(items[0].labelText ?? '').replace(/^#/, '')}>
                     {(items[0].labelText ?? '').replace(/^#/, '')}
@@ -8262,6 +8287,7 @@
                 running={item.running}
                 admin={item.admin}
                 {fixed}
+                hideLabel={fixed && (item.shared?.labels !== true || item.shared?.indices?.[shared_key] == 0)}
                 source={item.attr ? item.attr.source : ''}
                 path={item.attr ? item.attr.path : ''}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
@@ -8512,14 +8538,14 @@
     .item > div:first-child {
       display: none !important;
     } */
-    .item > :is(.content, .deps-and-dependents) mark.label {
-      display: none !important;
-    }
+    /* note label hiding on shared pages is handled per item (see hideLabel in Item.svelte) */
     {#if items[0].title}
-      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
+      /* hide the focused item's first heading (in document order), which the header shows as the
+         page title; note :first-of-type would hide the first heading of every level */
+      .header + .super-container :is(h1, h2, h3, h4, h5, h6):not(:is(h1, h2, h3, h4, h5, h6) ~ :is(h1, h2, h3, h4, h5, h6)) {
         display: none;
       }
-      .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type + br {
+      .header + .super-container :is(h1, h2, h3, h4, h5, h6):not(:is(h1, h2, h3, h4, h5, h6) ~ :is(h1, h2, h3, h4, h5, h6)) + br {
         display: none;
       }
     {/if}

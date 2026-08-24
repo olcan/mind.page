@@ -13,3 +13,5 @@ dot/git
 test-results/
 playwright-report/
 *-debug.log
+.svelte-kit/
+build/

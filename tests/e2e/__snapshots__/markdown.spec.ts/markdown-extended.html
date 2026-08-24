@@ -1,0 +1,47 @@
+<p>
+<mark class="label unique" title="#markdown/extended" onmousedown="_handleTagClick('md-markdown-extended','#markdown/extended','#markdown/extended',event)" onclick="event.preventDefault();event.stopPropagation();">markdown/extended</mark>
+<br>&nbsp;<br>
+</p>
+<h4 id="heading-1">Heading 1</h4>
+<p>has auto-generated id <code>heading-1</code>
+<br>&nbsp;<br>
+</p>
+<h4 id="heading-2">Heading 2</h4>
+<p>has auto-generated id <code>heading-2</code>
+<br>&nbsp;<br>
+</p>
+<p>Fragment (<code>#id</code>) links work when the target element is on the page. An extra '#' is used to distinguish from <code>#tags</code>:</p>
+<ul>
+<li>
+<span class="list-item">
+<a href="#heading-1" title="##heading-1" onclick="_handleLinkClick('md-markdown-extended','##heading-1',event)">Scroll to Heading 1</a>
+</span>
+</li>
+<li>
+<span class="list-item">
+<a href="#heading-2" title="##heading-2" onclick="_handleLinkClick('md-markdown-extended','##heading-2',event)">Scroll to Heading 2</a>
+</span>
+</li>
+</ul>
+<p>&nbsp;<br>
+</p>
+<p>Checkboxes <code>[ ]</code> and <code>[x]</code> work inside bullets:</p>
+<ul class="checkbox">
+<li class="checkbox">
+<span class="list-item">
+<input type="checkbox" _checkbox_index="0"> do</span>
+</li>
+<li class="checkbox">
+<span class="list-item">
+<input type="checkbox" _checkbox_index="1"> not</span>
+</li>
+<li class="checkbox">
+<span class="list-item">
+<input type="checkbox" _checkbox_index="2"> quite work</span>
+</li>
+</ul>
+<p>&nbsp;<br>
+</p>
+<p>Footnotes [^1]<br>[^1]: do not work<br>&nbsp;<br>
+</p>
+<p>Term Definitions<br>: do not work</p>

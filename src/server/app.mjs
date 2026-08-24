@@ -1,30 +1,31 @@
+// express middleware stack shared by the dev server (vite plugin, see vite.config.ts), the
+// production server (server.mjs) and the ssr cloud function; extracted from the sapper-era
+// src/server.ts, which mounted sapper.middleware at the end (kit's handler is now mounted by the
+// caller instead, and the page's session fields moved to src/routes/[[scope=pwa]]/+page.server.js)
 import sirv from 'sirv'
 import express from 'express'
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
-import * as sapper from '@sapper/server'
-import https from 'https'
 import fs from 'fs'
-import os from 'os'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir } from './util.js'
+import { canonicalizeHost, getHostDir } from '../host.js'
 
-const { PORT, NODE_ENV } = process.env
+const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
 const server_id = crypto.randomBytes(8).toString('hex')
 
-const chokidar = dev ? require('chokidar') : null
+const chokidar = dev ? (await import('chokidar')).default : null
 const events = {} // recorded fs events for /watch/... requests
 
 // initialize firebase admin client
 // NOTE: Firebase ADMIN API is NOT to be confused with Firebase API
 // see https://firebase.google.com/docs/reference/admin vs https://firebase.google.com/docs/reference
-import { firebaseConfig } from '../firebase-config.js'
-const { initializeApp } = require('firebase-admin/app')
-const { getFirestore } = require('firebase-admin/firestore')
-const { getAuth } = require('firebase-admin/auth')
+import { firebaseConfig } from '../../firebase-config.js'
+import { initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
+import { getAuth } from 'firebase-admin/auth'
 initializeApp(firebaseConfig)
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
@@ -35,12 +36,6 @@ initializeApp(firebaseConfig)
 // standalone (s) should hide chrome toolbar but may show if app navigates outside scope
 // browser (b) runs in a regular browser tab or window
 // see https://developer.mozilla.org/en-US/docs/Web/Manifest/display
-// first non-internal ipv4 address of this host (as ip.address() of the dropped `ip` package did)
-function localAddress() {
-  for (const addresses of Object.values(os.networkInterfaces()))
-    for (const a of addresses ?? []) if (a.family == 'IPv4' && !a.internal) return a.address
-  return '127.0.0.1'
-}
 
 const paths = []
 for (let i = 0; i < 10; i++) {
@@ -58,16 +53,15 @@ paths.push('/b/')
 // default global-scope standalone-display prefix
 paths.push('/')
 
-const sapper_server = express().use(
-  paths,
+const scoped = express.Router()
+scoped.use(
 
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
   // redirects are followed instead of exposed to server for robust CORS bypass
   // note // in https?:// can be rewritted to / by browser or intemediaries
   // websockets can also be proxied
-  // @ts-ignore  // ignore since should go away with sveltekit upgrade
-  createProxyMiddleware({
+    createProxyMiddleware({
     changeOrigin: true,
     pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
     pathRewrite: (path, req) => {
@@ -108,13 +102,13 @@ const sapper_server = express().use(
     dev,
     // maxAge: 365 * 24 * 3600, // cache for up to 1y (disabled in dev mode)
     dotfiles: true, // allow requests for .DS_Store to avoid 404 preventing "app" treatment on Android
-  } as any),
+  }),
 
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     // console.debug('handling path', req.path)
-    const hostport = (req.headers['x-forwarded-host'] || req.headers['host']) as string
+    const hostport = (req.headers['x-forwarded-host'] || req.headers['host'])
     const hostname_orig = hostport.replace(/:\d+$/, '')
     // note globalThis.hostname is used in index.svelte on server side
     const hostname = (globalThis.hostname = canonicalizeHost(hostport))
@@ -163,6 +157,8 @@ const sapper_server = express().use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
+    } else if (req.path == '/.well-known/appspecific/com.chrome.devtools.json') {
+      res.status(204).end() // chrome devtools probes this on every load; a 404 is noise in dev logs
     } else if (req.path == '/server_id') {
       res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
@@ -198,39 +194,6 @@ const sapper_server = express().use(
       }
       res.json(events[key])
       events[key] = []
-    } else if (hostname == 'localhost' && req.path.startsWith('/client/sapper-dev-client')) {
-      // modify sapper-dev-client.*.js file (see comments below on changes)
-      // the file is in __sapper__/dev/client/sapper-dev-client.*.js
-      // the dev server is in node_modules/sapper/dist/dev.js
-      const abspath = process.env['PWD'] + '/__sapper__/dev' + req.path
-      // res.sendFile(abspath)
-      fs.readFile(abspath, 'utf8', (err, data) => {
-        if (err) {
-          console.error(err)
-          res.status(400).send('could not find ' + abspath + ';' + err)
-        } else {
-          res.contentType('text/javascript') // Or some other more appropriate value
-          // use /proxy for HTTP to avoid mixed content errors
-          // upgrade-insecure-requests header (or meta tag) does NOT work on Safari
-          data = data.replace('http:', '/proxy/http:')
-          // force reload on server connection with new server_id
-          // otherwise server restarts are NOT detected via proxy
-          data = data.replace(
-            `console.log(\`[SAPPER] dev client connected\`);`,
-            `console.log(\`[SAPPER] dev client connected\`);
-             fetch('/server_id').then(resp => resp.text()).then(server_id => {
-              if (window._dev_server_id && window._dev_server_id != server_id) {
-                console.log('[SAPPER] dev server_id changed!', window._dev_server_id, '-->', server_id)
-                window.location.reload()
-                return
-              }
-              window._dev_server_id = server_id
-              console.log('[SAPPER] dev server_id is', server_id)
-            })`
-          )
-          res.send(data)
-        }
-      })
     } else if (hostname == 'localhost' && req.path == '/preview') {
       const html = `<!doctype html><html lang=en><head><meta charset=utf-8><title>preview</title><script>document.open('text/html');document.write(localStorage.getItem('mindpage_preview_html') ?? 'missing html');document.close()</script></head></html>`
       res.status(200).contentType('text/html').send(html)
@@ -281,8 +244,8 @@ const sapper_server = express().use(
           response_token:
             'sha256=' +
             crypto
-              .createHmac('sha256', req.query.crc_key as string)
-              .update(req.query.crc_token as string)
+              .createHmac('sha256', req.query.crc_key)
+              .update(req.query.crc_token)
               .digest('base64'),
         })
         return
@@ -317,50 +280,17 @@ const sapper_server = express().use(
     } else {
       next()
     }
-  },
-
-  // populate session w/ cookie, see https://sapper.svelte.dev/docs#Seeding_session_data
-  sapper.middleware({
-    session: (req, res) => ({
-      cookie: res['cookie'],
-      server_name: os.hostname(),
-      server_ip: localAddress(),
-      // we use client_ip to help identify distinct client devices (_should_ work on firebase w/ the 'trust proxy' setting set below, but otherwise you can try accessing headers directly as in https://stackoverflow.com/a/67397092)
-      // aside from public ip & user agent, there is no info in http headers that can help identify client machine
-      // browsers do not reveal any more info to servers than they do to local javascript via navigator.*
-      // browsers do provide user-level identifiers for authentication, but we are interested in devices
-      // see https://code-maze.com/http-series-part-3/#headers for some more info about relevant headers
-      client_ip: req['ip'], // see https://stackoverflow.com/a/14631683
-    }),
-  }) as any // sapper's request/response types predate current @types/express (via @types/compression)
+  }
 )
 
-sapper_server.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
+// the stack is mounted at the root and again at the pwa scope prefixes, which strip the prefix so
+// that e.g. /2f/apple-touch-icon.png resolves within the scope (express 5 no longer accepts '/'
+// inside a path array, hence the separate root mount)
+const app = express()
+app.use(scoped)
+app.use(paths.filter(path => path != '/'), scoped)
 
-const on_firebase = 'FIREBASE_CONFIG' in process.env
-let sapper_https_server // started here unless on_firebase
-
-// listen if firebase is not handling the server ...
-if (!on_firebase) {
-  // listen on standard HTTP port
-  sapper_server.listen(PORT, () => {
-    console.log(`HTTP server ${server_id} listening on http://localhost:${PORT}`)
-  })
-
-  // also listen on HTTPS port, unless disabled (e.g. by the e2e test stack, see tests/e2e)
-  if (!process.env.NO_HTTPS)
-    sapper_https_server = https
-    .createServer(
-      {
-        key: fs.readFileSync('ssl-dev/ca.key'),
-        cert: fs.readFileSync('ssl-dev/ca.crt'),
-      },
-      sapper_server
-    )
-    .listen(443, () => {
-      console.log(`HTTPS server ${server_id} listening on https://localhost:443`)
-    })
-}
+app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
 
 // helper to read stream into buffer, from https://stackoverflow.com/a/67729663
 function read_to_buffer(stream) {
@@ -372,57 +302,5 @@ function read_to_buffer(stream) {
   })
 }
 
-// server-side preload hidden from client code (see index.svelte)
-// see https://sapper.svelte.dev/docs#preloading for documentation
-// NOTE: for dev server, admin credentials require `gcloud auth application-default login`
-process['server-preload'] = async (page, session) => {
-  // console.debug('preloading', page, session)
-
-  // sanity check that this function is not invoked on the client side
-  if (typeof window !== 'undefined') throw new Error('server-preload invoked on client side')
-
-  // server session information included in all responses
-  // these should match up with exported variables in index.svelte
-  const resp = {
-    server_name: session.server_name,
-    server_ip: session.server_ip,
-    client_ip: session.client_ip,
-  }
-
-  // disable preload for now since firebase realtime is often faster due to client-side caching
-  return resp
-
-  let user = null
-  if (session.cookie == 'signin_pending') {
-    // if signin is pending, we do not want to waste time loading anonymous items, and we also can not risk any auth errors (e.g. when loading fixed items) that would interrupt signin, so we simply return nothing (with an indication that preloading was skipped) and expect client to reload if server-side loading is required (i.e. if client-side fallback is not available)
-    return resp
-  } else if (!session.cookie || page.query.user == 'anonymous') {
-    user = { uid: 'anonymous' }
-  } else {
-    user = await getAuth().verifyIdToken(session.cookie).catch(console.error)
-    if (!user) return { ...resp, server_warning: 'invalid/expired signin' }
-    // console.debug('user', user)
-  }
-
-  const start = Date.now()
-  let items // items preloaded from firebase
-
-  console.debug(`retrieving all items for user ${user.email} (${user.uid}) ...`)
-  const item_docs = await getFirestore()
-    .collection('items') // server always reads from primary collection
-    .where('user', '==', user.uid) // important since otherwise firebaseAdmin has full access
-    .orderBy('time', 'desc')
-    .get()
-  items = item_docs.docs.map(doc => Object.assign(doc.data(), { id: doc.id }))
-
-  const bytes = JSON.stringify(items).length
-  console.debug(
-    `retrieved ${items.length} items (${bytes} bytes) for user ` +
-      `${user.email} (${user.uid}) in ${Date.now() - start}ms`
-  )
-
-  resp['items_preload'] = items // _preload suffix avoids replacing client-side items[] on back/forward
-  return resp
-}
-
-export { sapper_server } // for use as handler in functions.ts
+ // for use as handler in functions.ts
+export { app as middleware, server_id }

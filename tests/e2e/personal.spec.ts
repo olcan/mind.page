@@ -120,7 +120,7 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   await page.evaluate(() => void window._create('#e2e_shared hello visitors'))
   await expect.poll(() => savedId(page, '#e2e_shared'), { timeout: 30_000 }).toBeTruthy()
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
-  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key'))
+  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key', 0)) // indexed, so it is shown (not just accessible)
   await expect
     .poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 })
     .toMatchObject({
@@ -135,6 +135,7 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
     await waitForApp(visitor)
     expect(await visitor.evaluate(() => window._readonly)).toBe(true)
     expect(await visitor.evaluate(() => window._items().map(item => item.name))).toEqual(['#e2e_shared'])
+    expect(await visitor.evaluate(() => window.__hideIndex)).toBe(1) // shown, not just accessible
     // the header names the sharer via /user/<uid> (the display name of the signed-in profile)
     await expect(visitor.locator('.header .status .center .subtitle')).toHaveText(/shared by Alice/)
   } finally {
@@ -144,6 +145,53 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key'))
   await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null, attr: null })
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
+})
+
+test('a partially cached account does not prompt for a new phrase', async ({ page }) => {
+  // visiting a shared page caches its (plaintext) items; signing in afterwards on a device without
+  // the stored secret used to initialize from that partial cache snapshot, see no ciphertext and
+  // prompt for a NEW phrase over the existing encrypted items (found in a manual pass)
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key', 0))
+  await expect
+    .poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 })
+    .toMatchObject({
+      attr: { shared: { keys: ['e2e-key'] } },
+    })
+  await page.evaluate(() => void window._create('/_signout', { command: true })) // also clears the cache
+  await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
+  // cache alice's shared item by visiting her shared page as a signed-out visitor
+  await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
+  await waitForApp(page)
+  expect(await page.evaluate(() => window._items().length)).toBe(1)
+  // sign in with the firestore channel stalled: the first snapshot comes from the partial cache
+  await page.goto('/')
+  let blocked = true
+  await page.route(/:8080\/google\.firestore/, route =>
+    blocked ? void setTimeout(() => route.continue(), 8_000) : route.continue()
+  )
+  const token = await customToken(ALICE)
+  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+  await page.evaluate(token => {
+    sessionStorage.setItem('mindpage_signin_pending', '1')
+    document.cookie = '__session=signin_pending;max-age=600'
+    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+  }, token)
+  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+  await page.waitForTimeout(4_000) // while stalled, the app must keep waiting on the partial cache
+  expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
+  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+  blocked = false
+  // the server snapshot arrives with the encrypted items, which prompt for the existing phrase
+  await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
+  await waitForApp(page)
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
+    .toContain('secret text 12345')
+  await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
+  await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
 })
 
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {

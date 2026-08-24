@@ -33,6 +33,9 @@
   export let running = false
   export let admin = false
   export let fixed = false
+  // hide the item label on shared pages: always for contiguous reading pages, and for the item at
+  // shared index 0 (whose label already heads the page) when labels are enabled via shared.labels
+  export let hideLabel = false
   export let source = null
   export let path = null
   export let hidden = false
@@ -686,6 +689,22 @@
     // convert markdown to html
     let marked = new Marked()
     let renderer = new marked.Renderer()
+    // restore the auto-generated heading ids of old marked (headerIds, removed in marked 5),
+    // e.g. "#### Heading 1" gets id "heading-1" for ##fragment links (see renderer.link below)
+    const headingIds = new Map()
+    renderer.heading = function ({ tokens, depth }) {
+      const raw = tokens.map(token => token.raw ?? '').join('')
+      let id = raw
+        .toLowerCase()
+        .trim()
+        .replace(/<[!/a-z].*?>/gi, '')
+        .replace(/[\u2000-\u206F\u2E00-\u2E7F\\'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/g, '')
+        .replace(/\s/g, '-')
+      const count = headingIds.get(id) ?? 0
+      headingIds.set(id, count + 1)
+      if (count) id += '-' + count
+      return `<h${depth} id="${_.escape(id)}">${this.parser.parseInline(tokens)}</h${depth}>\n`
+    }
     renderer.link = ({ href, text, title }) => {
       if (window['_shortcut_hosts']?.some(h => href.startsWith(h + '/'))) href = 'http://' + href
       if (href.startsWith('##')) {
@@ -717,7 +736,7 @@
         href
       )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
-    marked.use(renderer)
+    marked.use({ renderer }) // note a bare renderer instance is silently ignored by marked.use
     marked.use(markedExtendedTables())
     marked.use(
       markedHighlight({
@@ -1676,6 +1695,7 @@
     on:mousedown={onMouseDown}
     on:click={onClick}
     class="container"
+    class:hideLabel
     class:editing
     class:focused
     class:saving
@@ -2336,6 +2356,9 @@
 
   .item > :global(:is(.content, .deps-and-dependents) mark.label) {
     background: #ddd;
+  }
+  .container.hideLabel .item > :global(:is(.content, .deps-and-dependents) mark.label) {
+    display: none !important;
   }
   .item > :global(:is(.content, .deps-and-dependents) mark.label.unique) {
     font-weight: 700;

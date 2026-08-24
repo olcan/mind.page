@@ -1,4 +1,6 @@
-import * as sapper from '@sapper/app'
+// window globals expected by index.svelte and by items (the app's original client.ts minus
+// sapper.start, which kit replaces); loaded only in the browser, before the page component
+// instantiates, via the dynamic import in src/routes/[[scope=pwa]]/+page.js
 
 // import/expose lodash as window._
 import _ from 'lodash' // ~72K
@@ -143,4 +145,3 @@ window['UAParser'] = UAParser
 
 // comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
 window['_client_start_time'] = Math.round(performance.now())
-sapper.start({ target: document.querySelector('#sapper') })

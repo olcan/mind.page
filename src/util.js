@@ -5,16 +5,8 @@ export function numberWithCommas(x) {
   return parts.join('.')
 }
 
-// canonicalize host name given a host(:port) string
-// get host from url using new URL(url).host
-// mainly to canonicalize/detect 'localhost'
-export function canonicalizeHost(host) {
-  return host.replace(/:.+$/, '').replace(/^(?:127\.0\.0\.1|local\.dev|localhost\..+|192\.168\.86\.10\d)$/, 'localhost')
-}
+export { canonicalizeHost, getHostDir } from './host.js'
 
-// url regex constructor
-// url scheme regex from https://stackoverflow.com/a/190405
-// we are fairly restrictive on the tail (last character) by default, disallowing common punctuation
 export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,.]/ } = {}) {
   shortcut_hosts ??= window._shortcut_hosts ?? []
   let shortcut_host_alts = shortcut_hosts.map(h => _.escapeRegExp(h + '/')).join('|')
@@ -25,9 +17,6 @@ export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix 
   )
 }
 
-export function getHostDir(host) {
-  return ['mind.page', 'mindbox.io', 'olcan.com'].includes(host) ? host : 'other'
-}
 
 export function blockRegExp(type_regex) {
   if (type_regex.source) type_regex = type_regex.source // get source string if passed regex
@@ -457,7 +446,7 @@ export function decode(encoded, encoding = 'base64') {
   }
 }
 
-import utf8 from '../node_modules/utf8' // ~18K
+import utf8 from 'utf8' // ~18K
 
 // utf16 -> utf8
 export function encode_utf8(str) {
@@ -531,7 +520,7 @@ export function hash_32_djb2(str) {
 }
 
 // ~135K is too big so we copy relevant parts below
-// import fnv1a from '../node_modules/fnv-plus'
+// import fnv1a from 'fnv-plus'
 
 // utf16 -> 32-bit integer using fnv-1a algorithm
 // _hash32_1a_fast_utf from https://github.com/tjwebb/fnv-plus/blob/1e2ce68a07cb7dd4c3c85364f3d8d96c95919474/index.js#L341
@@ -854,7 +843,7 @@ export function hash_64_fnv1a(str) {
 }
 
 // https://github.com/cimi/murmurhash3js-revisited is a more robust fork of murmurhash3 that uses uint8 arrays instead of strings w/ chopped code points (see https://github.com/pid/murmurHash3js/issues/3#issue-364485381)
-import murmur3 from '../node_modules/murmurhash3js-revisited' // ~6K
+import murmur3 from 'murmurhash3js-revisited' // ~6K
 
 // utf16 -> 32-bit integer using 32-bit murmurhash v3 algorithm, x86 variant
 // optimized for x86 (32-bit) architectures
@@ -883,7 +872,7 @@ export function hash_128_murmur3_x64(x) {
   return murmur3.x64.hash128(x)
 }
 
-import sha1 from '../node_modules/js-sha1' // ~16K
+import sha1 from 'js-sha1' // ~16K
 
 // utf16 -> 160-bit hex string using sha1 algorithm
 // also accepts utf8 arrays (Uint8Array)

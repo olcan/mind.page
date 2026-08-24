@@ -10,11 +10,11 @@ import { ADMIN, ALICE, firestore } from './helpers'
 
 const repo = resolve(__dirname, '../..')
 
-// preloaded session fields embedded by sapper as __SAPPER__={...preloaded:[null,{...}]}
+// session fields serialized into the page by the server load (see +page.server.js)
 function preloaded(html: string): Record<string, string> {
-  const m = html.match(/__SAPPER__=\{.*?preloaded:\[null,\{(.*?)\}\]/s)
-  expect(m, '__SAPPER__ preloaded data').toBeTruthy()
-  return Object.fromEntries([...m![1].matchAll(/(\w+):"([^"]*)"/g)].map(([, k, v]) => [k, v]))
+  const fields = [...html.matchAll(/(server_name|server_ip|client_ip)\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+  expect(fields.length, 'serialized session fields').toBeGreaterThan(0)
+  return Object.fromEntries(fields.map(([, k, v]) => [k, v]))
 }
 
 test.describe('ssr shell', () => {
@@ -24,8 +24,7 @@ test.describe('ssr shell', () => {
     expect(res.headers()['content-type']).toContain('text/html')
     expect(res.headers()['content-encoding'], 'compression').toBe('gzip')
     const html = await res.text()
-    expect(html).toMatch(/<div id="?sapper"?>/) // app root (attributes are unquoted by the html minifier)
-    expect(html).toContain('<base href="/">')
+    expect(html).toMatch(/<div id="?sapper"?[ >]/) // app root (attributes may follow, or be unquoted by a minifier)
     expect(html).toContain('<title>localhost</title>') // hostname, canonicalized (see util.js)
     expect(html).toContain('<link rel="manifest" href="manifest.json?v=') // relative, so scoped (see below)
     expect(html).toContain('href="other/favicon.ico?v=') // icons from the host directory under static/
@@ -46,7 +45,9 @@ test.describe('ssr shell', () => {
   test('unknown paths are 404', async ({ request }) => {
     const res = await request.get('/no-such-page')
     expect(res.status()).toBe(404)
-    expect(await res.text()).toContain('Not found')
+    expect(await res.text()).toMatch(/Not [Ff]ound/)
+    // except the chrome devtools probe, whose 404 would be noise in dev logs
+    expect((await request.get('/.well-known/appspecific/com.chrome.devtools.json')).status()).toBe(204)
   })
 })
 
@@ -80,7 +81,7 @@ test.describe('pwa scopes', () => {
     test(`${prefix} serves the app with a ${display} manifest scoped to it`, async ({ request }) => {
       const page = await request.get(prefix)
       expect(page.status()).toBe(200)
-      expect(await page.text()).toContain(`<base href="${prefix}">`)
+      expect(await page.text()).toMatch(/<div id="?sapper"?[ >]/) // served in place, not redirected
       const manifest = await (await request.get(prefix + 'manifest.json')).json()
       expect(manifest).toMatchObject({
         scope: prefix,
@@ -99,13 +100,13 @@ test.describe('icons', () => {
     test(`are served for ${host}`, async ({ request }) => {
       const headers: Record<string, string> = host == 'localhost' ? {} : { Host: host }
       for (const [path, type] of [
-        ['/favicon.ico', 'image/x-icon'],
-        ['/icon.png', 'image/x-icon'], // favicon.ico under another name
-        ['/apple-touch-icon.png', 'image/png'],
-      ]) {
+        ['/favicon.ico', /image\/(x-icon|vnd\.microsoft\.icon)/], // express 5 serves the iana type
+        ['/icon.png', /image\/(x-icon|vnd\.microsoft\.icon)/], // favicon.ico under another name
+        ['/apple-touch-icon.png', /image\/png/],
+      ] as [string, RegExp][]) {
         const res = await request.get(path, { headers })
         expect(res.status(), path).toBe(200)
-        expect(res.headers()['content-type'], path).toContain(type)
+        expect(res.headers()['content-type'], path).toMatch(type)
         expect((await res.body()).length, path).toBeGreaterThan(100)
       }
     })

@@ -16,7 +16,7 @@
 <li>
 <span class="list-item">Evaluates <code>run(`…`)</code> from item named <code>#commands/&lt;name&gt;</code>.<ul>
 <li>
-<span class="list-item">If missing, evaluates <code>_on_command_&lt;name&gt;(`…`)</code> in <a href="#features/_listen" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#features/_listen',event)">listeners</a>.</span>
+<span class="list-item">If missing, evaluates <code>_on_command_&lt;name&gt;(`…`)</code> in <mark class="link" title="#features/_listen" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#features/_listen','listeners',event)" onclick="event.preventDefault();event.stopPropagation();">listeners</mark>.</span>
 </li>
 <li>
 <span class="list-item">Function can be <code>async</code> or return promise, e.g. <mark title="#commands/agenda" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#commands/agenda','#/agenda',event)" onclick="event.preventDefault();event.stopPropagation();">agenda</mark>.</span>
@@ -48,7 +48,7 @@
 </span>
 </li>
 <li>
-<span class="list-item">Return <code>null</code> or <a href="#MindPage/core/_Item" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item',event)">_Item</a> to do nothing.<ul>
+<span class="list-item">Return <code>null</code> or <mark class="link" title="#MindPage/core/_Item" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item','_Item',event)" onclick="event.preventDefault();event.stopPropagation();">_Item</mark> to do nothing.<ul>
 <li>
 <span class="list-item">Allows command to handle any changes to <mark title="#MindBox" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindBox','#MindBox',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox</mark> as needed.</span>
 </li>
@@ -58,10 +58,10 @@
 <li>
 <span class="list-item">Commands can also be triggered programmatically.<ul>
 <li>
-<span class="list-item">e.g. via <a href="#MindPage/core/functions" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/functions',event)">window._create</a> or <a href="#MindBox" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindBox',event)">MindBox.create</a>.</span>
+<span class="list-item">e.g. via <mark class="link" title="#MindPage/core/functions" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/functions','window._create',event)" onclick="event.preventDefault();event.stopPropagation();">window._create</mark> or <mark class="link" title="#MindBox" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindBox','MindBox.create',event)" onclick="event.preventDefault();event.stopPropagation();">MindBox.create</mark>.</span>
 </li>
 <li>
-<span class="list-item">Any created or returned <a href="#MindPage/core/_Item" onclick="_handleLinkClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item',event)">_Item</a> (or <code>null</code>) is also returned to the programmatic context where command is triggered.</span>
+<span class="list-item">Any created or returned <mark class="link" title="#MindPage/core/_Item" onmousedown="_handleTagClick('9y8wfK3joIYBIghbrMgN','#MindPage/core/_Item','_Item',event)" onclick="event.preventDefault();event.stopPropagation();">_Item</mark> (or <code>null</code>) is also returned to the programmatic context where command is triggered.</span>
 </li>
 </ul>
 </span>

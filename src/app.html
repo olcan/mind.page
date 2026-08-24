@@ -2,7 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    %sapper.base%
     <meta name="description" content="Secure private notebook for your mind." />
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -85,12 +84,11 @@
       }
     </script>
 
-    %sapper.styles% %sapper.head%
+    %sveltekit.head%
   </head>
 
   <body>
     <!-- index.svelte is rendered here -->
-    <div id="sapper">%sapper.html%</div>
     <div id="cache-div" style="position: fixed; left: -100000px; width: 750px"></div>
     <script>
       MathJax = {
@@ -157,9 +155,13 @@
     <script>
       window.s = undefined
     </script>
-    %sapper.scripts%
     <script>
       delete window.s
     </script>
+    <!-- the app container keeps the sapper-era id (used by styles, tests and items); kit link
+         handling is disabled since the app manages its own links and history; it sits after the
+         parser-blocking cdn scripts above so that kit's inline import() bootstrap (not parser
+         ordered, unlike sapper's classic bundle tag) cannot start the app before they load -->
+    <div id="sapper" data-sveltekit-reload data-sveltekit-preload-data="off">%sveltekit.body%</div>
   </body>
 </html>

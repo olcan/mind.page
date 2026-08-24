@@ -11,7 +11,7 @@ Browser tests that run the production build against local Firebase emulators, ne
 ## Running
 
 ```sh
-npx sapper build     # production build served by the tests (stop `sapper dev` first, see below)
+npm run build        # production build served by the tests (vite build)
 npm run test:e2e     # = tests/e2e/run.sh: emulators + seed + node __sapper__/build + playwright
 npm run test:e2e:update   # re-create snapshots after an intentional rendering change
 npx playwright show-report   # inspect failures (html report, traces retained on failure)
@@ -24,9 +24,8 @@ seeded anonymous account, or in another terminal run `npx playwright test --ui` 
 tests with a live browser view) or `npx playwright test --headed`; both reuse the running server.
 
 `run.sh` runs everything under `firebase emulators:exec --only auth,firestore`, so the emulators
-start fresh and shut down after the run. Do not run `sapper build` while `sapper dev` is running:
-both regenerate `src/node_modules/@sapper`, and a dev rebuild mid-build can leave the production
-bundle pointing at `__sapper__/dev`.
+start fresh and shut down after the run. The production build (`build/`, served by `server.mjs`)
+and the dev server (`npm run dev`) are independent and can run concurrently.
 
 ## How it works
 
@@ -101,6 +100,13 @@ Notes on driving the app from tests:
   `__session=signin_pending` cookie) like the app's own `signIn()`, so that the reload after the
   auth change does not start as an anonymous visitor, whose welcome prompt would stay open and
   queue every later modal behind it.
+
+- `markdown.spec.ts` - the markdown rendering conformance corpus: `fixtures/markdown/*.md` (one
+  item per file, first `#label` in the file is the item label; source of truth in this repo) is
+  seeded as items shared by `markdown_e2e` and rendered on `/?shared=markdown_e2e/markdown` as a
+  signed-out visitor, each compared to `__snapshots__/markdown.spec.ts/<slug>.html`. To view and
+  edit the corpus, run `npm run test:e2e:serve` and open that url: saving a fixture file re-seeds
+  it and the app applies it live. Add a case by adding a file.
 
 Each item's golden is reviewed like any diff: if a change is intended, run `test:e2e:update` and
 commit the updated snapshot files.
