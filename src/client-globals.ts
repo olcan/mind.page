@@ -139,9 +139,9 @@ window['marked'] = marked // global instance w/ extended tables enabled
 import { KernelManager, SessionManager, ServerConnection } from '@jupyterlab/services' // ~250K
 window['jupyter'] = { KernelManager, SessionManager, ServerConnection }
 
-// import/expose UAParser
-import { UAParser } from 'ua-parser-js' // ~16K
-window['UAParser'] = UAParser
+// expose UAParser: vendored v1.0.41 (MIT) since v2 relicensed to AGPL; the umd module assigns
+// window.UAParser itself when imported for side effects
+import './vendor/ua-parser.js' // ~16K
 
 // comment this out to see "unhydrated app" (https://stackoverflow.com/a/58645471)
 window['_client_start_time'] = Math.round(performance.now())

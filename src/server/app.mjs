@@ -25,7 +25,6 @@ const events = {} // recorded fs events for /watch/... requests
 import { firebaseConfig } from '../../firebase-config.js'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
-import { getAuth } from 'firebase-admin/auth'
 initializeApp(firebaseConfig)
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
@@ -64,7 +63,7 @@ scoped.use(
     createProxyMiddleware({
     changeOrigin: true,
     pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
-    pathRewrite: (path, req) => {
+    pathRewrite: (path, _req) => {
       path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
       if (!path.startsWith('/')) path = '/' + path
       // console.debug('proxy path', path)
@@ -176,7 +175,7 @@ scoped.use(
         }
       })
     } else if (hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
-      const [m, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
+      const [, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
       if (!client_id || !req_path) {
         console.warn('invalid watch path ' + req.path)
         res.status(400).send('invalid watch path ' + req.path)
@@ -291,16 +290,6 @@ app.use(scoped)
 app.use(paths.filter(path => path != '/'), scoped)
 
 app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
-
-// helper to read stream into buffer, from https://stackoverflow.com/a/67729663
-function read_to_buffer(stream) {
-  return new Promise((resolve, reject) => {
-    const bufs = []
-    stream.on('data', chunk => bufs.push(chunk))
-    stream.on('end', () => resolve(Buffer.concat(bufs)))
-    stream.on('error', reject)
-  })
-}
 
  // for use as handler in functions.ts
 export { app as middleware, server_id }
