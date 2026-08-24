@@ -1,12 +1,10 @@
 import os from 'os'
 import { localAddress } from '../../server/address.mjs'
-import { pageContent } from '$lib/server/content.js'
-import { canonicalizeHost } from '../../host.js'
 
 // server session information included in all responses (as the sapper-era server-preload did);
-// these match up with exported props of index.svelte. public (anonymous) and shared pages also get
-// server-rendered content and meta tags for crawlers and link unfurlers (see $lib/server/content)
-export async function load({ request, url, cookies, getClientAddress }) {
+// these match up with exported props of index.svelte. meta tags for public and shared pages come
+// from hooks.server.js (which also injects the server-rendered content for crawlers)
+export function load({ request, locals, getClientAddress }) {
   let client_ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
   if (!client_ip) {
     try {
@@ -15,8 +13,5 @@ export async function load({ request, url, cookies, getClientAddress }) {
       client_ip = ''
     }
   }
-  // behind firebase hosting the host header is the function's own host (x-forwarded-host is the site)
-  const hostname = canonicalizeHost(request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host)
-  const content = await pageContent({ url, cookie: cookies.get('__session'), hostname })
-  return { server_name: os.hostname(), server_ip: localAddress(), client_ip, content }
+  return { server_name: os.hostname(), server_ip: localAddress(), client_ip, meta: locals.meta }
 }

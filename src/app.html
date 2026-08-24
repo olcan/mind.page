@@ -158,6 +158,9 @@
     <script>
       delete window.s
     </script>
+    <!-- server-rendered content for crawlers and no-javascript visitors, injected by
+         hooks.server.js on public and shared pages and removed by the app on boot -->
+    <!--ssr-content-->
     <!-- the app container keeps the sapper-era id (used by styles, tests and items); kit link
          handling is disabled since the app manages its own links and history; it sits after the
          parser-blocking cdn scripts above so that kit's inline import() bootstrap (not parser

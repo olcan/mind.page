@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { createHmac } from 'crypto'
+import { execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { createServer, type Server } from 'http'
 import { resolve } from 'path'
@@ -77,6 +78,27 @@ test.describe('crawlable public pages', () => {
       await expect(page.locator('.loading')).toBeHidden() // the noscript style hides the overlay
     } finally {
       await context.close()
+    }
+  })
+
+  test('a frozen render replaces the markdown fallback once captured', async ({ request }) => {
+    test.setTimeout(240_000) // captures in a real browser, then polls through the 60s content cache
+    // capture the app's default view from the running server into the emulator (see prerender.mjs)
+    execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
+    try {
+      await expect
+        .poll(async () => (await request.get('/')).text(), { timeout: 90_000, intervals: [5_000] })
+        .toMatch(/ssr-content[^]*class="items/) // the captured items region, not the markdown fallback
+      const html = await (await request.get('/')).text()
+      // the injected block is sanitized: no scripts or handlers from item content (the page's own
+      // kit scripts live outside the block)
+      const block = html.slice(html.indexOf('class="ssr-content"'), html.indexOf('id="sapper"'))
+      expect(block.length).toBeGreaterThan(1000)
+      expect(block).not.toContain('<script')
+      expect(block).not.toContain('onclick')
+      expect(block).not.toContain('onmousedown')
+    } finally {
+      await firestore().collection('prerender').doc('anonymous').delete() // restore the markdown fallback
     }
   })
 
