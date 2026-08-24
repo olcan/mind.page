@@ -17,13 +17,14 @@ const FIXTURES = readdirSync(resolve(__dirname, 'fixtures/markdown'))
 test('the markdown corpus renders as before', async ({ page }) => {
   // external content references (e.g. images) stay deterministic offline; scripts and styles from
   // the app shell (mathjax, c3, ... from cdns, see app.html) are still allowed
-  await page.route(
-    /^https?:\/\/(?!localhost|127\.0\.0\.1)/,
-    route => (['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue())
+  await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, route =>
+    ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue()
   )
   await page.goto('/?shared=markdown_e2e/markdown')
   await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 })
   await waitForApp(page)
+  expect(await page.evaluate(() => window.__items[0].id)).toBe('md-markdown') // the root item heads the page
+  await expect(page.locator('mark.label[title="#markdown/extended"]')).toBeVisible() // labels shown (shared.labels)
   const ids = await page.evaluate(() =>
     window
       ._items()

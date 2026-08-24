@@ -2235,6 +2235,9 @@
   let ignoreStateOnEditorChange = false
   let hideIndex = 0
   let hideIndexFixed = 0
+  // shared pages show item labels only when the share opts in (attr.shared.labels), see the
+  // fixed-mode style block for the css this class controls
+  $: if (isClient) document.body.classList.toggle('sharedLabels', fixed && items[0]?.shared?.labels === true)
   let hideIndexMinimal = 0
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
@@ -3063,6 +3066,15 @@
     }
   }
 
+  // clear the mindbox (back to the main page): via the #mindbox item's controller when installed
+  // (e.g. the anonymous account), else directly (e.g. shared pages, whose items define no globals)
+  function clearMindbox() {
+    if (window['MindBox']?.clear) window['MindBox'].clear()
+    else {
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange('')
+    }
+  }
   function onLogSummaryClick(id: string) {
     let index = indexFromId.get(id)
     if (index === undefined) return
@@ -8136,7 +8148,7 @@
               {#if fixed && items.length > 0}
                 <div class="left">
                   {#if items[0].shared.indices?.[shared_key] != 0}
-                    <span class="triangle" on:click={() => window['MindBox'].clear()}>◀</span>
+                    <span class="triangle" on:click={clearMindbox}>◀</span>
                   {/if}
                   <span title={(items[0].labelText ?? '').replace(/^#/, '')}>
                     {(items[0].labelText ?? '').replace(/^#/, '')}
@@ -8505,7 +8517,11 @@
     .item > div:first-child {
       display: none !important;
     } */
-    .item > :is(.content, .deps-and-dependents) mark.label {
+    /* labels are hidden for a contiguous reading page unless the share opts in via
+       attr.shared.labels, which sets the body class below (e.g. an index-like page navigated by
+       item, see tests/e2e/fixtures); note templating inside this style tag would not work, since
+       the server renders it before items load and hydration keeps the served copy */
+    body:not(.sharedLabels) .item > :is(.content, .deps-and-dependents) mark.label {
       display: none !important;
     }
     {#if items[0].title}
