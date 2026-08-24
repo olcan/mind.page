@@ -25,6 +25,7 @@ test('the markdown corpus renders as before', async ({ page }) => {
   await waitForApp(page)
   expect(await page.evaluate(() => window.__items[0].id)).toBe('md-markdown') // the root item heads the page
   await expect(page.locator('mark.label[title="#markdown/extended"]')).toBeVisible() // labels shown (shared.labels)
+  await expect(page.locator('mark.label[title="#markdown"]')).toBeHidden() // except the root item, whose label heads the page
   const ids = await page.evaluate(() =>
     window
       ._items()
@@ -32,6 +33,12 @@ test('the markdown corpus renders as before', async ({ page }) => {
       .sort()
   )
   expect(ids).toEqual(FIXTURES.map(slug => `md-${slug}`).sort()) // seeded ids are md-<file slug>
+  // focusing an item (e.g. clicking its label) shows it alone; navigating to the root item is the
+  // main page again, not a lone-item view (there is no mindbox on shared pages, so navigate by hash)
+  await page.evaluate(() => void (location.hash = '#markdown/extended'))
+  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(1)
+  await page.evaluate(() => void (location.hash = '#markdown'))
+  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(FIXTURES.length)
   for (const slug of FIXTURES) {
     const html = await renderedHtml(page, `md-${slug}`)
     expect.soft(html, slug).not.toBeNull()

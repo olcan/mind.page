@@ -33,6 +33,9 @@
   export let running = false
   export let admin = false
   export let fixed = false
+  // hide the item label on shared pages: always for contiguous reading pages, and for the item at
+  // shared index 0 (whose label already heads the page) when labels are enabled via shared.labels
+  export let hideLabel = false
   export let source = null
   export let path = null
   export let hidden = false
@@ -1692,6 +1695,7 @@
     on:mousedown={onMouseDown}
     on:click={onClick}
     class="container"
+    class:hideLabel
     class:editing
     class:focused
     class:saving
@@ -2352,6 +2356,9 @@
 
   .item > :global(:is(.content, .deps-and-dependents) mark.label) {
     background: #ddd;
+  }
+  .container.hideLabel .item > :global(:is(.content, .deps-and-dependents) mark.label) {
+    display: none !important;
   }
   .item > :global(:is(.content, .deps-and-dependents) mark.label.unique) {
     font-weight: 700;

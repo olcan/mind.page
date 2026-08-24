@@ -2235,9 +2235,6 @@
   let ignoreStateOnEditorChange = false
   let hideIndex = 0
   let hideIndexFixed = 0
-  // shared pages show item labels only when the share opts in (attr.shared.labels), see the
-  // fixed-mode style block for the css this class controls
-  $: if (isClient) document.body.classList.toggle('sharedLabels', fixed && items[0]?.shared?.labels === true)
   let hideIndexMinimal = 0
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
@@ -2249,6 +2246,12 @@
   function onEditorChange(text: string, keep_times = false) {
     // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
+    // in fixed mode, navigating to the item at shared index 0 (e.g. by clicking its label) is
+    // treated as the main page, instead of a lone-item view without even the back triangle
+    if (fixed && text.trim()) {
+      const root = items.find(item => item.shared?.indices?.[shared_key] == 0)
+      if (root?.labelText && text.trim().toLowerCase() == root.labelText.toLowerCase()) text = ''
+    }
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -8267,6 +8270,7 @@
                 running={item.running}
                 admin={item.admin}
                 {fixed}
+                hideLabel={fixed && (item.shared?.labels !== true || item.shared?.indices?.[shared_key] == 0)}
                 source={item.attr ? item.attr.source : ''}
                 path={item.attr ? item.attr.path : ''}
                 hidden={item.index >= hideIndex || (item.dotted && !showDotted)}
@@ -8517,13 +8521,7 @@
     .item > div:first-child {
       display: none !important;
     } */
-    /* labels are hidden for a contiguous reading page unless the share opts in via
-       attr.shared.labels, which sets the body class below (e.g. an index-like page navigated by
-       item, see tests/e2e/fixtures); note templating inside this style tag would not work, since
-       the server renders it before items load and hydration keeps the served copy */
-    body:not(.sharedLabels) .item > :is(.content, .deps-and-dependents) mark.label {
-      display: none !important;
-    }
+    /* note label hiding on shared pages is handled per item (see hideLabel in Item.svelte) */
     {#if items[0].title}
       .header + .super-container :is(h1,h2,h3,h4,h5,h6):first-of-type {
         display: none;
