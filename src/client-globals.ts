@@ -128,7 +128,8 @@ window['Octokit'] = Octokit
 // also import/expose extensions marked-highlight and marked-extended-tables
 import { marked, Marked } from 'marked' // ~36K
 import { markedHighlight } from 'marked-highlight'
-import markedExtendedTables from 'marked-extended-tables' // ~3K
+// vendored: the package is unmaintained with peer marked <16 (see src/vendor)
+import markedExtendedTables from './vendor/marked-extended-tables.js' // ~3K
 window['Marked'] = Marked // for local instance, see https://marked.js.org/using_advanced#instance
 window['markedHighlight'] = markedHighlight
 window['markedExtendedTables'] = markedExtendedTables
