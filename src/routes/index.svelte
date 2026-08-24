@@ -1641,7 +1641,12 @@
     // note forced re-render also forces re-eval of macros at re-render time
     // force render is delayed to prevent accidental tight render<->trigger loops that could crash browser
     invalidate_elem_cache({ force_render = false, render_delay = 1000 } = {}) {
-      invalidateElemCache(this.id)
+      // an invalidated element that was already adopted into the live item is exactly the stale
+      // state the caller wants gone, so a render is forced even when not requested; this closed a
+      // race (common under svelte 5, e.g. charts skipped at zero width) where a stale-render
+      // timeout invalidated the cache only after its empty element had been adopted, leaving it
+      // displayed indefinitely
+      if (invalidateElemCache(this.id)) force_render = true
       if (force_render)
         this.dispatch_task(
           'force_render',

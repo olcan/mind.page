@@ -233,8 +233,12 @@ export function isBalanced(expr) {
 }
 
 // NOTE: element cache invalidation should be triggered on any script/eval errors, but also whenever an item is run or <script>s executed since code dependencies can never be fully captured in cache keys (even with deephash)
+// returns true if any invalidated element was left live on the item: it must then be replaced via
+// a forced render (see invalidate_elem_cache in index.svelte), since deleting the cache entry
+// alone cannot fix what is already displayed
 export function invalidateElemCache(id) {
   // console.warn('invalidateElemCache for ', id)
+  let live = false
   window['_elem_cache']?.[id]?.forEach(elem => {
     const key = elem.getAttribute('_cache_key')
     // we allow some items to skip invalidation, e.g. to be intentionally reused across runs
@@ -248,7 +252,9 @@ export function invalidateElemCache(id) {
     // element removal also prevents any pending (via setTimeout) chart renders
     // ensuring svelte update may require a version increment to invalidate svelte content cache
     if (elem.closest('.item')?.id != 'item-' + id) elem.remove()
+    else live = true
   })
+  return live
 }
 
 export function adoptCachedElem(elem) {

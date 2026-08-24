@@ -33,6 +33,28 @@ test('the app waits for the cdn scripts even when they are slow', async ({ page 
   expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
 })
 
+test('charts regenerate after a stale hidden render (zero-width skip)', async ({ page }) => {
+  // clicking a section separator transiently renders off-screen items; their chart scripts measure
+  // zero width in a delayed callback, skip generation and invalidate the element cache — which
+  // must force a re-render when the empty element was already adopted (see invalidate_elem_cache
+  // in index.svelte; regression under svelte 5, where adoption started winning that race and
+  // charts came up empty when toggled into view)
+  await loadAnonymous(page)
+  await page.locator('.section-separator').last().click()
+  await page.waitForTimeout(2_000) // let the stale chart callbacks fire
+  for (const [name, charts] of [
+    ['#charts', 2],
+    ['#weight', 1],
+  ] as const) {
+    await page.evaluate(name => void (location.hash = name), name)
+    await expect
+      .poll(() => page.evaluate(name => window._item(name)?.elem?.querySelectorAll('svg').length ?? 0, name), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThanOrEqual(charts)
+  }
+})
+
 test('every anonymous item renders as before', async ({ page }) => {
   await loadAnonymous(page)
   const ids: string[] = await page.evaluate(() => window._items().map(item => item.id))

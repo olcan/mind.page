@@ -106,7 +106,9 @@ test.describe('crawlable public pages', () => {
     const html = await (await request.get('/', { headers: { Cookie: '__session=some-id-token' } })).text()
     expect(html).not.toContain('#load function for loading external libraries')
     expect(html).not.toMatch(/<meta property="og:title"/) // note the template carries a static description meta
-    expect(html).not.toContain('ssr-content')
+    // the <!--ssr-content--> placeholder comment stays on every page (see hooks.server.js); only
+    // the injected content div must be absent
+    expect(html).not.toContain('class="ssr-content"')
   })
 })
 
