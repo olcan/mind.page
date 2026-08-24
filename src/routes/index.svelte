@@ -6901,11 +6901,18 @@
                 `received first snapshot (${snapshot.docs.length} items, ` +
                   `${snapshot.metadata.fromCache ? 'cache' : 'current'})`
               )
-              // a fresh (empty) persistent cache can produce an empty snapshot before the server
-              // has responded; initializing then would treat a populated account as empty and offer
-              // the new-account welcome (and a NEW secret phrase), so wait for the server instead
-              if (!initTime && snapshot.empty && snapshot.metadata.fromCache) {
-                init_log('ignoring empty first snapshot from cache (waiting for server) ...')
+              // the persistent cache can produce an empty first snapshot (fresh cache) or a partial
+              // one (e.g. only the plaintext shared items cached by a visit to a shared page)
+              // before the server has responded; initializing from those would treat a populated
+              // account as empty or unencrypted and prompt for a NEW secret phrase over the
+              // existing items, so wait for the server unless this device holds the secret (a
+              // returning device still initializes offline from its complete cache)
+              if (
+                !initTime &&
+                snapshot.metadata.fromCache &&
+                (snapshot.empty || (!anonymous && !fixed && !localStorage.getItem('mindpage_secret')))
+              ) {
+                init_log('ignoring first snapshot from cache (waiting for server) ...')
                 return
               }
               if (!initTime) {
