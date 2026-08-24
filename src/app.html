@@ -107,7 +107,12 @@
           ],
         },
         // http://docs.mathjax.org/en/latest/options/output/svg.html
-        svg: { fontCache: 'global' },
+        // NOTE: fontCache 'local' keeps each equation's glyph defs inside its own svg; the 'global'
+        // cache svg is inserted next to the first typeset output, gets destroyed when that item
+        // re-renders, and every equation measured against the orphaned cache collapses to zero bbox
+        // (NaN/Infinity transforms in _dot_rendered); self-contained svgs also survive serialization
+        // (element cache, frozen render in prerender.mjs)
+        svg: { fontCache: 'local' },
         // http://docs.mathjax.org/en/latest/options/menu.html
         // http://docs.mathjax.org/en/latest/output/mathml.html
         // NOTE: these options take effect in context menu but inTabOrder fails to set tabindex=-1

@@ -974,8 +974,13 @@
 
   function renderMath(elems, done = null) {
     if (elems.length == 0) return
-    window['MathJax']
-      .typesetPromise(elems)
+    // concurrent typesetPromise calls are unsafe (see "handling asynchronous typesetting" in the
+    // mathjax docs): a run can leave the global font cache empty while another item's callback is
+    // still measuring its glyph <use> refs, which then measure as zero bbox (e.g. NaN/Infinity
+    // transforms in _dot_rendered); the shared queue serializes typesetting across items and runs
+    // each done() before the next typeset can start
+    window['_typeset_queue'] = (window['_typeset_queue'] ?? Promise.resolve())
+      .then(() => window['MathJax'].typesetPromise(elems))
       .then(() => {
         const itemdiv = elems[0].closest('.item')
         if (!itemdiv) return
@@ -1630,29 +1635,33 @@
       }
     })
     renderMath(math, function () {
-      dot.querySelectorAll('.node > text > .MathJax > svg > *').forEach(elem => {
-        if (!item.elem?.contains(elem)) {
+      dot.querySelectorAll('.node > text > .MathJax > svg').forEach(mathsvg => {
+        if (!item.elem?.contains(mathsvg)) {
           // console.error("detached _graph elem in item", item.name)
           invalidateElemCache(id)
           return
         }
-        let math = elem as SVGGraphicsElement
-        let dot = elem.parentNode.parentNode.parentNode.parentNode
+        // the typeset svg holds the math in a <g>, preceded by its glyph <defs> under fontCache
+        // 'local' (see app.html); both move into the graph node so the <use> refs keep resolving
+        let math = mathsvg.querySelector(':scope > g') as SVGGraphicsElement
+        let defs = mathsvg.querySelector(':scope > defs')
+        let dot = mathsvg.parentNode.parentNode.parentNode
         // NOTE: node can have multiple shapes as children, e.g. doublecircle nodes have two
         let shape = dot.children[1] as SVGGraphicsElement // shape (e.g. ellipse) is second child
         let text = dot.children[dot.children.length - 1] // text is last child
         let shaperect = shape.getBBox()
         let textrect = text['_bbox'] // recover text bbox pre-mathjax
         let textscale = textrect.height / shaperect.height // fontsize-based scaling factor
-        elem.parentElement.parentElement.parentElement.remove() // remove text node
-        dot.appendChild(elem)
+        mathsvg.parentElement.parentElement.remove() // remove text node
+        if (defs) dot.appendChild(defs)
+        dot.appendChild(math)
         let mathrect = math.getBBox()
         let scale = (0.6 * textscale * shaperect.height) / mathrect.height
         let xt0 = -mathrect.x
         let yt0 = -mathrect.y
         let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2
         let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
-        elem.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
+        math.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
       })
     })
   }

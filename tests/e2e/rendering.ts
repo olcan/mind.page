@@ -32,6 +32,7 @@ export async function renderedHtml(page: Page, id: string, timeout = 15_000): Pr
 export function normalize(html: string): string {
   return html
     .replace(/ id="(?:mjx-|time-|[^"]*\d{8,})[^"]*"/g, '') // mathjax / $cid / timestamp ids
+    .replace(/MJX-\d+-/g, 'MJX-') // glyph def/ref ids count typeset containers (render order)
     .replace(/ _(?:cached|rendered)="\d+"/g, '') // element cache timestamps (see Item.svelte)
     .replace(/ _cache_key="[^"]*"/g, '') // includes a per-render counter (see Item.svelte)
     .replace(/ _failed="\d+"/g, ' _failed') // failed image marker carries a timestamp
