@@ -3747,11 +3747,8 @@
 
   import { tick } from 'svelte'
   // the stored form of the secret phrase: base64 of sha-256(uid + phrase)
-  async function hashSecretPhrase(phrase: string): Promise<string> {
-    const secret_utf8 = new TextEncoder().encode(user.uid + phrase)
-    const secret_buffer = await crypto.subtle.digest('SHA-256', secret_utf8)
-    const secret_array = Array.from(new Uint8Array(secret_buffer))
-    return btoa(secret_array.map(b => String.fromCharCode(b)).join(''))
+  function hashSecretPhrase(phrase: string): Promise<string> {
+    return hashSecretPhraseForUid(user.uid, phrase)
   }
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
@@ -3901,19 +3898,12 @@
   // ideal for firestore database since cipher is easy to view, copy, etc
   // overhead for text is ~20% cpu time (utf8) and ~30% storage (base64)
   // overhead for binary can be ~60% cpu time (utf8 for ~50% larger buffers) and ~2x storage (utf8+base64)
+  // session-secret wrappers over the aes-gcm module (src/crypto.ts): resolve (or initialize via
+  // getSecretPhrase) the session secret, then delegate
   async function encrypt(text: string): Promise<string> {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
     secret = await Promise.resolve(secret) // resolve secret if promise pending
-    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
-    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
-    const iv = crypto.getRandomValues(new Uint8Array(12)) // get 96-bit random iv
-    const alg = { name: 'AES-GCM', iv: iv } // configure AES-GCM
-    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['encrypt']) // generate key
-    const cipher_buffer = await crypto.subtle.encrypt(alg, key, new TextEncoder().encode(text)) // encrypt using key
-    const iv_hex = Array.from(iv)
-      .map(b => ('00' + b.toString(16)).slice(-2))
-      .join('') // convert iv to hex string (of length 24)
-    return iv_hex + btoa(byteArrayToString(new Uint8Array(cipher_buffer)))
+    return encryptWithSecret(text, secret)
   }
 
   // encrypt arbitrary bytes (uint8)
@@ -3921,60 +3911,23 @@
   async function encrypt_bytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
     secret = await Promise.resolve(secret) // resolve secret if promise pending
-    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
-    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
-    const iv = crypto.getRandomValues(new Uint8Array(12)) // get 96-bit random iv
-    const alg = { name: 'AES-GCM', iv: iv } // configure AES-GCM
-    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['encrypt']) // generate key
-    const cipher_buffer = await crypto.subtle.encrypt(alg, key, bytes) // encrypt text using key
-    const iv_hex = Array.from(iv)
-      .map(b => ('00' + b.toString(16)).slice(-2))
-      .join('') // convert iv to hex string (of length 24)
-    return concatByteArrays(byteStringToArray('~' + iv_hex), new Uint8Array(cipher_buffer))
+    return encryptBytesWithSecret(bytes, secret)
   }
 
   // with_secret decrypts with the given secret instead of the session's (e.g. to validate an
   // entered phrase before committing it, see getSecretPhrase)
   async function decrypt(cipher: string, with_secret: string = null): Promise<string> {
-    // if (cipher[0] == '~') return byteArrayToString(await decrypt_bytes(byteStringToArray(cipher)))
-    if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
     if (!with_secret) {
       if (!secret) secret = getSecretPhrase()
       with_secret = await Promise.resolve(secret) // resolve secret if promise pending
     }
-    const secret_utf8 = new TextEncoder().encode(with_secret) // utf8-encode secret
-    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
-    const iv = cipher
-      .slice(0, 24)
-      .match(/.{2}/g)
-      .map(byte => parseInt(byte, 16)) // get iv from cipher
-    const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
-    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
-    const cipher_array = byteStringToArray(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
-    const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
-    return new TextDecoder().decode(text_buffer) // utf8-decode text
+    return decryptWithSecret(cipher, with_secret)
   }
 
   async function decrypt_bytes(cipher: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
-    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
-    const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
-    // detect uint8 ("bytes") mode based on ~ prefix
-    const encrypted_bytes = cipher[0] == '~'.charCodeAt(0)
-    const offset = encrypted_bytes ? 1 : 0 // uint8 encoding has offset 1 for '~' prefix
-    const iv = byteArrayToString(cipher.subarray(offset, 24 + offset))
-      .match(/.{2}/g)
-      .map(byte => parseInt(byte, 16)) // get iv from cipher
-    const alg = { name: 'AES-GCM', iv: new Uint8Array(iv) } // configure AES-GCM
-    const key = await crypto.subtle.importKey('raw', secret_sha256, alg, false, ['decrypt']) // generate key
-    const cipher_array = encrypted_bytes
-      ? cipher.subarray(24 + offset)
-      : byteStringToArray(atob(byteArrayToString(cipher.subarray(24 + offset))))
-    const text_buffer = await crypto.subtle.decrypt(alg, key, cipher_array) // decrypt cipher using key
-    if (encrypted_bytes) return new Uint8Array(text_buffer) // return raw uint8 array
-    // backwards compatibility mode: convert utf8-decoded text to uint8 array (code points <= 255 only)
-    return byteStringToArray(new TextDecoder().decode(text_buffer))
+    return decryptBytesWithSecret(cipher, secret)
   }
 
   async function encryptItem(item) {
@@ -6170,6 +6123,13 @@
     hash_128_murmur3_x86,
     hash_160_sha1,
   } from '../util.js'
+  import {
+    hashSecretPhrase as hashSecretPhraseForUid,
+    encryptWithSecret,
+    encryptBytesWithSecret,
+    decryptWithSecret,
+    decryptBytesWithSecret,
+  } from '../crypto'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
