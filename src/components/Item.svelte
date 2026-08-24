@@ -1814,7 +1814,7 @@
       {:else if saving}
         <Circle size="25" unit="px" />
       {/if}
-      <div class="status" />
+      <div class="status"></div>
     </div>
   </div>
 </div>

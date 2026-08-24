@@ -1064,7 +1064,7 @@
     disabled={!editable}
     class:editable
     value={insertZWSP(text)}
-  />
+  ></textarea>
   {#if showButtons}
     <!-- we cancel the click at the parent (.buttons), which works if it doesn't shrink during the click -->
     <div class="buttons" class:focused on:click={cancel}>

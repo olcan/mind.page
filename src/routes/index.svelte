@@ -8288,7 +8288,7 @@
         class:focused
         class:editorFocused
       >
-        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown} />
+        <div class="column-padding" on:mousedown={onColumnPaddingMouseDown}></div>
         {#if column == 0}
           <div class="header" bind:this={headerdiv} on:click={() => textArea(-1).focus()}>
             <div class="header-container" class:focused={editorFocused}>
@@ -8313,7 +8313,7 @@
                   onNext={onNextItem}
                 />
               </div>
-              <div class="spacer" />
+              <div class="spacer"></div>
               {#if user}
                 <img
                   class="user"
@@ -8348,7 +8348,7 @@
                   {/if}
                 </div>
               {/if}
-              <span class="console-summary" bind:this={summarydiv} on:click={onConsoleSummaryClick} />
+              <span class="console-summary" bind:this={summarydiv} on:click={onConsoleSummaryClick}></span>
               {#if dotCount > 0}
                 {#if showDotted}
                   <div class="triangle">▲</div>
@@ -8369,7 +8369,7 @@
                   {/if}
                 </div>
               {/if}
-              <div class="console" bind:this={consolediv} on:click={onConsoleClick} />
+              <div class="console" bind:this={consolediv} on:click={onConsoleClick}></div>
             </div>
             <div class="history">
               <div class="history-container">
@@ -8791,11 +8791,11 @@
     }
   </style>
 
-  <div class="webcam-background" class:intro on:click|self={onWebcamClick} />
+  <div class="webcam-background" class:intro on:click|self={onWebcamClick}></div>
   <!-- svelte-ignore a11y-media-has-caption -->
-  <video id="webcam-video" class="webcam" class:intro style="visibility: hidden; z-index:-100" />
-  <canvas id="webcam-canvas" class="webcam" class:intro on:click|self={onWebcamClick} />
-  <div class="webcam-title" class:intro />
+  <video id="webcam-video" class="webcam" class:intro style="visibility: hidden; z-index:-100"></video>
+  <canvas id="webcam-canvas" class="webcam" class:intro on:click|self={onWebcamClick}></canvas>
+  <div class="webcam-title" class:intro></div>
 
   <script>
     if (navigator?.mediaDevices?.getUserMedia) {
