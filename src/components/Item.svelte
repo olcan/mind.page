@@ -1048,15 +1048,17 @@
     // console.debug('afterUpdate', name)
     setTimeout(() => onResized(id, container, 'afterUpdate'), 0)
 
+    // destroy any expired-while-live elements that this update actually replaced (see
+    // invalidateElemCache; svelte's {@html} replacement does not run _destroy hooks); this runs
+    // BEFORE the editing early-return below — switching into the editor is exactly such a
+    // replacement, and a retired chart/timer must not stay active for the whole editing session
+    reapRetiredElems(id)
+
     // itemdiv or its parent can be null, e.g. if we are editing, and if so we immediately adopt any cached elements
     if (!itemdiv?.parentElement) {
       window['_elem_cache'][id]?.forEach(adoptCachedElem)
       return
     }
-
-    // destroy any expired-while-live elements that this update actually replaced (see
-    // invalidateElemCache; svelte's {@html} replacement does not run _destroy hooks)
-    reapRetiredElems(id)
 
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it

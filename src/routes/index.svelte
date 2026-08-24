@@ -3723,7 +3723,6 @@
         signOut,
       })
       if (validated != null) {
-        hiddenIndexAuthoritative = true // registration above ran over server-confirmed documents
         secret = validated
         localStorage.setItem('mindpage_secret', secret)
         return secret
@@ -6031,8 +6030,15 @@
     decryptBytesWithSecret,
   } from '../crypto'
   import { resolveFixedOwnerSecret } from '../secret'
-  import { snapshotAction } from '../snapshot'
-  import { buildHiddenIndex, registerHidden, applyRemoteAdded, applyRemoteModified, removeHidden } from '../hidden'
+  import { snapshotDecision } from '../snapshot'
+  import {
+    buildHiddenIndex,
+    registerHidden,
+    applyRemoteAdded,
+    applyRemoteModified,
+    removeHidden,
+    finalizeAdoption,
+  } from '../hidden'
   import { layoutItems } from '../layout'
 
   let consoleLog = []
@@ -6214,10 +6220,11 @@
   }
 
   async function initialize() {
-    // non-fixed accounts load hidden items through the account-wide query below/listener (their
-    // cache-completeness is handled by the first-snapshot gates); the authority question below is
-    // specific to fixed pages, whose shared query cannot see hidden documents
-    hiddenIndexAuthoritative = !fixed || readonly
+    // authority is only ever granted by a current (server, no-pending-writes) revision of the
+    // full-account query in the items listener: a cache-initialized account may be partial, and
+    // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
+    // per save (see saveHiddenItem)
+    hiddenIndexAuthoritative = false
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
@@ -6239,7 +6246,6 @@
           )
         )
         hidden_docs.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
-        hiddenIndexAuthoritative = true
       } catch (e) {
         console.error('could not load hidden items from server (creates will re-confirm):', e)
       }
@@ -6268,14 +6274,15 @@
       duplicate: 'found invalid hidden item under duplicate name',
       anonymous: 'found invalid hidden item on anonymous account',
       orphaned: 'found invalid hidden global_store_* item associated with missing/deleted item',
+      malformed: 'found malformed hidden item (unparseable; quarantined, not deleted)',
     }
-    for (const { wrapper, reason } of buildHiddenIndex(
+    for (const entry of buildHiddenIndex(
       hiddenIndex(),
       items.filter(item => item.hidden),
       { anonymous, checkOrphans: !fixed, existingIds: existing_ids }
     )) {
-      console.warn(warnings[reason], wrapper.name, wrapper.id, wrapper)
-      hiddenItemsInvalid.push(wrapper)
+      console.warn(warnings[entry.reason], entry.wrapper.name, entry.wrapper.id, entry.wrapper)
+      hiddenItemsInvalid.push(entry) // { wrapper, reason } — deletion is gated on authority below
     }
     items = items.filter(item => !item.hidden)
 
@@ -6842,25 +6849,33 @@
           // snapshots are ignored after initialization
           { includeMetadataChanges: true },
           snapshot => {
-            // the gating decisions are extracted and table-tested (see snapshotAction in
+            // the gating decisions are extracted and table-tested (see snapshotDecision in
             // src/snapshot.ts); this listener owns the effects and the firstSnapshot bookkeeping
-            const action = snapshotAction({
+            const { action, authoritative } = snapshotDecision({
               syncDisabled: !!window['_disable_sync'],
-              initialized: !!initTime,
+              initializationStarted: !!initTime,
               firstSnapshot,
               fromCache: snapshot.metadata.fromCache,
               empty: snapshot.empty,
               changeCount: snapshot.docChanges().length,
+              hasPendingWrites: snapshot.metadata.hasPendingWrites,
               anonymous,
               fixed,
               hasStoredSecret: !!localStorage.getItem('mindpage_secret'),
             })
+            // a current (server, no-pending-writes) revision of the full-account query makes the
+            // hidden-item index authoritative — a cache-initialized account may be partial, so
+            // until then uniquely keyed hidden creates re-confirm against the server and
+            // provisional invalid-hidden candidates are not deleted (see initialize); fixed
+            // pages listen to a shared subset that cannot see hidden documents, so they never
+            // hold durable authority and every new-name create re-confirms (see saveHiddenItem)
+            if (authoritative && !fixed && !anonymous) hiddenIndexAuthoritative = true
             if (action == 'ignore_sync_disabled') {
               console.warn('ignoring firestore snapshot due to _disable_sync')
               return
             }
             if (action == 'ignore_metadata_only') return
-            if (action == 'initialize' || action == 'arm_completion' || action == 'wait_for_server') {
+            if (action == 'initialize' || action == 'wait_for_server') {
               // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
               init_log(
                 `received first snapshot (${snapshot.docs.length} items, ` +
@@ -6870,7 +6885,11 @@
                 init_log('ignoring first snapshot from cache (waiting for server) ...')
                 return // firstSnapshot stays true: the next snapshot is still the first
               }
-              if (action == 'initialize') {
+              if (initTime) {
+                // unreachable since the sapper-era preload was removed (initialization only
+                // starts here); log loudly if a new producer appears, and skip repopulating
+                console.error('first snapshot with initialization already started (unexpected)')
+              } else if (action == 'initialize') {
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
@@ -6921,11 +6940,20 @@
                     .catch(encryptionError)
                 }
 
-                // delete invalid hidden items after initialization
-                hiddenItemsInvalid.forEach(wrapper => {
-                  console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
-                  deleteHiddenItem(wrapper.id)
-                })
+                // delete invalid hidden items after initialization — only when the index is
+                // authoritative: candidates classified from a partial cache can be wrong (e.g. a
+                // global_store_X looks orphaned because item X is missing from the cache), and a
+                // provisional classification must never be destructive
+                if (hiddenIndexAuthoritative)
+                  hiddenItemsInvalid.forEach(({ wrapper, reason }) => {
+                    if (reason == 'malformed') return // quarantined, never auto-deleted
+                    console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
+                    deleteHiddenItem(wrapper.id)
+                  })
+                else if (hiddenItemsInvalid.length)
+                  console.warn(
+                    `retaining ${hiddenItemsInvalid.length} invalid hidden item(s): index not yet server-confirmed`
+                  )
 
                 // if narrating, fill .webcam-title from #webcam-title item if it exists
                 if (narrating)
@@ -7830,27 +7858,40 @@
         // here, letting registerHiddenItem adopt this pending wrapper if the name exists — on
         // failure the save rejects visibly (and the wrapper is cleaned below) instead of
         // duplicating
-        const confirmed = hiddenIndexAuthoritative
-          ? Promise.resolve()
-          : getDocsFromServer(
-              query(
-                collection(getFirestore(firebase), 'items'),
-                where('user', '==', user.uid),
-                where('hidden', '==', true)
-              )
-            ).then(async hidden_docs => {
-              for (const doc of hidden_docs.docs) {
-                try {
+        // a create is only safe against a server-confirmed hidden index (a partial cache could
+        // hide an existing document under this name): if encryption below did not already lead
+        // to adoption (on fixed pages the phrase validation registers the account's hidden
+        // items, see resolveFixedOwnerSecret), the index is re-confirmed against the server
+        // BEFORE addDoc. the confirmation runs after encryption so the common adopted path is
+        // not delayed by an extra round-trip (its updateDoc should start as early as possible —
+        // a quick navigation away discards work not yet handed to the sdk). ascending id order
+        // so a pending create adopts the MINIMUM-id duplicate (the index invariant); any
+        // failure fails the whole confirmation — a server read proves query completeness, not a
+        // successfully constructed name index, and a skipped document under this name would let
+        // the create duplicate it
+        const confirmIndex = () =>
+          hiddenIndexAuthoritative || wrapper.adopt_id
+            ? Promise.resolve()
+            : getDocsFromServer(
+                query(
+                  collection(getFirestore(firebase), 'items'),
+                  where('user', '==', user.uid),
+                  where('hidden', '==', true)
+                )
+              ).then(async hidden_docs => {
+                for (const doc of [...hidden_docs.docs].sort((a, b) => a.id.localeCompare(b.id))) {
                   const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
                   registerHiddenItem(hidden_item)
-                } catch (e) {
-                  console.error('could not load hidden item:', e)
                 }
-              }
-              hiddenIndexAuthoritative = true
-            })
-        confirmed
-          .then(() => encryptItem(itemToSave))
+                // no durable authority: this confirmed ONE create; on fixed pages the listener
+                // (shared subset) cannot see later hidden documents, so the next new-name
+                // create re-confirms again
+              })
+        encryptItem(itemToSave)
+          .then(async itemToSave => {
+            await confirmIndex() // may set wrapper.adopt_id via registration
+            return itemToSave
+          })
           .then(itemToSave => {
             // if an existing document for this name was found while encryptItem awaited the secret
             // phrase (see registerHiddenItem), update it with the merged state instead of creating
@@ -7866,10 +7907,9 @@
                 .then(adopted => {
                   updateDoc(doc(getFirestore(firebase), 'items', wrapper.adopt_id), adopted)
                     .then(() => {
-                      hiddenItems.delete(wrapper.id) // remove under temp id
-                      hiddenItems.set(wrapper.adopt_id, wrapper) // add back under persistent id
-                      wrapper.id = wrapper.adopt_id
-                      wrapper.pending_create = wrapper.adopt_id = null
+                      // settle via the reducer: re-key to the persistent id and restore the
+                      // minimum-id name invariant (a smaller retained duplicate may win the name)
+                      finalizeAdoption(hiddenIndex(), wrapper)
                       wrapper.saving = null
                       resolve(wrapper.id)
                     })
@@ -7909,18 +7949,16 @@
       wrapper.saving.catch(() => {
         wrapper.saving = null
         if (wrapper.adopt_id) {
-          // the document exists (adoption found it): re-key the wrapper to the persistent id so
-          // the next save updates it — deleting the wrapper here would send the next save down
-          // the create path and duplicate a document known to exist
-          hiddenItems.delete(wrapper.id)
-          wrapper.id = wrapper.adopt_id
-          wrapper.pending_create = wrapper.adopt_id = null
-          hiddenItems.set(wrapper.id, wrapper)
+          // the document exists (adoption found it): settle via the reducer — re-key to the
+          // persistent id so the next save updates it (deleting the wrapper would send the next
+          // save down the create path and duplicate a document known to exist), restoring the
+          // minimum-id name invariant
+          finalizeAdoption(hiddenIndex(), wrapper)
         } else {
-          // a genuinely failed fresh create: remove the wrapper so the next save (callers pass
-          // complete current state each time) retries the create
-          if (hiddenItems.get(wrapper.id) == wrapper) hiddenItems.delete(wrapper.id)
-          if (hiddenItemsByName.get(wrapper.name) == wrapper) hiddenItemsByName.delete(wrapper.name)
+          // a genuinely failed fresh create: remove via the reducer, which also promotes any
+          // retained same-name duplicate (e.g. a remote add that arrived while pending) so the
+          // next save updates that document instead of creating another
+          removeHidden(hiddenIndex(), wrapper.id)
         }
       })
     }

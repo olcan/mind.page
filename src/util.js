@@ -267,15 +267,31 @@ export function invalidateElemCache(id) {
 
 // destroys retired (expired-while-live) elements once they are no longer on their item: either
 // detached (replaced by a later render) or, with force, regardless (component unmount). safe to
-// call often; each element is destroyed exactly once
-export function reapRetiredElems(id, { force = false } = {}) {
-  window['_retired_elems']?.[id]?.forEach(elem => {
-    if (!force && elem.closest('.item')?.id == 'item-' + id && document.contains(elem)) return // still displayed
-    window['_retired_elems'][id].delete(elem)
-    elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
-    elem._destroy?.()
-    elem.remove()
+// call often; each element (and each nested hook) is destroyed exactly once — a retired parent
+// destroys its retired descendants' hooks, so those are tracked and skipped when their own set
+// entries come up
+const destroyedElems = new WeakSet()
+function destroyElem(elem) {
+  elem.querySelectorAll('[_destroy]').forEach(e => {
+    if (destroyedElems.has(e)) return
+    destroyedElems.add(e)
+    e['_destroy']()
   })
+  if (!destroyedElems.has(elem)) {
+    destroyedElems.add(elem)
+    elem._destroy?.()
+  }
+  elem.remove()
+}
+export function reapRetiredElems(id, { force = false } = {}) {
+  const retired = window['_retired_elems']?.[id]
+  if (!retired) return
+  retired.forEach(elem => {
+    if (!force && elem.closest('.item')?.id == 'item-' + id && document.contains(elem)) return // still displayed
+    retired.delete(elem)
+    destroyElem(elem)
+  })
+  if (retired.size == 0) delete window['_retired_elems'][id]
 }
 
 export function adoptCachedElem(elem) {

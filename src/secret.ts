@@ -73,8 +73,11 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
 
   // register the account's hidden items (e.g. global stores) decrypted with the validated
   // candidate — NOT the session secret, which is not published yet and must not be until this
-  // completes (a pending save adopts the existing document instead of creating a duplicate)
-  for (const doc of docs) {
+  // completes (a pending save adopts the existing document instead of creating a duplicate);
+  // only hidden documents are touched ('hidden' is a plaintext field — an unrelated corrupt
+  // ordinary item must not fail this), in ascending id order so a pending create adopts the
+  // MINIMUM-id duplicate (the index invariant; the query itself is ordered by descending time)
+  for (const doc of docs.filter(doc => doc.data().hidden).sort((a, b) => a.id.localeCompare(b.id))) {
     try {
       const item: Record<string, any> = Object.assign(doc.data(), { id: doc.id })
       if (item.cipher) {
@@ -83,8 +86,12 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
         item.attr = decrypted.attr
         item.cipher = null
       }
-      if (item.hidden) deps.registerHiddenItem(item)
+      deps.registerHiddenItem(item)
     } catch (e) {
+      // best-effort here: the phrase is validated regardless, and duplicate protection for a
+      // pending create does not rest on this pass — every new-name create on a fixed page
+      // re-confirms against the server and FAILS on any hidden-document error (see
+      // saveHiddenItem in index.svelte)
       console.error('could not load hidden item:', e)
     }
   }

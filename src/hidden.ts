@@ -21,18 +21,25 @@ export type HiddenIndex = {
   byName: Map<string, HiddenWrapper> // minimum-id wrapper per name (see above)
 }
 
-export type InvalidHidden = { wrapper: HiddenWrapper; reason: 'duplicate' | 'anonymous' | 'orphaned' }
+export type InvalidHidden = {
+  wrapper: HiddenWrapper
+  // 'malformed' wrappers (unparseable text or missing name) are quarantined: reported but never
+  // auto-deleted, and never indexed — converting an unreadable record into absence would be
+  // destructive
+  reason: 'duplicate' | 'anonymous' | 'orphaned' | 'malformed'
+}
 
 // points byName at the wrapper unless a smaller-id wrapper already holds the name; a
 // pending_create holder is never displaced (its in-flight save owns the name until adoption)
-function indexByName(index: HiddenIndex, wrapper: HiddenWrapper) {
+export function indexByName(index: HiddenIndex, wrapper: HiddenWrapper) {
   const existing = index.byName.get(wrapper.name)
   if (existing?.pending_create) return
   if (!(existing && existing.id < wrapper.id)) index.byName.set(wrapper.name, wrapper)
 }
 
-// after a removal, point byName at the minimum-id wrapper among any remaining duplicates
-function reassignName(index: HiddenIndex, name: string) {
+// after a removal or settlement, point byName at the minimum-id wrapper among any remaining
+// duplicates (restores the index invariant whenever byName may have lost its holder)
+export function reassignName(index: HiddenIndex, name: string) {
   for (const dup of index.byId.values())
     if (dup.name == name && !((index.byName.get(name)?.id as any) < dup.id)) index.byName.set(name, dup)
 }
@@ -52,8 +59,18 @@ export function buildHiddenIndex(
 ): InvalidHidden[] {
   const invalid: InvalidHidden[] = []
   for (const item of [...hidden_items].sort((a, b) => a.id.localeCompare(b.id))) {
-    const wrapper: HiddenWrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+    let wrapper: HiddenWrapper
+    try {
+      wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+      if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
+    } catch (e) {
+      invalid.push({ wrapper: { id: item.id, name: '' }, reason: 'malformed' })
+      continue
+    }
     if (index.byName.has(wrapper.name)) {
+      // retained in byId (canonical byName keeps the minimum id) so a later authoritative
+      // cleanup can still promote it if the canonical document is removed first
+      index.byId.set(wrapper.id, wrapper)
       invalid.push({ wrapper, reason: 'duplicate' })
       continue
     }
@@ -126,6 +143,17 @@ export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper):
 
 export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: HiddenWrapper } {
   return removeHidden(index, id)
+}
+
+// settles a pending create's ADOPTION (its document was found to exist, see saveHiddenItem in
+// index.svelte): re-keys the wrapper to the persistent id, clears the pending claim, then
+// restores the minimum-id invariant for the name (a smaller-id retained duplicate may now win)
+export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
+  index.byId.delete(wrapper.id)
+  wrapper.id = wrapper.adopt_id!
+  wrapper.pending_create = wrapper.adopt_id = null
+  index.byId.set(wrapper.id, wrapper)
+  reassignName(index, wrapper.name)
 }
 
 // removes a wrapper by id and reassigns its name to the minimum-id duplicate, if any
