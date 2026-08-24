@@ -3769,86 +3769,52 @@
     // falls through to the new-phrase flow below
     if (fixed) {
       new_phrase = false
-      // fail closed on fetch errors: falling through to the unvalidated prompt after e.g. a
-      // transient network error would accept any phrase and let the pending encrypted save write
-      // under a wrong key, so the fetch retries in place (or signs out); the retry must be an
-      // internal loop — a recursive getSecretPhrase() call would return the caller-assigned
-      // in-flight promise (see `if (secret) return secret` above) and deadlock on itself
-      let account_docs
-      while (true) {
-        try {
-          // from the server, never the cache: a cache holding only previously-visited plaintext
-          // shared items would resolve with no cipher and misclassify the account as unencrypted
-          account_docs = await getDocsFromServer(
-            query(
-              collection(getFirestore(firebase), 'items'),
-              where('user', '==', user.uid),
-              orderBy('time', 'desc')
+      // the validation flow is extracted with injected dependencies (see src/secret.ts and its
+      // unit tests); it fails closed on fetch errors, validates the phrase against
+      // server-confirmed ciphertext, and registers the account's hidden items BEFORE the secret
+      // is published here (a concurrent encrypted save must adopt, not duplicate)
+      const validated = await resolveFixedOwnerSecret({
+        fetchAccountDocs: async () =>
+          (
+            await getDocsFromServer(
+              query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
             )
-          )
-          break
-        } catch (e) {
-          console.error('could not fetch account items to validate secret phrase:', e)
-          const retry = await modal.show({
+          ).docs,
+        promptPhrase: async () => {
+          await tick() // wait until modal is rendered on page
+          return modal.show({
+            content: 'Enter your secret phrase:',
+            confirm: 'Continue',
+            cancel: 'Sign Out',
+            input: '',
+            password: true,
+            username: user.email,
+            autocomplete: 'current-password',
+          })
+        },
+        confirmRetry: async () =>
+          (await modal.show({
             content: 'Could not verify your secret phrase against your account. Check your connection and try again.',
             confirm: 'Try Again',
             cancel: 'Sign Out',
-          })
-          if (retry == null) {
-            signOut()
-            throw new Error('secret phrase cancelled')
-          }
-        }
+          })) != null,
+        reportWrongPhrase: () =>
+          modal.show({
+            content: "Secret phrase appears incorrect. Let's try again ...",
+            confirm: 'Try Again',
+            background: 'confirm',
+          }),
+        hashPhrase: phrase => hashSecretPhrase(phrase),
+        registerHiddenItem,
+        signOut,
+      })
+      if (validated != null) {
+        hiddenIndexAuthoritative = true // registration above ran over server-confirmed documents
+        secret = validated
+        localStorage.setItem('mindpage_secret', secret)
+        return secret
       }
-      {
-        const cipher = account_docs.docs.map(doc => doc.data().cipher).find(cipher => cipher)
-        if (cipher) {
-          await tick() // wait until modal is rendered on page
-          while (true) {
-            const phrase = await modal.show({
-              content: 'Enter your secret phrase:',
-              confirm: 'Continue',
-              cancel: 'Sign Out',
-              input: '',
-              password: true,
-              username: user.email,
-              autocomplete: 'current-password',
-            })
-            if (phrase == null) {
-              signOut()
-              throw new Error('secret phrase cancelled')
-            }
-            // validate against a local candidate: the module secret holds the in-flight promise
-            // that concurrent callers await, and clearing it on a retry would spawn a second prompt
-            const candidate = await hashSecretPhrase(phrase)
-            try {
-              await decryptWithSecret(cipher, candidate) // throws on a wrong phrase
-              secret = candidate
-              break
-            } catch (e) {
-              await modal.show({
-                content: "Secret phrase appears incorrect. Let's try again ...",
-                confirm: 'Try Again',
-                background: 'confirm',
-              })
-            }
-          }
-          localStorage.setItem('mindpage_secret', secret)
-          // register the account's hidden items (e.g. global stores) so that the pending save
-          // updates the existing one instead of creating a duplicate (see initialize for the
-          // stored-secret path)
-          for (const account_doc of account_docs.docs) {
-            try {
-              const hidden_item = await decryptItem(Object.assign(account_doc.data(), { id: account_doc.id }))
-              if (hidden_item.hidden) registerHiddenItem(hidden_item)
-            } catch (e) {
-              console.error('could not load hidden item:', e)
-            }
-          }
-          return secret
-        }
-        new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
-      }
+      new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
     }
     await tick() // wait until modal is rendered on page
 
@@ -6150,6 +6116,7 @@
     decryptWithSecret,
     decryptBytesWithSecret,
   } from '../crypto'
+  import { resolveFixedOwnerSecret } from '../secret'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
@@ -6253,6 +6220,11 @@
   let specialTagFunctions = []
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
+  // whether the hidden-item index is confirmed against the server: on a fixed page the shared
+  // query cannot see the account's hidden documents, so until the dedicated hidden query has a
+  // SERVER answer, uniquely keyed hidden creates must re-confirm first (see saveHiddenItem) or a
+  // partial cache could hide an existing document and a create would duplicate it
+  let hiddenIndexAuthoritative = false
   let hiddenItemsByName
   let hiddenItemsInvalid
   let resolve_init // set below
@@ -6323,6 +6295,11 @@
   }
 
   async function initialize() {
+    // non-fixed accounts load hidden items through the account-wide query below/listener (their
+    // cache-completeness is handled by the first-snapshot gates); the authority question below is
+    // specific to fixed pages, whose shared query cannot see hidden documents
+    hiddenIndexAuthoritative = !fixed || readonly
+
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
     // (e.g. global stores) looked empty and every save created a duplicate hidden item, flagged
@@ -6330,8 +6307,12 @@
     // device holds the secret (without it they are loaded after the phrase is validated instead,
     // see getSecretPhrase)
     if (fixed && !readonly && !anonymous && localStorage.getItem('mindpage_secret')) {
+      // from the server, never the cache: a partial cache could miss an existing hidden document
+      // and a later save would then create a duplicate; on failure the index stays marked
+      // unauthoritative and hidden CREATES re-confirm against the server first (see
+      // saveHiddenItem) instead of blocking the page here
       try {
-        const hidden_docs = await getDocs(
+        const hidden_docs = await getDocsFromServer(
           query(
             collection(getFirestore(firebase), 'items'),
             where('user', '==', user.uid),
@@ -6339,8 +6320,9 @@
           )
         )
         hidden_docs.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
+        hiddenIndexAuthoritative = true
       } catch (e) {
-        console.error('could not load hidden items:', e)
+        console.error('could not load hidden items from server (creates will re-confirm):', e)
       }
     }
     // decrypt any encrypted items
@@ -7978,7 +7960,32 @@
         text: JSON.stringify(_.pick(wrapper, ['name', 'item'])), // save only name/item
       }
       wrapper.saving = new Promise((resolve, reject) => {
-        encryptItem(itemToSave)
+        // a create is only safe against a server-confirmed hidden index: a partial cache could
+        // hide an existing document under this name (see hiddenIndexAuthoritative); re-confirm
+        // here, letting registerHiddenItem adopt this pending wrapper if the name exists — on
+        // failure the save rejects visibly (and the wrapper is cleaned below) instead of
+        // duplicating
+        const confirmed = hiddenIndexAuthoritative
+          ? Promise.resolve()
+          : getDocsFromServer(
+              query(
+                collection(getFirestore(firebase), 'items'),
+                where('user', '==', user.uid),
+                where('hidden', '==', true)
+              )
+            ).then(async hidden_docs => {
+              for (const doc of hidden_docs.docs) {
+                try {
+                  const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
+                  registerHiddenItem(hidden_item)
+                } catch (e) {
+                  console.error('could not load hidden item:', e)
+                }
+              }
+              hiddenIndexAuthoritative = true
+            })
+        confirmed
+          .then(() => encryptItem(itemToSave))
           .then(itemToSave => {
             // if an existing document for this name was found while encryptItem awaited the secret
             // phrase (see registerHiddenItem), update it with the merged state instead of creating

@@ -252,14 +252,30 @@ export function invalidateElemCache(id) {
       elem.remove()
     } else {
       // live on the item: only the cache entry expires — destroying a displayed node would leave
-      // it broken on the page (e.g. a dead chart) until an unrelated render; the node stays
-      // functional and is discarded whenever the item next re-renders (the deleted entry
-      // guarantees that render regenerates instead of restoring). the caller decides whether to
-      // force that render (see invalidate_elem_cache in index.svelte)
+      // it broken on the page (e.g. a dead chart) until it is replaced; the node stays functional
+      // and is RETIRED: reapRetiredElems destroys it exactly once when a later render has
+      // actually replaced it (or its component unmounts), since svelte's {@html} replacement
+      // never runs the app's _destroy teardown hooks. the caller decides whether to force the
+      // replacing render now (see invalidate_elem_cache in index.svelte)
+      ;(window['_retired_elems'] ??= {})[id] ??= new Set()
+      window['_retired_elems'][id].add(elem)
       live = true
     }
   })
   return live
+}
+
+// destroys retired (expired-while-live) elements once they are no longer on their item: either
+// detached (replaced by a later render) or, with force, regardless (component unmount). safe to
+// call often; each element is destroyed exactly once
+export function reapRetiredElems(id, { force = false } = {}) {
+  window['_retired_elems']?.[id]?.forEach(elem => {
+    if (!force && elem.closest('.item')?.id == 'item-' + id && document.contains(elem)) return // still displayed
+    window['_retired_elems'][id].delete(elem)
+    elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
+    elem._destroy?.()
+    elem.remove()
+  })
 }
 
 export function adoptCachedElem(elem) {

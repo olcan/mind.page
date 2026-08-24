@@ -15,6 +15,7 @@
     isBalanced,
     numberWithCommas,
     invalidateElemCache,
+    reapRetiredElems,
     adoptCachedElem,
     skipEscaped,
     exclusionRegExp,
@@ -1053,6 +1054,10 @@
       return
     }
 
+    // destroy any expired-while-live elements that this update actually replaced (see
+    // invalidateElemCache; svelte's {@html} replacement does not run _destroy hooks)
+    reapRetiredElems(id)
+
     // NOTE: this function must be fast and idempotent, as it can be called multiple times on the same item
     // NOTE: additional invocations can be on an existing DOM element, e.g. one with MathJax typesetting in it
     // NOTE: always invoked twice for new items due to id change after first save
@@ -1609,16 +1614,25 @@
   })
 
   onDestroy(() => {
-    if (window['_resize_item']?.[id]) delete window['_resize_item'][id]
+    reapRetiredElems(id, { force: true }) // expired-while-live elements lose their dom with this component
+    // delete only our own entry: during a column move a NEW instance for the same id can install
+    // its hooks before this old instance is destroyed, and must not lose them here
+    if (window['_item_hooks']?.[id] === itemHooks) delete window['_item_hooks'][id]
     // move cached elements into dom to prevent offloading by browser
     window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
-  // per-item resize hooks: the window globals below are installed once (??=) and so must not use
-  // this component instance's id/container/onResized closures — they would belong to whichever
-  // item mounted first and misattribute measurements and invalidations to it
-  ;((window['_resize_item'] ??= {}) as any)[id] = (trigger: string) => onResized(id, container, trigger)
-  window['_render_images'] ??= item => renderImages(item.id, item.elem?.querySelectorAll('.item > .content img') ?? [])
+  // per-item hooks registry: the window globals below are installed once (??=) and so must not
+  // use any component instance's closures — they would belong to whichever item mounted first and
+  // misattribute measurements, caching and invalidations to it; instead they route through this
+  // registry by the PASSED item's id
+  const itemHooks = {
+    resize: (trigger: string) => onResized(id, container, trigger),
+    render_images: (elems: NodeListOf<Element>) => renderImages(id, elems),
+  }
+  ;((window['_item_hooks'] ??= {}) as any)[id] = itemHooks
+  window['_render_images'] ??= item =>
+    window['_item_hooks']?.[item.id]?.render_images(item.elem?.querySelectorAll('.item > .content img') ?? [])
   window['_dot_rendered'] ??= function (item, dot) {
     // render "stack" clusters (subgraphs)
     dot.querySelectorAll('.cluster.stack').forEach(cluster => {
@@ -1679,7 +1693,7 @@
           let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
           math.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
         })
-        window['_resize_item']?.[item.id]?.('math rendered')
+        window['_item_hooks']?.[item.id]?.resize('math rendered')
       })
       .catch(console.error)
   }
