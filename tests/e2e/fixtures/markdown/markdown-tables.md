@@ -35,3 +35,9 @@ And alignment syntax is allowed:
 | columns *and* two rows    ^|| Header B |
 |-------------|--------------|-----------|
 | Cell A      | Cell B       | Cell C    |
+
+And column widths as percentages in the alignment row:
+
+| Name           | Notes             |
+|:-- 30% --------|:-- 70% ----------|
+| short          | the wide column   |

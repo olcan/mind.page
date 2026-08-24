@@ -15,6 +15,10 @@ Checkboxes `[ ]` and `[x]` work inside bullets:
 - [ ] not
 - [ ] quite work
 
+Also inside numbered items, checked or not:
+1. [x] one
+2. [ ] two
+
 Footnotes [^1]
 [^1]: do not work
 
