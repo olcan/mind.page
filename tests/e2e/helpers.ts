@@ -18,6 +18,7 @@ declare global {
       elem: HTMLElement | null
       text: string
       saved_id?: string
+      global_store: Record<string, unknown>
       delete: (confirm?: boolean) => void
       share: (key: string, index?: number) => void
       unshare: (key: string) => void

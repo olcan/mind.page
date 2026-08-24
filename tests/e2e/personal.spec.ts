@@ -194,6 +194,73 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
   await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
 })
 
+test('a complete cache without the stored secret still initializes from the server', async ({ page }) => {
+  // with a complete cache matching the server there is no data change, so the first-snapshot gate
+  // must rely on a metadata snapshot (fromCache -> false) to proceed; without includeMetadataChanges
+  // the page hung forever at "ignoring first snapshot from cache" (found in production)
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page) // fills the persistent cache with the full account
+  // simulate a device that lost only the local storage (cache intact), as a fresh profile that had
+  // visited before signing in
+  await page
+    .evaluate(async () => {
+      localStorage.removeItem('mindpage_secret')
+      localStorage.removeItem('mindpage_user')
+      await (window.firebase.auth.getAuth(window.firebase) as { signOut: () => Promise<void> }).signOut()
+    })
+    .catch(() => {}) // the app reloads itself on the auth change, destroying this context
+  await page.waitForTimeout(1_000)
+  await page.goto('about:blank') // settle before navigating
+  await loadUser(page, ALICE)
+  await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue') // not "Choose ..."
+  await waitForApp(page)
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
+    .toContain('secret text 12345')
+})
+
+test('signing in on a shared page asks for the existing phrase, and cancelling signs out', async ({ page }) => {
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await page.evaluate(() => window._item('#e2e_shared')!.share('e2e-key', 0))
+  await expect
+    .poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 })
+    .toMatchObject({
+      attr: { shared: { keys: ['e2e-key'] } },
+    })
+  await page.evaluate(() => void window._create('/_signout', { command: true }))
+  await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
+  // sign in on the shared page itself (as the owner, without the stored secret)
+  const token = await customToken(ALICE)
+  await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
+  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+  await page.evaluate(token => {
+    sessionStorage.setItem('mindpage_signin_pending', '1')
+    document.cookie = '__session=signin_pending;max-age=600'
+    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+  }, token)
+  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 }) // fixed-page welcome
+  await waitForApp(page)
+  // an encrypted save (item code saving global state, as the production #sharer item does)
+  // prompts for the existing phrase, never a new one
+  await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe = Date.now()))
+  await expect(page.getByText(/Enter your secret phrase/)).toBeVisible({ timeout: 60_000 })
+  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+  // cancelling signs out instead of re-prompting forever
+  await page.locator('.modal .button.cancel', { hasText: 'Sign Out' }).click()
+  await expect(page.getByText(/Welcome to MindPage/)).toBeVisible({ timeout: 60_000 }) // shared page, signed out
+  await page.evaluate(() => window._item('#e2e_shared', true) && undefined)
+  // restore: sign back in with the secret and unshare
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key'))
+  await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
+})
+
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)

@@ -3738,9 +3738,14 @@
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
     if (readonly) throw Error('readonly mode should not require a secret phrase')
+    if (signingOut) throw new Error('secret phrase cancelled') // do not re-prompt while signing out
     if (secret) return secret // already initialized from localStorage
     secret = localStorage.getItem('mindpage_secret')
     if (secret) return secret // retrieved from localStorage
+    // on a fixed (shared) page the prompt is triggered by an encrypted save (new_phrase == true),
+    // but the signed-in owner almost certainly has an account already, so ask for the existing
+    // phrase instead of a new one (on the main page decryption asks and verifies it naturally)
+    if (fixed) new_phrase = false
     await tick() // wait until modal is rendered on page
 
     let phrase = ''
@@ -3790,7 +3795,12 @@
         autocomplete: 'current-password',
       })
     }
-    if (phrase == null || confirmed == null) throw new Error('secret phrase cancelled')
+    if (phrase == null || confirmed == null) {
+      // sign out on cancellation: callers (e.g. item code saving encrypted state) often swallow
+      // this error, which previously left the page signed in and re-prompting on the next save
+      signOut()
+      throw new Error('secret phrase cancelled')
+    }
     const secret_utf8 = new TextEncoder().encode(user.uid + phrase)
     const secret_buffer = await crypto.subtle.digest('SHA-256', secret_utf8)
     const secret_array = Array.from(new Uint8Array(secret_buffer))
@@ -6888,12 +6898,18 @@
         // (also initialize if items were not returned by server)
         onSnapshot(
           items_query,
+          // metadata changes are included so that the fromCache -> server transition fires a
+          // snapshot even when the cached data matches the server (see the first-snapshot gate
+          // below, which would otherwise wait forever on a complete cache); metadata-only
+          // snapshots are ignored after initialization
+          { includeMetadataChanges: true },
           snapshot => {
             // ignore (and warn about) snapshots disabled via _disable_sync
             if (window['_disable_sync']) {
               console.warn('ignoring firestore snapshot due to _disable_sync')
               return
             }
+            if (initTime && !firstSnapshot && snapshot.docChanges().length == 0) return // metadata-only
             // on first snapshot, if init has not started (!initTime), we simply populate items array and trigger initialization; otherwise we must be already initializing items received directly from server so we ignore the first snapshot (presumably coming from a local cache) and simply set up init completion logic
             if (firstSnapshot) {
               // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
