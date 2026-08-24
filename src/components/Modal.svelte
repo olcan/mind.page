@@ -1,6 +1,7 @@
 <script lang="ts">
   const marked = globalThis['marked'] // imported (and set up) in client.ts
   import { numberWithCommas } from '../util.js'
+  import type { FullAutoFill } from 'svelte/elements'
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
 
   let content = ''
@@ -9,7 +10,7 @@
   let input = null
   let password = false
   let username = ''
-  let autocomplete = ''
+  let autocomplete: FullAutoFill = ''
   let images = false
   let style = ''
   let canConfirm = (input: string) => input == null || input.length > 0 // confirm by default for non-input modal

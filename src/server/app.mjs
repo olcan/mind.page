@@ -107,7 +107,8 @@ scoped.use(
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
   (req, res, next) => {
     // console.debug('handling path', req.path)
-    const hostport = (req.headers['x-forwarded-host'] || req.headers['host'])
+    // http/2 requests (e.g. the vite 8 dev server) carry :authority instead of a host header
+    const hostport = req.headers['x-forwarded-host'] || req.headers['host'] || req.headers[':authority'] || 'localhost'
     const hostname_orig = hostport.replace(/:\d+$/, '')
     // note globalThis.hostname is used in index.svelte on server side
     const hostname = (globalThis.hostname = canonicalizeHost(hostport))

@@ -4,8 +4,8 @@ import globals from 'globals'
 // plain-javascript lint only: svelte/typescript sources are covered by `npm run check` (svelte-check)
 // and `npm run check:tests` (tsc), so eslint keeps the untyped node scripts honest
 export default [
-  // lib/ holds tsc-compiled cloud function output (generated code)
-  { ignores: ['node_modules', 'build', '.svelte-kit', 'functions/node_modules', 'static', 'ssl-dev', 'lib'] },
+  // lib/ holds tsc-compiled cloud function output (generated code); src/vendor is third-party
+  { ignores: ['node_modules', 'build', '.svelte-kit', 'functions/node_modules', 'static', 'ssl-dev', 'lib', 'src/vendor'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,mjs}'],
