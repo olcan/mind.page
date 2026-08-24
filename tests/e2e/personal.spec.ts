@@ -220,7 +220,7 @@ test('a complete cache without the stored secret still initializes from the serv
     .toContain('secret text 12345')
 })
 
-test('signing in on a shared page asks for the existing phrase, and cancelling signs out', async ({ page }) => {
+test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -233,31 +233,47 @@ test('signing in on a shared page asks for the existing phrase, and cancelling s
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   // sign in on the shared page itself (as the owner, without the stored secret)
-  const token = await customToken(ALICE)
-  await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
-  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
-  await page.evaluate(token => {
-    sessionStorage.setItem('mindpage_signin_pending', '1')
-    document.cookie = '__session=signin_pending;max-age=600'
-    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
-  }, token)
-  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 }) // fixed-page welcome
-  await waitForApp(page)
-  // an encrypted save (item code saving global state, as the production #sharer item does)
-  // prompts for the existing phrase, never a new one
-  await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe = Date.now()))
+  const signInOnSharedPage = async () => {
+    const token = await customToken(ALICE)
+    await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
+    await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+    await page.evaluate(token => {
+      sessionStorage.setItem('mindpage_signin_pending', '1')
+      document.cookie = '__session=signin_pending;max-age=600'
+      void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+    }, token)
+    await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+    await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 }) // fixed-page welcome
+    await waitForApp(page)
+    // an encrypted save (item code saving global state, as the production #sharer item does)
+    // prompts for the existing phrase, never a new one, validated against the account's ciphertext
+    await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe = Date.now()))
+    await expect(page.getByText(/Enter your secret phrase/)).toBeVisible({ timeout: 60_000 })
+    expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+  }
+  await signInOnSharedPage()
+  // a wrong phrase is rejected and re-prompted instead of encrypting under the wrong key
+  await page.fill('#modal-input', 'wrong phrase')
+  await page.locator('.modal .button.confirm', { hasText: 'Continue' }).click()
+  await expect(page.getByText(/appears incorrect/)).toBeVisible({ timeout: 60_000 })
+  await page.locator('.modal .button.confirm', { hasText: 'Try Again' }).click()
   await expect(page.getByText(/Enter your secret phrase/)).toBeVisible({ timeout: 60_000 })
-  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
   // cancelling signs out instead of re-prompting forever
   await page.locator('.modal .button.cancel', { hasText: 'Sign Out' }).click()
   await expect(page.getByText(/Welcome to MindPage/)).toBeVisible({ timeout: 60_000 }) // shared page, signed out
-  await page.evaluate(() => window._item('#e2e_shared', true) && undefined)
-  // restore: sign back in with the secret and unshare
-  await withSecret(page)
-  await loadUser(page, ALICE)
+  // the correct phrase validates, and the validation fetch warms the cache: the main page then
+  // initializes without any prompt
+  await signInOnSharedPage()
+  await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
+  await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
+  expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
+  await page.goto('/')
   await waitForApp(page)
-  await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key'))
+  expect(await page.locator('#modal-input').count()).toBe(0) // no phrase prompt on the main page
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
+    .toContain('secret text 12345')
+  await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
   await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
 })
 

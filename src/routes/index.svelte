@@ -3735,6 +3735,13 @@
   let secret // retrieved once and stored separately to prevent tampering during session
 
   import { tick } from 'svelte'
+  // the stored form of the secret phrase: base64 of sha-256(uid + phrase)
+  async function hashSecretPhrase(phrase: string): Promise<string> {
+    const secret_utf8 = new TextEncoder().encode(user.uid + phrase)
+    const secret_buffer = await crypto.subtle.digest('SHA-256', secret_utf8)
+    const secret_array = Array.from(new Uint8Array(secret_buffer))
+    return btoa(secret_array.map(b => String.fromCharCode(b)).join(''))
+  }
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
     if (readonly) throw Error('readonly mode should not require a secret phrase')
@@ -3743,9 +3750,63 @@
     secret = localStorage.getItem('mindpage_secret')
     if (secret) return secret // retrieved from localStorage
     // on a fixed (shared) page the prompt is triggered by an encrypted save (new_phrase == true),
-    // but the signed-in owner almost certainly has an account already, so ask for the existing
-    // phrase instead of a new one (on the main page decryption asks and verifies it naturally)
-    if (fixed) new_phrase = false
+    // but the signed-in owner almost certainly has an account already, so fetch the account's
+    // items once: any ciphertext found validates the entered phrase (an unvalidated phrase would
+    // encrypt new data under the wrong key), and the fetch warms the persistent cache so the
+    // user's own page initializes instantly afterwards; a truly empty or unencrypted account
+    // falls through to the new-phrase flow below
+    if (fixed) {
+      new_phrase = false
+      try {
+        const account_docs = await getDocs(
+          query(
+            collection(getFirestore(firebase), 'items'),
+            where('user', '==', user.uid),
+            orderBy('time', 'desc')
+          )
+        )
+        const cipher = account_docs.docs.map(doc => doc.data().cipher).find(cipher => cipher)
+        if (cipher) {
+          await tick() // wait until modal is rendered on page
+          while (true) {
+            const phrase = await modal.show({
+              content: 'Enter your secret phrase:',
+              confirm: 'Continue',
+              cancel: 'Sign Out',
+              input: '',
+              password: true,
+              username: user.email,
+              autocomplete: 'current-password',
+            })
+            if (phrase == null) {
+              signOut()
+              throw new Error('secret phrase cancelled')
+            }
+            // validate against a local candidate: the module secret holds the in-flight promise
+            // that concurrent callers await, and clearing it on a retry would spawn a second prompt
+            const candidate = await hashSecretPhrase(phrase)
+            try {
+              await decrypt(cipher, candidate) // throws on a wrong phrase
+              secret = candidate
+              break
+            } catch (e) {
+              await modal.show({
+                content: "Secret phrase appears incorrect. Let's try again ...",
+                confirm: 'Try Again',
+                background: 'confirm',
+              })
+            }
+          }
+          localStorage.setItem('mindpage_secret', secret)
+          return secret
+        }
+        new_phrase = true // no ciphertext anywhere: a new (or unencrypted) account
+      } catch (e) {
+        if (e.message?.includes('cancelled')) throw e
+        console.error('could not validate secret phrase against account items:', e)
+        // fall through to the unvalidated prompt (previous behavior) if the fetch failed
+      }
+    }
     await tick() // wait until modal is rendered on page
 
     let phrase = ''
@@ -3801,11 +3862,7 @@
       signOut()
       throw new Error('secret phrase cancelled')
     }
-    const secret_utf8 = new TextEncoder().encode(user.uid + phrase)
-    const secret_buffer = await crypto.subtle.digest('SHA-256', secret_utf8)
-    const secret_array = Array.from(new Uint8Array(secret_buffer))
-    const secret_string = secret_array.map(b => String.fromCharCode(b)).join('')
-    secret = btoa(secret_string)
+    secret = await hashSecretPhrase(phrase)
     localStorage.setItem('mindpage_secret', secret)
     return secret
   }
@@ -3854,12 +3911,16 @@
     return concatByteArrays(byteStringToArray('~' + iv_hex), new Uint8Array(cipher_buffer))
   }
 
-  async function decrypt(cipher: string): Promise<string> {
+  // with_secret decrypts with the given secret instead of the session's (e.g. to validate an
+  // entered phrase before committing it, see getSecretPhrase)
+  async function decrypt(cipher: string, with_secret: string = null): Promise<string> {
     // if (cipher[0] == '~') return byteArrayToString(await decrypt_bytes(byteStringToArray(cipher)))
     if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
-    if (!secret) secret = getSecretPhrase()
-    secret = await Promise.resolve(secret) // resolve secret if promise pending
-    const secret_utf8 = new TextEncoder().encode(secret) // utf8-encode secret
+    if (!with_secret) {
+      if (!secret) secret = getSecretPhrase()
+      with_secret = await Promise.resolve(secret) // resolve secret if promise pending
+    }
+    const secret_utf8 = new TextEncoder().encode(with_secret) // utf8-encode secret
     const secret_sha256 = await crypto.subtle.digest('SHA-256', secret_utf8) // sha256-hash the secret
     const iv = cipher
       .slice(0, 24)
