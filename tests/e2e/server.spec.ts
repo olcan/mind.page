@@ -52,19 +52,25 @@ test.describe('ssr shell', () => {
 })
 
 test.describe('crawlable public pages', () => {
-  // not implemented: the server renders only the shell (the item preload in server.ts is disabled,
-  // and items were never rendered server-side), so public and shared pages are invisible to clients
-  // that do not run javascript (link unfurlers, most crawlers); these pin the target
-  test.fixme('the public account serves its items without javascript', async ({ request }) => {
+  // public (anonymous) and shared pages carry server-rendered content and meta tags for crawlers
+  // and link unfurlers (see $lib/server/content); the app replaces the content on mount
+  test('the public account serves its items without javascript', async ({ request }) => {
     const html = await (await request.get('/', { headers: { Host: 'mindbox.io' } })).text()
     expect(html).toMatch(/<meta name="description" content="[^"]+"/)
-    expect(html).toContain('Introducing MindPage') // the intro item, in the body and not only in a script
+    expect(html).toContain('#load function for loading external libraries') // item text in the body
   })
 
-  test.fixme('a shared page serves its item without javascript', async ({ request }) => {
+  test('a shared page serves its item without javascript', async ({ request }) => {
     const html = await (await request.get('/?shared=crawl_e2e/public')).text()
     expect(html).toMatch(/<meta property="og:title" content="[^"]+"/)
     expect(html).toContain('a shared item for crawlers')
+  })
+
+  test('a signed-in session gets no server-rendered content', async ({ request }) => {
+    const html = await (await request.get('/', { headers: { Cookie: '__session=some-id-token' } })).text()
+    expect(html).not.toContain('#load function for loading external libraries')
+    expect(html).not.toMatch(/<meta property="og:title"/) // note the template carries a static description meta
+    expect(html).not.toContain('ssr-content')
   })
 })
 

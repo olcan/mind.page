@@ -22,7 +22,7 @@ batch.set(db.collection('items').doc('e2e-crawl-shared'), {
   user: 'crawl_e2e',
   time: Date.now(),
   text: '#e2e_crawl a shared item for crawlers',
-  attr: { shared: { keys: ['public'] } },
+  attr: { shared: { keys: ['public'], indices: { public: 0 } } },
 })
 // the markdown rendering corpus (fixtures/markdown/*.md, one item per file, first #label is the
 // item label): shared by the markdown_e2e user under key 'markdown', so it can be browsed and
