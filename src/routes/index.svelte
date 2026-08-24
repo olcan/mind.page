@@ -1673,6 +1673,12 @@
     if (document.querySelector('.column.hidden'))
       (document.querySelector('.column.hidden') as HTMLElement).style.width =
         (document.querySelector('.column:not(.hidden)') as HTMLElement).offsetWidth + 'px'
+    // size the element cache the same way: pending renders can complete inside it (e.g. charts
+    // generated in a delayed callback after their element was cached, see adoptCachedElem), and
+    // should come out sized for the column they get adopted into
+    const cachediv = document.getElementById('cache-div')
+    if (cachediv && document.querySelector('.column:not(.hidden)'))
+      cachediv.style.width = (document.querySelector('.column:not(.hidden)') as HTMLElement).offsetWidth + 'px'
   }
 
   function scrollTo(y) {

@@ -30,6 +30,17 @@ export async function renderedHtml(page: Page, id: string, timeout = 15_000): Pr
 }
 
 export function normalize(html: string): string {
+  // chart geometry (widths, positions, path data) scales to wherever the chart happened to
+  // generate — the visible column, the hidden column or the element cache — and charts are
+  // resized to their final container on adoption, so only structure and data labels are
+  // compared; geometry inside c3 svgs is masked
+  html = html.replace(/<div[^>]*class="c3[^"]*"[^]*?<\/svg>/g, block =>
+    block
+      .replace(/ (width|height|x|y|x1|x2|y1|y2|r|cx|cy|dx|dy)="[^"]*"/g, ' $1="N"')
+      .replace(/ d="[^"]*"/g, ' d="PATH"')
+      .replace(/translate\([^)]*\)/g, 'translate(N)')
+      .replace(/ style="[^"]*"/g, '')
+  )
   return html
     .replace(/ id="(?:mjx-|time-|[^"]*\d{8,})[^"]*"/g, '') // mathjax / $cid / timestamp ids
     .replace(/MJX-\d+-/g, 'MJX-') // glyph def/ref ids count typeset containers (render order)
@@ -38,6 +49,12 @@ export function normalize(html: string): string {
     .replace(/ _failed="\d+"/g, ' _failed') // failed image marker carries a timestamp
     .replace(/ ctxtmenu_counter="\d+"/g, '') // mathjax context menu counter (render order)
     .replace(/ ?position: relative;?/g, '') // set by c3 (chart containers) and mathjax at variable times
+    // inline style declaration order varies with render timing (e.g. the img macro applies
+    // width/height and custom style in either order), so declarations are compared sorted
+    .replace(/ style="([^"]*)"/g, (m, s) => {
+      const decls = s.split(';').map(decl => decl.trim()).filter(Boolean).sort()
+      return decls.length ? ` style="${decls.join('; ')};"` : ''
+    })
     .replace(/ style=""/g, '') // empty style attributes come and go
     .replace(/c3-\d{10,}/g, 'c3-TIMESTAMP') // c3 chart clip-path ids
     .replace(/https?:\/\/localhost(?::\d+)?\//g, '/') // page origin, e.g. in c3 clip-path urls

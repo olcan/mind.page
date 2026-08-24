@@ -59,7 +59,7 @@
 <span class="hljs-title function_">px</span> = (<span class="hljs-params">s</span>) =&gt; <span class="hljs-keyword">typeof</span> s == <span class="hljs-string">'number'</span> ? s+<span class="hljs-string">'px'</span> : s
 <span class="hljs-keyword">const</span>
 <span class="hljs-title function_">img</span> = (<span class="hljs-params">u, w=<span class="hljs-string">'auto'</span>, h=<span class="hljs-string">'auto'</span>, style=<span class="hljs-string">''</span>
-</span>) =&gt; <span class="hljs-string">`&lt;img src="<span class="hljs-subst">${u}</span>" style="width:<span class="hljs-subst">${px(w)}</span>;height:<span class="hljs-subst">${px(h)}</span>;<span class="hljs-subst">${style}</span>"&gt;`</span>
+</span>) =&gt; <span class="hljs-string">`&lt;img src="<span class="hljs-subst">${u}</span>" style="width:<span class=;"hljs-subst">${px(w)}</span>;height:<span class="hljs-subst">${px(h)}</span>;<span class="hljs-subst">${style}</span>"&gt;`</span>
 <span class="hljs-keyword">const</span>
 <span class="hljs-title function_">code</span> = (<span class="hljs-params">text</span>) =&gt; <span class="hljs-string">"`"</span> + text + <span class="hljs-string">"`"</span>
 <span class="hljs-keyword">const</span>
@@ -75,7 +75,7 @@
   <span class="hljs-string">`&lt;a href="#" onmousedown="`</span> + _.<span class="hljs-built_in">escape</span>(js) + 
     <span class="hljs-string">`;event.preventDefault();event.stopPropagation()" `</span> +
     <span class="hljs-string">`onclick="event.preventDefault();event.stopPropagation()" `</span> +
-    <span class="hljs-string">`class="<span class="hljs-subst">${classes}</span>" style="<span class="hljs-subst">${style}</span>" title="<span class="hljs-subst">${_.<span class="hljs-built_in">escape</span>(title)}</span>"&gt;<span class="hljs-subst">${text}</span>&lt;/a&gt;`</span>
+    <span class="hljs-string">`class="<span class="hljs-subst">${classes}</span>" style="<span class=;"hljs-subst">${style}</span>" title="<span class="hljs-subst">${_.<span class="hljs-built_in">escape</span>(title)}</span>"&gt;<span class="hljs-subst">${text}</span>&lt;/a&gt;`</span>
 <span class="hljs-keyword">const</span>
 <span class="hljs-title function_">evallink</span> = (<span class="hljs-params">item, js, text=js, classes=<span class="hljs-string">''</span>, style=<span class="hljs-string">''</span>, title=js</span>) =&gt;
   <span class="hljs-title function_">jslink</span>(<span class="hljs-string">`_item('<span class="hljs-subst">${item.id}</span>')`</span> +
@@ -86,7 +86,7 @@
 <span class="hljs-keyword">const</span>
 <span class="hljs-title function_">spacer</span> = (<span class="hljs-params">height=<span class="hljs-number">10</span>, width=<span class="hljs-number">10</span>
 </span>) =&gt; 
-  <span class="hljs-string">`&lt;div style="height:<span class="hljs-subst">${height}</span>px; width:<span class="hljs-subst">${width}</span>px"&gt;&lt;/div&gt;`</span>
+  <span class="hljs-string">`&lt;div style="height:<span class=;"hljs-subst">${height}</span>px; width:<span class="hljs-subst">${width}</span>px"&gt;&lt;/div&gt;`</span>
 <span class="hljs-keyword">const</span>
 <span class="hljs-title function_">time_short</span> = (<span class="hljs-params">ms</span>) =&gt; (
     ms &lt; <span class="hljs-number">60</span>*<span class="hljs-number">1000</span> ? <span class="hljs-string">"&lt;1m"</span> :

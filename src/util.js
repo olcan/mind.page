@@ -263,10 +263,20 @@ export function adoptCachedElem(elem) {
   elem['_width'] = elem.style.width
   elem['_height'] = elem.style.height
   elem['_position'] = elem.style.position
-  const computed = getComputedStyle(elem)
-  elem.style.width = computed.width
-  elem.style.height = computed.height
-  elem.style.position = 'absolute'
+  // svelte 5 detaches elements before onDestroy, so the computed style can come back empty; the
+  // element then sizes naturally in the cache div (fixed 750px wide, see app.html), which keeps
+  // it measurable for pending renders (e.g. charts scale to their container in a delayed
+  // callback and skip rendering at zero width)
+  const computed = elem.isConnected ? getComputedStyle(elem) : null
+  if (computed && parseFloat(computed.width) > 0) {
+    elem.style.width = computed.width
+    elem.style.height = computed.height
+    elem.style.position = 'absolute'
+  } else {
+    // no frozen width to hold onto: laid out in flow so it takes the cache div's width
+    // (absolute positioning would shrink-wrap empty elements back to zero width)
+    elem.style.position = 'static'
+  }
   elem.remove()
   cachediv.appendChild(elem)
 }
