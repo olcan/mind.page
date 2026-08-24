@@ -25,27 +25,45 @@ await page.getByText('Stay Anonymous', { exact: true }).click({ timeout: 60_000 
 await page.waitForFunction(() => window.__rendered === true, null, { timeout: 90_000 })
 await page.waitForTimeout(2_000) // let charts, math and macros settle
 const { html, description } = await page.evaluate(() => {
-  // the default view: rendered items up to hideIndex, as a fresh visitor sees them
+  // the default view: rendered items up to hideIndex, as a fresh visitor sees them; the cleanup
+  // below mutates the live page (this browser is disposable), where layout is measurable
   const columns = document.querySelector('.items')
-  const clone = columns.cloneNode(true)
-  // drop hidden dom, which would ship invisible bytes: the app's hidden render column, hidden
-  // sections within items, and anything else not displayed (items past hideIndex are not in the
-  // dom at all, so the frozen render is the default view by construction)
-  clone.querySelectorAll('.column.hidden, [style*="display: none"], [style*="display:none"]').forEach(e => e.remove())
+  // app furniture that is useless frozen: the header (mindbox editor, status bar, user image) and
+  // its layout spacer live inside the first column; also the hidden render column, hidden
+  // sections, and any item rendering an editor replica
+  columns
+    .querySelectorAll('.header, .column-padding, .column.hidden, [style*="display: none"], [style*="display:none"]')
+    .forEach(e => e.remove())
+  columns.querySelectorAll('.super-container').forEach(e => {
+    if (e.querySelector('.editor, textarea')) e.remove()
+  })
+  // remove embeds along with their text-free wrappers (e.g. video aspect boxes)
+  columns.querySelectorAll('iframe, video, embed, object').forEach(el => {
+    let e = el
+    while (
+      e.parentElement &&
+      e.parentElement != columns &&
+      e.parentElement.textContent.trim() == el.textContent.trim()
+    )
+      e = e.parentElement
+    e.remove()
+  })
   // sanitize: this html is injected into the page for everyone, so item-embedded scripts and
   // handlers must not execute in other people's browsers (the frozen render is read-only anyway)
-  clone.querySelectorAll('script, iframe, textarea, input, button').forEach(e => e.remove())
-  for (const elem of clone.querySelectorAll('*')) {
+  columns.querySelectorAll('script, textarea, input, button').forEach(e => e.remove())
+  for (const elem of columns.querySelectorAll('*')) {
     for (const attr of [...elem.attributes]) {
-      if (
-        attr.name.startsWith('on') ||
-        (attr.name == 'href' && attr.value.trim().toLowerCase().startsWith('javascript:'))
-      )
+      if (attr.name.startsWith('on') || (attr.name == 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')))
         elem.removeAttribute(attr.name)
     }
   }
+  // sweep leftover husks: tall boxes with no text, image or chart (measured on the live layout)
+  for (let i = 0; i < 3; i++)
+    columns.querySelectorAll('div, span, p').forEach(e => {
+      if (e.clientHeight > 60 && !e.textContent.trim() && !e.querySelector('img, svg, canvas')) e.remove()
+    })
   const text = columns.textContent.replace(/\s+/g, ' ').trim()
-  return { html: clone.outerHTML, description: text.slice(0, 159) + (text.length > 160 ? '…' : '') }
+  return { html: columns.outerHTML, description: text.slice(0, 159) + (text.length > 160 ? '…' : '') }
 })
 await browser.close()
 
