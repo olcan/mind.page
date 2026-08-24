@@ -6118,6 +6118,7 @@
   } from '../crypto'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotAction } from '../snapshot'
+  import { buildHiddenIndex, registerHidden, applyRemoteAdded, applyRemoteModified, removeHidden } from '../hidden'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
@@ -6221,6 +6222,8 @@
   let specialTagFunctions = []
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
+  // the two maps as one index for the extracted transitions (see src/hidden.ts)
+  const hiddenIndex = () => ({ byId: hiddenItems, byName: hiddenItemsByName })
   // whether the hidden-item index is confirmed against the server: on a fixed page the shared
   // query cannot see the account's hidden documents, so until the dedicated hidden query has a
   // SERVER answer, uniquely keyed hidden creates must re-confirm first (see saveHiddenItem) or a
@@ -6343,43 +6346,22 @@
     hiddenItems = new Map()
     hiddenItemsByName = new Map()
     hiddenItemsInvalid = []
-    // note we sort hidden items by id to resolve name conflicts by taking item w/ minimum id
-    items
-      .filter(item => item.hidden)
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .forEach(item => {
-        const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
-        // console.debug("found hidden item", wrapper.name, wrapper.name, wrapper.id, wrapper);
-        // mark duplicate as invalid
-        if (hiddenItemsByName.has(wrapper.name)) {
-          console.warn('found invalid hidden item under duplicate name', wrapper.name, wrapper.id, wrapper)
-          hiddenItemsInvalid.push(wrapper)
-          return
-        }
-        // mark any hidden item on anonymous account as invalid
-        if (anonymous) {
-          console.warn('found invalid hidden item on anonymous account', wrapper.name, wrapper.id, wrapper)
-          hiddenItemsInvalid.push(wrapper)
-          return
-        }
-        // mark any global_store_<id> hidden item associated with a missing/deleted <id> as invalid
-        // (not on fixed pages, which load only the shared subset of the account's items)
-        if (!fixed && wrapper.name.match(/^global_store_/)) {
-          const id = wrapper.name.replace(/^global_store_/, '')
-          if (!existing_ids.has(id)) {
-            console.warn(
-              'found invalid hidden global_store_* item associated with missing/deleted item',
-              wrapper.name,
-              wrapper.id,
-              wrapper
-            )
-            hiddenItemsInvalid.push(wrapper)
-            return
-          }
-        }
-        hiddenItems.set(wrapper.id, wrapper)
-        hiddenItemsByName.set(wrapper.name, wrapper)
-      })
+    // index transitions are extracted and table-tested (see buildHiddenIndex in src/hidden.ts):
+    // ascending-id order resolves duplicate names to the minimum id, and orphan classification
+    // is skipped on fixed pages, which load only the shared subset of the account's items
+    const warnings = {
+      duplicate: 'found invalid hidden item under duplicate name',
+      anonymous: 'found invalid hidden item on anonymous account',
+      orphaned: 'found invalid hidden global_store_* item associated with missing/deleted item',
+    }
+    for (const { wrapper, reason } of buildHiddenIndex(
+      hiddenIndex(),
+      items.filter(item => item.hidden),
+      { anonymous, checkOrphans: !fixed, existingIds: existing_ids }
+    )) {
+      console.warn(warnings[reason], wrapper.name, wrapper.id, wrapper)
+      hiddenItemsInvalid.push(wrapper)
+    }
     items = items.filter(item => !item.hidden)
 
     // extract special tag functions
@@ -7066,13 +7048,8 @@
                   if (change.type === 'added') {
                     if (savedItem.hidden) {
                       const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                      if (hiddenItemsByName.has(wrapper.name))
-                        console.warn(
-                          'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
-                        )
-                      hiddenItems.set(wrapper.id, wrapper)
-                      if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
-                        hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
+                      const { warning } = applyRemoteAdded(hiddenIndex(), wrapper)
+                      if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
                       return
                     }
@@ -7106,20 +7083,10 @@
                     onEditorChange(editorText) // integrate new item at index 0
                   } else if (change.type == 'removed') {
                     if (savedItem.hidden) {
-                      const wrapper = hiddenItems.get(doc.id)
-                      if (!wrapper) {
-                        // NOTE: hasPendingWrites can be false for local deletes, see https://stackoverflow.com/q/54884508
-                        // console.warn("remote-deleted hidden item missing locally", doc.id);
-                        return
-                      }
-                      hiddenItems.delete(wrapper.id)
-                      hiddenItemsByName.delete(wrapper.name)
-                      // switch to any other hidden item w/ same name & with minimal id
-                      for (const dup of hiddenItems.values()) {
-                        if (dup.name == wrapper.name && !(hiddenItemsByName.get(dup.name)?.id < dup.id))
-                          hiddenItemsByName.set(dup.name, dup)
-                      }
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      // NOTE: a miss is fine: hasPendingWrites can be false for local deletes,
+                      // see https://stackoverflow.com/q/54884508
+                      const { removed } = removeHidden(hiddenIndex(), doc.id)
+                      if (removed) hiddenItemChangedRemotely(removed.name, change.type)
                       return
                     }
                     // NOTE: remote remove is similar to deleteItem
@@ -7151,17 +7118,8 @@
                   } else if (change.type == 'modified') {
                     if (savedItem.hidden) {
                       const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
-                      if (!hiddenItems.has(wrapper.id))
-                        console.warn('remote-modified hidden item missing locally', wrapper.id)
-                      else if (hiddenItems.get(wrapper.id).name != wrapper.name)
-                        console.warn(
-                          `remote-modified hidden item has new name ${wrapper.name}; older name ${
-                            hiddenItems.get(wrapper.id).name
-                          } will still work locally until reload`
-                        )
-                      hiddenItems.set(wrapper.id, wrapper)
-                      if (!(hiddenItemsByName.get(wrapper.name)?.id < wrapper.id))
-                        hiddenItemsByName.set(wrapper.name, wrapper) // points to minimum-id wrapper w/ this name
+                      const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
+                      if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
                       return
                     }
@@ -7899,19 +7857,9 @@
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
     const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
-    const existing = hiddenItemsByName.get(wrapper.name)
-    if (existing) {
-      // a save waiting on the secret phrase has already claimed this name: have it adopt the
-      // loaded document (update instead of create) and fill in the loaded state, with the pending
-      // (shared-page) changes taking precedence
-      if (existing.pending_create && !existing.adopt_id) {
-        existing.adopt_id = wrapper.id
-        _.defaultsDeep(existing.item, wrapper.item)
-      }
-      return
-    }
-    hiddenItems.set(wrapper.id, wrapper)
-    hiddenItemsByName.set(wrapper.name, wrapper)
+    // a pending create that claimed this name adopts the document (update instead of create),
+    // with the pending (shared-page) changes taking precedence over the loaded state
+    registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
   }
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
@@ -8066,16 +8014,7 @@
   function deleteHiddenItem(id) {
     if (!id) return // nothing to delete
     if (!initialized) throw new Error('deleteHiddenItem called before initialized')
-    const wrapper = hiddenItems.get(id)
-    if (wrapper) {
-      hiddenItems.delete(wrapper.id)
-      hiddenItemsByName.delete(wrapper.name)
-      // switch to any other hidden item w/ same name & with minimal id
-      for (const dup of hiddenItems.values()) {
-        if (dup.name == wrapper.name && !(hiddenItemsByName.get(dup.name)?.id < dup.id))
-          hiddenItemsByName.set(dup.name, dup)
-      }
-    }
+    const { removed: wrapper } = removeHidden(hiddenIndex(), id)
     if (readonly) return // no saving
     // console.debug("deleting hidden item", name);
     // NOTE: if item is saving, we need to wait for its persistent id before we can delete

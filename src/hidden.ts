@@ -1,0 +1,139 @@
+// hidden-item index transitions (extracted from index.svelte; table-tested in
+// tests/unit/hidden.spec.ts). hidden items carry encrypted per-item state (e.g. global stores):
+// the index maps document id -> wrapper and name -> the MINIMUM-id wrapper for that name, which
+// is the app's duplicate-resolution rule everywhere (initialization sorts by id; remote and
+// registration transitions preserve the invariant incrementally). persistence, encryption and
+// logging stay with the caller — these functions only decide and update the maps.
+
+export type HiddenWrapper = {
+  id: string
+  name: string
+  item?: any
+  // a locally created wrapper not yet persisted (see saveHiddenItem in index.svelte): its name
+  // claim must not be displaced, and registration ADOPTS an existing document into it
+  pending_create?: boolean | null
+  adopt_id?: string | null
+  saving?: Promise<string> | null
+}
+
+export type HiddenIndex = {
+  byId: Map<string, HiddenWrapper>
+  byName: Map<string, HiddenWrapper> // minimum-id wrapper per name (see above)
+}
+
+export type InvalidHidden = { wrapper: HiddenWrapper; reason: 'duplicate' | 'anonymous' | 'orphaned' }
+
+// points byName at the wrapper unless a smaller-id wrapper already holds the name; a
+// pending_create holder is never displaced (its in-flight save owns the name until adoption)
+function indexByName(index: HiddenIndex, wrapper: HiddenWrapper) {
+  const existing = index.byName.get(wrapper.name)
+  if (existing?.pending_create) return
+  if (!(existing && existing.id < wrapper.id)) index.byName.set(wrapper.name, wrapper)
+}
+
+// after a removal, point byName at the minimum-id wrapper among any remaining duplicates
+function reassignName(index: HiddenIndex, name: string) {
+  for (const dup of index.byId.values())
+    if (dup.name == name && !((index.byName.get(name)?.id as any) < dup.id)) index.byName.set(name, dup)
+}
+
+// builds the index from the account's decrypted hidden items (initialization): items are indexed
+// in ascending id order so the minimum-id wrapper wins each name, and invalid wrappers are
+// returned for the caller to log (and possibly delete after initialization — a policy decision
+// that stays with the caller):
+// - 'duplicate': a larger-id wrapper under an already-indexed name
+// - 'anonymous': any hidden item on the anonymous account
+// - 'orphaned': a global_store_<id> whose item <id> no longer exists — only decidable when the
+//   account was fully loaded (checkOrphans false on fixed pages, which load a shared subset)
+export function buildHiddenIndex(
+  index: HiddenIndex,
+  hidden_items: { id: string; text: string }[],
+  { anonymous, checkOrphans, existingIds }: { anonymous: boolean; checkOrphans: boolean; existingIds: Set<string> }
+): InvalidHidden[] {
+  const invalid: InvalidHidden[] = []
+  for (const item of [...hidden_items].sort((a, b) => a.id.localeCompare(b.id))) {
+    const wrapper: HiddenWrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+    if (index.byName.has(wrapper.name)) {
+      invalid.push({ wrapper, reason: 'duplicate' })
+      continue
+    }
+    if (anonymous) {
+      invalid.push({ wrapper, reason: 'anonymous' })
+      continue
+    }
+    if (checkOrphans && wrapper.name.match(/^global_store_/)) {
+      const id = wrapper.name.replace(/^global_store_/, '')
+      if (!existingIds.has(id)) {
+        invalid.push({ wrapper, reason: 'orphaned' })
+        continue
+      }
+    }
+    index.byId.set(wrapper.id, wrapper)
+    index.byName.set(wrapper.name, wrapper)
+  }
+  return invalid
+}
+
+// registers one decrypted hidden document (phrase validation on fixed pages, or the
+// create-confirmation path in saveHiddenItem): a pending create that already claimed the name
+// ADOPTS the document (update instead of create, existing state filled in under the pending
+// changes via the caller-provided merge); otherwise the document is indexed under the
+// minimum-id rule
+export function registerHidden(
+  index: HiddenIndex,
+  wrapper: HiddenWrapper,
+  mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => void
+): 'adopted' | 'exists' | 'added' {
+  const existing = index.byName.get(wrapper.name)
+  if (existing) {
+    if (existing.pending_create && !existing.adopt_id) {
+      existing.adopt_id = wrapper.id
+      mergeAdopted(existing, wrapper)
+      return 'adopted'
+    }
+    // retain the record; the name keeps its minimum-id (or pending) holder
+    index.byId.set(wrapper.id, wrapper)
+    indexByName(index, wrapper)
+    return 'exists'
+  }
+  index.byId.set(wrapper.id, wrapper)
+  index.byName.set(wrapper.name, wrapper)
+  return 'added'
+}
+
+// remote listener transitions; returned warnings are for the caller to log
+export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
+  const warning = index.byName.has(wrapper.name)
+    ? 'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
+    : undefined
+  index.byId.set(wrapper.id, wrapper)
+  indexByName(index, wrapper)
+  return { warning }
+}
+
+export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
+  let warning: string | undefined
+  const existing = index.byId.get(wrapper.id)
+  if (!existing) warning = `remote-modified hidden item missing locally ${wrapper.id}`
+  else if (existing.name != wrapper.name)
+    // NOTE: the old name's byName entry is deliberately retained (pointing at the stale
+    // wrapper) so the older name keeps working locally until reload, as before
+    warning = `remote-modified hidden item has new name ${wrapper.name}; older name ${existing.name} will still work locally until reload`
+  index.byId.set(wrapper.id, wrapper)
+  indexByName(index, wrapper)
+  return { warning }
+}
+
+export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: HiddenWrapper } {
+  return removeHidden(index, id)
+}
+
+// removes a wrapper by id and reassigns its name to the minimum-id duplicate, if any
+export function removeHidden(index: HiddenIndex, id: string): { removed?: HiddenWrapper } {
+  const wrapper = index.byId.get(id)
+  if (!wrapper) return {}
+  index.byId.delete(wrapper.id)
+  if (index.byName.get(wrapper.name) == wrapper) index.byName.delete(wrapper.name)
+  reassignName(index, wrapper.name)
+  return { removed: wrapper }
+}
