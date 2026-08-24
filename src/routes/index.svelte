@@ -6117,6 +6117,7 @@
     decryptBytesWithSecret,
   } from '../crypto'
   import { resolveFixedOwnerSecret } from '../secret'
+  import { snapshotAction } from '../snapshot'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
@@ -6944,34 +6945,35 @@
           // snapshots are ignored after initialization
           { includeMetadataChanges: true },
           snapshot => {
-            // ignore (and warn about) snapshots disabled via _disable_sync
-            if (window['_disable_sync']) {
+            // the gating decisions are extracted and table-tested (see snapshotAction in
+            // src/snapshot.ts); this listener owns the effects and the firstSnapshot bookkeeping
+            const action = snapshotAction({
+              syncDisabled: !!window['_disable_sync'],
+              initialized: !!initTime,
+              firstSnapshot,
+              fromCache: snapshot.metadata.fromCache,
+              empty: snapshot.empty,
+              changeCount: snapshot.docChanges().length,
+              anonymous,
+              fixed,
+              hasStoredSecret: !!localStorage.getItem('mindpage_secret'),
+            })
+            if (action == 'ignore_sync_disabled') {
               console.warn('ignoring firestore snapshot due to _disable_sync')
               return
             }
-            if (initTime && !firstSnapshot && snapshot.docChanges().length == 0) return // metadata-only
-            // on first snapshot, if init has not started (!initTime), we simply populate items array and trigger initialization; otherwise we must be already initializing items received directly from server so we ignore the first snapshot (presumably coming from a local cache) and simply set up init completion logic
-            if (firstSnapshot) {
+            if (action == 'ignore_metadata_only') return
+            if (action == 'initialize' || action == 'arm_completion' || action == 'wait_for_server') {
               // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
               init_log(
                 `received first snapshot (${snapshot.docs.length} items, ` +
                   `${snapshot.metadata.fromCache ? 'cache' : 'current'})`
               )
-              // the persistent cache can produce an empty first snapshot (fresh cache) or a partial
-              // one (e.g. only the plaintext shared items cached by a visit to a shared page)
-              // before the server has responded; initializing from those would treat a populated
-              // account as empty or unencrypted and prompt for a NEW secret phrase over the
-              // existing items, so wait for the server unless this device holds the secret (a
-              // returning device still initializes offline from its complete cache)
-              if (
-                !initTime &&
-                snapshot.metadata.fromCache &&
-                (snapshot.empty || (!anonymous && !fixed && !localStorage.getItem('mindpage_secret')))
-              ) {
+              if (action == 'wait_for_server') {
                 init_log('ignoring first snapshot from cache (waiting for server) ...')
-                return
+                return // firstSnapshot stays true: the next snapshot is still the first
               }
-              if (!initTime) {
+              if (action == 'initialize') {
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
