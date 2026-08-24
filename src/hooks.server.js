@@ -15,6 +15,9 @@ export async function handle({ event, resolve }) {
   }
   event.locals.meta = content?.meta ?? null
   return resolve(event, {
-    transformPageChunk: ({ html }) => html.replace('<!--ssr-content-->', content?.html ?? ''),
+    // the placeholder comment stays in place (content is inserted after it): removing comments in
+    // transformPageChunk draws a dev warning since svelte hydration relies on comment markers
+    transformPageChunk: ({ html }) =>
+      content ? html.replace('<!--ssr-content-->', '<!--ssr-content-->' + content.html) : html,
   })
 }
