@@ -3,13 +3,14 @@ import { waitForApp } from './helpers'
 import { normalize, renderedHtml } from './rendering'
 import { readdirSync } from 'fs'
 import { resolve, basename } from 'path'
+import { fileURLToPath } from 'url'
 
 // markdown rendering conformance corpus: fixtures/markdown/*.md (one item per file, source of
 // truth in this repo) are seeded as items shared by markdown_e2e (see seed.mjs) and rendered on
 // the shared page as a signed-out visitor; goldens live in __snapshots__/markdown.spec.ts/. To
 // view and edit the corpus locally, run `npm run test:e2e:serve` and open
 // /?shared=markdown_e2e/markdown: saving a fixture file re-seeds it and the app updates live.
-const FIXTURES = readdirSync(resolve(__dirname, 'fixtures/markdown'))
+const FIXTURES = readdirSync(resolve(fileURLToPath(new URL('.', import.meta.url)), 'fixtures/markdown'))
   .filter(file => file.endsWith('.md'))
   .map(file => basename(file, '.md'))
   .sort()

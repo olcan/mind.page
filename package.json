@@ -1,5 +1,6 @@
 {
   "name": "functions",
+  "type": "module",
   "description": "Sapper SSR on Firebase",
   "scripts": {
     "lint": "eslint .",

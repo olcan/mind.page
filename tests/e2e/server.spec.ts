@@ -4,12 +4,13 @@ import { execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { createServer, type Server } from 'http'
 import { resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { ADMIN, ALICE, firestore } from './helpers'
 
 // server.ts contract over http (no browser): the ssr shell and its session fields, pwa scopes and
 // manifests, host-dependent icons, /user, webhooks, the cors proxy and the localhost-only dev routes
 
-const repo = resolve(__dirname, '../..')
+const repo = resolve(fileURLToPath(new URL('.', import.meta.url)), '../..')
 
 // session fields serialized into the page by the server load (see +page.server.js)
 function preloaded(html: string): Record<string, string> {
@@ -210,7 +211,7 @@ test.describe('webhooks', () => {
     const body = { ref: 'refs/heads/e2e', repository: { full_name: 'olcan/e2e' } }
     expect((await request.post('/github_webhooks', { data: body })).status()).toBe(200)
     await expect
-      .poll(async () => (await firestore().collection('github_webhooks').get()).docs.map(d => d.data().body))
+      .poll(async () => (await firestore().collection('github_webhooks').get()).docs.map((d: any) => d.data().body))
       .toContainEqual(body)
   })
 })
