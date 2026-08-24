@@ -68,6 +68,18 @@ test.describe('crawlable public pages', () => {
     expect(html).toContain('a shared item for crawlers')
   })
 
+  test('a browser without javascript sees the content, not the spinner', async ({ browser }) => {
+    const context = await browser.newContext({ javaScriptEnabled: false })
+    try {
+      const page = await context.newPage()
+      await page.goto('/?shared=crawl_e2e/public')
+      await expect(page.getByText('a shared item for crawlers')).toBeVisible()
+      await expect(page.locator('.loading')).toBeHidden() // the noscript style hides the overlay
+    } finally {
+      await context.close()
+    }
+  })
+
   test('a signed-in session gets no server-rendered content', async ({ request }) => {
     const html = await (await request.get('/', { headers: { Cookie: '__session=some-id-token' } })).text()
     expect(html).not.toContain('#load function for loading external libraries')

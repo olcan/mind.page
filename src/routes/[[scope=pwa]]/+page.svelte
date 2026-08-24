@@ -13,6 +13,17 @@
 
 <svelte:head>
   {#if content}
+    <noscript>
+      <!-- without javascript the app never hides its loading overlay or fills its shell, so show
+           the server-rendered content alone -->
+      <style>
+        .loading,
+        .header,
+        .items {
+          display: none !important;
+        }
+      </style>
+    </noscript>
     <meta name="description" content={content.meta.description} />
     <meta property="og:title" content={content.meta.title} />
     <meta property="og:description" content={content.meta.description} />
