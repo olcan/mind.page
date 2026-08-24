@@ -230,6 +230,12 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
     .toMatchObject({
       attr: { shared: { keys: ['e2e-key'] } },
     })
+  // a pre-existing store (saved from the main page): the shared-page saves below must update this
+  // document, not duplicate it, even when the save itself triggers the phrase prompt
+  const hiddenCount = async () =>
+    (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
+  await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_pre = 1))
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   // sign in on the shared page itself (as the owner, without the stored secret)
@@ -267,11 +273,8 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
   await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
   expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
-  // the probe save persists a single hidden (global store) item before we leave the page: without
-  // the account's hidden items loaded on fixed pages, every save created a duplicate (deleted,
-  // with the saved state lost, on the next full account load)
-  const hiddenCount = async () =>
-    (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
+  // the probe save updated the pre-existing store (adopted mid-save once the phrase validation
+  // loaded the account's hidden items), not a duplicate
   await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
   await page.goto('/')
   await waitForApp(page)
@@ -292,8 +295,12 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
   // both probes survived in the single store (nothing was lost to duplicate cleanup)
   expect(
-    await page.evaluate(() => Object.keys(window._item('#e2e_shared')!.global_store).filter(k => k.startsWith('_e2e')))
-  ).toEqual(['_e2e_probe', '_e2e_probe2'])
+    await page.evaluate(() =>
+      Object.keys(window._item('#e2e_shared')!.global_store)
+        .filter(k => k.startsWith('_e2e'))
+        .sort()
+    )
+  ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2']) // nothing lost across the shared-page saves
 })
 
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {

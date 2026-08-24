@@ -7950,7 +7950,17 @@
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
     const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
-    if (hiddenItemsByName.has(wrapper.name)) return
+    const existing = hiddenItemsByName.get(wrapper.name)
+    if (existing) {
+      // a save waiting on the secret phrase has already claimed this name: have it adopt the
+      // loaded document (update instead of create) and fill in the loaded state, with the pending
+      // (shared-page) changes taking precedence
+      if (existing.pending_create && !existing.adopt_id) {
+        existing.adopt_id = wrapper.id
+        _.defaultsDeep(existing.item, wrapper.item)
+      }
+      return
+    }
     hiddenItems.set(wrapper.id, wrapper)
     hiddenItemsByName.set(wrapper.name, wrapper)
   }
@@ -7984,7 +7994,10 @@
       })
     } else {
       // create new hidden item
-      const wrapper = { name, item, id: (Date.now() + sessionCounter++).toString(), saving: null }
+      // note pending_create marks the wrapper until it is persisted: if the account's hidden items
+      // are loaded meanwhile (after phrase validation, see registerHiddenItem), the create adopts
+      // the existing document instead of adding a duplicate
+      const wrapper = { name, item, id: (Date.now() + sessionCounter++).toString(), saving: null, pending_create: true, adopt_id: null }
       hiddenItems.set(wrapper.id, wrapper)
       hiddenItemsByName.set(wrapper.name, wrapper)
       if (readonly) return // no saving
@@ -7998,6 +8011,38 @@
       wrapper.saving = new Promise((resolve, reject) => {
         encryptItem(itemToSave)
           .then(itemToSave => {
+            // if an existing document for this name was found while encryptItem awaited the secret
+            // phrase (see registerHiddenItem), update it with the merged state instead of creating
+            // a duplicate (re-encrypted, since the merge happened after the serialization above)
+            if (wrapper.adopt_id) {
+              const adopted = {
+                hidden: true,
+                time: Date.now(),
+                attr: null,
+                text: JSON.stringify(_.pick(wrapper, ['name', 'item'])),
+              }
+              encryptItem(adopted)
+                .then(adopted => {
+                  updateDoc(doc(getFirestore(firebase), 'items', wrapper.adopt_id), adopted)
+                    .then(() => {
+                      hiddenItems.delete(wrapper.id) // remove under temp id
+                      hiddenItems.set(wrapper.adopt_id, wrapper) // add back under persistent id
+                      wrapper.id = wrapper.adopt_id
+                      wrapper.pending_create = wrapper.adopt_id = null
+                      wrapper.saving = null
+                      resolve(wrapper.id)
+                    })
+                    .catch(e => {
+                      console.error(e)
+                      reject(e)
+                    })
+                })
+                .catch(e => {
+                  console.error(e)
+                  reject(e)
+                })
+              return
+            }
             addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
               .then(doc => {
                 // console.debug("created hidden item", JSON.stringify(itemToSave));
@@ -8005,6 +8050,7 @@
                 hiddenItems.set(doc.id, wrapper) // add back under persistent id
                 wrapper.id = doc.id // update id in wrapper
                 wrapper.saving = null // no longer saving
+                wrapper.pending_create = null
                 resolve(wrapper.id) // return persistent id
               })
               .catch(e => {
