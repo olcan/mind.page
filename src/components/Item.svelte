@@ -1609,10 +1609,15 @@
   })
 
   onDestroy(() => {
+    if (window['_resize_item']?.[id]) delete window['_resize_item'][id]
     // move cached elements into dom to prevent offloading by browser
     window['_elem_cache'][id]?.forEach(adoptCachedElem)
   })
 
+  // per-item resize hooks: the window globals below are installed once (??=) and so must not use
+  // this component instance's id/container/onResized closures — they would belong to whichever
+  // item mounted first and misattribute measurements and invalidations to it
+  ;((window['_resize_item'] ??= {}) as any)[id] = (trigger: string) => onResized(id, container, trigger)
   window['_render_images'] ??= item => renderImages(item.id, item.elem?.querySelectorAll('.item > .content img') ?? [])
   window['_dot_rendered'] ??= function (item, dot) {
     // render "stack" clusters (subgraphs)
@@ -1637,13 +1642,21 @@
         math.push(text)
       }
     })
-    renderMath(math, function () {
-      dot.querySelectorAll('.node > text > .MathJax > svg').forEach(mathsvg => {
-        if (!item.elem?.contains(mathsvg)) {
-          // console.error("detached _graph elem in item", item.name)
-          invalidateElemCache(id)
-          return
-        }
+    if (math.length == 0) return
+    // typesets are serialized on the shared queue (see renderMath), but the completion work here
+    // must use the PASSED item, not this closure's component (see the ??= note above)
+    window['_typeset_queue'] = (window['_typeset_queue'] ?? Promise.resolve())
+      .then(() => window['MathJax'].typesetPromise(math))
+      .then(function () {
+        const itemdiv = math[0].closest('.item')
+        // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
+        itemdiv?.querySelectorAll('.MathJax').forEach(elem => elem.setAttribute('tabindex', '-1'))
+        dot.querySelectorAll('.node > text > .MathJax > svg').forEach(mathsvg => {
+          if (!item.elem?.contains(mathsvg)) {
+            // console.error("detached _graph elem in item", item.name)
+            item.invalidate_elem_cache?.()
+            return
+          }
         // the typeset svg holds the math in a <g>, preceded by its glyph <defs> under fontCache
         // 'local' (see app.html); both move into the graph node so the <use> refs keep resolving
         let math = mathsvg.querySelector(':scope > g') as SVGGraphicsElement
@@ -1662,11 +1675,13 @@
         let scale = (0.6 * textscale * shaperect.height) / mathrect.height
         let xt0 = -mathrect.x
         let yt0 = -mathrect.y
-        let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2
-        let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
-        math.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
+          let xt = shaperect.x + shaperect.width / 2 - (mathrect.width * scale) / 2
+          let yt = shaperect.y + shaperect.height / 2 + (mathrect.height * scale) / 2
+          math.setAttribute('transform', `translate(${xt},${yt}) scale(${scale},-${scale}) translate(${xt0},${yt0})`)
+        })
+        window['_resize_item']?.[item.id]?.('math rendered')
       })
-    })
+      .catch(console.error)
   }
 </script>
 

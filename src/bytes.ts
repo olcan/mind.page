@@ -27,12 +27,13 @@ export function byteStringToArray(str: string): Uint8Array<ArrayBuffer> {
   return array
 }
 
-export function castArgToByteArray(x: any): Uint8Array {
-  if (x.constructor.name == 'Uint8Array') return x
-  else if (x.constructor.name == 'ArrayBuffer') return new Uint8Array(x)
+export function castArgToByteArray(x: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
+  if (x.constructor.name == 'Uint8Array') return x as Uint8Array
+  else if (x.constructor.name == 'ArrayBuffer') return new Uint8Array(x as ArrayBuffer)
   else if (ArrayBuffer.isView(x)) {
     if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
-    return new Uint8Array(x.buffer)
+    // preserve the view window: a typed-array or DataView slice must not expose its whole buffer
+    return new Uint8Array(x.buffer, x.byteOffset, x.byteLength)
   } else throw new Error('argument is not an ArrayBuffer or view')
 }
 

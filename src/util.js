@@ -17,7 +17,6 @@ export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix 
   )
 }
 
-
 export function blockRegExp(type_regex) {
   if (type_regex.source) type_regex = type_regex.source // get source string if passed regex
   // sanity check against patterns that can match across multiple blocks
@@ -245,14 +244,20 @@ export function invalidateElemCache(id) {
     if (elem.hasAttribute('_skip_invalidation')) return
     // console.warn('deleting from _elem_cache', key)
     window['_elem_cache'][id].delete(key)
-    // destroy all children and SELF w/ _destroy attribute (and property)
-    elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
-    elem._destroy?.()
-    // remove unless still live on item (then should be removed on svelte update)
-    // element removal also prevents any pending (via setTimeout) chart renders
-    // ensuring svelte update may require a version increment to invalidate svelte content cache
-    if (elem.closest('.item')?.id != 'item-' + id) elem.remove()
-    else live = true
+    if (elem.closest('.item')?.id != 'item-' + id) {
+      // not live on the item: destroy all children and SELF w/ _destroy attribute (and property)
+      // element removal also prevents any pending (via setTimeout) chart renders
+      elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
+      elem._destroy?.()
+      elem.remove()
+    } else {
+      // live on the item: only the cache entry expires — destroying a displayed node would leave
+      // it broken on the page (e.g. a dead chart) until an unrelated render; the node stays
+      // functional and is discarded whenever the item next re-renders (the deleted entry
+      // guarantees that render regenerates instead of restoring). the caller decides whether to
+      // force that render (see invalidate_elem_cache in index.svelte)
+      live = true
+    }
   })
   return live
 }
@@ -307,7 +312,6 @@ export function checkElemCache() {
 // for existing importers (a bare `export from` would not bind the local names)
 import { byteArrayToString, byteStringToArray, castArgToByteArray, concatByteArrays } from './bytes.js'
 export { byteArrayToString, byteStringToArray, concatByteArrays }
-
 
 // converts x to a string
 // mainly uses JSON.stringify

@@ -18,6 +18,7 @@
     doc,
     getDoc,
     getDocs,
+    getDocsFromServer,
     setDoc,
     addDoc,
     updateDoc,
@@ -37,7 +38,6 @@
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
   export let items = []
-  export let items_preload = [] // items returned by server preload (see above and server.ts)
   export let server_error = null // error from server?
   export let server_warning = null // warning from server?
   export let server_name
@@ -3769,14 +3769,38 @@
     // falls through to the new-phrase flow below
     if (fixed) {
       new_phrase = false
-      try {
-        const account_docs = await getDocs(
-          query(
-            collection(getFirestore(firebase), 'items'),
-            where('user', '==', user.uid),
-            orderBy('time', 'desc')
+      // fail closed on fetch errors: falling through to the unvalidated prompt after e.g. a
+      // transient network error would accept any phrase and let the pending encrypted save write
+      // under a wrong key, so the fetch retries in place (or signs out); the retry must be an
+      // internal loop — a recursive getSecretPhrase() call would return the caller-assigned
+      // in-flight promise (see `if (secret) return secret` above) and deadlock on itself
+      let account_docs
+      while (true) {
+        try {
+          // from the server, never the cache: a cache holding only previously-visited plaintext
+          // shared items would resolve with no cipher and misclassify the account as unencrypted
+          account_docs = await getDocsFromServer(
+            query(
+              collection(getFirestore(firebase), 'items'),
+              where('user', '==', user.uid),
+              orderBy('time', 'desc')
+            )
           )
-        )
+          break
+        } catch (e) {
+          console.error('could not fetch account items to validate secret phrase:', e)
+          const retry = await modal.show({
+            content: 'Could not verify your secret phrase against your account. Check your connection and try again.',
+            confirm: 'Try Again',
+            cancel: 'Sign Out',
+          })
+          if (retry == null) {
+            signOut()
+            throw new Error('secret phrase cancelled')
+          }
+        }
+      }
+      {
         const cipher = account_docs.docs.map(doc => doc.data().cipher).find(cipher => cipher)
         if (cipher) {
           await tick() // wait until modal is rendered on page
@@ -3823,23 +3847,7 @@
           }
           return secret
         }
-        new_phrase = true // no ciphertext anywhere: a new (or unencrypted) account
-      } catch (e) {
-        if (e.message?.includes('cancelled')) throw e
-        console.error('could not validate secret phrase against account items:', e)
-        // fail closed: falling through to the unvalidated prompt after e.g. a transient network
-        // error would accept any phrase and let the pending encrypted save write under a wrong
-        // key, so the flow retries the account fetch (or signs out) instead
-        const retry = await modal.show({
-          content: 'Could not verify your secret phrase against your account. Check your connection and try again.',
-          confirm: 'Try Again',
-          cancel: 'Sign Out',
-        })
-        if (retry == null) {
-          signOut()
-          throw new Error('secret phrase cancelled')
-        }
-        return getSecretPhrase(new_phrase)
+        new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
       }
     }
     await tick() // wait until modal is rendered on page
@@ -6673,33 +6681,7 @@
       anonymous = user?.uid == 'anonymous'
       readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
 
-      // print client load time w/ preloaded item count, excluding admin and hidden items
-      const preload_count = _.sumBy(items_preload, ({ hidden, id }) =>
-        !hidden && (!readonly || !adminItems.has(id)) ? 1 : 0
-      )
-      console.debug(
-        `[${window['_client_start_time']}ms] loaded client` + (preload_count > 0 ? ` + ${preload_count} items` : '')
-      )
-
-      // if items were preloaded, confirm user and either ignore or init items
-      if (items_preload.length > 0) {
-        items = items_preload
-        if (window.sessionStorage.getItem('mindpage_signin_pending')) {
-          console.warn(`ignoring ${items.length} items during signin`)
-          items = []
-        } else if (user && user.uid != items[0].user && !(fixed && items[0].user == 'anonymous')) {
-          // items are for wrong user, usually anonymous, due to missing (not expired) cookie
-          // you can test this with document.cookie='__session=;max-age=0' in console
-          // can also happen when admin is logged in but acting as anonymous
-          // in fixed mode, this is fine as long as items are anonymous
-          console.warn(`ignoring ${items.length} items for ${items[0].user}`)
-          items = []
-        } else {
-          // NOTE: at this point item heights (and totalItemHeight) may be zero and loading overlay should be visible, but we need the items on the page to compute their heights, which will trigger updated layout through onItemResized
-          initTime = window['_init_time'] = instance.init_time = Date.now() // init started
-          initialize()
-        }
-      }
+      console.debug(`[${window['_client_start_time']}ms] loaded client`)
 
       // note this is experimental, to try to debug redirect auth failure in recent iOS and MacOS
       // getRedirectResult(getAuth(firebase))
@@ -8051,12 +8033,23 @@
           })
       })
       // a failed create must not wedge the store for the session: the rejected saving promise
-      // would block every later update (see above), so the wrapper is removed and the next save
-      // takes the create path again (this also marks the rejection as handled)
+      // would block every later update (see above); this also marks the rejection as handled
       wrapper.saving.catch(() => {
         wrapper.saving = null
-        if (hiddenItems.get(wrapper.id) == wrapper) hiddenItems.delete(wrapper.id)
-        if (hiddenItemsByName.get(wrapper.name) == wrapper) hiddenItemsByName.delete(wrapper.name)
+        if (wrapper.adopt_id) {
+          // the document exists (adoption found it): re-key the wrapper to the persistent id so
+          // the next save updates it — deleting the wrapper here would send the next save down
+          // the create path and duplicate a document known to exist
+          hiddenItems.delete(wrapper.id)
+          wrapper.id = wrapper.adopt_id
+          wrapper.pending_create = wrapper.adopt_id = null
+          hiddenItems.set(wrapper.id, wrapper)
+        } else {
+          // a genuinely failed fresh create: remove the wrapper so the next save (callers pass
+          // complete current state each time) retries the create
+          if (hiddenItems.get(wrapper.id) == wrapper) hiddenItems.delete(wrapper.id)
+          if (hiddenItemsByName.get(wrapper.name) == wrapper) hiddenItemsByName.delete(wrapper.name)
+        }
       })
     }
   }
