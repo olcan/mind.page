@@ -167,3 +167,38 @@ test('attr changes reach the changed item and #_listen listeners, never bystande
   expect(calls.filter(call => call[0] == 'other'), 'bystanders must not run').toEqual([])
   expect(calls.every(call => call[1] == target_id), 'all calls receive the changed id').toBe(true)
 })
+
+test('an expired live element is torn down exactly once when its replacement renders', async ({ page }) => {
+  // pins the retired-node lifecycle (see invalidateElemCache/reapRetiredElems in util.js): cache
+  // invalidation on a LIVE element must not destroy it in place (it stays functional), and the
+  // re-render that replaces it must run its _destroy teardown exactly once per generation
+  await loadAdmin(page)
+  const text = [
+    '#e2e_lifecycle',
+    '```_html',
+    '<div id="lc-$id" _cache_key="lc-$id"><script>',
+    "const elem = document.getElementById('lc-$id')",
+    "elem.setAttribute('_destroy', '')",
+    'elem._destroy = () => { window.__destroys = (window.__destroys ?? 0) + 1 }',
+    '</script>ok</div>',
+    '```',
+  ].join('\n')
+  await page.evaluate(text => void window._create(text), text)
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_lifecycle'))).toBe(true)
+  await page.evaluate(() => void (location.hash = '#e2e_lifecycle')) // render it (creates open in the editor)
+  await expect
+    .poll(() => page.evaluate(() => !!window._item('#e2e_lifecycle')?.elem?.querySelector('[_cache_key]')), {
+      timeout: 15_000,
+    })
+    .toBe(true)
+  expect(await page.evaluate(() => (window as any).__destroys ?? 0)).toBe(0)
+  // invalidate with a forced render: the live element is retired, stays in place until the
+  // replacement renders, then is destroyed exactly once
+  await page.evaluate(() => (window._item('#e2e_lifecycle') as any).invalidate_elem_cache({ force_render: true, render_delay: 0 }))
+  await expect.poll(() => page.evaluate(() => (window as any).__destroys ?? 0), { timeout: 15_000 }).toBe(1)
+  // the next generation tears down once more — once per element, never double
+  await page.evaluate(() => (window._item('#e2e_lifecycle') as any).invalidate_elem_cache({ force_render: true, render_delay: 0 }))
+  await expect.poll(() => page.evaluate(() => (window as any).__destroys ?? 0), { timeout: 15_000 }).toBe(2)
+  await page.waitForTimeout(2_000)
+  expect(await page.evaluate(() => (window as any).__destroys)).toBe(2) // and stays there
+})

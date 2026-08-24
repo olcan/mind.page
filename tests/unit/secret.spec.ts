@@ -123,3 +123,23 @@ test('hidden items are decrypted with the candidate and registered before the se
   }
   expect(d.calls.indexOf('register:h2')).toBeLessThan(d.calls.length)
 })
+
+test('hidden documents register in ascending id order (adoption targets the minimum id) and only hidden documents are touched', async () => {
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const hidden = async (name: string) => ({
+    hidden: true,
+    cipher: await encryptWithSecret(JSON.stringify({ text: JSON.stringify({ name, item: {} }), attr: null }), secret),
+  })
+  const d = deps({
+    fetchAccountDocs: async () => [
+      // descending time order, as the real query returns: z9 is encountered before a1
+      doc('z9', await hidden('global_store_x')),
+      doc('p1', { cipher: 'CORRUPT-ORDINARY-ITEM' }), // ordinary (not hidden): must be skipped, not decrypted
+      doc('a1', await hidden('global_store_x')),
+    ],
+  })
+  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  // registration order is ascending by id, so a pending create would adopt a1, the minimum
+  expect(d.calls.filter(call => call.startsWith('register:'))).toEqual(['register:a1', 'register:z9'])
+  expect(d.registered.map(item => item.id)).toEqual(['a1', 'z9'])
+})

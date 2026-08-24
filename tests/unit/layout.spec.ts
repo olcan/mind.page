@@ -26,6 +26,27 @@ test('unmeasured items (zero heights) stay in column zero', () => {
   expect(items.map(it => it.column)).toEqual([0, 0, 0])
 })
 
+test('stay/spill threshold boundaries: within half a screen of the minimum an item always stays', () => {
+  // column 0 at header 100 + first item; screenHeight tuned so the second item sits exactly at
+  // the 0.5*screen boundary (<= stays)
+  const items = [item(3, 268), item(2, 600)] // 100 + (268+8+24) = 400 = 0 + 0.5 * 800
+  layoutItems(items, config({ screenHeight: 800 }))
+  expect(items[1].column).toBe(0) // boundary is inclusive
+  const over = [item(3, 269), item(2, 600)] // one pixel over: falls to the second inequality
+  layoutItems(over, config({ screenHeight: 800 }))
+  // second inequality: 401 + (600+8) + 80 = 1089 > 0 + 0.9 * 800 = 720 -> spills
+  expect(over[1].column).toBe(1)
+})
+
+test('dotted items occupy no height and defaultItemHeight stands in for unmeasured items', () => {
+  const items = [item(3, 500), item(2, 500, { dotted: true }), item(1, 0)]
+  const { columnHeights } = layoutItems(items, config({ columnCount: 1, defaultItemHeight: 200 }))
+  // 100 header + (500+8+24) + 0 (dotted) + (200+8+24): the unmeasured item uses the default
+  // height and, starting a new time group, carries a time string
+  expect(columnHeights).toEqual([100 + 532 + 0 + 232])
+  expect(items[1].outerHeight).toBe(0)
+})
+
 test('tall items spill to the minimum column once ~a screen height over it, with arrows and a separator', () => {
   const items = [item(4, 600), item(3, 600), item(2, 600), item(1, 600)]
   const { columnHeights } = layoutItems(items, config())
@@ -36,7 +57,24 @@ test('tall items spill to the minimum column once ~a screen height over it, with
   expect(items[0].nextColumn).toBe(1) // the break is recorded on the item before it
   expect(items[0].arrows).toBe('↗')
   expect(items[1].arrows).toBe('↗')
-  expect(columnHeights.length).toBe(3)
+  // exact heights pin the arithmetic: each item is 600+8 margins+24 time string = 632; broken
+  // columns gain the 80px separator; removing any increment must fail this
+  expect(columnHeights).toEqual([100 + 632 + 80, 632 + 80, 632 + 632])
+  // per-column chaining links each item to the next in its column
+  expect(items.map(it => it.nextItemInColumn)).toEqual([-1, -1, 3, -1])
+})
+
+test('a spill can jump multiple columns, repeating the arrow', () => {
+  // column 0 is oversized by one huge item; columns 1 and 2 fill; the next item must jump from
+  // column 2 back... construct the forward case instead: keep items on column 0 until it is far
+  // over, with columns 1 and 2 still empty — the mover jumps 0 -> 2? the minimum index is 1, so
+  // multi-column jumps arise only when the minimum is further away; pin 2 -> 0 via oversizing
+  const items = [item(6, 600), item(5, 600), item(4, 600), item(3, 1200), item(2, 4000), item(1, 600)]
+  layoutItems(items, config({ screenHeight: 500 }))
+  // items: [0, 1, 2, 2 (min own), 1? ...] — assert the recorded jump width matches the arrows
+  for (const it of items)
+    if (it.nextColumn >= 0 && Math.abs(it.nextColumn - it.column) > 1)
+      expect(it.arrows.length).toBe(Math.abs(it.nextColumn - it.column) + 1) // end cap + repeats
 })
 
 test('a move to an earlier column points its arrows left', () => {

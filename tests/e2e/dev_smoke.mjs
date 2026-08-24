@@ -19,42 +19,47 @@ let out = ''
 dev.stdout.on('data', chunk => (out += chunk))
 dev.stderr.on('data', chunk => (out += chunk))
 
-// cleanup is idempotent and every step is guarded independently, so a failure in one step (e.g.
-// a read error during restore) cannot skip the others; signals route through it as well, since
-// default SIGINT/SIGTERM handling would exit without unwinding the finally below and could leave
-// the tracked probe modified
+// cleanup is idempotent, ASYNC and every step is guarded independently, so a failure in one
+// step (e.g. a read error during restore) cannot skip the others; it awaits browser closure and
+// the dev process tree's exit (with a hard kill after a short timeout) so interrupted runs do
+// not strand descendants. signals route through it as well, since default SIGINT/SIGTERM
+// handling would exit without unwinding the finally below and could leave the tracked probe
+// modified
 let browser = null
 let probe_original = null
-let cleaned = false
+let cleaning = null
 function cleanup() {
-  if (cleaned) return
-  cleaned = true
-  if (probe_original != null) {
-    // restore only if the probe holds exactly the original plus the sentinel: anything else
-    // means a concurrent edit landed during the probe window and must not be overwritten
-    try {
-      const current = readFileSync(PROBE, 'utf8')
-      if (current == probe_original + SENTINEL) writeFileSync(PROBE, probe_original)
-      else if (current != probe_original) {
-        console.error(`NOT restoring ${PROBE}: it changed during the probe window (remove the sentinel manually)`)
-        process.exitCode = 1 // the tracked file is left dirty: this run must not report success
+  cleaning ??= (async () => {
+    if (probe_original != null) {
+      // restore only if the probe holds exactly the original plus the sentinel: anything else
+      // means a concurrent edit landed during the probe window and must not be overwritten
+      try {
+        const current = readFileSync(PROBE, 'utf8')
+        if (current == probe_original + SENTINEL) writeFileSync(PROBE, probe_original)
+        else if (current != probe_original) {
+          console.error(`NOT restoring ${PROBE}: it changed during the probe window (remove the sentinel manually)`)
+          process.exitCode = 1 // the tracked file is left dirty: this run must not report success
+        }
+      } catch (e) {
+        console.error(`probe restore failed: ${e}`)
+        process.exitCode = 1
       }
-    } catch (e) {
-      console.error(`probe restore failed: ${e}`)
-      process.exitCode = 1
     }
-  }
-  try {
-    void browser?.close()
-  } catch {}
-  try {
-    dev.kill()
-  } catch {}
+    try {
+      await browser?.close()
+    } catch {}
+    try {
+      const exited = new Promise(resolve => dev.on('exit', resolve))
+      dev.kill()
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))])
+      if (dev.exitCode == null) dev.kill('SIGKILL')
+    } catch {}
+  })()
+  return cleaning
 }
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, () => {
-    cleanup()
-    process.exit(process.exitCode ?? 130)
+    void cleanup().then(() => process.exit(process.exitCode ?? 130))
   })
 
 try {
@@ -112,5 +117,5 @@ try {
   console.error(String(e?.message ?? e))
   process.exitCode = 1
 } finally {
-  cleanup()
+  await cleanup()
 }

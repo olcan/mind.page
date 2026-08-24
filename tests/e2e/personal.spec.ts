@@ -273,9 +273,20 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
   await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
   expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
+  // decrypted contents of the account's hidden store documents (see src/crypto.ts)
+  const storedHidden = async () => {
+    const snap = await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
+    const { decryptWithSecret } = await import('../../src/crypto.js')
+    return Promise.all(snap.docs.map(d => decryptWithSecret(d.data().cipher, secretFor(ALICE, PHRASE))))
+  }
   // the probe save updated the pre-existing store (adopted mid-save once the phrase validation
   // loaded the account's hidden items), not a duplicate
   await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  // the adopted update must be PERSISTED (merged probe present in the document) before
+  // navigating away: a navigation discards a write not yet handed to the sdk
+  await expect
+    .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe')), { timeout: 30_000 })
+    .toBe(true)
   await page.goto('/')
   await waitForApp(page)
   expect(await page.locator('#modal-input').count()).toBe(0) // no phrase prompt on the main page
@@ -289,6 +300,9 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe2 = Date.now()))
   await page.waitForTimeout(3_000) // allow the (dispatched) save to complete before checking
   await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  await expect
+    .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe2')), { timeout: 30_000 })
+    .toBe(true)
   await page.goto('/')
   await waitForApp(page)
   await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests

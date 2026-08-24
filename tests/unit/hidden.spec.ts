@@ -6,6 +6,7 @@ import {
   applyRemoteModified,
   applyRemoteRemoved,
   removeHidden,
+  finalizeAdoption,
   type HiddenIndex,
   type HiddenWrapper,
 } from '../../src/hidden.js'
@@ -33,10 +34,34 @@ test('initialization indexes by minimum id and classifies duplicates, anonymous 
   )
   expect(idx.byName.get('global_store_x')!.id).toBe('a1')
   expect(idx.byId.has('d4')).toBe(true)
+  // the duplicate is retained in byId so a later authoritative cleanup can still promote it if
+  // the canonical document is removed first
+  expect(idx.byId.has('b2')).toBe(true)
   expect(invalid.map(entry => [entry.wrapper.id, entry.reason])).toEqual([
     ['b2', 'duplicate'],
     ['c3', 'orphaned'],
   ])
+  expect(removeHidden(idx, 'a1').removed!.id).toBe('a1')
+  expect(idx.byName.get('global_store_x')!.id).toBe('b2') // retained duplicate promoted
+})
+
+test('malformed hidden items are quarantined, never indexed and never throw', () => {
+  const idx = index()
+  const invalid = buildHiddenIndex(
+    idx,
+    [
+      { id: 'x1', text: 'not json' },
+      { id: 'x2', text: JSON.stringify({ item: {} }) }, // missing name
+      doc('a1', 'fine'),
+    ],
+    opts
+  )
+  expect(invalid.map(entry => [entry.wrapper.id, entry.reason])).toEqual([
+    ['x1', 'malformed'],
+    ['x2', 'malformed'],
+  ])
+  expect(idx.byId.size).toBe(1)
+  expect(idx.byName.get('fine')!.id).toBe('a1')
 })
 
 test('initialization on the anonymous account classifies every hidden item invalid', () => {
@@ -110,4 +135,37 @@ test('removal reassigns the name to the minimum-id duplicate', () => {
   expect(applyRemoteRemoved(idx, 'b2').removed!.id).toBe('b2')
   expect(idx.byName.get('name')!.id).toBe('c3')
   expect(applyRemoteRemoved(idx, 'gone').removed).toBeUndefined() // local deletes echo back
+})
+
+test('adoption settlement re-keys to the persistent id and restores the minimum-id invariant', () => {
+  const idx = index()
+  const pending: HiddenWrapper = { id: 'temp1', name: 'name', item: { v: 1 }, pending_create: true, adopt_id: null }
+  idx.byId.set(pending.id, pending)
+  idx.byName.set(pending.name, pending)
+  const merge = () => {}
+  // callers register server documents in ASCENDING id order (see saveHiddenItem/secret.ts), so
+  // the pending create adopts the minimum-id duplicate; later duplicates are retained
+  expect(registerHidden(idx, wrapper('a1', 'name'), merge)).toBe('adopted')
+  expect(pending.adopt_id).toBe('a1')
+  expect(registerHidden(idx, wrapper('z9', 'name'), merge)).toBe('exists')
+  finalizeAdoption(idx, pending)
+  expect(pending.id).toBe('a1')
+  expect(pending.pending_create).toBeNull()
+  expect(idx.byId.get('a1')).toBe(pending)
+  expect(idx.byId.has('temp1')).toBe(false)
+  expect(idx.byName.get('name')).toBe(pending) // a1 is the minimum id, the invariant holds
+})
+
+test('a failed fresh create with a retained remote duplicate promotes it instead of losing the name', () => {
+  const idx = index()
+  const pending: HiddenWrapper = { id: 'temp1', name: 'name', item: {}, pending_create: true, adopt_id: null }
+  idx.byId.set(pending.id, pending)
+  idx.byName.set(pending.name, pending)
+  // a remote same-name document arrives while the create is pending: retained, not displacing
+  applyRemoteAdded(idx, wrapper('r5', 'name'))
+  expect(idx.byName.get('name')).toBe(pending)
+  // the create fails: removal must promote the retained remote wrapper, so the next save
+  // UPDATES it instead of creating another duplicate
+  expect(removeHidden(idx, 'temp1').removed).toBe(pending)
+  expect(idx.byName.get('name')!.id).toBe('r5')
 })
