@@ -267,14 +267,33 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
   await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
   expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
+  // the probe save persists a single hidden (global store) item before we leave the page: without
+  // the account's hidden items loaded on fixed pages, every save created a duplicate (deleted,
+  // with the saved state lost, on the next full account load)
+  const hiddenCount = async () =>
+    (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
   await page.goto('/')
   await waitForApp(page)
   expect(await page.locator('#modal-input').count()).toBe(0) // no phrase prompt on the main page
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
     .toContain('secret text 12345')
+  // revisit the shared page (with the stored secret now) and save again: still one store
+  await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
+  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 })
+  await waitForApp(page)
+  await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe2 = Date.now()))
+  await page.waitForTimeout(3_000) // allow the (dispatched) save to complete before checking
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  await page.goto('/')
+  await waitForApp(page)
   await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
   await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
+  // both probes survived in the single store (nothing was lost to duplicate cleanup)
+  expect(
+    await page.evaluate(() => Object.keys(window._item('#e2e_shared')!.global_store).filter(k => k.startsWith('_e2e')))
+  ).toEqual(['_e2e_probe', '_e2e_probe2'])
 })
 
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {

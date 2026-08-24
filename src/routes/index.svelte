@@ -3798,6 +3798,17 @@
             }
           }
           localStorage.setItem('mindpage_secret', secret)
+          // register the account's hidden items (e.g. global stores) so that the pending save
+          // updates the existing one instead of creating a duplicate (see initialize for the
+          // stored-secret path)
+          for (const account_doc of account_docs.docs) {
+            try {
+              const hidden_item = await decryptItem(Object.assign(account_doc.data(), { id: account_doc.id }))
+              if (hidden_item.hidden) registerHiddenItem(hidden_item)
+            } catch (e) {
+              console.error('could not load hidden item:', e)
+            }
+          }
           return secret
         }
         new_phrase = true // no ciphertext anywhere: a new (or unencrypted) account
@@ -6321,6 +6332,26 @@
   }
 
   async function initialize() {
+    // on a fixed page the shared-items query cannot include the account's hidden items (their
+    // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
+    // (e.g. global stores) looked empty and every save created a duplicate hidden item, flagged
+    // and deleted on the next full account load; fetch them for the signed-in owner when the
+    // device holds the secret (without it they are loaded after the phrase is validated instead,
+    // see getSecretPhrase)
+    if (fixed && !readonly && !anonymous && localStorage.getItem('mindpage_secret')) {
+      try {
+        const hidden_docs = await getDocs(
+          query(
+            collection(getFirestore(firebase), 'items'),
+            where('user', '==', user.uid),
+            where('hidden', '==', true)
+          )
+        )
+        hidden_docs.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
+      } catch (e) {
+        console.error('could not load hidden items:', e)
+      }
+    }
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
     if (signingOut) return // encryption error
@@ -6358,7 +6389,8 @@
           return
         }
         // mark any global_store_<id> hidden item associated with a missing/deleted <id> as invalid
-        if (wrapper.name.match(/^global_store_/)) {
+        // (not on fixed pages, which load only the shared subset of the account's items)
+        if (!fixed && wrapper.name.match(/^global_store_/)) {
           const id = wrapper.name.replace(/^global_store_/, '')
           if (!existing_ids.has(id)) {
             console.warn(
@@ -7913,6 +7945,15 @@
     lastFocusedElem?.blur()
   }
 
+  // registers a hidden item loaded after initialization (e.g. by the phrase validation on a fixed
+  // page); existing registrations win, as in initialize
+  function registerHiddenItem(item) {
+    if (!item.hidden || !item.text) return
+    const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+    if (hiddenItemsByName.has(wrapper.name)) return
+    hiddenItems.set(wrapper.id, wrapper)
+    hiddenItemsByName.set(wrapper.name, wrapper)
+  }
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')
