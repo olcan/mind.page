@@ -131,3 +131,39 @@ test('/_undelete restores the last deleted item', async ({ page }) => {
   await expect.poll(() => savedId(page, '#e2e_source'), { timeout: 30_000 }).toBeTruthy()
   expect(await itemText(page, '#e2e_source')).toBe('#e2e_source refers to #e2e_target')
 })
+
+test('attr changes reach the changed item and #_listen listeners, never bystanders', async ({ page }) => {
+  // regression for itemAttrChanged (index.svelte): its guard compared item.id to itself, so every
+  // item defining _on_attr_change ran on any attr change, and each received its OWN id instead of
+  // the changed item's id
+  await loadAdmin(page)
+  const block = (kind: string) =>
+    '```js\nfunction _on_attr_change(id, remote) { (window.__attr_calls ??= []).push([' +
+    `'${kind}'` +
+    ", id]) }\n```"
+  await page.evaluate(
+    ([target, listener, other]) => {
+      void window._create('#e2e_attr_target\n' + target)
+      void window._create('#e2e_attr_listener #_listen\n' + listener)
+      void window._create('#e2e_attr_other\n' + other)
+    },
+    [block('self'), block('listener'), block('other')] as const
+  )
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_attr_other'))).toBe(true)
+  const target_id = await page.evaluate(() => {
+    const item = window._item('#e2e_attr_target')!
+    item.share('e2e_attr') // updates attr.shared via _update_attr_async -> itemAttrChanged
+    return item.id as string
+  })
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__attr_calls ?? []), { timeout: 15_000 })
+    .toEqual(
+      expect.arrayContaining([
+        ['self', target_id],
+        ['listener', target_id],
+      ])
+    )
+  const calls: [string, string][] = await page.evaluate(() => (window as any).__attr_calls)
+  expect(calls.filter(call => call[0] == 'other'), 'bystanders must not run').toEqual([])
+  expect(calls.every(call => call[1] == target_id), 'all calls receive the changed id').toBe(true)
+})

@@ -24,18 +24,25 @@ const widths = (page: Page) =>
     cache: document.getElementById('cache-div')!.offsetWidth,
   }))
 
-// every visible item appears exactly once across the columns, and each column's dom order is a
-// subsequence of index order (items distribute across columns but never reorder within one)
+// every visible item appears exactly once, in the column the layout assigned it (item.column,
+// set by updateItemLayout and used by the template), with dom order following index order
+// NOTE: multi-column DISTRIBUTION is deliberately not asserted: the seeded corpus's visible set
+// stays in column zero even on fresh two-column loads (observed behavior), so distribution over
+// synthetic heights belongs to the pure-layout unit tables when updateItemLayout is extracted
 async function expectConsistentColumns(page: Page) {
   const ids = await visibleIds(page)
   const by_column = await renderedByColumn(page)
   const rendered = by_column.flat()
   expect(rendered.length, 'each visible item rendered exactly once').toBe(new Set(rendered).size)
   expect(new Set(rendered), 'rendered items match the visible set').toEqual(new Set(ids))
-  for (const column of by_column) {
+  const assigned = await page.evaluate(() =>
+    Object.fromEntries(window.__items.slice(0, window.__hideIndex).map(item => [item.id, item.column]))
+  )
+  by_column.forEach((column, index) => {
+    for (const id of column) expect(assigned[id], `item ${id} in its assigned column`).toBe(index)
     const positions = column.map(id => ids.indexOf(id))
     expect(positions, 'column order follows index order').toEqual([...positions].sort((a, b) => a - b))
-  }
+  })
   return ids
 }
 

@@ -33,6 +33,7 @@ declare global {
       saving?: boolean
       labelText?: string
       matching?: boolean
+      column?: number // assigned by updateItemLayout, used by the column template
     }[] // internal item state
     __hideIndex: number // items past this index are hidden (search results are ranked first)
     _user: { uid: string }

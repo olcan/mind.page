@@ -56,8 +56,9 @@ test('charts regenerate after a stale hidden render (zero-width skip)', async ({
 })
 
 test('charts carry real data and geometry (semantic checks the masked goldens cannot make)', async ({ page }) => {
-  // the goldens mask chart geometry (see normalize in rendering.ts), so data shape, visibility
-  // and nondegenerate geometry are asserted here on the live page instead
+  // the goldens mask chart geometry (see normalize in rendering.ts), so data values, visibility
+  // and nondegenerate geometry are asserted here on the live page instead; the #charts fixture
+  // holds a bar chart (y1 [4,2,5,10], y2 [2,3,6,12]) and a line chart (y1 [4,2,6,10], y2 [2,3,7,12])
   await loadAnonymous(page)
   await page.evaluate(() => void (location.hash = '#charts'))
   await expect
@@ -65,28 +66,47 @@ test('charts carry real data and geometry (semantic checks the masked goldens ca
       timeout: 30_000,
     })
     .toBe(2)
-  const charts = await page.evaluate(() =>
+  const [bar, line] = await page.evaluate(() =>
     [...(window._item('#charts')!.elem as HTMLElement).querySelectorAll('.c3')].map((chart: any) => ({
       width: chart.querySelector('svg').clientWidth,
       height: chart.querySelector('svg').clientHeight,
-      // both seeded charts plot series y1 and y2 (see the #charts fixture)
-      series: [...chart.querySelectorAll('.c3-chart-line')].map((line: any) =>
-        [...line.classList].find((c: string) => c.startsWith('c3-target-'))
+      // series carry their bound data values (c3 attaches them as __data__ on each shape);
+      // bar series render under .c3-chart-bar groups, line series under .c3-chart-line
+      values: Object.fromEntries(
+        [...chart.querySelectorAll('.c3-chart-bar, .c3-chart-line')]
+          .map((series: any) => [
+            [...series.classList].find((c: string) => c.startsWith('c3-target-')),
+            [...series.querySelectorAll('.c3-bar, .c3-circle')].map((shape: any) => shape.__data__?.value),
+          ])
+          .filter(([, values]: any) => values.length)
       ),
-      // a real line path has multiple points (L segments), not a degenerate M-only path
-      path_shapes: [...chart.querySelectorAll('.c3-chart-line path.c3-line')].map(
-        (path: any) => path.getAttribute('d')?.match(/L/g)?.length ?? 0
-      ),
+      bars: [...chart.querySelectorAll('.c3-bar')].map((barpath: any) => {
+        const box = barpath.getBBox()
+        return { d: barpath.getAttribute('d'), area: box.width * box.height }
+      }),
+      line_paths: [...chart.querySelectorAll('.c3-chart-line path.c3-line')].map((path: any) => path.getAttribute('d')),
       tick_labels: [...chart.querySelectorAll('.c3-axis-y .tick text')].map((tick: any) => tick.textContent),
     }))
   )
-  for (const chart of charts) {
+  for (const chart of [bar, line]) {
     expect(chart.width).toBeGreaterThan(100)
     expect(chart.height).toBeGreaterThan(50)
-    expect(chart.series).toEqual(['c3-target-y1', 'c3-target-y2'])
-    for (const segments of chart.path_shapes) expect(segments).toBeGreaterThanOrEqual(2)
   }
-  expect(charts[1].tick_labels).toContain('10') // the second chart pins tick values [0, 5, 10]
+  // the bar chart binds the exact fixture values to its bars, with finite nonzero geometry
+  expect(bar.values).toEqual({ 'c3-target-y1': [4, 2, 5, 10], 'c3-target-y2': [2, 3, 6, 12] })
+  expect(bar.bars).toHaveLength(8)
+  for (const barpath of bar.bars) {
+    expect(barpath.d).not.toMatch(/NaN|Infinity/)
+    expect(barpath.area).toBeGreaterThan(0)
+  }
+  // the line chart binds the exact fixture values to its points, with nondegenerate finite lines
+  expect(line.values).toEqual({ 'c3-target-y1': [4, 2, 6, 10], 'c3-target-y2': [2, 3, 7, 12] })
+  expect(line.line_paths).toHaveLength(2)
+  for (const d of line.line_paths) {
+    expect(d).not.toMatch(/NaN|Infinity/)
+    expect(d.match(/L/g)!.length).toBeGreaterThanOrEqual(3) // 4 points per series
+  }
+  expect(line.tick_labels).toContain('10') // the line chart pins tick values [0, 5, 10]
 })
 
 test('every anonymous item renders as before', async ({ page }) => {
