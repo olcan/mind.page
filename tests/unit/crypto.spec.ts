@@ -5,7 +5,7 @@ import {
   encryptBytesWithSecret,
   decryptWithSecret,
   decryptBytesWithSecret,
-} from '../../src/crypto'
+} from '../../src/crypto.js'
 // @ts-expect-error util.js is untyped (strict tsc; svelte-check covers it via allowJs)
 import { byteStringToArray } from '../../src/util.js'
 
