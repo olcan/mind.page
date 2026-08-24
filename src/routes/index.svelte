@@ -3798,7 +3798,7 @@
             // that concurrent callers await, and clearing it on a retry would spawn a second prompt
             const candidate = await hashSecretPhrase(phrase)
             try {
-              await decrypt(cipher, candidate) // throws on a wrong phrase
+              await decryptWithSecret(cipher, candidate) // throws on a wrong phrase
               secret = candidate
               break
             } catch (e) {
@@ -3827,7 +3827,19 @@
       } catch (e) {
         if (e.message?.includes('cancelled')) throw e
         console.error('could not validate secret phrase against account items:', e)
-        // fall through to the unvalidated prompt (previous behavior) if the fetch failed
+        // fail closed: falling through to the unvalidated prompt after e.g. a transient network
+        // error would accept any phrase and let the pending encrypted save write under a wrong
+        // key, so the flow retries the account fetch (or signs out) instead
+        const retry = await modal.show({
+          content: 'Could not verify your secret phrase against your account. Check your connection and try again.',
+          confirm: 'Try Again',
+          cancel: 'Sign Out',
+        })
+        if (retry == null) {
+          signOut()
+          throw new Error('secret phrase cancelled')
+        }
+        return getSecretPhrase(new_phrase)
       }
     }
     await tick() // wait until modal is rendered on page
@@ -3918,17 +3930,13 @@
     return encryptBytesWithSecret(bytes, secret)
   }
 
-  // with_secret decrypts with the given secret instead of the session's (e.g. to validate an
-  // entered phrase before committing it, see getSecretPhrase)
-  async function decrypt(cipher: string, with_secret: string = null): Promise<string> {
-    if (!with_secret) {
-      if (!secret) secret = getSecretPhrase()
-      with_secret = await Promise.resolve(secret) // resolve secret if promise pending
-    }
-    return decryptWithSecret(cipher, with_secret)
+  async function decrypt(cipher: string): Promise<string> {
+    if (!secret) secret = getSecretPhrase()
+    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    return decryptWithSecret(cipher, secret)
   }
 
-  async function decrypt_bytes(cipher: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+  async function decrypt_bytes(cipher: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
     if (!secret) secret = getSecretPhrase()
     secret = await Promise.resolve(secret) // resolve secret if promise pending
     return decryptBytesWithSecret(cipher, secret)
@@ -7956,17 +7964,21 @@
         text: JSON.stringify(_.pick(wrapper, ['name', 'item'])), // save only name/item
       }
       // NOTE: if existing item is saving, we need to wait for its persistent id before we can update
-      Promise.resolve(wrapper.saving || wrapper.id).then(saved_id => {
-        encryptItem(itemToSave)
-          .then(itemToSave => {
-            updateDoc(doc(getFirestore(firebase), 'items', saved_id), itemToSave)
-              // .then(() => {
-              //   console.debug("updated hidden item", name, item);
-              // })
-              .catch(console.error)
-          })
-          .catch(console.error)
-      })
+      Promise.resolve(wrapper.saving || wrapper.id)
+        .then(saved_id => {
+          encryptItem(itemToSave)
+            .then(itemToSave => {
+              updateDoc(doc(getFirestore(firebase), 'items', saved_id), itemToSave)
+                // .then(() => {
+                //   console.debug("updated hidden item", name, item);
+                // })
+                .catch(console.error)
+            })
+            .catch(console.error)
+        })
+        // a wrapper whose create failed carries a rejected saving promise (see below); the update
+        // is dropped either way, but this keeps the rejection handled and visible
+        .catch(e => console.error('hidden item update skipped (create failed):', e))
     } else {
       // create new hidden item
       // note pending_create marks the wrapper until it is persisted: if the account's hidden items
@@ -8037,6 +8049,14 @@
             console.error(e)
             reject(e)
           })
+      })
+      // a failed create must not wedge the store for the session: the rejected saving promise
+      // would block every later update (see above), so the wrapper is removed and the next save
+      // takes the create path again (this also marks the rejection as handled)
+      wrapper.saving.catch(() => {
+        wrapper.saving = null
+        if (hiddenItems.get(wrapper.id) == wrapper) hiddenItems.delete(wrapper.id)
+        if (hiddenItemsByName.get(wrapper.name) == wrapper) hiddenItemsByName.delete(wrapper.name)
       })
     }
   }
@@ -8110,10 +8130,10 @@
   function itemAttrChanged(id, remote) {
     // invoke _on_attr_change(id, remote) on all listener (or self) items
     items.forEach(item => {
-      if (!item.listen && item.id != item.id) return // must be listener or self
+      if (!item.listen && item.id != id) return // must be listener or self
       if (!itemDefinesFunction(item, '_on_attr_change')) return
       Promise.resolve(
-        _item(item.id).eval(`_on_attr_change('${item.id}', ${remote})`, {
+        _item(item.id).eval(`_on_attr_change('${id}', ${remote})`, {
           trigger: item.listen ? 'listen' : 'change',
           async: item.deepasync, // run async if item is async or has async deps
           async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async

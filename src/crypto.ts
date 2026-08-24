@@ -3,13 +3,12 @@
 // mode, or '~' + iv hex + raw cipher bytes in uint8 ("bytes") mode; the key is the sha-256 of
 // the utf8-encoded secret, and the stored form of a secret phrase is base64(sha-256(uid+phrase))
 
-// @ts-ignore util.js is untyped (the strict tsc pass over tests reaches this module)
-import { byteArrayToString, byteStringToArray, concatByteArrays } from './util.js'
+import { byteArrayToString, byteStringToArray, concatByteArrays } from './bytes.js'
 
 // aes-gcm key for the secret, usable for the given operations
-async function secretKey(secret: string, usages: KeyUsage[], iv: Uint8Array): Promise<CryptoKey> {
+async function secretKey(secret: string, usages: KeyUsage[]): Promise<CryptoKey> {
   const secret_sha256 = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret))
-  return crypto.subtle.importKey('raw', secret_sha256, { name: 'AES-GCM', iv } as AesGcmParams, false, usages)
+  return crypto.subtle.importKey('raw', secret_sha256, { name: 'AES-GCM' }, false, usages)
 }
 
 const ivToHex = (iv: Uint8Array) =>
@@ -29,15 +28,18 @@ export async function hashSecretPhrase(uid: string, phrase: string): Promise<str
 
 export async function encryptWithSecret(text: string, secret: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12)) // 96-bit random iv
-  const key = await secretKey(secret, ['encrypt'], iv)
+  const key = await secretKey(secret, ['encrypt'])
   const cipher_buffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text))
   return ivToHex(iv) + btoa(byteArrayToString(new Uint8Array(cipher_buffer)))
 }
 
 // encrypt arbitrary bytes (uint8); ideal for firebase storage of large binary data such as images
-export async function encryptBytesWithSecret(bytes: Uint8Array<ArrayBuffer>, secret: string): Promise<Uint8Array> {
+export async function encryptBytesWithSecret(
+  bytes: Uint8Array<ArrayBuffer>,
+  secret: string
+): Promise<Uint8Array<ArrayBuffer>> {
   const iv = crypto.getRandomValues(new Uint8Array(12)) // 96-bit random iv
-  const key = await secretKey(secret, ['encrypt'], iv)
+  const key = await secretKey(secret, ['encrypt'])
   const cipher_buffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes)
   return concatByteArrays(byteStringToArray('~' + ivToHex(iv)), new Uint8Array(cipher_buffer))
 }
@@ -47,18 +49,21 @@ export async function encryptBytesWithSecret(bytes: Uint8Array<ArrayBuffer>, sec
 export async function decryptWithSecret(cipher: string, secret: string): Promise<string> {
   if (cipher[0] == '~') throw new Error('data encrypted using encrypt_bytes must be decrypted using decrypt_bytes')
   const iv = ivFromHex(cipher.slice(0, 24))
-  const key = await secretKey(secret, ['decrypt'], iv)
+  const key = await secretKey(secret, ['decrypt'])
   const cipher_array = byteStringToArray(atob(cipher.slice(24))) // base64-decode cipher string (encrypted in text mode)
   const text_buffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher_array)
   return new TextDecoder().decode(text_buffer)
 }
 
-export async function decryptBytesWithSecret(cipher: Uint8Array, secret: string): Promise<Uint8Array<ArrayBuffer>> {
+export async function decryptBytesWithSecret(
+  cipher: Uint8Array<ArrayBuffer>,
+  secret: string
+): Promise<Uint8Array<ArrayBuffer>> {
   // detect uint8 ("bytes") mode based on ~ prefix
   const encrypted_bytes = cipher[0] == '~'.charCodeAt(0)
   const offset = encrypted_bytes ? 1 : 0 // uint8 encoding has offset 1 for '~' prefix
   const iv = ivFromHex(byteArrayToString(cipher.subarray(offset, 24 + offset)))
-  const key = await secretKey(secret, ['decrypt'], iv)
+  const key = await secretKey(secret, ['decrypt'])
   const cipher_array = encrypted_bytes
     ? cipher.subarray(24 + offset)
     : byteStringToArray(atob(byteArrayToString(cipher.subarray(24 + offset))))

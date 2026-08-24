@@ -303,55 +303,11 @@ export function checkElemCache() {
   })
 }
 
-// convert byte array (Uint8Array) -> byte string of code points <=255 (a.k.a. a "binary string")
-// based on https://stackoverflow.com/a/20604561
-export function byteArrayToString(array) {
-  if (array.constructor.name != 'Uint8Array') throw new Error('invalid argument, expected Uint8Array')
-  const len = array.length
-  const inc = 65535 // max args, see https://stackoverflow.com/a/22747272
-  let str = ''
-  for (let i = 0; i < len; i += inc) str += String.fromCharCode.apply(null, array.subarray(i, Math.min(len, i + inc)))
-  return str
-}
+// byte array/string helpers live in bytes.ts (typed); imported for use below and re-exported
+// for existing importers (a bare `export from` would not bind the local names)
+import { byteArrayToString, byteStringToArray, castArgToByteArray, concatByteArrays } from './bytes.js'
+export { byteArrayToString, byteStringToArray, concatByteArrays }
 
-// convert byte string -> byte array (Uint8Array), ensuring code points <= 255
-// note this is much faster than Uint8Array.from despite checking each code point
-export function byteStringToArray(str) {
-  if (typeof str != 'string') throw new Error('invalid argument, expected string')
-  const len = str.length
-  const array = new Uint8Array(len)
-  for (let i = 0; i < len; i++) {
-    const code = str.charCodeAt(i)
-    if (code > 255) throw new Error(`unsupported code point ${code}>255 in string->Uint8Array conversion`)
-    array[i] = code
-  }
-  return array
-}
-
-function castArgToByteArray(x) {
-  if (x.constructor.name == 'Uint8Array') return x
-  else if (x.constructor.name == 'ArrayBuffer') return new Uint8Array(x)
-  else if (ArrayBuffer.isView(x)) {
-    if (x.buffer?.constructor.name != 'ArrayBuffer') throw new Error('invalid ArrayBuffer view w/o buffer property')
-    return new Uint8Array(x.buffer)
-  } else throw new Error('argument is not an ArrayBuffer or view')
-}
-
-// concatenate Uint8Arrays or ArrayBuffers/views that can be cast to Uint8Arrays
-export function concatByteArrays(...parts) {
-  let length = 0 // total byte length
-  for (let j = 0; j < parts.length; j++) {
-    parts[j] = castArgToByteArray(parts[j])
-    length += parts[j].length
-  }
-  const array = new Uint8Array(length)
-  let offset = 0
-  for (const part of parts) {
-    array.set(part, offset)
-    offset += part.length
-  }
-  return array
-}
 
 // converts x to a string
 // mainly uses JSON.stringify

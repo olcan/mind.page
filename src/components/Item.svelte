@@ -1553,10 +1553,13 @@
 
       // invalidate cache whenever scripts are run (same as in onDone and onRun)
       // since dependencies are not always fully captured in the cache key (even with deephash)
-      // a version increment does not make sense since these scripts are considered part of the current version
-      // also version increment can cause a render-error loop since elements are not cached on errors
+      // NOTE: no version increment here, even for entries left live by the invalidation (unlike
+      // invalidate_elem_cache in index.svelte): restoring cached elements and then invalidating
+      // is the NORMAL flow for items with cached content, and since cacheElems re-caches after
+      // every successful script pass, any forced re-render restores again and loops; the live
+      // restored element is tolerated by design until the next natural re-render (the deleted
+      // cache entry guarantees that render regenerates it)
       invalidateElemCache(id)
-      // version++; // ensure re-render even if deephash and html are unchanged
 
       let pendingScripts = scripts.length
       let scriptErrors = []

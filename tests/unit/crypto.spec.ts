@@ -6,8 +6,7 @@ import {
   decryptWithSecret,
   decryptBytesWithSecret,
 } from '../../src/crypto.js'
-// @ts-expect-error util.js is untyped (strict tsc; svelte-check covers it via allowJs)
-import { byteStringToArray } from '../../src/util.js'
+import { byteStringToArray } from '../../src/bytes.js'
 
 // node-side unit tests for the aes-gcm module (webcrypto is global in node 20+); the end-to-end
 // flows (secret phrase setup, encrypted items, shared-page validation) live in tests/e2e
@@ -40,6 +39,20 @@ test('bytes round-trip in uint8 mode, marked with the ~ prefix', async () => {
   const cipher = await encryptBytesWithSecret(bytes, SECRET)
   expect(cipher[0]).toBe('~'.charCodeAt(0))
   expect(Array.from(await decryptBytesWithSecret(cipher, SECRET))).toEqual(Array.from(bytes))
+})
+
+// frozen compatibility vectors: persisted user data must stay readable, so these exact ciphers —
+// captured 2026-08-24, when the byte-identical format from before the crypto extraction was also
+// verified end-to-end by the personal spec — must decrypt forever; a failure here means a format
+// break (kdf, iv layout, base64 framing), not a bug to fix by regenerating the vectors
+test('frozen ciphers from 2026-08-24 decrypt (persisted-data compatibility)', async () => {
+  const FROZEN_TEXT = '1a6a8aced06c5d2df4e692f8e7wWhRUEF5e0127YeqVm5zPSYjEJPgtjk9zjq8OXsQ0tWtX/3X/xvB2BXGA273WcBrDy9FpZRNtm'
+  expect(await decryptWithSecret(FROZEN_TEXT, SECRET)).toBe('frozen vector: item text with unicode ✓')
+  const FROZEN_BYTES = 'fjNiNjhmOTk0YTI5NTMyMjRhZWM3NGRlYROLOeEVtgH6Wj9CS2fi44yciA9cbSfY' // base64 of the uint8-mode cipher
+  const bytes_cipher = byteStringToArray(atob(FROZEN_BYTES))
+  expect(Array.from(await decryptBytesWithSecret(bytes_cipher, SECRET))).toEqual([0, 1, 2, 250, 255, 128, 7])
+  const FROZEN_LEGACY = '0d2063d038fd4768dbccdef38m+zVrINzC1MMoPVS4KMcOiB1UYbrw==' // text-mode cipher of byte content
+  expect(Array.from(await decryptBytesWithSecret(byteStringToArray(FROZEN_LEGACY), SECRET))).toEqual([1, 2, 250, 255])
 })
 
 test('decrypt refuses uint8-mode ciphers, decrypt_bytes accepts legacy text-mode ciphers', async () => {
