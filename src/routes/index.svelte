@@ -8522,7 +8522,7 @@
   on:focusin={onFocus}
   on:blur={onFocus}
   on:error={onError}
-  on:touchstart={onTouchStart}
+  on:touchstart|passive={onTouchStart}
   on:mousedown={onMouseDown}
   on:unhandledrejection={onError}
   on:popstate={onPopState}
