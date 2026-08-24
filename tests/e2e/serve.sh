@@ -14,4 +14,4 @@ export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first
 # seeding completes before the server starts (a visit during seeding would find an empty account);
 # the watcher then re-seeds (idempotently, once more at startup) as fixture files change
 firebase emulators:exec --only auth,firestore \
-    'node tests/e2e/seed.mjs && { node tests/e2e/seed.mjs --watch > /dev/null 2>&1 & SEED=$!; } && echo "serving seeded accounts at http://localhost:3100/ (markdown corpus at /?shared=markdown_e2e/markdown; Ctrl-C to stop)" && env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs; kill $SEED 2>/dev/null'
+    'node tests/e2e/seed.mjs && { node tests/e2e/seed.mjs --watch > /dev/null 2>&1 & SEED=$!; } && echo "serving seeded accounts (Ctrl-C to stop):" && echo "  http://localhost:3100/" && echo "  http://localhost:3100/?shared=markdown_e2e/markdown  (markdown corpus)" && env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs; kill $SEED 2>/dev/null'

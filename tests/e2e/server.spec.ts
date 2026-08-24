@@ -46,6 +46,8 @@ test.describe('ssr shell', () => {
     const res = await request.get('/no-such-page')
     expect(res.status()).toBe(404)
     expect(await res.text()).toMatch(/Not [Ff]ound/)
+    // except the chrome devtools probe, whose 404 would be noise in dev logs
+    expect((await request.get('/.well-known/appspecific/com.chrome.devtools.json')).status()).toBe(204)
   })
 })
 

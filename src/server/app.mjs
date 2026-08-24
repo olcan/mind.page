@@ -157,6 +157,8 @@ scoped.use(
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
       res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
+    } else if (req.path == '/.well-known/appspecific/com.chrome.devtools.json') {
+      res.status(204).end() // chrome devtools probes this on every load; a 404 is noise in dev logs
     } else if (req.path == '/server_id') {
       res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
