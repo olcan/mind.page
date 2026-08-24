@@ -11,7 +11,6 @@
     "start_functions": "npm run shell",
     "deploy": "npm run build && firebase deploy",
     "logs": "firebase functions:log",
-    "build_ts": "tsc src/firebase/*.ts --outDir lib/firebase --tsBuildInfoFile lib/firebase/build.json --incremental --esModuleInterop --skipLibCheck",
     "build": "vite build && make firebase",
     "dev": "vite dev",
     "start": "node server.mjs",
@@ -21,8 +20,10 @@
     "test:e2e:serve": "tests/e2e/serve.sh",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --threshold error",
-    "check:tests": "tsc --noEmit --ignoreConfig --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --strict tests/e2e/*.ts tests/unit/*.ts playwright.config.ts",
-    "test:dev-smoke": "node tests/e2e/dev_smoke.mjs"
+    "check:tests": "tsc -p tests",
+    "test:dev-smoke": "node tests/e2e/dev_smoke.mjs",
+    "test:unit": "playwright test --config playwright.unit.config.ts",
+    "test:function-smoke": "tests/e2e/function_smoke.sh"
   },
   "main": "lib/firebase/functions.js",
   "engines": {

@@ -32,14 +32,22 @@ export async function renderedHtml(page: Page, id: string, timeout = 15_000): Pr
 export function normalize(html: string): string {
   // chart geometry (widths, positions, path data) scales to wherever the chart happened to
   // generate — the visible column, the hidden column or the element cache — and charts are
-  // resized to their final container on adoption, so only structure and data labels are
-  // compared; geometry inside c3 svgs is masked
+  // resized to their final container on adoption, so geometry inside c3 svgs is masked while
+  // structure, data labels and non-geometric styles (colors, opacity, visibility) stay compared;
+  // semantic geometry (positive bounds, nondegenerate paths) is asserted live in render.spec.ts
   html = html.replace(/<div[^>]*class="c3[^"]*"[^]*?<\/svg>/g, block =>
     block
       .replace(/ (width|height|x|y|x1|x2|y1|y2|r|cx|cy|dx|dy)="[^"]*"/g, ' $1="N"')
       .replace(/ d="[^"]*"/g, ' d="PATH"')
       .replace(/translate\([^)]*\)/g, 'translate(N)')
-      .replace(/ style="[^"]*"/g, '')
+      .replace(/ style="([^"]*)"/g, (m, s: string) => {
+        // drop only the geometric declarations (pixel sizes/offsets, transforms)
+        const decls = s
+          .split(';')
+          .map(decl => decl.trim())
+          .filter(decl => decl && !/px|translate\(/.test(decl))
+        return decls.length ? ` style="${decls.join('; ')};"` : ''
+      })
   )
   return html
     .replace(/ id="(?:mjx-|time-|[^"]*\d{8,})[^"]*"/g, '') // mathjax / $cid / timestamp ids

@@ -55,6 +55,40 @@ test('charts regenerate after a stale hidden render (zero-width skip)', async ({
   }
 })
 
+test('charts carry real data and geometry (semantic checks the masked goldens cannot make)', async ({ page }) => {
+  // the goldens mask chart geometry (see normalize in rendering.ts), so data shape, visibility
+  // and nondegenerate geometry are asserted here on the live page instead
+  await loadAnonymous(page)
+  await page.evaluate(() => void (location.hash = '#charts'))
+  await expect
+    .poll(() => page.evaluate(() => window._item('#charts')?.elem?.querySelectorAll('.c3 svg').length ?? 0), {
+      timeout: 30_000,
+    })
+    .toBe(2)
+  const charts = await page.evaluate(() =>
+    [...(window._item('#charts')!.elem as HTMLElement).querySelectorAll('.c3')].map((chart: any) => ({
+      width: chart.querySelector('svg').clientWidth,
+      height: chart.querySelector('svg').clientHeight,
+      // both seeded charts plot series y1 and y2 (see the #charts fixture)
+      series: [...chart.querySelectorAll('.c3-chart-line')].map((line: any) =>
+        [...line.classList].find((c: string) => c.startsWith('c3-target-'))
+      ),
+      // a real line path has multiple points (L segments), not a degenerate M-only path
+      path_shapes: [...chart.querySelectorAll('.c3-chart-line path.c3-line')].map(
+        (path: any) => path.getAttribute('d')?.match(/L/g)?.length ?? 0
+      ),
+      tick_labels: [...chart.querySelectorAll('.c3-axis-y .tick text')].map((tick: any) => tick.textContent),
+    }))
+  )
+  for (const chart of charts) {
+    expect(chart.width).toBeGreaterThan(100)
+    expect(chart.height).toBeGreaterThan(50)
+    expect(chart.series).toEqual(['c3-target-y1', 'c3-target-y2'])
+    for (const segments of chart.path_shapes) expect(segments).toBeGreaterThanOrEqual(2)
+  }
+  expect(charts[1].tick_labels).toContain('10') // the second chart pins tick values [0, 5, 10]
+})
+
 test('every anonymous item renders as before', async ({ page }) => {
   await loadAnonymous(page)
   const ids: string[] = await page.evaluate(() => window._items().map(item => item.id))

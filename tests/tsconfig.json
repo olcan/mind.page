@@ -1,0 +1,13 @@
+{
+  // strict type-checking of the test suites and playwright configs (`npm run check:tests`);
+  // separate from the app tsconfig, which svelte-check owns
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true
+  },
+  "include": ["e2e/**/*.ts", "unit/**/*.ts", "../playwright.config.ts", "../playwright.unit.config.ts"]
+}

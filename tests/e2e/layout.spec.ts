@@ -2,48 +2,75 @@ import { expect, test, type Page } from '@playwright/test'
 import { loadAnonymous } from './helpers.js'
 
 // column layout (see updateItemLayout in index.svelte): columnCount is max(1, floor(width / 500)),
-// items keep their order across reflows, and the hidden render column tracks the first column's
-// width; this pins the layout math ahead of its extraction from index.svelte
+// every visible item is rendered exactly once with per-column order following index order, and the
+// hidden render column and element cache track the first column's width; this pins the layout
+// math ahead of its extraction from index.svelte
 
 const columns = (page: Page) => page.evaluate(() => document.querySelectorAll('.column:not(.hidden)').length)
-// names of the visible items in index order (the layout must never reorder them)
-const visible = (page: Page) =>
-  page.evaluate(() => window.__items.slice(0, window.__hideIndex).map(item => item.labelText ?? ''))
-const hiddenColumnWidth = (page: Page) =>
+// visible item ids in index order (the layout must never reorder or drop them)
+const visibleIds = (page: Page) =>
+  page.evaluate(() => window.__items.slice(0, window.__hideIndex).map(item => item.id))
+// rendered item ids per visible column, in dom order
+const renderedByColumn = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.column:not(.hidden)')].map(column =>
+      [...column.querySelectorAll('.super-container')].map(elem => elem.id.replace('super-container-', ''))
+    )
+  )
+const widths = (page: Page) =>
   page.evaluate(() => ({
-    hidden: (document.querySelector('.column.hidden') as HTMLElement).offsetWidth,
     first: (document.querySelector('.column:not(.hidden)') as HTMLElement).offsetWidth,
+    hidden: (document.querySelector('.column.hidden') as HTMLElement).offsetWidth,
+    cache: document.getElementById('cache-div')!.offsetWidth,
   }))
 
-test('column count follows viewport width and items keep their order', async ({ page }) => {
+// every visible item appears exactly once across the columns, and each column's dom order is a
+// subsequence of index order (items distribute across columns but never reorder within one)
+async function expectConsistentColumns(page: Page) {
+  const ids = await visibleIds(page)
+  const by_column = await renderedByColumn(page)
+  const rendered = by_column.flat()
+  expect(rendered.length, 'each visible item rendered exactly once').toBe(new Set(rendered).size)
+  expect(new Set(rendered), 'rendered items match the visible set').toEqual(new Set(ids))
+  for (const column of by_column) {
+    const positions = column.map(id => ids.indexOf(id))
+    expect(positions, 'column order follows index order').toEqual([...positions].sort((a, b) => a - b))
+  }
+  return ids
+}
+
+test('column count follows viewport width; items stay unique and ordered', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 900 }) // floor(900 / 500) = 1 column
   await loadAnonymous(page)
   expect(await columns(page)).toBe(1)
-  const order = await visible(page)
-  expect(order.length).toBeGreaterThan(2)
+  const ids = await expectConsistentColumns(page)
+  expect(ids.length).toBeGreaterThan(2)
 
-  await page.setViewportSize({ width: 1200, height: 900 }) // floor(1200 / 500) = 2 columns
-  await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(2)
-  expect(await visible(page)).toEqual(order) // reflow distributes items but keeps index order
-
-  await page.setViewportSize({ width: 1600, height: 900 }) // floor(1600 / 500) = 3 columns
-  await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(3)
-  expect(await visible(page)).toEqual(order)
-
-  await page.setViewportSize({ width: 900, height: 900 })
-  await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(1)
-  expect(await visible(page)).toEqual(order)
+  for (const [width, count] of [
+    [1200, 2],
+    [1600, 3],
+    [900, 1],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
+    expect(await expectConsistentColumns(page)).toEqual(ids) // same visible set, reordered never
+  }
 })
 
-test('the hidden render column tracks the first column width', async ({ page }) => {
+test('the hidden render column and element cache track the first column width', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 900 })
   await loadAnonymous(page)
   await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(2)
-  const { hidden, first } = await hiddenColumnWidth(page)
-  expect(hidden).toBe(first)
+  let sizes = await widths(page)
+  expect(sizes.hidden).toBe(sizes.first)
+  expect(sizes.cache).toBe(sizes.first)
+  // after a reflow the recreated column div must be re-sized promptly (post-flush re-apply in
+  // updateItemLayout, not an eventual later layout pass): renders started right after the reflow
+  // measure against these widths, e.g. charts skip rendering at zero width
   await page.setViewportSize({ width: 900, height: 900 })
   await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(1)
-  await expect.poll(async () => (await hiddenColumnWidth(page)).hidden, { timeout: 15_000 }).toBe(
-    (await hiddenColumnWidth(page)).first
-  )
+  await expect.poll(async () => (await widths(page)).hidden, { timeout: 2_000 }).toBe((await widths(page)).first)
+  sizes = await widths(page)
+  expect(sizes.hidden).toBe(sizes.first)
+  expect(sizes.cache).toBe(sizes.first)
 })
