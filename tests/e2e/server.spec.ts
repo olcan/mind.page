@@ -61,8 +61,10 @@ test.describe('crawlable public pages', () => {
   })
 
   test('a shared page serves its item without javascript', async ({ request }) => {
-    const html = await (await request.get('/?shared=crawl_e2e/public')).text()
-    expect(html).toMatch(/<meta property="og:title" content="[^"]+"/)
+    const html = await (
+      await request.get('/?shared=crawl_e2e/public', { headers: { 'X-Forwarded-Host': 'mind.page' } })
+    ).text()
+    expect(html).toMatch(/<meta property="og:title" content="public @ mind.page"/) // forwarded host, not the function's
     expect(html).toContain('a shared item for crawlers')
   })
 

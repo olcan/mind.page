@@ -15,7 +15,8 @@ export async function load({ request, url, cookies, getClientAddress }) {
       client_ip = ''
     }
   }
-  const hostname = canonicalizeHost(request.headers.get('host') ?? url.host)
+  // behind firebase hosting the host header is the function's own host (x-forwarded-host is the site)
+  const hostname = canonicalizeHost(request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host)
   const content = await pageContent({ url, cookie: cookies.get('__session'), hostname })
   return { server_name: os.hostname(), server_ip: localAddress(), client_ip, content }
 }
