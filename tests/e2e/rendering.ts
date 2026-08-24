@@ -52,7 +52,7 @@ export function normalize(html: string): string {
     // inline style declaration order varies with render timing (e.g. the img macro applies
     // width/height and custom style in either order), so declarations are compared sorted
     .replace(/ style="([^"]*)"/g, (m, s) => {
-      const decls = s.split(';').map(decl => decl.trim()).filter(Boolean).sort()
+      const decls = s.split(';').map((decl: string) => decl.trim()).filter(Boolean).sort()
       return decls.length ? ` style="${decls.join('; ')};"` : ''
     })
     .replace(/ style=""/g, '') // empty style attributes come and go
