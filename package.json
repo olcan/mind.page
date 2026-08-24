@@ -21,7 +21,8 @@
     "test:e2e:serve": "tests/e2e/serve.sh",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --threshold error",
-    "check:tests": "tsc --noEmit --ignoreConfig --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --strict tests/e2e/*.ts playwright.config.ts"
+    "check:tests": "tsc --noEmit --ignoreConfig --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --strict tests/e2e/*.ts tests/unit/*.ts playwright.config.ts",
+    "test:dev-smoke": "node tests/e2e/dev_smoke.mjs"
   },
   "main": "lib/firebase/functions.js",
   "engines": {

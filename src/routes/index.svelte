@@ -1772,6 +1772,10 @@
     lastLayoutTime = Date.now()
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
+    // when columnCount changes the column divs are recreated by the each block after this pass,
+    // dropping the inline width, so it is re-applied post-flush (a zero-width hidden column makes
+    // off-screen renders measure zero, e.g. charts skip rendering; see tests/e2e/layout.spec.ts)
+    tick().then(resizeHiddenColumn)
     updateVerticalPadding()
 
     items.forEach((item, index) => {

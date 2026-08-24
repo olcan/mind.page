@@ -6,7 +6,7 @@ import { defineConfig, devices } from '@playwright/test'
 const WRITE_SPECS = /(admin|editor|personal)\.spec\.ts/
 
 export default defineConfig({
-  testDir: 'tests/e2e',
+  testDir: 'tests',
   workers: 1,
   fullyParallel: false,
   timeout: 120_000,
@@ -18,11 +18,19 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  // read-only tests (server, rules, rendering goldens) run first; write tests (admin installs, the
-  // editor, a personal account) change the seeded accounts and run after them
+  // unit tests (tests/unit) run in the playwright node process, no browser or app instance; then
+  // read-only tests (server, rules, rendering goldens); then write tests (admin installs, the
+  // editor, a personal account), which change the seeded accounts
   projects: [
-    { name: 'chromium', testIgnore: WRITE_SPECS, use: { ...devices['Desktop Chrome'] } },
-    { name: 'write', testMatch: WRITE_SPECS, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
+    { name: 'unit', testDir: 'tests/unit' },
+    { name: 'chromium', testDir: 'tests/e2e', testIgnore: WRITE_SPECS, use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'write',
+      testDir: 'tests/e2e',
+      testMatch: WRITE_SPECS,
+      dependencies: ['chromium'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: {
     // note FIREBASE_CONFIG (set by firebase emulators:exec) must be removed, since server.ts takes it

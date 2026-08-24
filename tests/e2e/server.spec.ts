@@ -191,7 +191,7 @@ test.describe('webhooks', () => {
     await expect
       .poll(async () => {
         const snap = await firestore().collection('webhooks').where('user', '==', ALICE.uid).get()
-        return snap.docs.map(d => d.data())
+        return snap.docs.map((d: any) => d.data())
       })
       .toMatchObject([{ user: ALICE.uid, source: 'e2e', body }])
   })
