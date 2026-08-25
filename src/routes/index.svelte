@@ -18,6 +18,7 @@
     doc,
     getDoc,
     getDocs,
+    getDocFromServer,
     getDocsFromServer,
     setDoc,
     addDoc,
@@ -3245,25 +3246,78 @@
 
   let idsFromLabel = new Map<string, string[]>()
 
-  // remote pending changes DEFERRED because our own write for the document was in flight (see
-  // isOwnPendingChange): the acknowledgement of our write is metadata-only, so a skipped change
-  // is never redelivered — it must be replayed once our write settles. latest change per doc;
-  // superseded by any newer applied change for the same document
-  const deferredRemoteChanges = new Map()
+  // documents whose remote change was DEFERRED because local intent for them was in flight (see
+  // the snapshot handler): applying a remote change under an unsettled local write rolls the
+  // item back, and the queued save then persists the rollback. the acknowledgement of our own
+  // write is metadata-only, so a skipped change is never redelivered — the document must be
+  // RECONCILED once every local intent settles
+  const deferredRemoteChanges = new Set()
   let applyRemoteChangeRef = null // set by the items listener (applyRemoteChange is closure-scoped)
-  function replayDeferredRemoteChange(item) {
-    if (!item.savedId) return
-    const deferred = deferredRemoteChanges.get(item.savedId)
-    if (!deferred || item.unackedWrites?.length) return
-    deferredRemoteChanges.delete(item.savedId)
-    // replay only a STRICTLY newer change: deferral happened because our write was in flight,
-    // and server order matches issue order — a newer remote time means the server ends at
-    // their state, while replaying an older (or same-time) one would roll our settled write back
-    if (!(deferred.savedItem.time > item.savedTime)) return
+
+  // true while anything local is still going to write this item: an in-flight write, a queued
+  // save task, or a save in progress. replaying under any of these loses the later intent —
+  // a queued task builds its payload from live item state, so it would persist the replay
+  const hasLocalIntent = item => !!(item.unackedWrites?.length || item.saveTask || item.saving)
+
+  // reconciles a deferred document against the SERVER once local intent settles. payload order
+  // cannot decide this: item.time is semantic (attribute-only and keep_time saves preserve it,
+  // clocks differ across devices), so neither "ours is newer" nor "theirs is newer" is sound.
+  // one server read per actually-conflicted document settles what the server really holds
+  // drives reconciliation until the document's local intent has ACTUALLY settled. the settle
+  // hooks alone are not enough: the inner write's finally and onSaveDone both run INSIDE the
+  // save task, while `saveTask`/`saving` clear in that task's own finally afterwards — so a
+  // hook-only reconcile always observed intent still pending and gave up silently
+  const reconcileScheduled = new Set()
+  function scheduleReconcile(item) {
+    const id = item?.savedId
+    if (!id || reconcileScheduled.has(id)) return
+    reconcileScheduled.add(id)
+    const attempt = async (tries = 0) => {
+      const index = indexFromId.get(tempIdFromSavedId.get(id) ?? id)
+      const current = index === undefined ? null : items[index]
+      if (!current || !deferredRemoteChanges.has(id)) {
+        reconcileScheduled.delete(id)
+        return
+      }
+      if (hasLocalIntent(current)) {
+        if (tries > 120) {
+          // ~60s of continuous local writing: stop polling, the next settled save reschedules
+          reconcileScheduled.delete(id)
+          return
+        }
+        setTimeout(() => void attempt(tries + 1), 500)
+        return
+      }
+      reconcileScheduled.delete(id)
+      await reconcileDeferredRemoteChange(current)
+    }
+    setTimeout(() => void attempt(), 0)
+  }
+
+  async function reconcileDeferredRemoteChange(item) {
+    if (!item?.savedId || !deferredRemoteChanges.has(item.savedId)) return
+    if (hasLocalIntent(item)) return // more local intent queued: reconcile when IT settles
+    const id = item.savedId
+    deferredRemoteChanges.delete(id)
     try {
-      applyRemoteChangeRef?.(deferred.change, deferred.doc, deferred.savedItem)
+      const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+      const meta = { id, metadata: { hasPendingWrites: false } }
+      if (!snapshot.exists()) {
+        applyRemoteChangeRef?.({ type: 'removed' }, meta, { hidden: false, text: '' })
+        return
+      }
+      const savedItem = await decryptItem(Object.assign(snapshot.data(), { id }))
+      if (savedItem.hidden) return // not an ordinary item any more; the hidden paths own it
+      // the server already holds our state: nothing was lost, and applying would be a no-op
+      if (
+        savedItem.text == item.savedText &&
+        savedItem.time == item.savedTime &&
+        _.isEqual(savedItem.attr, item.savedAttr)
+      )
+        return
+      applyRemoteChangeRef?.({ type: 'modified' }, meta, savedItem)
     } catch (e) {
-      console.error('could not replay deferred remote change:', deferred.doc.id, e)
+      console.error('could not reconcile deferred remote change:', id, e)
     }
   }
   function itemDeps(index, deps = [], missing_deps = undefined) {
@@ -4972,6 +5026,8 @@
     item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
     item.savedText = savedItem.text
     items[index] = item // trigger dom update
+    // a save task completing is also the end of local intent for this document
+    scheduleReconcile(item)
   }
 
   function onItemEscape(e) {
@@ -5223,8 +5279,8 @@
         } finally {
           const w = item.unackedWrites.indexOf(written)
           if (w >= 0) item.unackedWrites.splice(w, 1)
-          // a remote change deferred behind this write replays once nothing is in flight
-          if (!item.unackedWrites.length) replayDeferredRemoteChange(item)
+          // a change deferred behind local intent reconciles once ALL of it has settled
+          scheduleReconcile(item)
         }
 
         // also save to history ...
@@ -6130,6 +6186,8 @@
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
+    compareIds,
+    repairNameIndex,
     registerHidden,
     applyRemoteAdded,
     applyRemoteModified,
@@ -6260,7 +6318,37 @@
   // application): the index cannot claim completeness while any are unresolved, so grants are
   // blocked until each is healed — by a later successfully applied change for the same id, or
   // by a full server re-read (see confirmIndex, which registers every hidden document)
-  let hiddenDirtyIds = new Set()
+  let hiddenDirtyIds = new Map() // document id -> the generation at which it was marked dirty
+  let hiddenDirtySeq = 0 // monotonic: healing may only clear failures its own generation proves
+  const markHiddenDirty = id => hiddenDirtyIds.set(id, ++hiddenDirtySeq)
+  // heals `id` only if it has not been marked dirty AGAIN since `seen` (renames put one document
+  // on different name chains, so an older success can settle after a newer failure)
+  const healHiddenDirty = (id, seen) => {
+    if (hiddenDirtyIds.get(id) <= seen) hiddenDirtyIds.delete(id)
+  }
+
+  // authority settles on its OWN receipt-ordered chain, separate from snapshotApply: snapshot
+  // ingestion must not block on a phrase prompt, but no grant may pass an EARLIER unsettled
+  // hidden revision. every revision reserves its slot at receipt (in listener order) and hands
+  // back a `settle` callback its application calls when its hidden transitions have landed; a
+  // later metadata revision therefore cannot overtake an earlier queued hidden transition and
+  // grant into a state that transition is about to change (which could delete both records of
+  // a name at cleanup — see deleteInvalidHiddenCandidates)
+  let hiddenAuthoritySettle = Promise.resolve()
+  function reserveHiddenAuthority({ authoritative, fromCache }) {
+    // a cached (non-current) revision revokes IMMEDIATELY at receipt: authority must not stay
+    // usable — a create could skip confirmation — while the queue drains
+    if (!authoritative && fromCache) revokeHiddenAuthority('cached revision')
+    const epoch = hiddenAuthorityEpoch // captured at receipt: a later revocation must beat this grant
+    let applied
+    const done: Promise<{ failed: boolean; hiddenChanged: boolean }> = new Promise(resolve => (applied = resolve))
+    hiddenAuthoritySettle = hiddenAuthoritySettle.then(async () => {
+      await initialization
+      const { failed, hiddenChanged } = await done
+      if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged })
+    })
+    return applied
+  }
 
   function revokeHiddenAuthority(reason = '') {
     if (hiddenIndexAuthoritative || reason) console.warn(`hidden-index authority revoked${reason ? `: ${reason}` : ''}`)
@@ -6279,7 +6367,7 @@
   // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
   // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
   // the NOW-current state and only then deleted (see cleanupInvalidHidden)
-  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch }) {
+  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged }) {
     if (fixed || anonymous) return
     if (failed) revokeHiddenAuthority('hidden change failed to apply')
     else if (authoritative) {
@@ -6287,7 +6375,10 @@
       if (hiddenDirtyIds.size) return // skipped hidden changes unresolved: not complete
       const granting = !hiddenIndexAuthoritative
       hiddenIndexAuthoritative = true
-      if (granting) deleteInvalidHiddenCandidates()
+      // recompute on the grant AND on any later authoritative revision that changed hidden
+      // records: duplicates and orphans arriving while authority is already true would
+      // otherwise wait for an unrelated revoke/re-grant that may never come
+      if (granting || hiddenChanged) deleteInvalidHiddenCandidates()
     } else if (fromCache) revokeHiddenAuthority('cached revision')
   }
 
@@ -6301,6 +6392,9 @@
   // from the live index by classifyInvalidHidden (a record renamed to a unique name, or a store
   // whose owner arrived, is simply no longer classified). malformed stays quarantined.
   function deleteInvalidHiddenCandidates() {
+    // point every name that HAS a live record at that record first: a stale rename alias would
+    // otherwise make the real current record look like a duplicate and get it deleted
+    repairNameIndex(hiddenIndex())
     const ownerExists = id => _exists(tempIdFromSavedId.get(id) ?? id) // owner may be under a temp id
     const retained = []
     for (const entry of hiddenItemsInvalid ?? []) {
@@ -6403,7 +6497,7 @@
     // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
     // per save (see saveHiddenItem)
     revokeHiddenAuthority()
-    hiddenDirtyIds = new Set() // initialization rebuilds the index from scratch
+    hiddenDirtyIds = new Map() // initialization rebuilds the index from scratch
 
     // consent gate for foreign code (see foreignCodeBlocked above): a shared page runs its
     // OWNER's code in this origin, which is dangerous for ANY authenticated visitor who is not
@@ -7119,7 +7213,7 @@
             // exact payload identity: the controller records every plaintext payload it writes,
             // so another tab's update applies even while OUR wrapper has work in flight (the
             // old in-flight blanket skip lost those updates for good — the ack is metadata-only)
-            if (hiddenPersistence.isOwnWrite(doc.id, savedItem.text)) return true
+            if (hiddenPersistence.isOwnWrite(doc.id, savedItem.time, savedItem.text)) return true
             if (!wrapper) return false // unknown document: another tab's create
             // a settled write leaves the wrapper at the written state; an echo matching it is ours
             return JSON.stringify({ name: wrapper.name, item: wrapper.item }) == savedItem.text
@@ -7143,16 +7237,6 @@
           // an older write is still in flight, and applying that stale echo would roll the item
           // back — and the queued save, reading the rolled-back text, would then persist it
           if (item.unackedWrites?.some(matchesWrite)) return true
-          // any OTHER remote pending change against a document with our own write in flight is
-          // DEFERRED: applying it now would roll the item back under the in-flight write, whose
-          // queued save would then persist the rollback — the lost-latest interleaving (round-8
-          // finding 4). the change is stashed and REPLAYED when our write settles (its own
-          // acknowledgement is metadata-only, so nothing else would redeliver it): a strictly
-          // newer deferred change then lands, an older one is dropped as superseded
-          if (item.unackedWrites?.length) {
-            deferredRemoteChanges.set(doc.id, { change, doc, savedItem })
-            return true
-          }
           // a settled write leaves its payload as the saved state; an echo matching it is ours
           return (
             item.savedText == savedItem.text &&
@@ -7173,7 +7257,8 @@
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === 'added') {
                     if (savedItem.hidden) {
-                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                      if (!wrapper) return // quarantined
                       const { warning } = applyRemoteAdded(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -7243,7 +7328,8 @@
                     }) // for /undelete
                   } else if (change.type == 'modified') {
                     if (savedItem.hidden) {
-                      const wrapper = Object.assign(JSON.parse(savedItem.text), { id: doc.id })
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                      if (!wrapper) return // quarantined
                       const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -7321,14 +7407,12 @@
             }
             if (action == 'ignore_metadata_only') {
               // no data changes, but a server confirmation can still grant authority (e.g. the
-              // server catching up after a cache initialization) — queued in receipt order and
-              // AWAITING initialization: a confirmation received while initialization is still
-              // running must settle after it, not be discarded
-              const epoch = hiddenAuthorityEpoch
-              const fromCache = snapshot.metadata.fromCache
-              snapshotApply = snapshotApply.then(async () => {
-                await initialization
-                if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed: false, epoch })
+              // server catching up after a cache initialization): it takes its receipt-ordered
+              // slot and settles immediately — it carries no transitions of its own, but cannot
+              // overtake an earlier revision that does
+              reserveHiddenAuthority({ authoritative, fromCache: snapshot.metadata.fromCache })({
+                failed: false,
+                hiddenChanged: false,
               })
               return
             }
@@ -7359,14 +7443,12 @@
                 } else {
                   initTime = window['_init_time'] = instance.init_time = Date.now() // init started
                   initialize()
-                  // settle the FIRST revision's authority at receipt, in chain order: revisions
-                  // received while initialization runs queue BEHIND this task (each awaits
-                  // initialization), so an old authoritative first snapshot can never grant
-                  // after a later cached or failed revision revoked
-                  const epoch = hiddenAuthorityEpoch
-                  snapshotApply = snapshotApply.then(async () => {
-                    await initialization
-                    if (initialized) settleHiddenAuthority({ authoritative, fromCache: false, failed: false, epoch })
+                  // the FIRST revision takes the first slot on the authority chain: revisions
+                  // received while initialization runs reserve theirs behind it, so an old
+                  // authoritative first snapshot can never grant after a later revision revoked
+                  reserveHiddenAuthority({ authoritative, fromCache: false })({
+                    failed: false,
+                    hiddenChanged: false,
                   })
                 }
               }
@@ -7419,7 +7501,12 @@
             // handle changes in non-first snapshot, waiting for init if necessary; snapshots are
             // SERIALIZED and each change's decrypt is awaited before it is applied, so a later
             // snapshot can never interleave with (or overtake) an earlier one mid-application
-            const epoch = hiddenAuthorityEpoch // captured at receipt: a later revocation must beat this grant
+            // reserve this revision's authority slot NOW (receipt order); its application
+            // settles it once every hidden transition of this revision has landed
+            const settleApplied = reserveHiddenAuthority({
+              authoritative,
+              fromCache: snapshot.metadata.fromCache,
+            })
             const applyTask = async () => {
               await initialization
               if (!initialized) {
@@ -7431,6 +7518,7 @@
               // snapshot delivers all remote changes since last sync
               const applied = [] // labels of applied changes, logged in aggregate below
               let ownSkipped = 0
+              let deferred = 0 // changes held back behind unsettled local intent (reconciled later)
               // a failed hidden decrypt or application keeps this revision from granting
               // authority, and the document id stays DIRTY (blocking later grants) until a
               // successful change for it applies or a full server re-read heals the index
@@ -7458,39 +7546,54 @@
                   else {
                     if (couldBeHidden) {
                       hiddenApplyFailed = true
-                      hiddenDirtyIds.add(doc.id)
+                      markHiddenDirty(doc.id)
+                      revokeHiddenAuthority('hidden change could not be decrypted') // as soon as known
                     }
                     continue
                   }
                 }
                 if (savedItem.hidden) {
-                  let name
-                  if (change.type == 'removed') name = hiddenItems.get(doc.id)?.name
-                  else {
-                    try {
-                      name = JSON.parse(savedItem.text).name
-                    } catch (e) {
-                      console.error('could not apply remote change:', doc.id, e)
-                      hiddenApplyFailed = true
-                      hiddenDirtyIds.add(doc.id)
-                      continue
-                    }
+                  const seenDirtySeq = hiddenDirtySeq // this transition can only heal what it saw
+                  const removed = change.type == 'removed'
+                  let wrapper = null
+                  let names = []
+                  if (removed) {
+                    // covers a document being ADOPTED, whose server id is not in byId until
+                    // finalization: its removal must still serialize on the adopting name
+                    names = [hiddenPersistence.nameForDocument(doc.id)]
+                  } else {
+                    wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                    if (!wrapper) continue // quarantined (reported, never indexed): not a failure
+                    // a RENAME must also join the in-flight write on the OLD name, which could
+                    // otherwise complete and write the old name back
+                    names = [hiddenItems.get(doc.id)?.name, wrapper.name]
+                  }
+                  // receipt-time intent: a create/adopt decision must see this record even though
+                  // its application is queued — possibly behind that very create
+                  hiddenPersistence.noteRemote(wrapper, doc.id, removed)
+                  // an arrival for a name under logical deletion joins that deletion instead of
+                  // being applied: delivery order must not resurrect a store the user emptied
+                  const deletingName = names.find(name => name && hiddenPersistence.isDeleting(name))
+                  if (deletingName && !removed) {
+                    hiddenPersistence.deleteDiscovered(deletingName, doc.id)
+                    continue
                   }
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   hiddenApplied.push(
                     hiddenPersistence
-                      .applyRemote(name, () => {
+                      .applyRemote(names, () => {
                         // own-pending classification uses EXECUTION-time wrapper state: by the
                         // time this runs, in-flight work for the name has settled
                         if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
                         applyRemoteChange(change, doc, savedItem)
                       })
                       .then(
-                        () => void hiddenDirtyIds.delete(doc.id), // a successful change heals a dirty id
+                        () => healHiddenDirty(doc.id, seenDirtySeq), // heals only ITS OWN generation
                         e => {
                           console.error('could not apply remote change:', doc.id, e)
                           hiddenApplyFailed = true
-                          hiddenDirtyIds.add(doc.id)
+                          markHiddenDirty(doc.id)
+                          revokeHiddenAuthority('hidden change could not be applied') // as soon as known
                         }
                       )
                   )
@@ -7500,6 +7603,17 @@
                   // pending writes are skipped only when they are OUR OWN (see isOwnPendingChange)
                   if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) {
                     ownSkipped++
+                    continue
+                  }
+                  // DEFER any remote change — pending or server-confirmed, from this device or
+                  // another — while local intent for the document is unsettled: applying it now
+                  // rolls the item back under that intent, which then persists the rollback. the
+                  // document is reconciled against the server once the intent settles
+                  const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
+                  if (local?.savedId && hasLocalIntent(local)) {
+                    deferredRemoteChanges.add(local.savedId)
+                    scheduleReconcile(local)
+                    deferred++
                     continue
                   }
                   applied.push(
@@ -7513,21 +7627,18 @@
                   console.error('could not apply remote change:', doc.id, e)
                 }
               }
-              // settle once every hidden transition of this revision lands; not awaited on the
-              // snapshot chain itself (a write held at a phrase prompt must not stall sync) —
-              // ordering stays safe because revocations always apply and grants are epoch-gated
-              void Promise.all(hiddenApplied).then(() =>
-                settleHiddenAuthority({
-                  authoritative,
-                  fromCache: snapshot.metadata.fromCache,
-                  failed: hiddenApplyFailed,
-                  epoch,
-                })
+              // release this revision's reserved authority slot once every hidden transition it
+              // queued has landed: the settlement itself runs on the authority chain, in receipt
+              // order, so a later revision cannot grant ahead of these transitions
+              void Promise.all(hiddenApplied).then(
+                () => settleApplied({ failed: hiddenApplyFailed, hiddenChanged: !!hiddenApplied.length }),
+                () => settleApplied({ failed: true, hiddenChanged: true })
               )
               if (applied.length) {
                 const summary =
                   `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +
-                  `(${snapshot.metadata.fromCache ? 'cache' : 'server'}${ownSkipped ? `, ${ownSkipped} own skipped` : ''})`
+                  `(${snapshot.metadata.fromCache ? 'cache' : 'server'}${ownSkipped ? `, ${ownSkipped} own skipped` : ''}` +
+                  `${deferred ? `, ${deferred} deferred` : ''})`
                 // during initialization the [Nms] prefix orders this among the init steps; after
                 // that the timing is meaningless and each change is worth naming
                 if (!initTime) init_log(summary)
@@ -8246,9 +8357,26 @@
     if (_exists(local)) item(local).global_store = _.cloneDeep(pending.item)
   }
 
+  // parses one hidden document into a wrapper, QUARANTINING anything unusable (unparseable text
+  // or a missing/non-string name) exactly as initialization does: an invalid record is reported
+  // and never indexed — a partially indexed wrapper made later application throw, and a wrapper
+  // with an undefined name made cleanup throw AFTER authority was already granted
+  function parseHiddenWrapper(id, text) {
+    try {
+      const wrapper = Object.assign(JSON.parse(text), { id })
+      if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
+      return wrapper
+    } catch (e) {
+      console.warn('quarantining malformed hidden item (unparseable; not indexed, not deleted)', id, e)
+      hiddenItemsInvalid?.push({ wrapper: { id, name: '' }, reason: 'malformed' })
+      return null
+    }
+  }
+
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
-    const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+    const wrapper = parseHiddenWrapper(item.id, item.text)
+    if (!wrapper) return
     // a document discovered while its name is being logically deleted joins the deletion's
     // targets instead of being registered (the caller deleted the store; a mid-flight
     // discovery must not resurrect it)
@@ -8280,29 +8408,36 @@
       }),
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
-    confirmIndex: () =>
-      hiddenIndexAuthoritative
-        ? Promise.resolve()
-        : getDocsFromServer(
-            query(
-              collection(getFirestore(firebase), 'items'),
-              where('user', '==', user.uid),
-              where('hidden', '==', true)
-            )
-          ).then(async hidden_docs => {
-            // ascending id order so a pending create adopts the MINIMUM-id duplicate; any
-            // failure rejects (failing the create): a server read proves query completeness,
-            // not a successfully constructed name index. no durable authority is granted — on
-            // fixed pages the listener (shared subset) cannot see later hidden documents, so
-            // the next new-name create re-confirms again
-            for (const doc of [...hidden_docs.docs].sort((a, b) => a.id.localeCompare(b.id))) {
-              const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
-              registerHiddenItem(hidden_item)
-            }
-            // a complete successful server re-read heals every dirty id: whatever change was
-            // skipped, the document's current state (or absence) is now registered
-            hiddenDirtyIds.clear()
-          }),
+    confirmIndex: pendingName => {
+      if (hiddenIndexAuthoritative) return Promise.resolve()
+      // the read can only heal failures that were already known when it STARTED: a document
+      // corrupted after this snapshot was taken is not proven by it
+      const seenDirtySeq = hiddenDirtySeq
+      return getDocsFromServer(
+        query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
+      ).then(async hidden_docs => {
+        // ascending id order so a pending create adopts the MINIMUM-id duplicate; any failure
+        // rejects (failing the create): a server read proves query completeness, not a
+        // successfully constructed name index. no durable authority is granted — on fixed pages
+        // the listener (shared subset) cannot see later hidden documents, so the next new-name
+        // create re-confirms again
+        const routed = []
+        for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
+          const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
+          if (!hidden_item.hidden || !hidden_item.text) continue
+          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+          if (!wrapper) continue
+          // the CALLING create's own name registers inline — that is the adoption decision this
+          // confirmation exists to make, and its chain is busy with the very task awaiting us.
+          // every OTHER name goes through its own chain: registering it inline would replace a
+          // wrapper that name may be writing right now, silently dropping its queued save
+          if (wrapper.name == pendingName) registerHiddenItem(hidden_item)
+          else routed.push(hiddenPersistence.applyRemote(wrapper.name, () => registerHiddenItem(hidden_item)))
+        }
+        await Promise.all(routed)
+        for (const id of [...hiddenDirtyIds.keys()]) healHiddenDirty(id, seenDirtySeq)
+      })
+    },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
   })

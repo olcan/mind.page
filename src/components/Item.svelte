@@ -20,6 +20,7 @@
     skipEscaped,
     exclusionRegExp,
     skipExclusions,
+    destroyElem,
     scrubForeignHtml,
     hash as _hash,
   } from '../util.js'
@@ -972,10 +973,8 @@
         window['_elem_cache'][id].set(key, elem) //.cloneNode(true);
         limit_cache_size(window['_elem_cache'][id], _elem_cache_limit_per_item, elem => {
           if (itemdiv.contains(elem)) return null // cancel deletions since oldest elem is on item
-          // destroy all children and SELF w/ _destroy attribute (and property)
-          elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
-          elem._destroy?.()
-          elem.remove()
+          // destroy all children and SELF via the GUARDED shared teardown (see destroyElem)
+          destroyElem(elem)
         })
       }
     })

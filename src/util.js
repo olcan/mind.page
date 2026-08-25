@@ -270,7 +270,7 @@ export function invalidateElemCache(id) {
 // destroys its retired descendants' hooks, so those are tracked and skipped when their own set
 // entries come up
 const destroyedElems = new WeakSet()
-function destroyElem(elem) {
+export function destroyElem(elem) {
   // each teardown is guarded: one throwing hook must not abort the remaining hooks or the dom
   // removal (the destroyed mark stays set — a hook that threw does not get a second call)
   const teardown = e => {
@@ -336,10 +336,9 @@ export function checkElemCache() {
       // if element has zero-width, destroy it, otherwise adopt it
       if (elem.offsetWidth == 0) {
         window['_elem_cache'][id].delete(key)
-        // destroy all children and SELF w/ _destroy attribute (and property)
-        elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
-        if (elem._destroy) elem._destroy()
-        elem.remove() // prevents any pending chart also
+        // destroy all children and SELF via the GUARDED shared teardown (one throwing hook must
+        // not skip the remaining hooks or the removal); also prevents any pending chart render
+        destroyElem(elem)
         // console.warn("destroyed zero-width orphaned cached element", key, "from item", window["_item"](id).name);
       } else {
         adoptCachedElem(elem)

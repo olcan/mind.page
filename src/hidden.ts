@@ -5,6 +5,11 @@
 // registration transitions preserve the invariant incrementally). persistence, encryption and
 // logging stay with the caller — these functions only decide and update the maps.
 
+// THE id comparator: initialization once sorted with localeCompare while the index compared with
+// `<`, so mixed-case firestore ids could disagree about which record is canonical. every ordering
+// decision (initialization, name assignment, survivor choice, confirmation) uses this one
+export const compareIds = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
 export type HiddenWrapper = {
   id: string
   name: string
@@ -38,14 +43,17 @@ export type InvalidHidden = {
 export function indexByName(index: HiddenIndex, wrapper: HiddenWrapper) {
   const existing = index.byName.get(wrapper.name)
   if (existing?.pending_create) return
-  if (!(existing && existing.id < wrapper.id)) index.byName.set(wrapper.name, wrapper)
+  if (!(existing && compareIds(existing.id, wrapper.id) < 0)) index.byName.set(wrapper.name, wrapper)
 }
 
 // after a removal or settlement, point byName at the minimum-id wrapper among any remaining
 // duplicates (restores the index invariant whenever byName may have lost its holder)
 export function reassignName(index: HiddenIndex, name: string) {
-  for (const dup of index.byId.values())
-    if (dup.name == name && !((index.byName.get(name)?.id as any) < dup.id)) index.byName.set(name, dup)
+  for (const dup of index.byId.values()) {
+    if (dup.name != name) continue
+    const held = index.byName.get(name)
+    if (!held || compareIds(held.id, dup.id) > 0) index.byName.set(name, dup)
+  }
 }
 
 // builds the index from the account's decrypted hidden items (initialization): items are indexed
@@ -62,7 +70,7 @@ export function buildHiddenIndex(
   { anonymous, checkOrphans, existingIds }: { anonymous: boolean; checkOrphans: boolean; existingIds: Set<string> }
 ): InvalidHidden[] {
   const invalid: InvalidHidden[] = []
-  for (const item of [...hidden_items].sort((a, b) => a.id.localeCompare(b.id))) {
+  for (const item of [...hidden_items].sort((a, b) => compareIds(a.id, b.id))) {
     let wrapper: HiddenWrapper
     try {
       wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
@@ -149,6 +157,35 @@ export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: 
   return removeHidden(index, id)
 }
 
+// the canonical (name -> live record) map derived purely from byId: byName can hold a STALE
+// alias — applyRemoteModified deliberately leaves the old name pointing at a replaced wrapper
+// object that is no longer in byId — and trusting it makes a real current record look like a
+// duplicate. a pending create holds its name until it settles (its in-flight save owns it)
+export function canonicalHolders(index: HiddenIndex): Map<string, HiddenWrapper> {
+  const holders = new Map<string, HiddenWrapper>()
+  for (const wrapper of index.byId.values()) {
+    if (wrapper.deleted) continue
+    const held = holders.get(wrapper.name)
+    if (!held) {
+      holders.set(wrapper.name, wrapper)
+      continue
+    }
+    if (held.pending_create != wrapper.pending_create) {
+      if (wrapper.pending_create) holders.set(wrapper.name, wrapper)
+      continue
+    }
+    if (compareIds(wrapper.id, held.id) < 0) holders.set(wrapper.name, wrapper)
+  }
+  return holders
+}
+
+// points byName at the canonical live record for every name that HAS one, so a stale alias can
+// never mask a real current wrapper. an alias whose name has no live record is left alone: it
+// stays readable until reload (the documented rename behavior) and masks nothing
+export function repairNameIndex(index: HiddenIndex) {
+  for (const [name, wrapper] of canonicalHolders(index)) index.byName.set(name, wrapper)
+}
+
 // recomputes invalid hidden records from the CURRENT index (never from startup snapshots,
 // which go stale as remote changes apply — see cleanupInvalidHidden in index.svelte):
 // - 'duplicate': a wrapper that is not its name's byName holder (the minimum-id rule keeps the
@@ -161,9 +198,10 @@ export function classifyInvalidHidden(
   ownerExists: (id: string) => boolean
 ): { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[] {
   const invalid: { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[] = []
+  const holders = canonicalHolders(index) // from live records only — never a byName alias
   for (const wrapper of index.byId.values()) {
     if (wrapper.pending_create || wrapper.adopt_id || wrapper.deleted) continue
-    if (index.byName.get(wrapper.name) !== wrapper) {
+    if (holders.get(wrapper.name) !== wrapper) {
       invalid.push({ wrapper, reason: 'duplicate' })
       continue
     }
@@ -193,7 +231,10 @@ export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
 export function finalizeCreate(index: HiddenIndex, wrapper: HiddenWrapper, id: string) {
   if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id) // guarded, see finalizeAdoption
   wrapper.id = id
-  wrapper.pending_create = null
+  // a concurrent confirmation can set adopt_id AFTER this task chose the create branch: clearing
+  // only pending_create left a transitional wrapper that classification skips forever. the
+  // adopted document becomes an ordinary duplicate and is cleaned up by recomputation
+  wrapper.pending_create = wrapper.adopt_id = null
   if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
   index.byId.set(id, wrapper)
   reassignName(index, wrapper.name)

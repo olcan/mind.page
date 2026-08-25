@@ -159,6 +159,10 @@ const SVG_PRESENTATION = [
   'focusable',
 ]
 
+// attributes whose value can be a url(...) reference: the scheme allow-list applies to href/src
+// only, so these are checked separately (see the transform below)
+const SVG_URL_VALUED = ['fill', 'stroke', 'clip-path', 'mask', 'filter', 'marker-start', 'marker-mid', 'marker-end']
+
 // the constrained svg profile: enough for mathjax svg output (fontCache 'local' keeps each
 // equation's glyph defs inside its own svg, referenced via fragment-only <use>) and item-drawn
 // charts, without foreignObject (html injection inside svg), smil animation elements (event-like
@@ -216,9 +220,11 @@ function sanitizeInner(html) {
       'mark',
       'details',
       'summary',
-      // charts drawn and math typeset are part of the frozen render's contract (see
-      // prerender.mjs): svg survives under the constrained profile below, and canvas survives
-      // as an empty husk (its pixels never serialize; the husk keeps layout and is inert)
+      // math typeset and STRUCTURAL svg are part of the frozen render's contract (see
+      // prerender.mjs). NOTE the honest limits: canvas pixels never serialize, so a canvas
+      // survives only as an inert husk preserving layout, and svg charts that carry their paint
+      // in inline `style` lose it here (style is dropped for everyone — see the note below), so
+      // only attribute-painted svg renders as drawn
       ...SVG_TAGS,
       'canvas',
     ],
@@ -239,15 +245,28 @@ function sanitizeInner(html) {
     allowProtocolRelative: false,
     disallowedTagsMode: 'discard',
     transformTags: {
-      // <use> may reference only same-document fragments (mathjax glyph defs): an external href
-      // would make the frozen page fetch and render foreign svg content
-      use: (tagName, attribs) => {
-        const href = attribs['xlink:href'] ?? attribs.href
-        const safe = typeof href == 'string' && href.startsWith('#') ? href : null
+      // one transform for every tag: sanitize-html applies the specific-tag entry INSTEAD of a
+      // '*' entry, so both concerns are handled here
+      '*': (tagName, attribs) => {
         const kept = { ...attribs }
-        delete kept.href
-        delete kept['xlink:href']
-        if (safe) kept.href = safe
+        // <use> may reference only same-document fragments (mathjax glyph defs): an external
+        // href would make the frozen page fetch and render foreign svg content
+        if (tagName == 'use') {
+          const href = attribs['xlink:href'] ?? attribs.href
+          delete kept.href
+          delete kept['xlink:href']
+          if (typeof href == 'string' && href.startsWith('#')) kept.href = href
+        }
+        // paint and clipping attributes take url() VALUES, which the scheme allow-list never
+        // sees: only local url(#fragment) references are kept, so no external reference and no
+        // literal javascript: survives inside an attribute value
+        for (const name of SVG_URL_VALUED)
+          if (
+            typeof kept[name] == 'string' &&
+            /url\(/i.test(kept[name]) &&
+            !/^url\(\s*['"]?#[^)'"]*['"]?\s*\)$/i.test(kept[name].trim())
+          )
+            delete kept[name]
         return { tagName, attribs: kept }
       },
     },

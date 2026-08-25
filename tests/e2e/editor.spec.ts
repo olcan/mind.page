@@ -242,14 +242,28 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
       other.evaluate(() => window._item('#e2e_xtab')!.write('overlap B')),
     ])
     await page.waitForTimeout(3_000) // let every echo, deferred change and queued save settle
-    // both tabs end on the same server-converged state, and neither lost its OWN write
-    // permanently (the later writer wins; the loser's text was superseded, not rolled back)
-    await expect
-      .poll(async () => (await itemText(page, '#e2e_xtab')) == (await itemText(other, '#e2e_xtab')), {
-        timeout: 30_000,
-      })
-      .toBe(true)
-    expect(await itemText(page, '#e2e_xtab')).toMatch(/overlap [AB]/)
+    // the invariant that matters is that what each tab SHOWS matches what the backend HOLDS: a
+    // deferred change must not be applied under an unsettled local write (whose queued save
+    // would then persist the rollback), and a deferred change must not be silently dropped —
+    // each tab reconciles against the server once its own intent settles
+    const serverText = async () => {
+      const id = await savedId(page, '#e2e_xtab')
+      return (await firestore().collection('items').doc(id!).get()).data()?.text ?? null
+    }
+    for (const tab of [page, other])
+      await expect
+        .poll(async () => (await itemText(tab, '#e2e_xtab')) == (await serverText()), { timeout: 30_000 })
+        .toBe(true)
+    expect(await serverText()).toMatch(/overlap [AB]/)
+    // a fresh context (no shared cache, no local state) sees exactly the same document
+    const fresh = await page.context().browser()!.newContext()
+    try {
+      const third = await fresh.newPage()
+      await loadAdmin(third)
+      await expect.poll(() => itemText(third, '#e2e_xtab'), { timeout: 30_000 }).toBe(await serverText())
+    } finally {
+      await fresh.close()
+    }
     // identical same-millisecond creates in both tabs must surface as TWO items in BOTH tabs:
     // create classification is by identity (preallocated document ids), where content matching
     // made each tab skip the other's same-content document as its own

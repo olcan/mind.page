@@ -33,6 +33,16 @@ dev.stderr.on('data', chunk => (out += chunk))
 let browser = null
 let probe_original = null
 let cleaning = null
+// races a promise against a timer that is always cleared, so a settled promise never leaves a
+// pending timer holding the process open
+function withTimeout(promise, ms) {
+  let timer
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise(resolve => (timer = setTimeout(resolve, ms))),
+  ]).finally(() => clearTimeout(timer))
+}
+
 function cleanup() {
   cleaning ??= (async () => {
     if (probe_original != null) {
@@ -51,8 +61,9 @@ function cleanup() {
       }
     }
     try {
-      // bounded: a wedged browser close must not prevent the dev-server cleanup below
-      await Promise.race([browser?.close(), new Promise(resolve => setTimeout(resolve, 10_000))])
+      // bounded AND cleared: a wedged browser close must not prevent the dev-server cleanup
+      // below, and the losing timer must not keep node alive after a quick close
+      await withTimeout(browser?.close(), 10_000)
     } catch {}
     try {
       const exited = new Promise(resolve => dev.on('exit', resolve))
@@ -74,10 +85,13 @@ function cleanup() {
         }
       }
       kill('SIGTERM')
-      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))])
+      await withTimeout(exited, 5000)
       if (dev.exitCode == null || groupAlive()) {
         kill('SIGKILL')
-        await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))])
+        // the npm parent's exit event may have fired long ago: what must be proven is that the
+        // GROUP is gone, so poll liveness rather than waiting on that event
+        for (let i = 0; i < 20 && groupAlive(); i++) await new Promise(resolve => setTimeout(resolve, 100))
+        if (groupAlive()) console.error('dev server process group survived SIGKILL')
       }
     } catch {}
   })()

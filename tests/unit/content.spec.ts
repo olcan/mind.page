@@ -67,3 +67,18 @@ test('svg execution vectors are removed: foreignObject, script, smil, handlers, 
   expect(clean).not.toContain('javascript:')
   expect(clean).toContain('<path d="M0 0"></path>') // the shape itself survives
 })
+
+test('url()-valued paint and clipping attributes keep only local fragment references', () => {
+  // round-9 finding 10: the scheme allow-list only sees href/src, so url(...) VALUES bypassed it
+  // entirely — external references and a literal javascript: survived inside attribute values
+  const hostile =
+    '<svg viewBox="0 0 10 10">' +
+    '<rect fill="url(https://evil.example/x)" clip-path="url(//evil.example/x)" mask="url(javascript:alert(1))"></rect>' +
+    '<rect fill="url(#local)" stroke="url( \'#also-local\' )"></rect>' +
+    '</svg>'
+  const clean = sanitizeBlock(hostile)
+  expect(clean).not.toContain('evil.example')
+  expect(clean).not.toContain('javascript:')
+  expect(clean).toContain('fill="url(#local)"') // local references are untouched ...
+  expect(clean).toContain('also-local') // ... including quoted/spaced forms
+})

@@ -12,7 +12,14 @@
 // wrapper while it has in-flight work: item code observes it (e.g. the store_saving getter in
 // index.svelte), so it is part of the window contract.
 
-import { finalizeAdoption, finalizeCreate, removeHidden, type HiddenIndex, type HiddenWrapper } from './hidden.js'
+import {
+  compareIds,
+  finalizeAdoption,
+  finalizeCreate,
+  removeHidden,
+  type HiddenIndex,
+  type HiddenWrapper,
+} from './hidden.js'
 
 export type HiddenDocData = { hidden: true; time: number; attr: null; text: string }
 
@@ -28,7 +35,7 @@ export type HiddenPersistenceDeps = {
   // server re-confirmation of the hidden index before an unconfirmed create (registration may
   // adopt the pending wrapper); resolves immediately when the index is authoritative, rejects
   // to FAIL the create (a partial index must never lead to a duplicate document)
-  confirmIndex: () => Promise<void>
+  confirmIndex: (pendingName: string) => Promise<void>
   // merges an adopted document's state under a pending wrapper's changes AND propagates the
   // merged state back to whatever owns it (e.g. the owner item's in-memory global_store): the
   // owner saves fresh full-state snapshots, so a merge it never sees is erased on its next save
@@ -52,27 +59,40 @@ const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(Strin
 
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
-  // exact plaintext payloads written per document, so the listener can classify a pending echo
-  // as OUR OWN by content identity (payloads carry a fresh timestamp, so texts are unique);
-  // bounded per id, never cleared — a stale entry can only match its own historical echo
-  const recentWrites = new Map<string, string[]>()
-  const recordWrite = (id: string, text: string) => {
-    const texts = recentWrites.get(id) ?? []
-    texts.push(text)
-    if (texts.length > 8) texts.shift()
-    recentWrites.set(id, texts)
+  // OPERATION identity of each write this controller issued, per document: {time, text} of the
+  // plaintext payload, recorded BEFORE encryption (deps.encryptState MUTATES its argument and
+  // nulls text — recording after it stored nulls and broke provenance entirely). the time makes
+  // each entry unique, so a later same-content write from another tab cannot match ours, and a
+  // matched entry is CONSUMED so one echo cannot cover a second delivery
+  const recentWrites = new Map<string, { time: number; text: string }[]>()
+  const recordWrite = (id: string, state: HiddenDocData) => {
+    const writes = recentWrites.get(id) ?? []
+    writes.push({ time: state.time, text: state.text })
+    if (writes.length > 8) writes.shift()
+    recentWrites.set(id, writes)
   }
-  // documents THIS controller deleted: a pending removal echo for one of these is our own; any
-  // other pending removal is another tab's deletion and must be applied
+  // documents THIS controller is deleting: a pending removal echo for one is our own. tracked
+  // before the call (the echo can arrive while it is in flight), CONSUMED on that echo, and
+  // dropped if the delete FAILS — the document then still exists, so a later genuine remote
+  // deletion of the same id must apply instead of being skipped forever
   const ownDeletes = new Set<string>()
   const deleteDocTracked = (id: string) => {
     ownDeletes.add(id)
-    return deps.deleteDoc(id)
+    return deps.deleteDoc(id).catch(e => {
+      ownDeletes.delete(id)
+      throw e
+    })
   }
   // name-level deletion tombstones: while a logical deletion is unsettled, any same-name
-  // document DISCOVERED (e.g. registered during another task's confirmation) is added to the
-  // deletion's targets instead of being registered — see deleteName/deleteDiscovered
+  // document DISCOVERED (e.g. registered during another task's confirmation, or arriving at the
+  // listener) is added to the deletion's targets instead of being registered — see
+  // deleteName/deleteDiscovered
   const deleting = new Map<string, string[]>()
+  // remote records observed at RECEIPT but whose application is queued (possibly behind the very
+  // create that needs to know about them): serialization must not HIDE a same-name survivor from
+  // a create/adopt decision, which would create a duplicate the listener then has to clean up
+  const inbox = new Map<string, HiddenWrapper>() // document id -> record as received
+  const inboxRemoved = new Set<string>() // ids whose removal was received (never adopt these)
 
   // enqueue work for the name; failures settle inside each task, so the chain always continues;
   // the wrapper mirrors in-flight status via `saving`, cleared when ITS latest mirrored promise
@@ -101,9 +121,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // creating alongside it would duplicate the name even though the survivor is already known
   function findSurvivor(index: HiddenIndex, wrapper: HiddenWrapper): HiddenWrapper | undefined {
     let survivor: HiddenWrapper | undefined
-    for (const w of index.byId.values())
-      if (w !== wrapper && w.name == wrapper.name && !w.pending_create && !w.adopt_id && !w.deleted)
-        if (!survivor || w.id < survivor.id) survivor = w
+    const consider = (w: HiddenWrapper) => {
+      if (w === wrapper || w.name != wrapper.name) return
+      if (w.pending_create || w.adopt_id || w.deleted || inboxRemoved.has(w.id)) return
+      if (!survivor || compareIds(w.id, survivor.id) < 0) survivor = w
+    }
+    for (const w of index.byId.values()) consider(w)
+    for (const w of inbox.values()) if (!index.byId.has(w.id)) consider(w) // received, not yet applied
     return survivor
   }
 
@@ -118,7 +142,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     try {
       await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
       if (wrapper.deleted) return
-      if (!wrapper.adopt_id) await deps.confirmIndex() // may adopt via registration; rejects to fail the create
+      // the pending name is passed so the caller can register THAT name inline (the adoption
+      // decision) while routing every other name through its own chain (see confirmIndex)
+      if (!wrapper.adopt_id) await deps.confirmIndex(wrapper.name) // rejects to fail the create
       if (wrapper.deleted) return
       if (!wrapper.adopt_id) {
         // a same-name record can already be known locally even when confirmation was a no-op
@@ -132,14 +158,25 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       }
       if (wrapper.adopt_id) {
         const state = payload(wrapper) // merged state (see deps.adopt)
-        const adopted = await deps.encryptState(state)
-        recordWrite(wrapper.adopt_id, state.text)
-        await deps.updateDoc(wrapper.adopt_id, adopted)
+        recordWrite(wrapper.adopt_id, state) // BEFORE encryption: it mutates state and nulls text
+        try {
+          await deps.updateDoc(wrapper.adopt_id, await deps.encryptState(state))
+        } catch (e) {
+          // the adopted document is gone (deleted concurrently, possibly by a removal that
+          // arrived while we adopted): finalizing would settle the wrapper onto a document that
+          // no longer exists, so the create FAILS instead and the next save retries cleanly
+          if (isNotFound(e)) {
+            wrapper.adopt_id = null
+            deps.invalidateAuthority(`adopted hidden document vanished during adoption`)
+          }
+          throw e
+        }
         finalizeAdoption(deps.index(), wrapper)
       } else {
         const state = payload(wrapper)
+        const created = { ...state } // identity survives the mutation below
         const id = await deps.createDoc(await deps.encryptState(state))
-        recordWrite(id, state.text) // the create's own echo can arrive as added-then-modified
+        recordWrite(id, created) // the create's own echo can arrive as added-then-modified
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
@@ -188,13 +225,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           }
           try {
             const state = payload(existing)
+            const written = { ...state } // encryptState MUTATES state (nulls text): snapshot first
             const data = await deps.encryptState(state)
             if (!stillCurrent(name, existing)) {
               console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
               return
             }
             try {
-              recordWrite(existing.id, state.text)
+              recordWrite(existing.id, written)
               await deps.updateDoc(existing.id, data)
             } catch (e) {
               if (!isNotFound(e)) throw e
@@ -249,8 +287,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // immediately. returns a promise that settles when the transition has applied — the caller
     // aggregates these before settling revision authority. pass the name when known; a removal
     // of an id not in the index applies immediately (nothing in flight can target it)
-    applyRemote(name: string | undefined, apply: () => void): Promise<void> {
-      if (!name || !chains.has(name)) {
+    applyRemote(names: (string | undefined)[] | string | undefined, apply: () => void): Promise<void> {
+      // EVERY affected name is acquired, in a canonical order so two renames in opposite
+      // directions cannot deadlock: a rename must join the in-flight write on its OLD name too,
+      // otherwise an already-issued old-name update can write the old name back
+      const affected = [...new Set((Array.isArray(names) ? names : [names]).filter(Boolean) as string[])]
+        .filter(name => chains.has(name))
+        .sort(compareIds)
+      if (!affected.length) {
         try {
           apply()
           return Promise.resolve()
@@ -258,7 +302,30 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           return Promise.reject(e)
         }
       }
-      return enqueue(name, undefined, async () => apply()) as Promise<void>
+      const acquire = (i: number): Promise<void> =>
+        i == affected.length
+          ? Promise.resolve(apply())
+          : (enqueue(affected[i], undefined, () => acquire(i + 1)) as Promise<void>)
+      return acquire(0)
+    },
+
+    // records a remote record/removal at RECEIPT so create/adopt decisions can see it before its
+    // application runs (which may be queued behind the very create that needs it)
+    noteRemote(wrapper: HiddenWrapper | undefined, id: string, removed: boolean) {
+      if (removed) {
+        inboxRemoved.add(id)
+        inbox.delete(id)
+      } else if (wrapper) inbox.set(id, wrapper)
+    },
+
+    // the name a document belongs to, including one being ADOPTED (whose server id is not in
+    // byId until finalization): a removal of that id must serialize on the adopting name's chain
+    nameForDocument(id: string) {
+      const index = deps.index()
+      const known = index.byId.get(id)?.name
+      if (known) return known
+      for (const w of index.byId.values()) if (w.adopt_id == id) return w.name
+      return inbox.get(id)?.name
     },
 
     // LOGICAL deletion of the hidden name the id belongs to ("this store is empty"): removes
@@ -274,30 +341,51 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
         return
       }
+      // removes every record currently known under the name; called again INSIDE the task, since
+      // arrivals queued ahead of it can add more records between now and then (a snapshot list
+      // taken here would let those survive and resurrect the store)
       const removedList: HiddenWrapper[] = []
-      for (const w of [...index.byId.values()])
-        if (w.name == name) {
-          const { removed } = removeHidden(index, w.id)
-          if (removed) {
-            removed.deleted = true
-            removedList.push(removed)
+      const removeAllNamed = () => {
+        const index = deps.index()
+        for (const w of [...index.byId.values()])
+          if (w.name == name && !w.deleted) {
+            const { removed } = removeHidden(index, w.id)
+            if (removed) {
+              removed.deleted = true
+              removedList.push(removed)
+            }
           }
-        }
+      }
+      removeAllNamed()
       if (deps.readonly()) return
       const discovered: string[] = []
       deleting.set(name, discovered)
       const run = async () => {
         try {
+          // an index that is not authoritative may not KNOW every record of this name (a partial
+          // cache can hold one while an older one is unseen): confirm against the server first,
+          // with the tombstone routing every same-name document it finds into this deletion.
+          // without it, deleting a store can be undone by later discovery of an unseen record
+          await deps.confirmIndex(name).catch(e => console.error('hidden delete confirmation failed:', e))
+          // by the time the task runs, any preceding create has settled: on success the wrapper
+          // carries the persistent id (re-keyed even when tombstoned), on failure nothing was
+          // persisted (and is skipped below)
+          const deleted = new Set<string>()
           const targets = new Set<string>()
-          for (const w of removedList) {
-            // by now any preceding create settled: on success the wrapper carries the
-            // persistent id (re-keyed even when tombstoned), on failure nothing was persisted
-            if (w.pending_create && !w.adopt_id) continue
-            targets.add(!w.pending_create ? w.id : (w.adopt_id ?? w.id))
+          // discoveries and applied arrivals can keep landing WHILE a delete is in flight: drain
+          // until nothing new is left rather than snapshotting the list once
+          for (;;) {
+            removeAllNamed() // records applied since the last pass
+            for (const w of removedList)
+              if (!(w.pending_create && !w.adopt_id)) targets.add(!w.pending_create ? w.id : (w.adopt_id ?? w.id))
+            for (const id of discovered.splice(0)) targets.add(id)
+            const pending = [...targets].filter(id => !deleted.has(id))
+            if (!pending.length) break
+            for (const target of pending) {
+              deleted.add(target)
+              await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
+            }
           }
-          for (const target of discovered) targets.add(target)
-          for (const target of targets)
-            await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
         } finally {
           if (deleting.get(name) === discovered) deleting.delete(name)
         }
@@ -322,14 +410,21 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       else void run()
     },
 
-    // classification for the remote listener: a pending change whose payload matches one THIS
-    // controller wrote, or a removal of a document it deleted, is our own echo and is skipped;
-    // everything else — including another tab's work on a wrapper we are still writing — applies
-    isOwnWrite(id: string, text: string) {
-      return recentWrites.get(id)?.includes(text) ?? false
+    // classification for the remote listener: a pending change whose OPERATION identity matches
+    // one THIS controller issued, or a removal of a document it is deleting, is our own echo and
+    // is skipped; everything else — including another tab's work on a wrapper we are still
+    // writing — applies. matches are consumed, so a single write covers a single echo
+    isOwnWrite(id: string, time: number, text: string) {
+      const writes = recentWrites.get(id)
+      const i = writes?.findIndex(w => w.time == time && w.text == text) ?? -1
+      if (i < 0) return false
+      writes!.splice(i, 1)
+      return true
     },
     isOwnDelete(id: string) {
-      return ownDeletes.has(id)
+      if (!ownDeletes.has(id)) return false
+      ownDeletes.delete(id)
+      return true
     },
 
     // true while a logical deletion of the name is unsettled: registration paths consult this
