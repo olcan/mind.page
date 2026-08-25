@@ -395,6 +395,17 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await expect
     .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe')), { timeout: 30_000 })
     .toBe(true)
+  // round-8 finding 6: adoption merged the PRE-EXISTING store into the wrapper AND synced the
+  // owner item's in-memory store. the owner saves fresh full-state clones, so without the sync
+  // the next save from this same session would erase the adopted fields on the server
+  expect(await page.evaluate(() => window._item('#e2e_shared')!.global_store._e2e_pre ?? null)).toBe(1)
+  await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe3 = 1))
+  await expect
+    .poll(
+      async () => (await storedHidden()).some(text => text.includes('_e2e_probe3') && text.includes('_e2e_pre')),
+      { timeout: 30_000 }
+    )
+    .toBe(true)
   await page.goto('/')
   await waitForApp(page)
   expect(await page.locator('#modal-input').count()).toBe(0) // no phrase prompt on the main page
@@ -422,7 +433,7 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
         .filter(k => k.startsWith('_e2e'))
         .sort()
     )
-  ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2']) // nothing lost across the shared-page saves
+  ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2', '_e2e_probe3']) // nothing lost across the shared-page saves
 })
 
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {

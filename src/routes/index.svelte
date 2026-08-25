@@ -6293,12 +6293,12 @@
         continue
       }
       console.warn('deleting invalid hidden item (orphaned)', wrapper.name, wrapper.id, wrapper)
-      deleteHiddenItem(wrapper.id)
+      deleteHiddenRecord(wrapper.id)
     }
     hiddenItemsInvalid = retained
     for (const { wrapper, reason } of classifyInvalidHidden(hiddenIndex(), ownerExists)) {
       console.warn(`deleting invalid hidden item (${reason})`, wrapper.name, wrapper.id, wrapper)
-      deleteHiddenItem(wrapper.id)
+      deleteHiddenRecord(wrapper.id)
     }
   }
   let hiddenItemsByName
@@ -7357,6 +7357,11 @@
               // authority, and the document id stays DIRTY (blocking later grants) until a
               // successful change for it applies or a full server re-read heals the index
               let hiddenApplyFailed = false
+              // hidden transitions apply ON THE NAME'S CONTROLLER CHAIN so they can never
+              // interleave with an in-flight write for the same name (a remote replacement
+              // applied mid-write could displace the wrapper the write targets); authority
+              // settles only after every queued transition of this revision lands
+              const hiddenApplied = []
               for (const change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
@@ -7380,6 +7385,39 @@
                     continue
                   }
                 }
+                if (savedItem.hidden) {
+                  let name
+                  if (change.type == 'removed') name = hiddenItems.get(doc.id)?.name
+                  else {
+                    try {
+                      name = JSON.parse(savedItem.text).name
+                    } catch (e) {
+                      console.error('could not apply remote change:', doc.id, e)
+                      hiddenApplyFailed = true
+                      hiddenDirtyIds.add(doc.id)
+                      continue
+                    }
+                  }
+                  applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
+                  hiddenApplied.push(
+                    hiddenPersistence
+                      .applyRemote(name, () => {
+                        // own-pending classification uses EXECUTION-time wrapper state: by the
+                        // time this runs, in-flight work for the name has settled
+                        if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
+                        applyRemoteChange(change, doc, savedItem)
+                      })
+                      .then(
+                        () => void hiddenDirtyIds.delete(doc.id), // a successful change heals a dirty id
+                        e => {
+                          console.error('could not apply remote change:', doc.id, e)
+                          hiddenApplyFailed = true
+                          hiddenDirtyIds.add(doc.id)
+                        }
+                      )
+                  )
+                  continue
+                }
                 try {
                   // pending writes are skipped only when they are OUR OWN (see isOwnPendingChange)
                   if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) {
@@ -7387,29 +7425,27 @@
                     continue
                   }
                   applied.push(
-                    `${change.type} ${
-                      savedItem.hidden ? `hidden ${doc.id}` : `'${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})`
-                    }${doc.metadata.hasPendingWrites ? ' pending' : ''}`
+                    `${change.type} '${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})` +
+                      `${doc.metadata.hasPendingWrites ? ' pending' : ''}`
                   )
                   applyRemoteChange(change, doc, savedItem)
-                  hiddenDirtyIds.delete(doc.id) // a successful change for a dirty id heals it
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
-                  // log it, keep the revision non-authoritative if it involved a hidden record,
-                  // and continue with the remaining changes
+                  // log it and continue with the remaining changes
                   console.error('could not apply remote change:', doc.id, e)
-                  if (savedItem.hidden || couldBeHidden) {
-                    hiddenApplyFailed = true
-                    hiddenDirtyIds.add(doc.id)
-                  }
                 }
               }
-              settleHiddenAuthority({
-                authoritative,
-                fromCache: snapshot.metadata.fromCache,
-                failed: hiddenApplyFailed,
-                epoch,
-              })
+              // settle once every hidden transition of this revision lands; not awaited on the
+              // snapshot chain itself (a write held at a phrase prompt must not stall sync) —
+              // ordering stays safe because revocations always apply and grants are epoch-gated
+              void Promise.all(hiddenApplied).then(() =>
+                settleHiddenAuthority({
+                  authoritative,
+                  fromCache: snapshot.metadata.fromCache,
+                  failed: hiddenApplyFailed,
+                  epoch,
+                })
+              )
               if (applied.length) {
                 const summary =
                   `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +
@@ -8121,12 +8157,30 @@
 
   // registers a hidden item loaded after initialization (e.g. by the phrase validation on a fixed
   // page); existing registrations win, as in initialize
+  // merges an adopted document's state under the pending wrapper's changes AND syncs the
+  // owner item's in-memory global_store: owners save fresh full-state clones (see
+  // save_global_store), so a merge the owner never sees would be erased by its next save
+  function mergeAdoptedStore(pending, found) {
+    _.defaultsDeep(pending.item, found.item)
+    const owner = pending.name.match(/^global_store_(.+)$/)?.[1]
+    if (!owner) return
+    const local = tempIdFromSavedId.get(owner) ?? owner
+    if (_exists(local)) item(local).global_store = _.cloneDeep(pending.item)
+  }
+
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
     const wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+    // a document discovered while its name is being logically deleted joins the deletion's
+    // targets instead of being registered (the caller deleted the store; a mid-flight
+    // discovery must not resurrect it)
+    if (hiddenPersistence.isDeleting(wrapper.name)) {
+      hiddenPersistence.deleteDiscovered(wrapper.name, wrapper.id)
+      return
+    }
     // a pending create that claimed this name adopts the document (update instead of create),
     // with the pending (shared-page) changes taking precedence over the loaded state
-    registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
+    registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
   }
   // persistence runs through the per-name controller (src/hidden_persistence.ts, matrix-tested):
   // writes for a name are serialized, settlement goes through the index transitions, and an
@@ -8146,6 +8200,8 @@
         revokeHiddenAuthority('hidden delete failed')
         throw e
       }),
+    adopt: mergeAdoptedStore,
+    invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: () =>
       hiddenIndexAuthoritative
         ? Promise.resolve()
@@ -8179,10 +8235,20 @@
     hiddenPersistence.save(name, item)
   }
 
+  // record-level deletion for invalid-record cleanup: removes ONE document; a same-name
+  // canonical record stays (see deleteInvalidHiddenCandidates)
+  function deleteHiddenRecord(id) {
+    if (readonly) return
+    hiddenPersistence.deleteRecord(id)
+  }
+
+  // LOGICAL deletion ("this store is empty"): removes every record of the id's name —
+  // canonical plus retained duplicates, whose later promotion would resurrect old state — and
+  // tombstones the name so a document discovered mid-flight is deleted, not registered
   function deleteHiddenItem(id) {
     if (!id) return // nothing to delete
     if (!initialized) throw new Error('deleteHiddenItem called before initialized')
-    hiddenPersistence.delete(id)
+    hiddenPersistence.deleteName(id)
   }
 
   function hiddenItemChangedRemotely(name, change_type) {

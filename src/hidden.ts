@@ -177,7 +177,9 @@ export function classifyInvalidHidden(
 // index.svelte): re-keys the wrapper to the persistent id, clears the pending claim, then
 // restores the minimum-id invariant for the name (a smaller-id retained duplicate may now win)
 export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
-  index.byId.delete(wrapper.id)
+  // guarded: the entry under the old id can already be a REPLACEMENT (a remote wrapper object
+  // keyed to the same id) that must not be evicted while this wrapper settles away
+  if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id)
   wrapper.id = wrapper.adopt_id!
   wrapper.pending_create = wrapper.adopt_id = null
   if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
@@ -189,7 +191,7 @@ export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
 // invariant for the name — a smaller-id duplicate can have arrived remotely while the create was
 // in flight, and it must win the name (the cross-client duplicate-resolution rule)
 export function finalizeCreate(index: HiddenIndex, wrapper: HiddenWrapper, id: string) {
-  index.byId.delete(wrapper.id)
+  if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id) // guarded, see finalizeAdoption
   wrapper.id = id
   wrapper.pending_create = null
   if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
