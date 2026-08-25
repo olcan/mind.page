@@ -51,6 +51,12 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
   expect(doc.attr).toBeNull()
   expect(doc.cipher).toMatch(/^[A-Za-z0-9+/=]{40,}$/)
   expect(await page.evaluate(() => window.__items.every(item => !!item.savedId))).toBe(true) // welcome item too
+  // a server-served first revision grants hidden-index authority once its application settles
+  // (the receipt-time grant used to be reset by initialize(), leaving server-first loads
+  // unauthoritative forever)
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
+    .toBe(true)
   // reloading with the stored secret decrypts without prompting
   await page.reload()
   await waitForApp(page)
@@ -218,6 +224,11 @@ test('a complete cache without the stored secret still initializes from the serv
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
     .toContain('secret text 12345')
+  // the cache-initialized index is not authoritative by itself; the server's metadata-only
+  // confirmation grants authority through the serialized chain
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
+    .toBe(true)
 })
 
 test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
