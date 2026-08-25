@@ -149,6 +149,30 @@ export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: 
   return removeHidden(index, id)
 }
 
+// recomputes invalid hidden records from the CURRENT index (never from startup snapshots,
+// which go stale as remote changes apply — see cleanupInvalidHidden in index.svelte):
+// - 'duplicate': a wrapper that is not its name's byName holder (the minimum-id rule keeps the
+//   canonical one; the rest are redundant records)
+// - 'orphaned': a canonical global_store_<id> wrapper whose owner item is absent per ownerExists
+// wrappers with settlement in flight (pending_create/adopt_id) or tombstoned are never
+// classified — their state is transitional and the next grant recomputes
+export function classifyInvalidHidden(
+  index: HiddenIndex,
+  ownerExists: (id: string) => boolean
+): { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[] {
+  const invalid: { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[] = []
+  for (const wrapper of index.byId.values()) {
+    if (wrapper.pending_create || wrapper.adopt_id || wrapper.deleted) continue
+    if (index.byName.get(wrapper.name) !== wrapper) {
+      invalid.push({ wrapper, reason: 'duplicate' })
+      continue
+    }
+    const owner = wrapper.name.match(/^global_store_(.+)$/)?.[1]
+    if (owner && !ownerExists(owner)) invalid.push({ wrapper, reason: 'orphaned' })
+  }
+  return invalid
+}
+
 // settles a pending create's ADOPTION (its document was found to exist, see saveHiddenItem in
 // index.svelte): re-keys the wrapper to the persistent id, clears the pending claim, then
 // restores the minimum-id invariant for the name (a smaller-id retained duplicate may now win)

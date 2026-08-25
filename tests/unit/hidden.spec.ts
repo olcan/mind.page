@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   buildHiddenIndex,
+  classifyInvalidHidden,
   registerHidden,
   applyRemoteAdded,
   applyRemoteModified,
@@ -168,4 +169,30 @@ test('a failed fresh create with a retained remote duplicate promotes it instead
   // UPDATES it instead of creating another duplicate
   expect(removeHidden(idx, 'temp1').removed).toBe(pending)
   expect(idx.byName.get('name')!.id).toBe('r5')
+})
+
+test('current-state invalidity: non-canonical duplicates and ownerless canonical stores, transitional wrappers skipped', () => {
+  const index = { byId: new Map(), byName: new Map() }
+  const canonical = { id: 'a1', name: 'global_store_x', item: {} }
+  const duplicate = { id: 'b2', name: 'global_store_x', item: {} } // retained, not the holder
+  const orphan = { id: 'c3', name: 'global_store_gone', item: {} } // canonical but owner missing
+  const pending = { id: 'd4', name: 'n', item: {}, pending_create: true } // settlement in flight
+  const other = { id: 'e5', name: 'not_a_store', item: {} } // canonical non-store: valid
+  for (const w of [canonical, duplicate, orphan, pending, other]) index.byId.set(w.id, w)
+  index.byName.set('global_store_x', canonical)
+  index.byName.set('global_store_gone', orphan)
+  index.byName.set('n', pending)
+  index.byName.set('not_a_store', other)
+  const invalid = classifyInvalidHidden(index, id => id == 'x')
+  expect(invalid).toEqual([
+    { wrapper: duplicate, reason: 'duplicate' },
+    { wrapper: orphan, reason: 'orphaned' },
+  ])
+  // a remote rename to a unique name revalidates the record: the old startup classification
+  // must not survive recomputation (round-8 finding: stale candidates deleted renamed documents)
+  index.byId.set('b2', { id: 'b2', name: 'renamed_unique', item: {} })
+  index.byName.set('renamed_unique', index.byId.get('b2')!)
+  expect(classifyInvalidHidden(index, id => id == 'x')).toEqual([{ wrapper: orphan, reason: 'orphaned' }])
+  // an owner arriving revalidates the store the same way
+  expect(classifyInvalidHidden(index, () => true)).toEqual([])
 })

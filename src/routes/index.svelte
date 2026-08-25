@@ -6104,6 +6104,7 @@
   import { snapshotDecision } from '../snapshot'
   import {
     buildHiddenIndex,
+    classifyInvalidHidden,
     registerHidden,
     applyRemoteAdded,
     applyRemoteModified,
@@ -6222,46 +6223,83 @@
   // SERVER answer, uniquely keyed hidden creates must re-confirm first (see saveHiddenItem) or a
   // partial cache could hide an existing document and a create would duplicate it
   let hiddenIndexAuthoritative = false
+  // every revocation bumps the epoch: a grant decided at snapshot RECEIPT (and queued behind
+  // the serialized applications) must not be able to re-grant into a state that a NEWER
+  // synchronous revocation (sync disabled, a failed delete, a firestore error, the listener's
+  // error callback) already invalidated — the queued grant carries its receipt epoch and
+  // no-ops if the epoch moved
+  let hiddenAuthorityEpoch = 0
+  // hidden documents whose change could not be applied (undecryptable or a throwing
+  // application): the index cannot claim completeness while any are unresolved, so grants are
+  // blocked until each is healed — by a later successfully applied change for the same id, or
+  // by a full server re-read (see confirmIndex, which registers every hidden document)
+  let hiddenDirtyIds = new Set()
 
-  // settles the hidden-index authority for one applied revision — called INSIDE the serialized
-  // snapshot chain (or on early revocation paths, which are safe to run at receipt):
-  // - a current (server, no-pending-writes) revision whose hidden changes all applied grants it
-  // - a cached revision revokes it (offline/stale: the index can be behind the server), as does
-  //   a failed hidden application or any firestore error (see the console filter) — creates
-  //   then re-confirm against the server, failing closed
-  // - a revision with own pending writes leaves it unchanged (our writes don't blind us)
-  // on a grant, provisional invalid-hidden candidates are re-validated against the NOW-current
-  // index and deleted only if still invalid: a candidate classified from a partial cache can be
-  // wrong, and queued server changes can reclassify one (e.g. removing the canonical document
-  // promotes its retained duplicate)
-  function settleHiddenAuthority(authoritative, fromCache, hiddenApplyFailed) {
+  function revokeHiddenAuthority(reason = '') {
+    if (hiddenIndexAuthoritative || reason) console.warn(`hidden-index authority revoked${reason ? `: ${reason}` : ''}`)
+    hiddenIndexAuthoritative = false
+    hiddenAuthorityEpoch++
+  }
+
+  // settles the hidden-index authority for one revision, INSIDE the serialized snapshot chain
+  // and in RECEIPT order (every revision — first, metadata-only, data — queues its settlement
+  // when it arrives):
+  // - a current (server, no-pending-writes) revision whose hidden changes all applied grants,
+  //   unless its receipt epoch is stale (a newer revocation intervened) or unresolved dirty
+  //   hidden ids remain
+  // - a cached revision revokes (offline/stale: the index can be behind the server), as does a
+  //   failed hidden application — creates then re-confirm against the server, failing closed
+  // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
+  // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
+  // the NOW-current state and only then deleted (see cleanupInvalidHidden)
+  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch }) {
     if (fixed || anonymous) return
-    if (hiddenApplyFailed) hiddenIndexAuthoritative = false
+    if (failed) revokeHiddenAuthority('hidden change failed to apply')
     else if (authoritative) {
+      if (epoch != hiddenAuthorityEpoch) return // a newer revocation invalidated this grant
+      if (hiddenDirtyIds.size) return // skipped hidden changes unresolved: not complete
       const granting = !hiddenIndexAuthoritative
       hiddenIndexAuthoritative = true
       if (granting) deleteInvalidHiddenCandidates()
-    } else if (fromCache) hiddenIndexAuthoritative = false
+    } else if (fromCache) revokeHiddenAuthority('cached revision')
   }
 
+  // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
+  // serialized snapshot chain on a false -> true authority grant, so classification cannot race
+  // remote applications. startup candidates are not deleted from their (stale) provisional
+  // classification: startup ORPHANS were never indexed (see buildHiddenIndex), so one whose
+  // owner has since arrived is REGISTERED (valid again, and the owner's in-memory global_store
+  // is synced), one re-keyed into the index by a remote change defers to current-state rules,
+  // and only one still ownerless is deleted; duplicates and post-init arrivals are recomputed
+  // from the live index by classifyInvalidHidden (a record renamed to a unique name, or a store
+  // whose owner arrived, is simply no longer classified). malformed stays quarantined.
   function deleteInvalidHiddenCandidates() {
-    if (!hiddenItemsInvalid?.length) return
+    const ownerExists = id => _exists(tempIdFromSavedId.get(id) ?? id) // owner may be under a temp id
     const retained = []
-    for (const entry of hiddenItemsInvalid) {
+    for (const entry of hiddenItemsInvalid ?? []) {
       const { wrapper, reason } = entry
       if (reason == 'malformed') {
         retained.push(entry) // quarantined, never auto-deleted
         continue
       }
-      // re-validate against the current index: duplicates must still be non-canonical, orphans
-      // must still be indexed with their item still missing (an applied change can have fixed
-      // either); 'anonymous' entries never reach here (authority is never granted on anonymous)
-      if (reason == 'duplicate' && hiddenItemsByName.get(wrapper.name) === wrapper) continue
-      if (reason == 'orphaned' && !hiddenItems.has(wrapper.id)) continue
-      console.warn('deleting invalid hidden item', wrapper.name, wrapper.id, wrapper)
+      if (reason != 'orphaned') continue // duplicates are recomputed from the live index below
+      if (hiddenItems.has(wrapper.id)) continue // re-keyed by a remote change: live rules decide
+      const owner = wrapper.name.replace(/^global_store_/, '')
+      if (ownerExists(owner)) {
+        console.warn('registering startup-orphaned hidden item whose owner arrived', wrapper.name, wrapper.id)
+        registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
+        const local = tempIdFromSavedId.get(owner) ?? owner
+        if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
+        continue
+      }
+      console.warn('deleting invalid hidden item (orphaned)', wrapper.name, wrapper.id, wrapper)
       deleteHiddenItem(wrapper.id)
     }
     hiddenItemsInvalid = retained
+    for (const { wrapper, reason } of classifyInvalidHidden(hiddenIndex(), ownerExists)) {
+      console.warn(`deleting invalid hidden item (${reason})`, wrapper.name, wrapper.id, wrapper)
+      deleteHiddenItem(wrapper.id)
+    }
   }
   let hiddenItemsByName
   let hiddenItemsInvalid
@@ -6337,7 +6375,8 @@
     // full-account query in the items listener: a cache-initialized account may be partial, and
     // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
     // per save (see saveHiddenItem)
-    hiddenIndexAuthoritative = false
+    revokeHiddenAuthority()
+    hiddenDirtyIds = new Set() // initialization rebuilds the index from scratch
 
     // consent gate for foreign code (see foreignCodeBlocked above): a visitor signed in to
     // their OWN account (a stored secret exists and the page owner is someone else) must
@@ -7200,14 +7239,19 @@
             // would reclassify them applied (see settleHiddenAuthority)
             if (action == 'ignore_sync_disabled') {
               console.warn('ignoring firestore snapshot due to _disable_sync')
-              hiddenIndexAuthoritative = false // revoking early is safe; only granting must queue
+              revokeHiddenAuthority('sync disabled') // revoking early is safe; only granting must queue
               return
             }
             if (action == 'ignore_metadata_only') {
               // no data changes, but a server confirmation can still grant authority (e.g. the
-              // server catching up after a cache initialization) — behind the queued work
-              snapshotApply = snapshotApply.then(() => {
-                if (initialized) settleHiddenAuthority(authoritative, snapshot.metadata.fromCache, false)
+              // server catching up after a cache initialization) — queued in receipt order and
+              // AWAITING initialization: a confirmation received while initialization is still
+              // running must settle after it, not be discarded
+              const epoch = hiddenAuthorityEpoch
+              const fromCache = snapshot.metadata.fromCache
+              snapshotApply = snapshotApply.then(async () => {
+                await initialization
+                if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed: false, epoch })
               })
               return
             }
@@ -7238,10 +7282,18 @@
                 } else {
                   initTime = window['_init_time'] = instance.init_time = Date.now() // init started
                   initialize()
+                  // settle the FIRST revision's authority at receipt, in chain order: revisions
+                  // received while initialization runs queue BEHIND this task (each awaits
+                  // initialization), so an old authoritative first snapshot can never grant
+                  // after a later cached or failed revision revoked
+                  const epoch = hiddenAuthorityEpoch
+                  snapshotApply = snapshotApply.then(async () => {
+                    await initialization
+                    if (initialized) settleHiddenAuthority({ authoritative, fromCache: false, failed: false, epoch })
+                  })
                 }
               }
               // set up callback to complete init (or "sync")
-              const firstRevisionAuthoritative = authoritative
               Promise.resolve(initialization).then(() => {
                 if (!initialized) {
                   // initialization failed, we should be signing out ...
@@ -7277,14 +7329,6 @@
                     .catch(encryptionError)
                 }
 
-                // settle the first revision's authority (and any invalid-candidate deletion it
-                // gates) BEHIND the queued applications: revisions received during initialization
-                // are already waiting on the chain, and their changes can reclassify candidates
-                // (e.g. the server removing a cached canonical document promotes its duplicate)
-                snapshotApply = snapshotApply.then(() => {
-                  if (initialized) settleHiddenAuthority(firstRevisionAuthoritative, false, false)
-                })
-
                 // if narrating, fill .webcam-title from #webcam-title item if it exists
                 if (narrating)
                   document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
@@ -7297,6 +7341,7 @@
             // handle changes in non-first snapshot, waiting for init if necessary; snapshots are
             // SERIALIZED and each change's decrypt is awaited before it is applied, so a later
             // snapshot can never interleave with (or overtake) an earlier one mid-application
+            const epoch = hiddenAuthorityEpoch // captured at receipt: a later revocation must beat this grant
             const applyTask = async () => {
               await initialization
               if (!initialized) {
@@ -7309,11 +7354,12 @@
               const applied = [] // labels of applied changes, logged in aggregate below
               let ownSkipped = 0
               // a failed hidden decrypt or application keeps this revision from granting
-              // authority: the index cannot claim completeness while a relevant record was
-              // skipped (see settleHiddenAuthority)
+              // authority, and the document id stays DIRTY (blocking later grants) until a
+              // successful change for it applies or a full server re-read heals the index
               let hiddenApplyFailed = false
               for (const change of snapshot.docChanges()) {
                 const doc = change.doc
+                const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
                 // a change that cannot be decrypted is logged and skipped: it must not break the
                 // chain for later snapshots (destructive reconciliation stays init-gated)
                 let savedItem = await decryptItem(doc.data()).catch(e => {
@@ -7321,12 +7367,16 @@
                   return null
                 })
                 if (!savedItem) {
-                  // removal is id-driven: the plaintext `hidden` field plus the id suffices, so
-                  // a corrupt record can still be REMOVED (leaving it stale forever is worse);
-                  // any other undecryptable hidden change makes the revision non-authoritative
-                  if (change.type == 'removed') savedItem = { hidden: !!doc.data().hidden }
+                  // removal is id-driven: the plaintext `hidden` field plus the id suffices, so a
+                  // corrupt record can still be REMOVED (leaving it stale forever is worse); the
+                  // fabricated text keeps text-dependent paths (e.g. logging) safe for visible
+                  // removals, which also apply purely by id
+                  if (change.type == 'removed') savedItem = { hidden: couldBeHidden, text: '' }
                   else {
-                    if (doc.data().hidden) hiddenApplyFailed = true
+                    if (couldBeHidden) {
+                      hiddenApplyFailed = true
+                      hiddenDirtyIds.add(doc.id)
+                    }
                     continue
                   }
                 }
@@ -7342,15 +7392,24 @@
                     }${doc.metadata.hasPendingWrites ? ' pending' : ''}`
                   )
                   applyRemoteChange(change, doc, savedItem)
+                  hiddenDirtyIds.delete(doc.id) // a successful change for a dirty id heals it
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
                   // log it, keep the revision non-authoritative if it involved a hidden record,
                   // and continue with the remaining changes
                   console.error('could not apply remote change:', doc.id, e)
-                  if (savedItem.hidden) hiddenApplyFailed = true
+                  if (savedItem.hidden || couldBeHidden) {
+                    hiddenApplyFailed = true
+                    hiddenDirtyIds.add(doc.id)
+                  }
                 }
               }
-              settleHiddenAuthority(authoritative, snapshot.metadata.fromCache, hiddenApplyFailed)
+              settleHiddenAuthority({
+                authoritative,
+                fromCache: snapshot.metadata.fromCache,
+                failed: hiddenApplyFailed,
+                epoch,
+              })
               if (applied.length) {
                 const summary =
                   `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +
@@ -7368,6 +7427,8 @@
           },
           error => {
             console.error(error)
+            // a terminal listener error means the index no longer tracks the server at all
+            revokeHiddenAuthority('items listener error')
             if (isFirestoreShutdown(error)) onFirestoreShutdown() // e.g. cache cleared in another tab
             if (error.code == 'permission-denied') {
               // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
@@ -8082,7 +8143,7 @@
       deleteDoc(doc(getFirestore(firebase), 'items', id)).catch(e => {
         // the server document survives while the local wrapper is gone: revoke authority so the
         // next same-name create re-confirms and ADOPTS it instead of creating a duplicate
-        hiddenIndexAuthoritative = false
+        revokeHiddenAuthority('hidden delete failed')
         throw e
       }),
     confirmIndex: () =>
@@ -8104,6 +8165,9 @@
               const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
               registerHiddenItem(hidden_item)
             }
+            // a complete successful server re-read heals every dirty id: whatever change was
+            // skipped, the document's current state (or absence) is now registered
+            hiddenDirtyIds.clear()
           }),
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
@@ -8250,10 +8314,10 @@
     firebase.onLog(({ level, message, args }) => {
       if (level == 'error') {
         firebase_errors++
-        // any firestore error revokes hidden-index authority (the listener has no explicit
-        // error callback; sdk errors surface here): the next hidden create then re-confirms
-        // against the server, failing closed (see settleHiddenAuthority)
-        hiddenIndexAuthoritative = false
+        // any firestore error revokes hidden-index authority: the next hidden create then
+        // re-confirms against the server, failing closed (see settleHiddenAuthority); the epoch
+        // bump also invalidates any authoritative grant already queued behind applications
+        revokeHiddenAuthority()
       }
       if ([message, ...(args ?? [])].some(isFirestoreShutdown)) onFirestoreShutdown()
     })

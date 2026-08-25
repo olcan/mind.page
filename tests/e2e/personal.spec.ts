@@ -64,6 +64,13 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
     .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
     .toContain('secret text 12345')
   expect(await page.locator('#modal-input').count()).toBe(0)
+  // a warm-cache initialization (secret retained) is confirmed by the server with a
+  // metadata-only snapshot that can arrive WHILE initialization runs: the queued settlement
+  // must await initialization and still grant (round 8: it was discarded, leaving warm-cache
+  // loads unauthoritative until the next data change)
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
+    .toBe(true)
 })
 
 test('a new device must enter the phrase; a wrong one can only sign out', async ({ page }) => {
@@ -280,6 +287,45 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
   } finally {
     await firestore().collection('items').doc('e2e-foreign-init').delete()
   }
+})
+
+test('a corrupt hidden change revokes authority until healed, and re-granting cleans up invalid records', async ({ page }) => {
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
+  await expect.poll(authority, { timeout: 15_000 }).toBe(true)
+  // an item with a global store: deleting the ITEM later (server-side) orphans the store
+  await page.evaluate(() => void window._create('#e2e_orphan_owner store owner'))
+  await expect.poll(() => savedId(page, '#e2e_orphan_owner'), { timeout: 30_000 }).toBeTruthy()
+  const ownerId = await savedId(page, '#e2e_orphan_owner')
+  await page.evaluate(() => void (window._item('#e2e_orphan_owner')!.global_store._e2e = 1))
+  const hiddenDocs = async () =>
+    (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
+  const base = await expect
+    .poll(hiddenDocs, { timeout: 30_000 })
+    .toBeGreaterThan(0)
+    .then(() => hiddenDocs())
+  // an undecryptable hidden change arrives: the revision fails to apply it, so authority is
+  // revoked AND the id stays dirty — later confirmations must not re-grant past the gap
+  await firestore().collection('items').doc('e2e-corrupt-hidden').set({
+    user: ALICE.uid,
+    time: Date.now(),
+    hidden: true,
+    cipher: 'not decryptable',
+  })
+  await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+  // the owner item is deleted server-side while unauthoritative: its store is now orphaned
+  await firestore().collection('items').doc(ownerId!).delete()
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_orphan_owner', true)?.id ?? null), { timeout: 30_000 })
+    .toBeNull()
+  // removing the corrupt document heals its dirty id (removal applies by plaintext hidden + id,
+  // no decrypt needed) and the same authoritative revision re-grants; the false -> true grant
+  // recomputes invalidity from CURRENT state and deletes the now-orphaned store
+  await firestore().collection('items').doc('e2e-corrupt-hidden').delete()
+  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+  await expect.poll(hiddenDocs, { timeout: 30_000 }).toBe(base - 1)
 })
 
 test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
