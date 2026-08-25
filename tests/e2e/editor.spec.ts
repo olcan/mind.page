@@ -270,4 +270,25 @@ test('images loading in small steps still trigger a layout within seconds', asyn
     .poll(() => page.evaluate(() => (window as any).__layoutCount as number), { timeout: 5_000 })
     .toBeGreaterThan(before)
   expect(Date.now() - heightSettledAt).toBeLessThan(5_000)
+  // ... and the DOM must agree with what that layout computed: the layout mutates item.column
+  // without assigning items, so without an explicit invalidation the columns it assigns are only
+  // rendered when something else happens to invalidate them (up to 10s later, at the periodic
+  // time-string pass) — the delayed column wrap seen on shared pages
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const items = (window as any).__items as { id: string; column: number; index: number }[]
+          const hideIndex = (window as any).__hideIndex as number
+          return items
+            .filter(item => item.index < hideIndex)
+            .every(item => {
+              const div = document.querySelector('#super-container-' + item.id)
+              const column = div ? [...document.querySelectorAll('.column')].indexOf(div.parentElement!) : -1
+              return !div || column == item.column
+            })
+        }),
+      { timeout: 3_000 } // well under the 10s periodic pass
+    )
+    .toBe(true)
 })

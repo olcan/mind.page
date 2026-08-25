@@ -1788,7 +1788,14 @@
 
     // the per-item layout pass is extracted and table-tested with synthetic heights (see
     // layoutItems in src/layout.ts); it mutates the items' layout fields and returns the
-    // aggregates used for scrolling below
+    // aggregates used for scrolling below. those mutations are NOT assignments to `items`, so
+    // nothing invalidates the each blocks that render them: the column a change assigns is
+    // otherwise only picked up when some later update happens to invalidate items (the periodic
+    // time-string pass, a resize, an edit), which is why a page could compute its wrap in under
+    // two seconds and show it ten seconds later. the signature below re-renders when — and only
+    // when — a rendered layout field actually changed
+    const layoutSignature = () => items.map(item => `${item.column},${item.nextColumn},${item.timeString}`).join('|')
+    const layoutBefore = layoutSignature()
     const layout = layoutItems(items, {
       columnCount,
       headerHeight: headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight,
@@ -1799,6 +1806,7 @@
       fixed,
       timeString: itemTimeString,
     })
+    if (layoutSignature() != layoutBefore) items = items // render the new layout
     const topMovers = layout.topMovers
     newestTime = layout.newestTime
     oldestTime = layout.oldestTime
