@@ -320,7 +320,7 @@
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see settleHiddenAuthority), asserted by cache/authority e2e tests
-    Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenIndexAuthoritative })
+    Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
     window['_exists'] = _exists
@@ -6328,6 +6328,24 @@
     if (hiddenDirtyIds.get(id) <= seen) hiddenDirtyIds.delete(id)
   }
 
+  // RECEIVED/APPLIED frontier: a revision carrying hidden changes is counted at RECEIPT (from
+  // the plaintext `hidden` field, before any decrypt) and only counted as applied once every one
+  // of its transitions has landed. authority is USABLE only when the two agree — otherwise data
+  // that is already on this client, but still queued behind a name chain or a phrase prompt,
+  // would be invisible to a create's confirmation (duplicate) or to destructive cleanup (which
+  // could delete a name's last surviving record). ordering the settlement callbacks is NOT
+  // enough on its own: a later revision can begin applying while an earlier one is still queued
+  let hiddenReceivedGen = 0
+  let hiddenAppliedGen = 0
+  let hiddenCleanupPending = false // cleanup requested while the frontier was behind
+
+  // the flag alone never authorizes anything: it means "a current revision granted at some
+  // point", while USABLE additionally requires that nothing received is still unapplied and no
+  // skipped hidden record is unresolved
+  function hiddenAuthorityUsable() {
+    return hiddenIndexAuthoritative && hiddenReceivedGen == hiddenAppliedGen && hiddenDirtyIds.size == 0
+  }
+
   // authority settles on its OWN receipt-ordered chain, separate from snapshotApply: snapshot
   // ingestion must not block on a phrase prompt, but no grant may pass an EARLIER unsettled
   // hidden revision. every revision reserves its slot at receipt (in listener order) and hands
@@ -6336,17 +6354,29 @@
   // grant into a state that transition is about to change (which could delete both records of
   // a name at cleanup — see deleteInvalidHiddenCandidates)
   let hiddenAuthoritySettle = Promise.resolve()
-  function reserveHiddenAuthority({ authoritative, fromCache }) {
+  function reserveHiddenAuthority({ authoritative, fromCache, hiddenReceived = false }) {
     // a cached (non-current) revision revokes IMMEDIATELY at receipt: authority must not stay
     // usable — a create could skip confirmation — while the queue drains
-    if (!authoritative && fromCache) revokeHiddenAuthority('cached revision')
+    const slot = { revoked: false }
+    const revoke = reason => {
+      if (slot.revoked) return // this revision already revoked: a second epoch bump would
+      slot.revoked = true //     invalidate a NEWER revision's grant that captured the epoch
+      revokeHiddenAuthority(reason) //  between the two (a liveness bug, not a safety one)
+    }
+    if (!authoritative && fromCache) revoke('cached revision')
+    // count the revision as received BEFORE anything is decrypted or applied: from here until
+    // its transitions land, authority is not usable (see hiddenAuthorityUsable)
+    if (hiddenReceived) hiddenReceivedGen++
     const epoch = hiddenAuthorityEpoch // captured at receipt: a later revocation must beat this grant
     let applied
     const done: Promise<{ failed: boolean; hiddenChanged: boolean }> = new Promise(resolve => (applied = resolve))
     hiddenAuthoritySettle = hiddenAuthoritySettle.then(async () => {
       await initialization
       const { failed, hiddenChanged } = await done
-      if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged })
+      if (hiddenReceived) hiddenAppliedGen++ // this revision has now crossed the frontier
+      if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged, revoke })
+      // a cleanup deferred because the frontier was behind runs as soon as it catches up
+      if (hiddenCleanupPending && hiddenAuthorityUsable()) deleteInvalidHiddenCandidates()
     })
     return applied
   }
@@ -6368,9 +6398,9 @@
   // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
   // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
   // the NOW-current state and only then deleted (see cleanupInvalidHidden)
-  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged }) {
+  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged, revoke }) {
     if (fixed || anonymous) return
-    if (failed) revokeHiddenAuthority('hidden change failed to apply')
+    if (failed) revoke('hidden change failed to apply')
     else if (authoritative) {
       if (epoch != hiddenAuthorityEpoch) return // a newer revocation invalidated this grant
       if (hiddenDirtyIds.size) return // skipped hidden changes unresolved: not complete
@@ -6380,7 +6410,7 @@
       // records: duplicates and orphans arriving while authority is already true would
       // otherwise wait for an unrelated revoke/re-grant that may never come
       if (granting || hiddenChanged) deleteInvalidHiddenCandidates()
-    } else if (fromCache) revokeHiddenAuthority('cached revision')
+    } else if (fromCache) revoke('cached revision')
   }
 
   // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
@@ -6393,6 +6423,15 @@
   // from the live index by classifyInvalidHidden (a record renamed to a unique name, or a store
   // whose owner arrived, is simply no longer classified). malformed stays quarantined.
   function deleteInvalidHiddenCandidates() {
+    // DESTRUCTIVE: only ever run against a fully caught-up frontier. a revision that is received
+    // but still queued (behind a name chain, a phrase prompt, or its own decrypt) can be about
+    // to remove or rename the very record that makes another look like a redundant duplicate —
+    // deleting on an ordered-but-incomplete view can leave a name with no surviving record
+    if (!hiddenAuthorityUsable()) {
+      hiddenCleanupPending = true // retried when the frontier catches up (see reserveHiddenAuthority)
+      return
+    }
+    hiddenCleanupPending = false
     // point every name that HAS a live record at that record first: a stale rename alias would
     // otherwise make the real current record look like a duplicate and get it deleted
     repairNameIndex(hiddenIndex())
@@ -7515,6 +7554,9 @@
             const settleApplied = reserveHiddenAuthority({
               authoritative,
               fromCache: snapshot.metadata.fromCache,
+              // plaintext field, readable at receipt without decryption: enough to suspend
+              // usable authority for exactly the revisions that can change hidden completeness
+              hiddenReceived: snapshot.docChanges().some(change => !!change.doc.data().hidden),
             })
             const applyTask = async () => {
               await initialization
@@ -8382,6 +8424,17 @@
     }
   }
 
+  // the most recent server confirmation's records, staged so a create that JOINED an in-flight
+  // confirmation can still make its own adoption decision inline on its own chain
+  let confirmedRecords = new Map()
+  let confirmIndexInFlight = null
+  function registerConfirmed(pendingName) {
+    for (const hidden_item of confirmedRecords.values()) {
+      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+      if (wrapper?.name == pendingName) registerHiddenItem(hidden_item)
+    }
+  }
+
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
     const wrapper = parseHiddenWrapper(item.id, item.text)
@@ -8418,11 +8471,17 @@
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: pendingName => {
-      if (hiddenIndexAuthoritative) return Promise.resolve()
+      // the frontier matters as much as the flag: received-but-unapplied hidden data is exactly
+      // what a create must not miss (it would create a duplicate of a record already delivered)
+      if (hiddenAuthorityUsable()) return Promise.resolve()
+      // one confirmation at a time for the whole account: concurrent creates on different names
+      // would otherwise each issue the same full query, and (before this) each hold its own name
+      // chain while awaiting the others' — a cycle that deadlocked both permanently
+      if (confirmIndexInFlight) return confirmIndexInFlight.then(() => registerConfirmed(pendingName))
       // the read can only heal failures that were already known when it STARTED: a document
       // corrupted after this snapshot was taken is not proven by it
       const seenDirtySeq = hiddenDirtySeq
-      return getDocsFromServer(
+      const query_promise = getDocsFromServer(
         query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
       ).then(async hidden_docs => {
         // ascending id order so a pending create adopts the MINIMUM-id duplicate; any failure
@@ -8430,22 +8489,41 @@
         // successfully constructed name index. no durable authority is granted — on fixed pages
         // the listener (shared subset) cannot see later hidden documents, so the next new-name
         // create re-confirms again
-        const routed = []
+        // STAGE the whole result first; nothing is awaited on another name's chain while the
+        // caller holds its own (see the deadlock note above)
+        confirmedRecords = new Map()
         for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
           const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
           if (!hidden_item.hidden || !hidden_item.text) continue
           const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
           if (!wrapper) continue
-          // the CALLING create's own name registers inline — that is the adoption decision this
-          // confirmation exists to make, and its chain is busy with the very task awaiting us.
-          // every OTHER name goes through its own chain: registering it inline would replace a
-          // wrapper that name may be writing right now, silently dropping its queued save
-          if (wrapper.name == pendingName) registerHiddenItem(hidden_item)
-          else routed.push(hiddenPersistence.applyRemote(wrapper.name, () => registerHiddenItem(hidden_item)))
+          confirmedRecords.set(hidden_item.id, hidden_item)
         }
-        await Promise.all(routed)
-        for (const id of [...hiddenDirtyIds.keys()]) healHiddenDirty(id, seenDirtySeq)
+        // every name OTHER than the caller's is applied through its own chain, ENQUEUED and not
+        // awaited: registering inline would replace a wrapper that name may be writing right
+        // now, and awaiting it from inside a held chain is the deadlock
+        for (const hidden_item of confirmedRecords.values()) {
+          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+          if (!wrapper || wrapper.name == pendingName) continue
+          void hiddenPersistence.applyRemote([wrapper.name], () => registerHiddenItem(hidden_item))
+        }
+        // a COMPLETE server result also proves absence: a persisted local wrapper the query did
+        // not return no longer exists server-side, so it is removed through its own chain rather
+        // than left to mask a later create (the read otherwise "healed" ids it never proved)
+        for (const wrapper of [...hiddenIndex().byId.values()]) {
+          if (wrapper.pending_create || wrapper.adopt_id || wrapper.deleted) continue // transitional
+          if (confirmedRecords.has(wrapper.id)) continue
+          console.warn('hidden record absent from server confirmation; removing locally', wrapper.name, wrapper.id)
+          void hiddenPersistence.applyRemote([wrapper.name], () => removeHidden(hiddenIndex(), wrapper.id))
+        }
+        // heal ONLY what this read actually proves: a returned document (now staged) or one it
+        // showed to be absent. anything else — e.g. a record corrupted after the read started —
+        // keeps authority closed
+        for (const id of [...hiddenDirtyIds.keys()])
+          if (confirmedRecords.has(id) || !hiddenIndex().byId.has(id)) healHiddenDirty(id, seenDirtySeq)
       })
+      confirmIndexInFlight = query_promise.finally(() => (confirmIndexInFlight = null))
+      return confirmIndexInFlight.then(() => registerConfirmed(pendingName))
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
