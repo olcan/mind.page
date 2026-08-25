@@ -6707,19 +6707,25 @@
               : `MindPage could not sign you in to your Google account.`,
             {
               confirm: 'Try Again',
-              background: 'confirm',
+              // resetUser() already cleared the user, so the loading overlay stays up until a
+              // reload restores the anonymous page: cancelling must offer that escape
+              cancel: 'Cancel',
+              background: 'cancel',
               onConfirm: signIn,
+              onCancel: () => location.reload(),
             }
           )
         })
     }).catch(e => {
-      // setPersistence itself failed (no popup was ever opened): same cleanup and retry
+      // setPersistence itself failed (no popup was ever opened): same cleanup and escape
       console.error(e)
       failedSignIn()
       _modal(`MindPage could not sign you in to your Google account.`, {
         confirm: 'Try Again',
-        background: 'confirm',
+        cancel: 'Cancel',
+        background: 'cancel',
         onConfirm: signIn,
+        onCancel: () => location.reload(),
       })
     })
   }
@@ -6887,7 +6893,16 @@
           // note we initialize firebase even in anonymous mode, because (1) we can fallback to initial snapshot if items are not preloaded, and (2) we allow one-way sync of anonymous items from admin account
           initFirebaseRealtime()
         },
-        console.error
+        e => {
+          // a terminal auth-listener error leaves initialization unresolved (no auth state will
+          // ever arrive): surface it with an escape instead of hanging behind the overlay
+          console.error(e)
+          _modal(`MindPage could not determine your sign-in state.`, {
+            confirm: 'Reload',
+            background: 'confirm',
+            onConfirm: () => location.reload(),
+          })
+        }
       )
 
       // periodic macro expansion task ...

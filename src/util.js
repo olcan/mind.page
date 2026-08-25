@@ -246,10 +246,9 @@ export function invalidateElemCache(id) {
     window['_elem_cache'][id].delete(key)
     if (elem.closest('.item')?.id != 'item-' + id) {
       // not live on the item: destroy all children and SELF w/ _destroy attribute (and property)
-      // element removal also prevents any pending (via setTimeout) chart renders
-      elem.querySelectorAll('[_destroy]').forEach(e => e['_destroy']())
-      elem._destroy?.()
-      elem.remove()
+      // via the guarded shared teardown (one throwing hook must not abort the rest or the
+      // removal); element removal also prevents any pending (via setTimeout) chart renders
+      destroyElem(elem)
     } else {
       // live on the item: only the cache entry expires — destroying a displayed node would leave
       // it broken on the page (e.g. a dead chart) until it is replaced; the node stays functional

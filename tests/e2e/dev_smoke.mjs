@@ -51,7 +51,8 @@ function cleanup() {
       }
     }
     try {
-      await browser?.close()
+      // bounded: a wedged browser close must not prevent the dev-server cleanup below
+      await Promise.race([browser?.close(), new Promise(resolve => setTimeout(resolve, 10_000))])
     } catch {}
     try {
       const exited = new Promise(resolve => dev.on('exit', resolve))
@@ -62,9 +63,19 @@ function cleanup() {
           dev.kill(signal) // group already gone (or unsupported): signal the child directly
         }
       }
+      // liveness is checked on the process GROUP (signal 0), not the npm parent's exitCode: the
+      // parent can exit while a descendant ignoring SIGTERM lives on
+      const groupAlive = () => {
+        try {
+          process.kill(-dev.pid, 0)
+          return true
+        } catch {
+          return false
+        }
+      }
       kill('SIGTERM')
       await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))])
-      if (dev.exitCode == null) {
+      if (dev.exitCode == null || groupAlive()) {
         kill('SIGKILL')
         await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))])
       }
