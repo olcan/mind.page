@@ -3251,7 +3251,14 @@
   // item back, and the queued save then persists the rollback. the acknowledgement of our own
   // write is metadata-only, so a skipped change is never redelivered — the document must be
   // RECONCILED once every local intent settles
-  const deferredRemoteChanges = new Set()
+  // document id -> the GENERATION at which its latest remote change was deferred. a bare set
+  // could not tell an in-flight reconcile's read apart from a newer deferral that arrived while
+  // that read was pending: the older response then cleared the newer marker and the newer change
+  // was lost. the marker also survives a failed read, so a transient failure retries instead of
+  // forgetting the change permanently
+  const deferredRemoteChanges = new Map()
+  let deferredRemoteSeq = 0
+  const deferRemoteChange = id => deferredRemoteChanges.set(id, ++deferredRemoteSeq)
   let applyRemoteChangeRef = null // set by the items listener (applyRemoteChange is closure-scoped)
 
   // true while anything local is still going to write this item: an in-flight write, a queued
@@ -3288,36 +3295,62 @@
         setTimeout(() => void attempt(tries + 1), 500)
         return
       }
+      const generation = deferredRemoteChanges.get(id)
       reconcileScheduled.delete(id)
-      await reconcileDeferredRemoteChange(current)
+      const settled = await reconcileDeferredRemoteChange(current, generation)
+      // a FAILED read/decrypt leaves the marker in place: retry (bounded) rather than drop the
+      // change, since nothing else will redeliver it
+      if (!settled && deferredRemoteChanges.get(id) === generation && tries < 5) {
+        reconcileScheduled.add(id)
+        setTimeout(() => {
+          reconcileScheduled.delete(id)
+          void attempt(tries + 1)
+        }, 2000)
+      }
     }
     setTimeout(() => void attempt(), 0)
   }
 
-  async function reconcileDeferredRemoteChange(item) {
-    if (!item?.savedId || !deferredRemoteChanges.has(item.savedId)) return
-    if (hasLocalIntent(item)) return // more local intent queued: reconcile when IT settles
-    const id = item.savedId
-    deferredRemoteChanges.delete(id)
+  // returns true when the deferral reached a TERMINAL outcome (applied, proven equal, or no
+  // longer ours to settle) and false when it should be retried. the marker is cleared only on a
+  // terminal outcome, and both local intent and the marker generation are rechecked after every
+  // await: a save that starts while the read is in flight builds its payload from live item
+  // state, so applying the response over it would persist the rollback
+  async function reconcileDeferredRemoteChange(item, generation) {
+    const id = item?.savedId
+    if (!id || deferredRemoteChanges.get(id) !== generation) return true // superseded or gone
+    if (hasLocalIntent(item)) return true // more local intent queued: reconcile when IT settles
+    const stale = () => deferredRemoteChanges.get(id) !== generation || hasLocalIntent(item)
+    const settle = result => {
+      if (deferredRemoteChanges.get(id) === generation) deferredRemoteChanges.delete(id)
+      return result
+    }
     try {
       const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+      if (stale()) return true // a newer deferral or new local intent owns this document now
       const meta = { id, metadata: { hasPendingWrites: false } }
       if (!snapshot.exists()) {
+        settle(true)
         applyRemoteChangeRef?.({ type: 'removed' }, meta, { hidden: false, text: '' })
-        return
+        return true
       }
       const savedItem = await decryptItem(Object.assign(snapshot.data(), { id }))
-      if (savedItem.hidden) return // not an ordinary item any more; the hidden paths own it
+      if (stale()) return true
+      if (savedItem.hidden) return settle(true) // not an ordinary item any more
       // the server already holds our state: nothing was lost, and applying would be a no-op
       if (
         savedItem.text == item.savedText &&
         savedItem.time == item.savedTime &&
         _.isEqual(savedItem.attr, item.savedAttr)
       )
-        return
+        return settle(true)
+      settle(true)
       applyRemoteChangeRef?.({ type: 'modified' }, meta, savedItem)
+      return true
     } catch (e) {
-      console.error('could not reconcile deferred remote change:', id, e)
+      // transient read/decrypt failure: the marker stays, the caller retries
+      console.error('could not reconcile deferred remote change (will retry):', id, e)
+      return false
     }
   }
   function itemDeps(index, deps = [], missing_deps = undefined) {
@@ -7289,7 +7322,9 @@
         // per change (see the serialized snapshot handler below); also invoked by
         // replayDeferredRemoteChange once a local write settles (hence the component-scope ref)
         function applyRemoteChange(change, doc, savedItem) {
-          deferredRemoteChanges.delete(doc.id) // any applied change supersedes a deferred one
+          // an applied change supersedes a deferral: a reconcile clears its OWN marker before
+          // applying and returns early when superseded, so this can only clear a current one
+          deferredRemoteChanges.delete(doc.id)
                   // remote changes indicate non-focus: update sessionTime and invoke onFocus
                   sessionTime = Date.now() + 1000 /* margin for small time differences */
                   onFocus() // focused = document.hasFocus()
@@ -7632,12 +7667,16 @@
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   hiddenApplied.push(
                     hiddenPersistence
-                      .applyRemote(names, () => {
-                        // own-pending classification uses EXECUTION-time wrapper state: by the
-                        // time this runs, in-flight work for the name has settled
-                        if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
-                        applyRemoteChange(change, doc, savedItem)
-                      })
+                      .applyRemote(
+                        names,
+                        () => {
+                          // own-pending classification uses EXECUTION-time wrapper state: by the
+                          // time this runs, in-flight work for the name has settled
+                          if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
+                          applyRemoteChange(change, doc, savedItem)
+                        },
+                        doc.id // a transition that had to queue reconciles against the server after
+                      )
                       .then(
                         () => healHiddenDirty(doc.id, seenDirtySeq), // heals only ITS OWN generation
                         e => {
@@ -7662,7 +7701,7 @@
                   // document is reconciled against the server once the intent settles
                   const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
                   if (local?.savedId && hasLocalIntent(local)) {
-                    deferredRemoteChanges.add(local.savedId)
+                    deferRemoteChange(local.savedId)
                     scheduleReconcile(local)
                     deferred++
                     continue
@@ -8470,6 +8509,7 @@
       }),
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
+    reconcileDocument: id => void reconcileHiddenDocument(id),
     confirmIndex: pendingName => {
       // the frontier matters as much as the flag: received-but-unapplied hidden data is exactly
       // what a create must not miss (it would create a duplicate of a record already delivered)
@@ -8528,6 +8568,44 @@
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
   })
+
+  // settles one hidden document against the SERVER after its transition had to queue behind
+  // local writes (see reconcileDocument in hidden_persistence.ts). the read is the only sound
+  // arbiter: payload times are semantic, and our own later write is acknowledged by a
+  // metadata-only snapshot that redelivers nothing, so pure local ordering can leave the tab
+  // holding a state the server does not have
+  const reconcilingHidden = new Set()
+  async function reconcileHiddenDocument(id) {
+    if (readonly || anonymous || fixed || reconcilingHidden.has(id)) return
+    reconcilingHidden.add(id)
+    try {
+      const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+      const name = hiddenIndex().byId.get(id)?.name
+      if (!snapshot.exists()) {
+        // gone server-side: drop the local record (reconcile:false — this IS the settlement)
+        void hiddenPersistence.applyRemote([name], () => removeHidden(hiddenIndex(), id), id, { reconcile: false })
+        return
+      }
+      const hidden_item = await decryptItem(Object.assign(snapshot.data(), { id }))
+      if (!hidden_item.hidden || !hidden_item.text) return
+      const wrapper = parseHiddenWrapper(id, hidden_item.text)
+      if (!wrapper) return // malformed: quarantined by the parser, nothing to apply
+      void hiddenPersistence.applyRemote(
+        [name, wrapper.name],
+        () => {
+          const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
+          if (warning) console.warn(warning)
+          hiddenItemChangedRemotely(wrapper.name, 'modified')
+        },
+        id,
+        { reconcile: false }
+      )
+    } catch (e) {
+      console.error('could not reconcile hidden document:', id, e)
+    } finally {
+      reconcilingHidden.delete(id)
+    }
+  }
 
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')

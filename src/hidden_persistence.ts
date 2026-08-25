@@ -43,6 +43,13 @@ export type HiddenPersistenceDeps = {
   // revokes hidden-index authority (see settleHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
+  // re-reads one hidden document from the SERVER and applies what it finds. name-chain order is
+  // local execution order, not server commit order: a remote change that had to queue behind
+  // local writes can apply after them even though the server ordered it first, and our own
+  // later write is acknowledged by a metadata-only snapshot that redelivers nothing. after such
+  // an inversion the document is reconciled against the server, which is the only authority on
+  // its final state
+  reconcileDocument: (id: string) => void
   newTempId: () => string
   readonly: () => boolean
 }
@@ -287,7 +294,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // immediately. returns a promise that settles when the transition has applied — the caller
     // aggregates these before settling revision authority. pass the name when known; a removal
     // of an id not in the index applies immediately (nothing in flight can target it)
-    applyRemote(names: (string | undefined)[] | string | undefined, apply: () => void): Promise<void> {
+    applyRemote(
+      names: (string | undefined)[] | string | undefined,
+      apply: () => void,
+      docId?: string,
+      { reconcile = true } = {}
+    ): Promise<void> {
       // EVERY affected name is acquired, in a canonical order so two renames in opposite
       // directions cannot deadlock: a rename must join the in-flight write on its OLD name too,
       // otherwise an already-issued old-name update can write the old name back
@@ -306,7 +318,18 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         i == affected.length
           ? Promise.resolve(apply())
           : (enqueue(affected[i], undefined, () => acquire(i + 1)) as Promise<void>)
-      return acquire(0)
+      const applied = acquire(0)
+      // this transition had to WAIT for local work, so local and server order may have diverged
+      // for the document: settle it against the server once the affected chains have DRAINED —
+      // reading while more local writes are queued would just reconcile against a state about to
+      // change (a reconcile's own application passes reconcile:false, so this cannot recur)
+      if (reconcile && docId)
+        void applied.then(async () => {
+          for (let i = 0; i < 20 && affected.some(name => chains.has(name)); i++)
+            await Promise.all(affected.map(name => chains.get(name)).filter(Boolean)).catch(() => {})
+          deps.reconcileDocument(docId)
+        })
+      return applied
     },
 
     // records a remote record/removal at RECEIPT so create/adopt decisions can see it before its

@@ -47,6 +47,9 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     confirmIndex: async _name => void calls.push({ op: 'confirm' }),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
+    // by default a no-op: tests that exercise inverted ordering install a fake that applies the
+    // "server" state for the document (see the reconcile test below)
+    reconcileDocument: () => {},
     newTempId: () => 'temp' + ++ids,
     readonly: () => false,
     ...overrides,
@@ -826,6 +829,60 @@ test('an arrival applied while the tombstone is active does not resurrect the de
   expect(calls.filter(c => c.op == 'delete').map(c => c.id).sort()).toEqual(['arrival1', 'known1'])
   expect(idx.byName.has('n')).toBe(false)
   expect(idx.byId.size).toBe(0)
+})
+
+
+test('a queued arrival that would roll an adopted create back is settled from the server', async () => {
+  // round-10 finding 5: name-chain order is LOCAL execution order. a remote record received
+  // before our write can apply after it, and our own later write is acknowledged by a
+  // metadata-only snapshot that redelivers nothing — so the tab can sit on a state the server
+  // does not have. the controller therefore reconciles such a document against the server
+  const server = new Map<string, any>()
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async (id, data) => {
+      const text = String(data.cipher ?? data.text).replace(/^cipher:/, '') // harness "encryption"
+      calls.push({ op: 'update', id, text })
+      server.set(id, JSON.parse(text)) // the server now holds exactly what we wrote
+    },
+    // the production dep re-reads the document and applies what it finds, off the chain
+    reconcileDocument: id => {
+      const record = server.get(id)
+      if (!record) return
+      void controller.applyRemote(
+        [record.name],
+        () => {
+          const wrapper = { id, name: record.name, item: record.item }
+          idx.byId.set(id, wrapper)
+          idx.byName.set(record.name, wrapper)
+        },
+        id,
+        { reconcile: false }
+      )
+    },
+  })
+  // a same-name server record is known at receipt, so the create ADOPTS it and writes merged state
+  controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 1 } }, 'srv1', false)
+  controller.save('n', { mine: 2 })
+  // its application is queued behind the create and lands afterwards, carrying the STALE record
+  void controller.applyRemote(
+    ['n'],
+    () => {
+      const stale = { id: 'srv1', name: 'n', item: { theirs: 1 } }
+      idx.byId.set('srv1', stale)
+      idx.byName.set('n', stale)
+    },
+    'srv1'
+  )
+  await flush()
+  await flush() // the post-settle reconcile runs on its own turn
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates).toHaveLength(1)
+  expect(itemOf(updates[0].text)).toEqual({ theirs: 1, mine: 2 }) // the write itself was merged
+  // ... and the FINAL local state matches the server, not the stale queued arrival
+  expect(idx.byName.get('n')!.item).toEqual({ theirs: 1, mine: 2 })
 })
 
 test('readonly mode mutates the index but never writes', async () => {
