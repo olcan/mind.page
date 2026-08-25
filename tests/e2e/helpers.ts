@@ -9,7 +9,7 @@ import { createHash } from 'crypto'
 // app globals used via page.evaluate (see window._* in index.svelte and client.ts)
 declare global {
   interface Window {
-    _items: () => { id: string; name: string; text: string; global_store?: Record<string, unknown> }[]
+    _items: (selector?: string) => { id: string; name: string; text: string; global_store?: Record<string, unknown> }[]
     _item: (
       name: string,
       silent?: boolean

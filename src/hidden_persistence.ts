@@ -52,6 +52,23 @@ const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(Strin
 
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
+  // exact plaintext payloads written per document, so the listener can classify a pending echo
+  // as OUR OWN by content identity (payloads carry a fresh timestamp, so texts are unique);
+  // bounded per id, never cleared — a stale entry can only match its own historical echo
+  const recentWrites = new Map<string, string[]>()
+  const recordWrite = (id: string, text: string) => {
+    const texts = recentWrites.get(id) ?? []
+    texts.push(text)
+    if (texts.length > 8) texts.shift()
+    recentWrites.set(id, texts)
+  }
+  // documents THIS controller deleted: a pending removal echo for one of these is our own; any
+  // other pending removal is another tab's deletion and must be applied
+  const ownDeletes = new Set<string>()
+  const deleteDocTracked = (id: string) => {
+    ownDeletes.add(id)
+    return deps.deleteDoc(id)
+  }
   // name-level deletion tombstones: while a logical deletion is unsettled, any same-name
   // document DISCOVERED (e.g. registered during another task's confirmation) is added to the
   // deletion's targets instead of being registered — see deleteName/deleteDiscovered
@@ -99,7 +116,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // the wrapper WITHOUT reinserting it (the queued delete targets the result)
   async function persistCreate(wrapper: HiddenWrapper) {
     try {
-      const data = await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
+      await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
       if (wrapper.deleted) return
       if (!wrapper.adopt_id) await deps.confirmIndex() // may adopt via registration; rejects to fail the create
       if (wrapper.deleted) return
@@ -114,11 +131,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         }
       }
       if (wrapper.adopt_id) {
-        const adopted = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
+        const state = payload(wrapper) // merged state (see deps.adopt)
+        const adopted = await deps.encryptState(state)
+        recordWrite(wrapper.adopt_id, state.text)
         await deps.updateDoc(wrapper.adopt_id, adopted)
         finalizeAdoption(deps.index(), wrapper)
       } else {
-        const id = await deps.createDoc(data)
+        const state = payload(wrapper)
+        const id = await deps.createDoc(await deps.encryptState(state))
+        recordWrite(id, state.text) // the create's own echo can arrive as added-then-modified
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
@@ -166,12 +187,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
             return
           }
           try {
-            const data = await deps.encryptState(payload(existing))
+            const state = payload(existing)
+            const data = await deps.encryptState(state)
             if (!stillCurrent(name, existing)) {
               console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
               return
             }
             try {
+              recordWrite(existing.id, state.text)
               await deps.updateDoc(existing.id, data)
             } catch (e) {
               if (!isNotFound(e)) throw e
@@ -248,7 +271,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       const name = index.byId.get(id)?.name
       if (!name) {
         // unknown id (e.g. already removed): best-effort record deletion
-        if (!deps.readonly()) void deps.deleteDoc(id).catch(e => console.error('hidden item delete failed:', e))
+        if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
         return
       }
       const removedList: HiddenWrapper[] = []
@@ -274,7 +297,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           }
           for (const target of discovered) targets.add(target)
           for (const target of targets)
-            await deps.deleteDoc(target).catch(e => console.error('hidden item delete failed:', e))
+            await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
         } finally {
           if (deleting.get(name) === discovered) deleting.delete(name)
         }
@@ -293,10 +316,20 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       const run = async () => {
         const target = removed && !removed.pending_create ? removed.id : (removed?.adopt_id ?? removed?.id ?? id)
         if (removed?.pending_create && !removed.adopt_id) return // nothing persisted
-        await deps.deleteDoc(target).catch(e => console.error('hidden item delete failed:', e))
+        await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
       }
       if (removed) enqueue(removed.name, removed, run)
       else void run()
+    },
+
+    // classification for the remote listener: a pending change whose payload matches one THIS
+    // controller wrote, or a removal of a document it deleted, is our own echo and is skipped;
+    // everything else — including another tab's work on a wrapper we are still writing — applies
+    isOwnWrite(id: string, text: string) {
+      return recentWrites.get(id)?.includes(text) ?? false
+    },
+    isOwnDelete(id: string) {
+      return ownDeletes.has(id)
     },
 
     // true while a logical deletion of the name is unsettled: registration paths consult this
@@ -310,7 +343,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     deleteDiscovered(name: string, id: string) {
       const targets = deleting.get(name)
       if (targets) targets.push(id)
-      else if (!deps.readonly()) void deps.deleteDoc(id).catch(e => console.error('hidden item delete failed:', e))
+      else if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
     },
   }
 }

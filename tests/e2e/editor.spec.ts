@@ -234,6 +234,33 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
     expect(await itemText(page, '#e2e_xtab')).toContain('burst 4') // ... none may roll it back
     await expect.poll(() => itemText(other, '#e2e_xtab'), { timeout: 30_000 }).toContain('burst 4')
     expect(await itemText(other, '#e2e_xtab')).toBe(await itemText(page, '#e2e_xtab'))
+    // OVERLAPPING writes from both tabs with no wait between them (round-8 finding 4): tab B's
+    // pending change enters tab A's queue while A's own write is in flight — A must defer the
+    // remote change instead of rolling back, and both tabs converge on the newest state
+    await Promise.all([
+      page.evaluate(() => window._item('#e2e_xtab')!.write('overlap A')),
+      other.evaluate(() => window._item('#e2e_xtab')!.write('overlap B')),
+    ])
+    await page.waitForTimeout(3_000) // let every echo, deferred change and queued save settle
+    // both tabs end on the same server-converged state, and neither lost its OWN write
+    // permanently (the later writer wins; the loser's text was superseded, not rolled back)
+    await expect
+      .poll(async () => (await itemText(page, '#e2e_xtab')) == (await itemText(other, '#e2e_xtab')), {
+        timeout: 30_000,
+      })
+      .toBe(true)
+    expect(await itemText(page, '#e2e_xtab')).toMatch(/overlap [AB]/)
+    // identical same-millisecond creates in both tabs must surface as TWO items in BOTH tabs:
+    // create classification is by identity (preallocated document ids), where content matching
+    // made each tab skip the other's same-content document as its own
+    await Promise.all([
+      page.evaluate(() => void window._create('#e2e_twin identical')),
+      other.evaluate(() => void window._create('#e2e_twin identical')),
+    ])
+    for (const tab of [page, other])
+      await expect
+        .poll(() => tab.evaluate(() => window._items('#e2e_twin').length), { timeout: 30_000 })
+        .toBe(2)
   } finally {
     await other.close()
   }

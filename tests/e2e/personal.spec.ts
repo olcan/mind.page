@@ -289,6 +289,60 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
   }
 })
 
+test('a corrupted visible document can still be removed remotely (removal applies by id)', async ({ page }) => {
+  // a removed record whose decrypt fails must still apply: removal is id-driven, so the
+  // fabricated placeholder must not break text-dependent paths (round 8: the logging expression
+  // threw on the missing text and the visible removal never ran, leaving the item forever)
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await page.evaluate(() => void window._create('#e2e_corrupt_removed to be corrupted'))
+  await expect.poll(() => savedId(page, '#e2e_corrupt_removed'), { timeout: 30_000 }).toBeTruthy()
+  const id = await savedId(page, '#e2e_corrupt_removed')
+  // corrupt the document server-side (its later change events cannot decrypt), then delete it
+  await firestore().collection('items').doc(id!).update({ cipher: 'not decryptable', text: null, attr: null })
+  await page.waitForTimeout(2_000) // the corrupt modify arrives and is skipped (logged)
+  await firestore().collection('items').doc(id!).delete()
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_corrupt_removed', true)?.id ?? null), { timeout: 30_000 })
+    .toBeNull()
+})
+
+test('global-store updates and deletions reach a second tab of the same account', async ({ page }) => {
+  // hidden documents cross tabs through the shared persistent cache, so their changes arrive
+  // with hasPendingWrites set: classification must be by exact payload identity — a pending
+  // REMOVAL was misclassified as the receiving tab's own (wrapper present, matching content)
+  // and the metadata-only acknowledgement never replayed it, leaving the store alive there
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const other = await page.context().newPage() // same context: shared auth, secret and cache
+  try {
+    await other.goto('/')
+    await waitForApp(other)
+    await page.evaluate(() => void window._create('#e2e_xstore store owner'))
+    await expect.poll(() => savedId(page, '#e2e_xstore'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => savedId(other, '#e2e_xstore'), { timeout: 30_000 }).toBeTruthy()
+    await page.evaluate(() => void (window._item('#e2e_xstore')!.global_store._xtab = 1))
+    // polls read the non-saving _global_store accessor: reading .global_store dispatches a
+    // sync-save, and a poll on the receiving tab would re-persist its stale copy against the
+    // deletion below (resurrecting the store it is waiting to see die)
+    await expect
+      .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._xtab ?? null), {
+        timeout: 30_000,
+      })
+      .toBe(1)
+    await page.evaluate(() => void delete window._item('#e2e_xstore')!.global_store._xtab)
+    await expect
+      .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._xtab ?? null), {
+        timeout: 30_000,
+      })
+      .toBeNull()
+  } finally {
+    await other.close()
+  }
+})
+
 test('a corrupt hidden change revokes authority until healed, and re-granting cleans up invalid records', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)

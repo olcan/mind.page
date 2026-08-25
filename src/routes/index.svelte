@@ -3241,6 +3241,28 @@
   }
 
   let idsFromLabel = new Map<string, string[]>()
+
+  // remote pending changes DEFERRED because our own write for the document was in flight (see
+  // isOwnPendingChange): the acknowledgement of our write is metadata-only, so a skipped change
+  // is never redelivered — it must be replayed once our write settles. latest change per doc;
+  // superseded by any newer applied change for the same document
+  const deferredRemoteChanges = new Map()
+  let applyRemoteChangeRef = null // set by the items listener (applyRemoteChange is closure-scoped)
+  function replayDeferredRemoteChange(item) {
+    if (!item.savedId) return
+    const deferred = deferredRemoteChanges.get(item.savedId)
+    if (!deferred || item.unackedWrites?.length) return
+    deferredRemoteChanges.delete(item.savedId)
+    // replay only a STRICTLY newer change: deferral happened because our write was in flight,
+    // and server order matches issue order — a newer remote time means the server ends at
+    // their state, while replaying an older (or same-time) one would roll our settled write back
+    if (!(deferred.savedItem.time > item.savedTime)) return
+    try {
+      applyRemoteChangeRef?.(deferred.change, deferred.doc, deferred.savedItem)
+    } catch (e) {
+      console.error('could not replay deferred remote change:', deferred.doc.id, e)
+    }
+  }
   function itemDeps(index, deps = [], missing_deps = undefined) {
     let item = items[index]
     if (deps.includes(item.id)) return deps
@@ -4866,21 +4888,22 @@
     // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
     // if (!item.saving) itemToSave.text = ''
 
-    // NOTE: a snapshot, since encryptItem below mutates its argument (nulling text and attr)
-    const created = { time: itemToSave.time, text: itemToSave.text, attr: _.cloneDeep(itemToSave.attr) }
-    const untrackCreate = () => {
-      const c = unackedCreates.indexOf(created)
-      if (c >= 0) unackedCreates.splice(c, 1)
-    }
-    if (!readonly) unackedCreates.push(created)
     encryptItem(itemToSave)
       .then(itemToSave => {
+        // the document id is PREALLOCATED and mapped to the temp id before the write is issued:
+        // the local echo (latency compensation) then classifies our own create by identity —
+        // content matching could make two tabs creating identical same-millisecond content
+        // skip each other's documents (see isOwnPendingChange)
+        let ref
+        if (!readonly) {
+          ref = doc(collection(getFirestore(firebase), 'items'))
+          tempIdFromSavedId.set(ref.id, item.id)
+        }
         ;(readonly
           ? Promise.resolve({ id: item.id, delete: Promise.resolve /* dummy promise */ })
-          : addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
+          : setDoc(ref, itemToSave).then(() => ref)
         )
           .then(doc => {
-            untrackCreate() // acknowledged (settled echoes are matched by id or saved state)
             let index = indexFromId.get(item.id) // since index can change
             tempIdFromSavedId.set(doc.id, item.id)
             if (index == undefined) {
@@ -4917,12 +4940,10 @@
             }
           })
           .catch(e => {
-            untrackCreate()
             console.error(e)
           })
       })
       .catch(e => {
-        untrackCreate()
         console.error(e)
       })
 
@@ -5152,7 +5173,6 @@
   // plaintext payloads of creates issued but not yet acknowledged: a pending 'added' echo from
   // the shared mutation queue carries a server-assigned id no local map knows yet, so it is
   // recognized as our own by payload (see isOwnPendingChange)
-  let unackedCreates = []
 
   function saveItem(id: string, silent = null) {
     // console.debug('saving item', id)
@@ -5200,6 +5220,8 @@
         } finally {
           const w = item.unackedWrites.indexOf(written)
           if (w >= 0) item.unackedWrites.splice(w, 1)
+          // a remote change deferred behind this write replays once nothing is in flight
+          if (!item.unackedWrites.length) replayDeferredRemoteChange(item)
         }
 
         // also save to history ...
@@ -7055,20 +7077,30 @@
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
             const wrapper = hiddenItems.get(doc.id)
-            if (!wrapper) return change.type == 'removed' // a removal already applied locally
-            // never clobber a wrapper with work in flight: its operation state lives on the
-            // object (see hidden_persistence.ts)
-            if (wrapper.saving || wrapper.pending_create) return true
+            if (change.type == 'removed') {
+              // ours only if THIS controller deleted the document (or nothing is left to
+              // remove); another tab's pending removal must apply even though our wrapper's
+              // serialized content matches the removed document
+              return hiddenPersistence.isOwnDelete(doc.id) || !wrapper
+            }
+            // exact payload identity: the controller records every plaintext payload it writes,
+            // so another tab's update applies even while OUR wrapper has work in flight (the
+            // old in-flight blanket skip lost those updates for good — the ack is metadata-only)
+            if (hiddenPersistence.isOwnWrite(doc.id, savedItem.text)) return true
+            if (!wrapper) return false // unknown document: another tab's create
+            // a settled write leaves the wrapper at the written state; an echo matching it is ours
             return JSON.stringify({ name: wrapper.name, item: wrapper.item }) == savedItem.text
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
           if (change.type == 'removed') return index === undefined // already removed locally
           if (change.type == 'added') {
-            if (index !== undefined) return true // already present locally
-            // an item created HERE is still saving under a temporary id, so its server-assigned
-            // document id cannot be mapped yet: match the unacknowledged create by payload
-            return unackedCreates.some(matchesWrite)
+            // our own creates are classified by IDENTITY: the document id is preallocated and
+            // mapped to the temp id BEFORE the write is issued (see setDoc in the create flow),
+            // so two tabs creating identical content in the same millisecond cannot skip each
+            // other's documents (the mapping also covers a create whose item was deleted
+            // before the write settled — its removal follows separately)
+            return index !== undefined || tempIdFromSavedId.has(doc.id)
           }
           if (index === undefined) return false // not present here: another tab has it
           const item = items[index]
@@ -7078,6 +7110,16 @@
           // an older write is still in flight, and applying that stale echo would roll the item
           // back — and the queued save, reading the rolled-back text, would then persist it
           if (item.unackedWrites?.some(matchesWrite)) return true
+          // any OTHER remote pending change against a document with our own write in flight is
+          // DEFERRED: applying it now would roll the item back under the in-flight write, whose
+          // queued save would then persist the rollback — the lost-latest interleaving (round-8
+          // finding 4). the change is stashed and REPLAYED when our write settles (its own
+          // acknowledgement is metadata-only, so nothing else would redeliver it): a strictly
+          // newer deferred change then lands, an older one is dropped as superseded
+          if (item.unackedWrites?.length) {
+            deferredRemoteChanges.set(doc.id, { change, doc, savedItem })
+            return true
+          }
           // a settled write leaves its payload as the saved state; an echo matching it is ours
           return (
             item.savedText == savedItem.text &&
@@ -7087,8 +7129,10 @@
         }
 
         // applies one remote change from a snapshot; called with the decrypted item, sequentially
-        // per change (see the serialized snapshot handler below)
+        // per change (see the serialized snapshot handler below); also invoked by
+        // replayDeferredRemoteChange once a local write settles (hence the component-scope ref)
         function applyRemoteChange(change, doc, savedItem) {
+          deferredRemoteChanges.delete(doc.id) // any applied change supersedes a deferred one
                   // remote changes indicate non-focus: update sessionTime and invoke onFocus
                   sessionTime = Date.now() + 1000 /* margin for small time differences */
                   onFocus() // focused = document.hasFocus()
@@ -7338,6 +7382,7 @@
               return // done with first snapshot
             }
 
+            applyRemoteChangeRef = applyRemoteChange
             // handle changes in non-first snapshot, waiting for init if necessary; snapshots are
             // SERIALIZED and each change's decrypt is awaited before it is applied, so a later
             // snapshot can never interleave with (or overtake) an earlier one mid-application
