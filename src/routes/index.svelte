@@ -6037,8 +6037,8 @@
     applyRemoteAdded,
     applyRemoteModified,
     removeHidden,
-    finalizeAdoption,
   } from '../hidden'
+  import { createHiddenPersistence } from '../hidden_persistence'
   import { layoutItems } from '../layout'
 
   let consoleLog = []
@@ -7804,180 +7804,52 @@
     // with the pending (shared-page) changes taking precedence over the loaded state
     registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
   }
+  // persistence runs through the per-name controller (src/hidden_persistence.ts, matrix-tested):
+  // writes for a name are serialized, settlement goes through the index transitions, and an
+  // unconfirmed create re-confirms the hidden index against the server first (failing closed on
+  // any hidden-document error — a partial index must never lead to a duplicate document)
+  const hiddenPersistence = createHiddenPersistence({
+    index: hiddenIndex,
+    encryptState: state => encryptItem(state),
+    updateDoc: (id, data) => updateDoc(doc(getFirestore(firebase), 'items', id), data),
+    // the plaintext user field is required for creates (see firestore rules); updates keep it
+    createDoc: data =>
+      addDoc(collection(getFirestore(firebase), 'items'), { ...data, user: user.uid }).then(added => added.id),
+    deleteDoc: id => deleteDoc(doc(getFirestore(firebase), 'items', id)),
+    confirmIndex: () =>
+      hiddenIndexAuthoritative
+        ? Promise.resolve()
+        : getDocsFromServer(
+            query(
+              collection(getFirestore(firebase), 'items'),
+              where('user', '==', user.uid),
+              where('hidden', '==', true)
+            )
+          ).then(async hidden_docs => {
+            // ascending id order so a pending create adopts the MINIMUM-id duplicate; any
+            // failure rejects (failing the create): a server read proves query completeness,
+            // not a successfully constructed name index. no durable authority is granted — on
+            // fixed pages the listener (shared subset) cannot see later hidden documents, so
+            // the next new-name create re-confirms again
+            for (const doc of [...hidden_docs.docs].sort((a, b) => a.id.localeCompare(b.id))) {
+              const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
+              registerHiddenItem(hidden_item)
+            }
+          }),
+    newTempId: () => (Date.now() + sessionCounter++).toString(),
+    readonly: () => readonly,
+  })
+
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')
-    const wrapper = hiddenItemsByName.get(name)
-    if (wrapper) {
-      // replace existing hidden item
-      wrapper.item = item
-      if (readonly) return // no saving
-
-      // console.debug("updating hidden item", name);
-      let itemToSave = {
-        hidden: true,
-        time: Date.now(),
-        attr: null, // we leave attr unused for now
-        text: JSON.stringify(_.pick(wrapper, ['name', 'item'])), // save only name/item
-      }
-      // NOTE: if existing item is saving, we need to wait for its persistent id before we can update
-      Promise.resolve(wrapper.saving || wrapper.id)
-        .then(saved_id => {
-          encryptItem(itemToSave)
-            .then(itemToSave => {
-              updateDoc(doc(getFirestore(firebase), 'items', saved_id), itemToSave)
-                // .then(() => {
-                //   console.debug("updated hidden item", name, item);
-                // })
-                .catch(console.error)
-            })
-            .catch(console.error)
-        })
-        // a wrapper whose create failed carries a rejected saving promise (see below); the update
-        // is dropped either way, but this keeps the rejection handled and visible
-        .catch(e => console.error('hidden item update skipped (create failed):', e))
-    } else {
-      // create new hidden item
-      // note pending_create marks the wrapper until it is persisted: if the account's hidden items
-      // are loaded meanwhile (after phrase validation, see registerHiddenItem), the create adopts
-      // the existing document instead of adding a duplicate
-      const wrapper = { name, item, id: (Date.now() + sessionCounter++).toString(), saving: null, pending_create: true, adopt_id: null }
-      hiddenItems.set(wrapper.id, wrapper)
-      hiddenItemsByName.set(wrapper.name, wrapper)
-      if (readonly) return // no saving
-      let itemToSave = {
-        hidden: true,
-        user: user.uid, // required for add
-        time: Date.now(),
-        attr: null, // we leave attr unused for now
-        text: JSON.stringify(_.pick(wrapper, ['name', 'item'])), // save only name/item
-      }
-      wrapper.saving = new Promise((resolve, reject) => {
-        // a create is only safe against a server-confirmed hidden index: a partial cache could
-        // hide an existing document under this name (see hiddenIndexAuthoritative); re-confirm
-        // here, letting registerHiddenItem adopt this pending wrapper if the name exists — on
-        // failure the save rejects visibly (and the wrapper is cleaned below) instead of
-        // duplicating
-        // a create is only safe against a server-confirmed hidden index (a partial cache could
-        // hide an existing document under this name): if encryption below did not already lead
-        // to adoption (on fixed pages the phrase validation registers the account's hidden
-        // items, see resolveFixedOwnerSecret), the index is re-confirmed against the server
-        // BEFORE addDoc. the confirmation runs after encryption so the common adopted path is
-        // not delayed by an extra round-trip (its updateDoc should start as early as possible —
-        // a quick navigation away discards work not yet handed to the sdk). ascending id order
-        // so a pending create adopts the MINIMUM-id duplicate (the index invariant); any
-        // failure fails the whole confirmation — a server read proves query completeness, not a
-        // successfully constructed name index, and a skipped document under this name would let
-        // the create duplicate it
-        const confirmIndex = () =>
-          hiddenIndexAuthoritative || wrapper.adopt_id
-            ? Promise.resolve()
-            : getDocsFromServer(
-                query(
-                  collection(getFirestore(firebase), 'items'),
-                  where('user', '==', user.uid),
-                  where('hidden', '==', true)
-                )
-              ).then(async hidden_docs => {
-                for (const doc of [...hidden_docs.docs].sort((a, b) => a.id.localeCompare(b.id))) {
-                  const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
-                  registerHiddenItem(hidden_item)
-                }
-                // no durable authority: this confirmed ONE create; on fixed pages the listener
-                // (shared subset) cannot see later hidden documents, so the next new-name
-                // create re-confirms again
-              })
-        encryptItem(itemToSave)
-          .then(async itemToSave => {
-            await confirmIndex() // may set wrapper.adopt_id via registration
-            return itemToSave
-          })
-          .then(itemToSave => {
-            // if an existing document for this name was found while encryptItem awaited the secret
-            // phrase (see registerHiddenItem), update it with the merged state instead of creating
-            // a duplicate (re-encrypted, since the merge happened after the serialization above)
-            if (wrapper.adopt_id) {
-              const adopted = {
-                hidden: true,
-                time: Date.now(),
-                attr: null,
-                text: JSON.stringify(_.pick(wrapper, ['name', 'item'])),
-              }
-              encryptItem(adopted)
-                .then(adopted => {
-                  updateDoc(doc(getFirestore(firebase), 'items', wrapper.adopt_id), adopted)
-                    .then(() => {
-                      // settle via the reducer: re-key to the persistent id and restore the
-                      // minimum-id name invariant (a smaller retained duplicate may win the name)
-                      finalizeAdoption(hiddenIndex(), wrapper)
-                      wrapper.saving = null
-                      resolve(wrapper.id)
-                    })
-                    .catch(e => {
-                      console.error(e)
-                      reject(e)
-                    })
-                })
-                .catch(e => {
-                  console.error(e)
-                  reject(e)
-                })
-              return
-            }
-            addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
-              .then(doc => {
-                // console.debug("created hidden item", JSON.stringify(itemToSave));
-                hiddenItems.delete(wrapper.id) // remove under temp id
-                hiddenItems.set(doc.id, wrapper) // add back under persistent id
-                wrapper.id = doc.id // update id in wrapper
-                wrapper.saving = null // no longer saving
-                wrapper.pending_create = null
-                resolve(wrapper.id) // return persistent id
-              })
-              .catch(e => {
-                console.error(e)
-                reject(e)
-              })
-          })
-          .catch(e => {
-            console.error(e)
-            reject(e)
-          })
-      })
-      // a failed create must not wedge the store for the session: the rejected saving promise
-      // would block every later update (see above); this also marks the rejection as handled
-      wrapper.saving.catch(() => {
-        wrapper.saving = null
-        if (wrapper.adopt_id) {
-          // the document exists (adoption found it): settle via the reducer — re-key to the
-          // persistent id so the next save updates it (deleting the wrapper would send the next
-          // save down the create path and duplicate a document known to exist), restoring the
-          // minimum-id name invariant
-          finalizeAdoption(hiddenIndex(), wrapper)
-        } else {
-          // a genuinely failed fresh create: remove via the reducer, which also promotes any
-          // retained same-name duplicate (e.g. a remote add that arrived while pending) so the
-          // next save updates that document instead of creating another
-          removeHidden(hiddenIndex(), wrapper.id)
-        }
-      })
-    }
+    hiddenPersistence.save(name, item)
   }
 
   function deleteHiddenItem(id) {
     if (!id) return // nothing to delete
     if (!initialized) throw new Error('deleteHiddenItem called before initialized')
-    const { removed: wrapper } = removeHidden(hiddenIndex(), id)
-    if (readonly) return // no saving
-    // console.debug("deleting hidden item", name);
-    // NOTE: if item is saving, we need to wait for its persistent id before we can delete
-    Promise.resolve(wrapper?.saving || id).then(saved_id => {
-      deleteDoc(doc(getFirestore(firebase), 'items', saved_id))
-        // .then(() => {
-        //   console.debug("deleted hidden item", name);
-        // })
-        .catch(console.error)
-    })
+    hiddenPersistence.delete(id)
   }
 
   function hiddenItemChangedRemotely(name, change_type) {
