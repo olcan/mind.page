@@ -14,7 +14,12 @@ const HMR_PORT = process.env.HMR_PORT ?? '24777' // clear of the default, in cas
 const PROBE = 'src/components/Modal.svelte' // watched component used to drive a real hmr update
 const SENTINEL = '\n<!-- dev smoke probe -->\n'
 
-const dev = spawn('npm', ['run', 'dev'], { env: { ...process.env, HMR_PORT }, stdio: ['ignore', 'pipe', 'pipe'] })
+// detached: the dev server is npm -> shell -> vite; killing the process GROUP reaches them all
+const dev = spawn('npm', ['run', 'dev'], {
+  env: { ...process.env, HMR_PORT },
+  stdio: ['ignore', 'pipe', 'pipe'],
+  detached: true,
+})
 let out = ''
 dev.stdout.on('data', chunk => (out += chunk))
 dev.stderr.on('data', chunk => (out += chunk))
@@ -50,9 +55,19 @@ function cleanup() {
     } catch {}
     try {
       const exited = new Promise(resolve => dev.on('exit', resolve))
-      dev.kill()
+      const kill = signal => {
+        try {
+          process.kill(-dev.pid, signal) // the whole group: npm's shell and vite descendants
+        } catch {
+          dev.kill(signal) // group already gone (or unsupported): signal the child directly
+        }
+      }
+      kill('SIGTERM')
       await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))])
-      if (dev.exitCode == null) dev.kill('SIGKILL')
+      if (dev.exitCode == null) {
+        kill('SIGKILL')
+        await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))])
+      }
     } catch {}
   })()
   return cleaning

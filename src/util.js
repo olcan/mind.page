@@ -272,14 +272,23 @@ export function invalidateElemCache(id) {
 // entries come up
 const destroyedElems = new WeakSet()
 function destroyElem(elem) {
+  // each teardown is guarded: one throwing hook must not abort the remaining hooks or the dom
+  // removal (the destroyed mark stays set — a hook that threw does not get a second call)
+  const teardown = e => {
+    try {
+      e['_destroy']?.()
+    } catch (error) {
+      console.error('_destroy hook failed:', error)
+    }
+  }
   elem.querySelectorAll('[_destroy]').forEach(e => {
     if (destroyedElems.has(e)) return
     destroyedElems.add(e)
-    e['_destroy']()
+    teardown(e)
   })
   if (!destroyedElems.has(elem)) {
     destroyedElems.add(elem)
-    elem._destroy?.()
+    teardown(elem)
   }
   elem.remove()
 }

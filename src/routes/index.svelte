@@ -3217,7 +3217,18 @@
         await clearFirestoreCache(3000)
         location.reload()
       })
-      .catch(console.error)
+      .catch(e => {
+        // the local state above is already cleared (deliberately before the network call: a
+        // failed sign-out still leaves this device clean), but signingOut must not stay set —
+        // it gates the auth callbacks and would otherwise wedge the page until reload
+        console.error(e)
+        signingOut = false
+        _modal(`MindPage could not complete the sign-out.`, {
+          confirm: 'Try Again',
+          background: 'confirm',
+          onConfirm: signOut,
+        })
+      })
   }
 
   let idsFromLabel = new Map<string, string[]>()
@@ -6565,6 +6576,14 @@
     resetUser()
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
     document.cookie = '__session=signin_pending;max-age=600' // temporary setting for server post-redirect
+    // a failed (or user-cancelled) sign-in must clear the in-progress state and the pending
+    // markers set above: leaving them meant the loading overlay stayed up and every later auth
+    // callback was ignored (signingIn gates onAuthStateChanged), wedging the page until reload
+    const failedSignIn = () => {
+      signingIn = false
+      window.sessionStorage.removeItem('mindpage_signin_pending')
+      document.cookie = '__session=;max-age=0'
+    }
     let provider = new GoogleAuthProvider()
     getAuth(firebase).useDeviceLanguage()
     setPersistence(getAuth(firebase), browserLocalPersistence).then(() => {
@@ -6580,6 +6599,7 @@
         .then(() => location.reload())
         .catch(e => {
           console.error(e)
+          failedSignIn()
           _modal(
             e.code == 'auth/popup-blocked'
               ? `MindPage could not open a popup required to sign you in to your Google account. Please change your browser settings to allow popups and try again.`
@@ -6591,6 +6611,15 @@
             }
           )
         })
+    }).catch(e => {
+      // setPersistence itself failed (no popup was ever opened): same cleanup and retry
+      console.error(e)
+      failedSignIn()
+      _modal(`MindPage could not sign you in to your Google account.`, {
+        confirm: 'Try Again',
+        background: 'confirm',
+        onConfirm: signIn,
+      })
     })
   }
 

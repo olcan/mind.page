@@ -36,6 +36,14 @@ test('stay/spill threshold boundaries: within half a screen of the minimum an it
   layoutItems(over, config({ screenHeight: 800 }))
   // second inequality: 401 + (600+8) + 80 = 1089 > 0 + 0.9 * 800 = 720 -> spills
   expect(over[1].column).toBe(1)
+  // the 0.9 boundary itself, exactly: 401 + (207+8+24) + 80 = 720 <= 720 stays ...
+  const at = [item(3, 269), item(2, 207)]
+  layoutItems(at, config({ screenHeight: 800 }))
+  expect(at[1].column).toBe(0)
+  // ... and one pixel over it spills
+  const past = [item(3, 269), item(2, 208)]
+  layoutItems(past, config({ screenHeight: 800 }))
+  expect(past[1].column).toBe(1)
 })
 
 test('dotted items occupy no height and defaultItemHeight stands in for unmeasured items', () => {
@@ -65,16 +73,16 @@ test('tall items spill to the minimum column once ~a screen height over it, with
 })
 
 test('a spill can jump multiple columns, repeating the arrow', () => {
-  // column 0 is oversized by one huge item; columns 1 and 2 fill; the next item must jump from
-  // column 2 back... construct the forward case instead: keep items on column 0 until it is far
-  // over, with columns 1 and 2 still empty — the mover jumps 0 -> 2? the minimum index is 1, so
-  // multi-column jumps arise only when the minimum is further away; pin 2 -> 0 via oversizing
-  const items = [item(6, 600), item(5, 600), item(4, 600), item(3, 1200), item(2, 4000), item(1, 600)]
+  // heights chosen so the final move jumps 2 -> 0 (a genuine two-column jump): columns fill
+  // left to right, the tall items push the minimum back to column 0, and the last item moves
+  // there directly (the earlier version of this test produced only one-column transitions, so
+  // its arrow assertion never executed — and expected one symbol too many)
+  const items = [item(6, 100), item(5, 100), item(4, 100), item(3, 300), item(2, 1000), item(1, 100)]
   layoutItems(items, config({ screenHeight: 500 }))
-  // items: [0, 1, 2, 2 (min own), 1? ...] — assert the recorded jump width matches the arrows
-  for (const it of items)
-    if (it.nextColumn >= 0 && Math.abs(it.nextColumn - it.column) > 1)
-      expect(it.arrows.length).toBe(Math.abs(it.nextColumn - it.column) + 1) // end cap + repeats
+  expect(items.map(it => it.column)).toEqual([0, 0, 1, 1, 2, 0])
+  const jump = items[4] // the item before the 2 -> 0 break records it
+  expect(jump.nextColumn).toBe(0)
+  expect(jump.arrows).toBe('↖←') // one symbol per column of distance (end cap + repeats)
 })
 
 test('a move to an earlier column points its arrows left', () => {
