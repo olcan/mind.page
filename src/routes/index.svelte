@@ -312,6 +312,7 @@
     Object.defineProperty(window, '__toggles', { get: () => toggles })
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
+    Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
     window['_exists'] = _exists
@@ -1743,6 +1744,7 @@
   let showDotted = false
   const separatorHeight = 80
 
+  let layoutCount = 0 // exposed as window.__layoutCount for tests
   function updateItemLayout() {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
     //       second is via initialize -> onEditorChange w/ >0 items, 0 height
@@ -1760,6 +1762,11 @@
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
     let target = null
     lastLayoutTime = Date.now()
+    layoutCount++
+    // record the heights this layout used: onItemResized triggers the next layout on cumulative
+    // drift from THESE values, since per-event deltas can each stay under the threshold (e.g.
+    // images loading one by one) while the layout drifts arbitrarily far from reality
+    items.forEach(item => (item.layoutHeight = item.height))
     // showDotted = false; // auto-hide dotted
     resizeHiddenColumn()
     // when columnCount changes the column divs are recreated by the each block after this pass,
@@ -4829,6 +4836,13 @@
     // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
     // if (!item.saving) itemToSave.text = ''
 
+    // NOTE: a snapshot, since encryptItem below mutates its argument (nulling text and attr)
+    const created = { time: itemToSave.time, text: itemToSave.text, attr: _.cloneDeep(itemToSave.attr) }
+    const untrackCreate = () => {
+      const c = unackedCreates.indexOf(created)
+      if (c >= 0) unackedCreates.splice(c, 1)
+    }
+    if (!readonly) unackedCreates.push(created)
     encryptItem(itemToSave)
       .then(itemToSave => {
         ;(readonly
@@ -4836,6 +4850,7 @@
           : addDoc(collection(getFirestore(firebase), 'items'), itemToSave)
         )
           .then(doc => {
+            untrackCreate() // acknowledged (settled echoes are matched by id or saved state)
             let index = indexFromId.get(item.id) // since index can change
             tempIdFromSavedId.set(doc.id, item.id)
             if (index == undefined) {
@@ -4871,9 +4886,15 @@
               )
             }
           })
-          .catch(console.error)
+          .catch(e => {
+            untrackCreate()
+            console.error(e)
+          })
       })
-      .catch(console.error)
+      .catch(e => {
+        untrackCreate()
+        console.error(e)
+      })
 
     return (window['_mindbox_return'] = _item(item.id)) // return created item
   }
@@ -4984,7 +5005,11 @@
       just_rendered ||
       height == 0 ||
       prevHeight == 0 ||
-      Math.abs(height - prevHeight) > 300
+      Math.abs(height - prevHeight) > 300 ||
+      // cumulative drift from the height the last layout used: images/charts growing in small
+      // steps previously triggered no layout at all until an unrelated pass (e.g. the periodic
+      // time-string update) ran, which is why a shared page could take 10+ seconds to wrap
+      (item.layoutHeight != null && Math.abs(height - item.layoutHeight) > 300)
       // height < 0.5 * prevHeight ||
       // height > prevHeight + 100
     ) {
@@ -5094,6 +5119,11 @@
     return jsout
   }
 
+  // plaintext payloads of creates issued but not yet acknowledged: a pending 'added' echo from
+  // the shared mutation queue carries a server-assigned id no local map knows yet, so it is
+  // recognized as our own by payload (see isOwnPendingChange)
+  let unackedCreates = []
+
   function saveItem(id: string, silent = null) {
     // console.debug('saving item', id)
     const index = indexFromId.get(id)
@@ -5127,9 +5157,20 @@
           return
         }
 
-        itemToSave = await encryptItem(itemToSave)
-        await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
-        await onSaveDone(item.id, itemToSave)
+        // the plaintext payload is tracked until the server acknowledges the write: within that
+        // window it can echo back through the listener as a pending change and must be
+        // recognized as OUR OWN (see isOwnPendingChange). savingText cannot serve this purpose:
+        // it is overwritten at enqueue by a newer save while this write is still in flight
+        const written = { time: itemToSave.time, text: itemToSave.text, attr: _.cloneDeep(itemToSave.attr) }
+        ;(item.unackedWrites ??= []).push(written)
+        try {
+          itemToSave = await encryptItem(itemToSave)
+          await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
+          await onSaveDone(item.id, itemToSave)
+        } finally {
+          const w = item.unackedWrites.indexOf(written)
+          if (w >= 0) item.unackedWrites.splice(w, 1)
+        }
 
         // also save to history ...
         await addDoc(collection(getFirestore(firebase), 'history'), {
@@ -6861,20 +6902,24 @@
             if (wrapper.saving || wrapper.pending_create) return true
             return JSON.stringify({ name: wrapper.name, item: wrapper.item }) == savedItem.text
           }
+          const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
           if (change.type == 'removed') return index === undefined // already removed locally
           if (change.type == 'added') {
             if (index !== undefined) return true // already present locally
-            // an item created HERE is still saving under a temporary id, so its new document id
-            // cannot be mapped yet: match it by the text of the save in flight
-            return items.some(item => item.savingText != null && item.savingText == savedItem.text)
+            // an item created HERE is still saving under a temporary id, so its server-assigned
+            // document id cannot be mapped yet: match the unacknowledged create by payload
+            return unackedCreates.some(matchesWrite)
           }
           if (index === undefined) return false // not present here: another tab has it
           const item = items[index]
-          // our own write echoes back with exactly the text we sent; anything else is another
-          // tab's change and must be applied (a blanket in-flight skip would drop those for as
-          // long as any save is settling)
-          if (item.savingText != null && item.savingText == savedItem.text) return true
+          // our own unacknowledged writes echo back with exactly the payload written; anything
+          // else is another tab's change and must be applied. matching savingText instead would
+          // misclassify during write bursts: it is overwritten at enqueue by a NEWER save while
+          // an older write is still in flight, and applying that stale echo would roll the item
+          // back — and the queued save, reading the rolled-back text, would then persist it
+          if (item.unackedWrites?.some(matchesWrite)) return true
+          // a settled write leaves its payload as the saved state; an echo matching it is ours
           return (
             item.savedText == savedItem.text &&
             item.savedTime == savedItem.time &&
@@ -7140,12 +7185,8 @@
               }
               // note w/ persistent local cache (see client.ts), first server snapshot after a cached first
               // snapshot delivers all remote changes since last sync
-              const remote_changes = snapshot.docChanges().filter(c => !c.doc.metadata.hasPendingWrites)
-              if (remote_changes.length)
-                init_log(
-                  `received ${remote_changes.length} remote change${remote_changes.length > 1 ? 's' : ''} ` +
-                    `(${snapshot.metadata.fromCache ? 'cache' : 'current'})`
-                )
+              const applied = [] // labels of applied changes, logged in aggregate below
+              let ownSkipped = 0
               for (const change of snapshot.docChanges()) {
                 const doc = change.doc
                 // a change that cannot be decrypted is logged and skipped: it must not break the
@@ -7156,8 +7197,25 @@
                 })
                 if (!savedItem) continue
                 // pending writes are skipped only when they are OUR OWN (see isOwnPendingChange)
-                if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) continue
+                if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) {
+                  ownSkipped++
+                  continue
+                }
+                applied.push(
+                  `${change.type} ${
+                    savedItem.hidden ? `hidden ${doc.id}` : `'${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})`
+                  }${doc.metadata.hasPendingWrites ? ' pending' : ''}`
+                )
                 applyRemoteChange(change, doc, savedItem)
+              }
+              if (applied.length) {
+                const summary =
+                  `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +
+                  `(${snapshot.metadata.fromCache ? 'cache' : 'server'}${ownSkipped ? `, ${ownSkipped} own skipped` : ''})`
+                // during initialization the [Nms] prefix orders this among the init steps; after
+                // that the timing is meaningless and each change is worth naming
+                if (!initTime) init_log(summary)
+                else console.debug(`applied ${summary}:`, applied.slice(0, 10).join('; ') + (applied.length > 10 ? ` … +${applied.length - 10} more` : ''))
               }
             })
           },

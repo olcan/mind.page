@@ -122,14 +122,19 @@ function sanitizeInner(html) {
 
 // item text rendered as markdown with its raw html ESCAPED: item html is author-controlled (a
 // shared page renders ANOTHER user's items into this origin) and marked deliberately passes raw
-// html and unsafe url schemes through, so for the crawler/no-javascript view it is shown as text
-// rather than parsed — strictly safer than filtering, and markdown structure still renders
+// html through, so for the crawler/no-javascript view it is shown as text rather than parsed —
+// inert by construction. only '<' is escaped: no tag can open without it, while '>' (blockquotes)
+// and '&' (entities) are meaningful markdown that cannot create markup on their own
 function renderMarkdown(text) {
-  const escaped = text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
-  return marked.parse(escaped, { breaks: true })
+  return marked.parse(text.replace(/</g, '&lt;'), { breaks: true })
 }
 
 function contentBlock(inner) {
+  // every path is sanitized at this final insertion point: for markdown paths the raw html is
+  // already escaped, but marked GENERATES anchors from link/image syntax with their url schemes
+  // passed through unchecked ([x](javascript:...) becomes a live href) — the allow-list drops
+  // those, and doubles as the trust boundary for the app-generated frozen render
+  inner = sanitize(inner)
   return (
     // without javascript the app shell is useless, so hide all of it; the frozen render is an
     // .items clone whose layout the app computes at runtime (absolutely positioned columns and
@@ -178,9 +183,8 @@ export async function pageContent({ url, cookie, hostname }) {
       if (frozen?.html) {
         if (frozen.description) meta.description = frozen.description
         // the frozen render is app-generated html (already cleaned at capture, see
-        // prerender.mjs), so it is the one path that keeps tags — sanitized here as the trust
-        // boundary, since it is stored and served like any other item-derived content
-        return { meta, html: contentBlock(sanitize(frozen.html)) }
+        // prerender.mjs) and the one path that keeps its tags; contentBlock sanitizes it
+        return { meta, html: contentBlock(frozen.html) }
       }
       const items = await fetchItems(
         'anonymous',

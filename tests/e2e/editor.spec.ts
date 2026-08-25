@@ -221,7 +221,53 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
     await expect.poll(() => itemText(other, '#e2e_xtab'), { timeout: 30_000 }).toContain('from the first tab')
     await other.evaluate(() => window._item('#e2e_xtab')!.write('from the second tab'))
     await expect.poll(() => itemText(page, '#e2e_xtab'), { timeout: 30_000 }).toContain('from the second tab')
+    // a rapid burst of writes must not roll the item back: each write's echo arrives as a
+    // pending change and must be recognized as our own even though a newer save has already
+    // superseded savingText — a stale echo applied over local state would also be PERSISTED by
+    // the queued save reading the rolled-back text (see unackedWrites in index.svelte)
+    await page.evaluate(() => {
+      const item = window._item('#e2e_xtab')!
+      for (const n of [1, 2, 3, 4]) item.write(`burst ${n}`)
+    })
+    await expect.poll(() => itemText(page, '#e2e_xtab'), { timeout: 30_000 }).toContain('burst 4')
+    await page.waitForTimeout(2_000) // let every echo and queued save settle ...
+    expect(await itemText(page, '#e2e_xtab')).toContain('burst 4') // ... none may roll it back
+    await expect.poll(() => itemText(other, '#e2e_xtab'), { timeout: 30_000 }).toContain('burst 4')
+    expect(await itemText(other, '#e2e_xtab')).toBe(await itemText(page, '#e2e_xtab'))
   } finally {
     await other.close()
   }
+})
+
+test('images loading in small steps still trigger a layout within seconds', async ({ page }) => {
+  // regression: item heights grow as each image loads, but each step stays under the 300px
+  // relayout threshold — with only per-event deltas checked, no layout ran until an unrelated
+  // pass (the periodic time-string update) 10+ seconds later, which is how a shared page could
+  // take that long to wrap into its second column. the trigger now also fires on cumulative
+  // drift from the height the LAST layout used (see onItemResized/updateItemLayout)
+  const svg = (n: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="160"><rect width="400" height="160" fill="#8cf"/><text x="10" y="80">${n}</text></svg>`
+  await page.route(/\/e2e-grow-(\d)\.svg/, async route => {
+    const n = route.request().url().match(/e2e-grow-(\d)/)![1]
+    await new Promise(resolve => setTimeout(resolve, 1000 + 400 * Number(n))) // staggered loads
+    await route.fulfill({ contentType: 'image/svg+xml', body: svg(n) })
+  })
+  await loadAdmin(page)
+  await page.evaluate(() =>
+    window._create('#e2e_growth staggered images\n![](/e2e-grow-1.svg)\n![](/e2e-grow-2.svg)\n![](/e2e-grow-3.svg)')
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_growth')) // navigate to it so it renders
+  // the item renders at its image-less height first (each image adds 160px only when it loads)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_growth')?.elem?.offsetHeight ?? 0)).toBeGreaterThan(0)
+  const before = await page.evaluate(() => (window as any).__layoutCount as number)
+  // all three images load between ~1.4s and ~2.2s after creation, each step under the per-event
+  // threshold; a layout pass must still follow within a few seconds, not after the 10s fallback
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_growth')?.elem?.offsetHeight ?? 0), { timeout: 10_000 })
+    .toBeGreaterThan(3 * 160)
+  const heightSettledAt = Date.now()
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__layoutCount as number), { timeout: 5_000 })
+    .toBeGreaterThan(before)
+  expect(Date.now() - heightSettledAt).toBeLessThan(5_000)
 })

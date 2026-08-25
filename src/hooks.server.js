@@ -16,8 +16,13 @@ export async function handle({ event, resolve }) {
   event.locals.meta = content?.meta ?? null
   return resolve(event, {
     // the placeholder comment stays in place (content is inserted after it): removing comments in
-    // transformPageChunk draws a dev warning since svelte hydration relies on comment markers
+    // transformPageChunk draws a dev warning since svelte hydration relies on comment markers.
+    // the replacement MUST be a function: as a string, '$&', "$'" and '$`' in the item-authored
+    // content are substitution patterns — "$'" splices in everything after the placeholder, so an
+    // item containing it duplicated the app container INSIDE the injected block, which the app
+    // removes on boot (see +page.js), leaving the real container empty and the app rendering into
+    // a detached tree (every item then measures zero height and rendering never completes)
     transformPageChunk: ({ html }) =>
-      content ? html.replace('<!--ssr-content-->', '<!--ssr-content-->' + content.html) : html,
+      content ? html.replace('<!--ssr-content-->', () => '<!--ssr-content-->' + content.html) : html,
   })
 }

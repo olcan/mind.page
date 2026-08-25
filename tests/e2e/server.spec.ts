@@ -121,6 +121,19 @@ test.describe('crawlable public pages', () => {
           '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" onerror="window.__XSS_RAN = 1">',
           '<a href="javascript:window.__XSS_RAN = 1">click</a>',
           '<div onclick="window.__XSS_RAN = 1" style="background:url(javascript:1)">styled</div>',
+          // markdown-AUTHORED forms: raw html is escaped, but marked GENERATES anchors from link
+          // syntax with the url scheme passed through — these must be dropped by the sanitizer
+          '[md link](javascript:window.__XSS_RAN%20=%201)',
+          '![md image](javascript:window.__XSS_RAN%20=%201)',
+          '[md ref][1]',
+          '',
+          '[1]: javascript:window.__XSS_RAN=1',
+          '',
+          '> a blockquote that must still render as one',
+          '',
+          // regex substitution patterns: as a string replacement these would splice page markup
+          // into the block (see transformPageChunk in hooks.server.js)
+          'patterns: $& and $\' and $` must stay literal',
         ].join('\n'),
         attr: { shared: { keys: ['hostile'], indices: { hostile: 0 } } },
       })
@@ -129,9 +142,16 @@ test.describe('crawlable public pages', () => {
       const block = html.slice(html.indexOf('class="ssr-content"'), html.indexOf('id="sapper"'))
       expect(block).toContain('payload follows') // the item IS rendered
       expect(block).toContain('&lt;script&gt;') // ... with its html inert, as text
+      expect(block).toContain('<blockquote>') // ... and markdown itself still renders
+      // item text cannot splice page markup: exactly ONE app container, and the page ends normally
+      expect(html.match(/id="sapper"/g) ?? []).toHaveLength(1)
+      expect(block).toContain('patterns: $&amp; and $\' and $` must stay literal')
       expect(block).not.toMatch(/<script/i) // no active markup of any kind
       expect(block).not.toMatch(/<[a-z]+[^>]*\son\w+\s*=/i) // no event-handler attributes
-      expect(block).not.toMatch(/<a[^>]*href\s*=\s*["']?javascript:/i)
+      // no ACTIVE javascript: url on any tag (the escaped raw payload legitimately contains the
+      // characters 'href="javascript:' as inert text) — markdown-authored links included
+      expect(block).not.toMatch(/<[a-z][^>]*\s(href|src)\s*=\s*["']?javascript:/i)
+      expect(block).toContain('<a>md link</a>') // the link parsed, and its href was dropped
       expect(block).not.toMatch(/<(iframe|object|embed|form)/i)
       // nothing in the injected block executes with javascript enabled: the app's own bundle is
       // blocked so only server-injected content can run (once the app boots it evaluates item
