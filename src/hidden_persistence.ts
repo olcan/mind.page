@@ -9,7 +9,7 @@
 // wrapper while its chain has in-flight work: item code observes it (e.g. the store_saving
 // getter in index.svelte), so it is part of the window contract.
 
-import { finalizeAdoption, reassignName, removeHidden, type HiddenIndex, type HiddenWrapper } from './hidden.js'
+import { finalizeAdoption, finalizeCreate, removeHidden, type HiddenIndex, type HiddenWrapper } from './hidden.js'
 
 export type HiddenDocData = { hidden: true; time: number; attr: null; text: string }
 
@@ -63,31 +63,73 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       })
   }
 
+  // persists a pending create: confirm (unless already adopted), then either update the adopted
+  // document with merged state or create a fresh one. shared by the create path and by not-found
+  // recovery (an update whose document was deleted concurrently is a create-like transition: it
+  // must confirm and adopt any surviving same-name document, never blindly create a duplicate).
+  // the wrapper can be tombstoned by a delete at any await: nothing further is persisted, and
+  // settlement re-keys the wrapper WITHOUT reinserting it (the queued delete targets the result)
+  async function persistCreate(wrapper: HiddenWrapper) {
+    try {
+      const data = await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
+      if (wrapper.deleted) return
+      if (!wrapper.adopt_id) await deps.confirmIndex() // may adopt via registration; rejects to fail the create
+      if (wrapper.deleted) return
+      if (wrapper.adopt_id) {
+        const adopted = await deps.encryptState(payload(wrapper)) // merged state (see registerHidden)
+        await deps.updateDoc(wrapper.adopt_id, adopted)
+        finalizeAdoption(deps.index(), wrapper)
+      } else {
+        const id = await deps.createDoc(data)
+        finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
+      }
+    } catch (e) {
+      if (wrapper.deleted) throw e // the maps were already cleared by the delete: leave them alone
+      if (wrapper.adopt_id) {
+        // the document exists: settle onto it so the next save UPDATES it — deleting the
+        // wrapper would send the next save down the create path and duplicate it
+        finalizeAdoption(deps.index(), wrapper)
+      } else {
+        // a genuinely failed fresh create: remove the wrapper (promoting any retained
+        // same-name duplicate) so the next save retries cleanly
+        removeHidden(deps.index(), wrapper.id)
+      }
+      throw e // keep the mirrored saving promise's rejection observable to waiters
+    }
+  }
+
   return {
-    // replaces (or creates) the hidden item for the name with the given state; each call
-    // snapshots the full state it was given, so a later save carries everything and a failed
-    // earlier write is superseded rather than retried
+    // replaces (or creates) the hidden item for the name with the given state. the wrapper's
+    // state is updated immediately; the document payload is serialized when the queued task
+    // EXECUTES, so it always carries the latest full state — including adoption merges and later
+    // save() calls — and a failed earlier write is superseded rather than retried
     save(name: string, item: any) {
       const index = deps.index()
       const existing = index.byName.get(name)
       if (existing) {
         existing.item = item
         if (deps.readonly()) return
-        const state = payload(existing)
         enqueue(name, existing, async () => {
+          // re-resolve the target at execution: while this task was queued the wrapper can have
+          // been deleted (tombstone), removed by a failed create's cleanup, or displaced from
+          // byId by a remote replacement or rename — a write against a transitional wrapper
+          // would resurrect deleted state, bypass create confirmation, or rename the document
+          // back, so the save is dropped instead (the canonical state is whatever displaced it)
+          const index = deps.index()
+          if (existing.deleted || index.byName.get(name) !== existing || index.byId.get(existing.id) !== existing) {
+            console.warn(`dropping hidden save for '${name}': wrapper removed or replaced while queued`)
+            return
+          }
           try {
-            const data = await deps.encryptState(state)
+            const data = await deps.encryptState(payload(existing))
             try {
               await deps.updateDoc(existing.id, data)
             } catch (e) {
               if (!isNotFound(e)) throw e
-              // the document was deleted concurrently (e.g. by another client's cleanup): fall
-              // back to creating the LATEST full snapshot under a new id
-              const created = await deps.createDoc(await deps.encryptState(payload(existing)))
-              index.byId.delete(existing.id)
-              existing.id = created
-              index.byId.set(created, existing)
-              reassignName(index, name)
+              // deleted concurrently (e.g. another client's cleanup): a create-like transition
+              existing.pending_create = true
+              existing.adopt_id = null
+              await persistCreate(existing)
             }
           } catch (e) {
             console.error('hidden item update failed:', e)
@@ -110,52 +152,34 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       index.byId.set(wrapper.id, wrapper)
       index.byName.set(name, wrapper)
       if (deps.readonly()) return
-      const state = payload(wrapper) // pre-adoption snapshot; the adopted path re-serializes merged state
       enqueue(name, wrapper, async () => {
         try {
-          const data = await deps.encryptState(state) // may prompt; adoption can happen meanwhile
-          if (!wrapper.adopt_id) await deps.confirmIndex() // may adopt via registration; rejects to fail the create
-          if (wrapper.adopt_id) {
-            const adopted = await deps.encryptState(payload(wrapper)) // merged state (see registerHidden)
-            await deps.updateDoc(wrapper.adopt_id, adopted)
-            finalizeAdoption(deps.index(), wrapper)
-          } else {
-            const id = await deps.createDoc(data)
-            const index = deps.index()
-            index.byId.delete(wrapper.id)
-            wrapper.id = id
-            wrapper.pending_create = null
-            index.byId.set(id, wrapper)
-          }
+          await persistCreate(wrapper)
         } catch (e) {
           console.error('hidden item create failed:', e)
-          if (wrapper.adopt_id) {
-            // the document exists: settle onto it so the next save UPDATES it — deleting the
-            // wrapper would send the next save down the create path and duplicate it
-            finalizeAdoption(deps.index(), wrapper)
-          } else {
-            // a genuinely failed fresh create: remove the wrapper (promoting any retained
-            // same-name duplicate) so the next save retries cleanly
-            removeHidden(deps.index(), wrapper.id)
-          }
-          throw e // keep the mirrored saving promise's rejection observable to waiters
+          throw e
         }
       })
     },
 
-    // removes the hidden item from the index immediately and deletes its document behind the
-    // name's chain (a delete during a pending create removes the eventually-persisted document)
+    // removes the hidden item from the index immediately, tombstones the wrapper (in-flight
+    // work must neither persist it nor reinsert it) and deletes its document behind the name's
+    // chain (a delete during a pending create removes the eventually-persisted document)
     delete(id: string) {
       const { removed } = removeHidden(deps.index(), id)
+      if (removed) removed.deleted = true
       if (deps.readonly()) return
       const run = async () => {
         // by the time the chain reaches this task, a preceding create has settled: on success
-        // the wrapper carries the persistent id, on failure nothing was persisted
+        // the wrapper carries the persistent id (re-keyed even when tombstoned), on failure
+        // nothing was persisted
         const target = removed && !removed.pending_create ? removed.id : (removed?.adopt_id ?? removed?.id ?? id)
         if (removed?.pending_create && !removed.adopt_id) return // nothing persisted
         await deps.deleteDoc(target).catch(e => console.error('hidden item delete failed:', e))
       }
-      if (removed) enqueue(removed.name, undefined, run)
+      // the wrapper is passed so its saving mirror stays accurate through the delete and is
+      // cleared at the chain tail (item code can still hold a reference to the wrapper)
+      if (removed) enqueue(removed.name, removed, run)
       else void run()
     },
   }

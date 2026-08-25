@@ -14,6 +14,10 @@ export type HiddenWrapper = {
   pending_create?: boolean | null
   adopt_id?: string | null
   saving?: Promise<string> | null
+  // tombstone set by a delete while controller work is in flight (see hidden_persistence.ts):
+  // settlement transitions re-key the wrapper (so the queued delete can target the persisted
+  // document) but never reinsert it into the maps
+  deleted?: boolean
 }
 
 export type HiddenIndex = {
@@ -152,7 +156,20 @@ export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
   index.byId.delete(wrapper.id)
   wrapper.id = wrapper.adopt_id!
   wrapper.pending_create = wrapper.adopt_id = null
+  if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
   index.byId.set(wrapper.id, wrapper)
+  reassignName(index, wrapper.name)
+}
+
+// settles a fresh create: re-keys the wrapper to the persistent id and restores the minimum-id
+// invariant for the name — a smaller-id duplicate can have arrived remotely while the create was
+// in flight, and it must win the name (the cross-client duplicate-resolution rule)
+export function finalizeCreate(index: HiddenIndex, wrapper: HiddenWrapper, id: string) {
+  index.byId.delete(wrapper.id)
+  wrapper.id = id
+  wrapper.pending_create = null
+  if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
+  index.byId.set(id, wrapper)
   reassignName(index, wrapper.name)
 }
 
