@@ -19,20 +19,6 @@ export type HiddenWrapper = {
   pending_create?: boolean | null
   adopt_id?: string | null
   saving?: Promise<string> | null
-  // the document REVISION this wrapper's state came from (server-assigned, monotonic per
-  // document). it is the whole ordering story for hidden records: a change is applied only when
-  // it is NEWER than what we hold, and a write only lands if the document is still at the
-  // revision we based it on. that replaces reconstructing server order on the client from
-  // payload provenance, receipt sequencing and post-hoc reconciliation
-  rev?: number
-  // monotonic stamp assigned when a LOCAL create claims the name (see hidden_persistence.ts):
-  // a logical deletion removes only records that existed when it was issued, so a save made
-  // after the deletion began is causally later and must survive it
-  born?: number
-  // tombstone set by a delete while controller work is in flight (see hidden_persistence.ts):
-  // settlement transitions re-key the wrapper (so the queued delete can target the persisted
-  // document) but never reinsert it into the maps
-  deleted?: boolean
 }
 
 export type HiddenIndex = {
@@ -76,14 +62,14 @@ export function reassignName(index: HiddenIndex, name: string) {
 //   account was fully loaded (checkOrphans false on fixed pages, which load a shared subset)
 export function buildHiddenIndex(
   index: HiddenIndex,
-  hidden_items: { id: string; text: string; rev?: number }[],
+  hidden_items: { id: string; text: string }[],
   { anonymous, checkOrphans, existingIds }: { anonymous: boolean; checkOrphans: boolean; existingIds: Set<string> }
 ): InvalidHidden[] {
   const invalid: InvalidHidden[] = []
   for (const item of [...hidden_items].sort((a, b) => compareIds(a.id, b.id))) {
     let wrapper: HiddenWrapper
     try {
-      wrapper = Object.assign(JSON.parse(item.text), { id: item.id, rev: item.rev ?? 0 })
+      wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
       if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
     } catch (e) {
       invalid.push({ wrapper: { id: item.id, name: '' }, reason: 'malformed' })
@@ -127,7 +113,6 @@ export function registerHidden(
   if (existing) {
     if (existing.pending_create && !existing.adopt_id) {
       existing.adopt_id = wrapper.id
-      existing.rev = wrapper.rev // the adopted write preconditions on the record's revision
       mergeAdopted(existing, wrapper)
       return 'adopted'
     }
@@ -149,28 +134,6 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
   return { warning }
-}
-
-// true when the incoming record is NEWER than what the index holds for that document: the one
-// rule that makes ordering total. an equal revision is our own echo (or a redelivery) and an
-// older one is a stale delivery — neither may overwrite current state
-export function isNewerRevision(index: HiddenIndex, wrapper: HiddenWrapper) {
-  const existing = index.byId.get(wrapper.id)
-  if (!existing) return true
-  const rev = wrapper.rev ?? 0
-  const held = existing.rev ?? 0
-  if (rev > held) return true
-  if (rev < held) return false
-  // EQUAL revisions are ambiguous. two cases have to be told apart:
-  // - OUR OWN echo of the revision we already hold. local state can legitimately have moved on
-  //   since (the caller mutated the store and its write is still queued), so content differing
-  //   proves nothing here — and replacing the wrapper would strand that queued write.
-  // - a client that predates the revision field, which updates the ciphertext while firestore
-  //   preserves the old rev. that IS a real change and must not be dropped.
-  // in-flight local work distinguishes them: while this document has a write of its own pending,
-  // an equal revision is our echo; otherwise different content at the same revision is a change
-  if (existing.saving) return false
-  return JSON.stringify(wrapper.item) != JSON.stringify(existing.item) || wrapper.name != existing.name
 }
 
 export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
@@ -197,7 +160,6 @@ export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: 
 export function canonicalHolders(index: HiddenIndex): Map<string, HiddenWrapper> {
   const holders = new Map<string, HiddenWrapper>()
   for (const wrapper of index.byId.values()) {
-    if (wrapper.deleted) continue
     const held = holders.get(wrapper.name)
     if (!held) {
       holders.set(wrapper.name, wrapper)
@@ -233,7 +195,7 @@ export function classifyInvalidHidden(
   const invalid: { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[] = []
   const holders = canonicalHolders(index) // from live records only — never a byName alias
   for (const wrapper of index.byId.values()) {
-    if (wrapper.pending_create || wrapper.adopt_id || wrapper.deleted) continue
+    if (wrapper.pending_create || wrapper.adopt_id) continue
     if (holders.get(wrapper.name) !== wrapper) {
       invalid.push({ wrapper, reason: 'duplicate' })
       continue
@@ -269,7 +231,6 @@ export function finalizeAdoption(index: HiddenIndex, wrapper: HiddenWrapper) {
   if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id)
   wrapper.id = wrapper.adopt_id!
   wrapper.pending_create = wrapper.adopt_id = null
-  if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
   index.byId.set(wrapper.id, wrapper)
   reassignName(index, wrapper.name)
 }
@@ -284,7 +245,6 @@ export function finalizeCreate(index: HiddenIndex, wrapper: HiddenWrapper, id: s
   // only pending_create left a transitional wrapper that classification skips forever. the
   // adopted document becomes an ordinary duplicate and is cleaned up by recomputation
   wrapper.pending_create = wrapper.adopt_id = null
-  if (wrapper.deleted) return // deleted while in flight: re-keyed for the queued delete, not reinserted
   index.byId.set(id, wrapper)
   reassignName(index, wrapper.name)
 }

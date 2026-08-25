@@ -430,6 +430,32 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     expect(
       await page.evaluate(() => Object.keys(sessionStorage).filter(k => k.startsWith('mindpage_run_code_')).length)
     ).toBe(0) // nothing persisted to forge against
+    // an ANONYMOUS visitor keeps a working page (owner code runs), but that realm cannot
+    // AUTHENTICATE anyone: the sign-in surface is removed from window.firebase before item code
+    // runs, so owner code cannot open its own popup under an intercepted click and end up
+    // holding a live session
+    await page.goto('/') // sign out from a first-party page, not from the foreign one
+    await waitForApp(page)
+    await page.evaluate(() => void window._create('/_signout', { command: true }))
+    await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
+    await page.goto('/?shared=crawl_e2e/trap')
+    await dismissNotice()
+    await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
+    expect(
+      await page.evaluate(() =>
+        [
+          'signInWithPopup',
+          'signInWithRedirect',
+          'signInWithCustomToken',
+          'signInAnonymously',
+          'getRedirectResult',
+        ].filter(m => typeof (window as any).firebase?.auth?.[m] == 'function')
+      )
+    ).toEqual([]) // no way to establish a session from this realm
+    await withSecret(page)
+    await loadUser(page, ALICE)
+    await page.goto('/?shared=crawl_e2e/trap')
+    await dismissNotice()
     // an authenticated visitor with NO stored secret is gated just the same: window.firebase
     // exposes their authenticated firestore/storage/auth handles and the id token sits in a
     // javascript-readable __session cookie, so the secret is not the only asset at risk

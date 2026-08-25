@@ -21,7 +21,6 @@
     getDocFromServer,
     getDocsFromServer,
     setDoc,
-    runTransaction,
     addDoc,
     updateDoc,
     deleteDoc,
@@ -67,12 +66,38 @@
   // so foreign code runs only after explicit consent (see initialize) and every execution path
   // funnels through Item.eval, which throws while blocked
   let foreignCodeBlocked = false
-  // a sign-in gesture started on a foreign shared page is completed on the next clean load (see
-  // signIn): the visitor asked to sign in, so the prompt should not be lost, but it must not
-  // happen in a realm where owner code may be live
-  if (isClient && window.sessionStorage.getItem('mindpage_signin_after_reload')) {
-    window.sessionStorage.removeItem('mindpage_signin_after_reload')
-    if (!url_params?.shared) setTimeout(() => signIn(), 0)
+  // NOTE: a sign-in gesture started on a foreign shared page is NOT auto-resumed after the
+  // navigation. a programmatic call carries no user activation and would simply be popup-blocked;
+  // the visitor lands on a clean first-party page and clicks sign in there, which is also the
+  // only way the gesture is genuinely theirs
+
+  // removes every way to establish a session from the firebase object item code can reach. the
+  // page keeps its authenticated READS (a shared page still renders), but nothing running here
+  // can create or swap a principal. residual, documented: owner code already running in another
+  // still-open foreign tab can observe a session created later elsewhere, since auth state is
+  // shared across tabs of an origin — closing that needs a separate execution origin
+  function disableForeignAuth() {
+    const auth = (window['firebase'] as any)?.auth
+    if (!auth) return
+    for (const method of [
+      'signInWithPopup',
+      'signInWithRedirect',
+      'signInWithCustomToken',
+      'signInWithCredential',
+      'signInWithEmailAndPassword',
+      'signInWithEmailLink',
+      'signInAnonymously',
+      'createUserWithEmailAndPassword',
+      'getRedirectResult',
+      'updateCurrentUser',
+      'linkWithPopup',
+      'linkWithRedirect',
+      'reauthenticateWithPopup',
+      'reauthenticateWithRedirect',
+    ])
+      try {
+        delete auth[method]
+      } catch (e) {} // non-configurable in some builds: best effort, the gate below still applies
   }
 
   // per-load, in-memory foreign-code consent (owner uid -> granted). deliberately NOT persisted:
@@ -6260,7 +6285,6 @@
     repairNameIndex,
     registerHidden,
     applyRemoteAdded,
-    isNewerRevision,
     applyRemoteModified,
     removeHidden,
   } from '../hidden'
@@ -6638,10 +6662,11 @@
     foreignCodeBlocked = false
     if (fixed && sharer) {
       const principal = getAuth(firebase)?.currentUser ?? null
-      const secret_present = !!localStorage.getItem('mindpage_secret')
-      // fail closed on unknown identity WITH key material present: something is authenticated
-      // enough to hold a secret, and an unidentifiable visitor must not silently run owner code
-      const gated = principal ? principal.uid != sharer : secret_present
+      // a foreign page can no longer AUTHENTICATE anyone (see disableForeignAuth below), so an
+      // anonymous visitor has nothing to lose here and keeps a working page. an authenticated
+      // visitor is a different matter: their session already exists, and consent is the only
+      // thing standing between owner code and it
+      const gated = principal ? principal.uid != sharer : false
       if (gated) {
         // consent is asked once PER LOAD and kept in memory only. a stored record cannot be an
         // integrity boundary here: any owner code that ever ran in this origin — including on an
@@ -6670,6 +6695,12 @@
     }
     // read by the renderer to make owner html inert (see toHTML in Item.svelte)
     window['_foreign_code_blocked'] = foreignCodeBlocked
+    // on a foreign page, remove the ability to AUTHENTICATE from the exposed firebase surface
+    // before any owner code runs. otherwise owner code can call signInWithPopup itself under a
+    // click it intercepted, and end up holding a live authenticated session in a realm it
+    // controls — the app's own signIn() leaving for a clean page cannot help when the hostile
+    // code is what handles the gesture. the visitor signs in from a first-party page instead
+    if (fixed && sharer && sharer != user?.uid) disableForeignAuth()
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
@@ -6911,8 +6942,7 @@
     // and act before this page reloads. so leave the realm FIRST and let the visitor complete
     // the gesture on a clean first-party load
     if (fixed && sharer && sharer != user?.uid) {
-      window.sessionStorage.setItem('mindpage_signin_after_reload', '1')
-      location.href = '/'
+      location.href = '/' // leave the realm; the visitor completes the gesture on a clean load
       return
     }
     // if user appears to be signed in, sign out instead
@@ -7352,11 +7382,12 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            // hidden records need no own-write classification at all: the REVISION decides. an
-            // echo of our own write carries the revision we already hold and is rejected by
-            // isNewerRevision at application; anything newer — from any tab or device — is
-            // exactly what should win. removals are id-driven and idempotent
-            return false
+            // the echo of a write this client ISSUED and the server has not acknowledged yet.
+            // firestore delivers a document's changes in commit order, so everything else is
+            // genuinely newer state and must be applied — including another tab's write that
+            // lands while ours is still pending, which the old blanket in-flight skip lost.
+            // removals are id-driven and idempotent, so they always apply
+            return change.type != 'removed' && hiddenPersistence.isOwnEcho(doc.id, savedItem.text)
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
@@ -7404,7 +7435,6 @@
                       // older or equal revision: a redelivery, or the echo of our own write —
                       // never allowed to overwrite what we hold (this single rule replaces the
                       // whole own-write provenance system)
-                      if (!isNewerRevision(hiddenIndex(), wrapper)) return
                       const { warning } = applyRemoteAdded(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -7481,7 +7511,6 @@
                     if (savedItem.hidden) {
                       const wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
                       if (!wrapper) return // quarantined
-                      if (!isNewerRevision(hiddenIndex(), wrapper)) return // see the added branch
                       const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -8587,7 +8616,6 @@
     // a server READ is a delivery like any other, and it can be older than what we hold by the
     // time it is applied (a confirmation query result queued behind a write that has since
     // committed). the revision decides here too
-    if (!isNewerRevision(hiddenIndex(), wrapper)) return
     // a pending create that claimed this name adopts the document (update instead of create),
     // with the pending (shared-page) changes taking precedence over the loaded state
     registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
@@ -8599,27 +8627,16 @@
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
-    // an ORDINARY queued update that carries the next revision. NOT a transaction: firestore
-    // transactions fail outright while offline instead of queueing, so routing every hidden save
-    // through one silently dropped offline changes — the app's persistent cache explicitly
-    // promises that offline writes survive a reload (see client-globals.ts). the revision here
-    // is advisory ordering for DELIVERY (see isNewerRevision), not a compare-and-set: making it
-    // a server invariant needs a firestore rule plus a staged cutover for already-open tabs,
-    // which is recorded as the next step rather than switched on under a live client
-    updateDoc: (id, data, expectedRev) => {
-      const rev = expectedRev + 1
-      return updateDoc(doc(getFirestore(firebase), 'items', id), { ...data, rev }).then(() => rev)
-    },
+    // an ordinary queued update. no revision field and no compare-and-set: firestore transactions
+    // fail outright offline (they never reach the durable queue), and an advisory client-written
+    // revision has the costs of a protocol with none of its guarantees — an offline client can
+    // lower it, no rule enforces the increment, and equal revisions carry no order. ordering
+    // comes from firestore itself, which delivers a document's changes in commit order; the
+    // controller only has to recognize the echoes of writes it issued
+    updateDoc: (id, data) => updateDoc(doc(getFirestore(firebase), 'items', id), data),
     // the plaintext user field is required for creates (see firestore rules); updates keep it
-    createDoc: data =>
-      addDoc(collection(getFirestore(firebase), 'items'), { ...data, user: user.uid, rev: 1 }).then(added => added.id),
-    deleteDoc: id =>
-      deleteDoc(doc(getFirestore(firebase), 'items', id)).catch(e => {
-        // the server document survives while the local wrapper is gone: revoke authority so the
-        // next same-name create re-confirms and ADOPTS it instead of creating a duplicate
-        revokeHiddenAuthority('hidden delete failed')
-        throw e
-      }),
+    createDoc: (id, data) => setDoc(doc(getFirestore(firebase), 'items', id), { ...data, user: user.uid }),
+    newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: pendingName => {

@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test'
 import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
 import {
   applyRemoteAdded,
-  isNewerRevision,
   registerHidden,
   removeHidden,
   type HiddenIndex,
@@ -21,12 +20,11 @@ function deferred<T>() {
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
-type Call = { op: string; id?: string; text?: string; time?: number; rev?: number }
+type Call = { op: string; id?: string; text?: string }
 
 function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
   const idx: HiddenIndex = { byId: new Map(), byName: new Map() }
   const calls: Call[] = []
-  const revs = new Map<string, number>() // server revision per document
   let ids = 0
   const deps: HiddenPersistenceDeps = {
     index: () => idx,
@@ -40,21 +38,15 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
       encrypted.attr = null
       return encrypted
     },
-    // models the conditional update: the document must still be at `expectedRev`, and the write
-    // lands at rev + 1. a mismatch rejects with the conflict shape production throws
-    updateDoc: async (id, data, expectedRev) => {
-      calls.push({ op: 'update', id, text: data.cipher ?? data.text, time: data.time, rev: expectedRev })
-      const current = revs.get(id) ?? 0
-      if (current != expectedRev) throw { conflict: true, rev: current }
-      const rev = current + 1
-      revs.set(id, rev)
-      return rev
+    // an ordinary write, exactly like production: no precondition, no revision. the plaintext
+    // survives only inside the cipher, since encryptState above nulls text like the real one
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
     },
-    createDoc: async data => {
-      calls.push({ op: 'create', text: data.cipher ?? data.text })
-      return 'doc' + ++ids
+    createDoc: async (id, data) => {
+      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
     },
-    deleteDoc: async id => void calls.push({ op: 'delete', id }),
+    newDocId: () => 'doc' + ++ids,
     confirmIndex: async _name => void calls.push({ op: 'confirm' }),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
@@ -62,7 +54,7 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     readonly: () => false,
     ...overrides,
   }
-  return { idx, calls, deps, revs, controller: createHiddenPersistence(deps) }
+  return { idx, calls, deps, controller: createHiddenPersistence(deps) }
 }
 
 // mimics the items listener for one remote hidden record: receipt-time intent is noted FIRST
@@ -82,36 +74,44 @@ function arriveRemoval(controller: any, idx: HiddenIndex, id: string) {
 
 const itemOf = (text?: string) => JSON.parse(String(text).replace(/^cipher:/, '')).item
 
-test('concurrent updates are serialized per name: the later snapshot always lands last', async () => {
-  const first = deferred<void>()
-  const { idx, calls, deps, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+test('successive saves both reach the write queue in order, without waiting for acknowledgement', async () => {
+  // round-13 finding 2: this test previously asserted the opposite — that a second save must not
+  // be issued while the first was unacknowledged. offline, `updateDoc` reaches the SDK's durable
+  // queue immediately but its promise stays pending until the server accepts, so waiting on it
+  // meant only the FIRST offline save survived a reload and every later one was lost with the
+  // tab. issue order is preserved; acknowledgement order is the server's business
+  const ack = deferred<void>()
+  const { idx, calls, controller } = harness({
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      if (calls.length == 1) await first.promise // the FIRST write hangs; the second must wait
-      return expectedRev + 1
+      await ack.promise // NEITHER write is acknowledged during this test
     },
   })
-  idx.byId.set('d1', { id: 'd1', name: 'n' })
-  idx.byName.set('n', idx.byId.get('d1')!)
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', wrapper)
+  idx.byName.set('n', wrapper)
+  // two saves in the same window COALESCE: the queued task serializes current state, so a
+  // second write of identical content would be pure waste
   controller.save('n', { v: 1 })
   controller.save('n', { v: 2 })
   await flush()
-  expect(calls.filter(c => c.op == 'update')).toHaveLength(1) // second not issued while first in flight
-  first.resolve()
+  expect(calls.filter(c => c.op == 'update')).toHaveLength(1)
+  expect(itemOf(calls[0].text)).toEqual({ v: 2 }) // carrying the latest state
+  // a LATER save is issued even though the first is still unacknowledged: waiting for the ack
+  // is what lost every offline change after the first (round-13 finding 2)
+  controller.save('n', { v: 3 })
   await flush()
   const updates = calls.filter(c => c.op == 'update')
   expect(updates).toHaveLength(2)
-  expect(itemOf(updates[1].text)).toEqual({ v: 2 }) // order preserved: latest state last
-  void deps
+  expect(itemOf(updates[1].text)).toEqual({ v: 3 })
+  ack.resolve()
 })
-
 test('a failed update is superseded by the next save, which carries the full state', async () => {
   let fail = true
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       if (fail) throw new Error('unavailable')
-      return expectedRev + 1
     },
   })
   idx.byId.set('d1', { id: 'd1', name: 'n' })
@@ -149,14 +149,13 @@ test('an update hitting not-found confirms like a create, then creates the lates
 
 test('not-found recovery adopts a surviving same-name document instead of creating a duplicate', async () => {
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       if (id == 'gone1') {
         const e: any = new Error('missing')
         e.code = 'not-found'
         throw e
       }
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      return expectedRev + 1
     },
     confirmIndex: async _name => {
       calls.push({ op: 'confirm' })
@@ -192,10 +191,10 @@ test('a create claims the name, confirms the index, persists and re-keys to the 
 })
 
 test('updates queued behind a create wait for it and use the persistent id', async () => {
-  const gate = deferred<string>()
+  const gate = deferred<void>()
   const { idx, calls, controller } = harness({
-    createDoc: async data => {
-      calls.push({ op: 'create', text: data.cipher ?? data.text })
+    createDoc: async (id, data) => {
+      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
       return gate.promise
     },
   })
@@ -204,11 +203,12 @@ test('updates queued behind a create wait for it and use the persistent id', asy
   controller.save('n', { v: 2 }) // update path: the pending wrapper already owns the name
   await flush()
   expect(calls.filter(c => c.op == 'update')).toHaveLength(0) // waiting behind the create
-  gate.resolve('doc9')
+  const createdId = calls.find(c => c.op == 'create')!.id! // allocated before the write is issued
+  gate.resolve()
   await flush()
   const updates = calls.filter(c => c.op == 'update')
   expect(updates).toHaveLength(1)
-  expect(updates[0].id).toBe('doc9')
+  expect(updates[0].id).toBe(createdId)
   expect(itemOf(updates[0].text)).toEqual({ v: 2 })
 })
 
@@ -251,10 +251,9 @@ test('a failed adopted update still settles onto the document: the next save upd
     confirmIndex: async _name => {
       registerHidden(idx, { id: 'srv1', name: 'n', item: {} }, () => {})
     },
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       if (fail) throw new Error('unavailable')
-      return expectedRev + 1
     },
   })
   controller.save('n', { v: 1 })
@@ -313,10 +312,10 @@ test('a save queued across an adoption still persists the merged state (adopted 
 })
 
 test('a fresh create settles to the minimum id when a lower-id duplicate arrives while it is in flight', async () => {
-  const gate = deferred<string>()
+  const gate = deferred<void>()
   const { idx, calls, controller } = harness({
-    createDoc: async data => {
-      calls.push({ op: 'create', text: data.cipher ?? data.text })
+    createDoc: async (id, data) => {
+      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
       return gate.promise
     },
   })
@@ -325,20 +324,20 @@ test('a fresh create settles to the minimum id when a lower-id duplicate arrives
   // a remote lower-id duplicate arrives mid-create; the pending claim is not displaced ...
   void arrive(controller, idx, { id: 'aaa1', name: 'n', item: { remote: true } })
   expect(idx.byName.get('n')!.pending_create).toBe(true)
-  gate.resolve('zzz9')
+  gate.resolve()
   await flush()
   // ... but settlement restores the module's minimum-id rule: the remote duplicate wins the name
   expect(idx.byName.get('n')!.id).toBe('aaa1')
-  expect(idx.byId.get('zzz9')!.item).toEqual({ v: 1 }) // the created document is retained in byId
+  const createdId = calls.find(c => c.op == 'create')!.id! // allocated before the write is issued
+  expect(idx.byId.get(createdId)!.item).toEqual({ v: 1 }) // the created document is retained in byId
 })
 
 test('a save against a wrapper displaced from byId (remote replacement or rename) is dropped', async () => {
   const gate = deferred<void>()
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       if (calls.length == 1) await gate.promise
-      return expectedRev + 1
     },
   })
   const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
@@ -360,10 +359,10 @@ test('a save against a wrapper displaced from byId (remote replacement or rename
 test('a create adopts a same-name record already known locally instead of creating alongside it', async () => {
   // round-8 finding 5: an authoritative (no-op) confirmation with a survivor already in byId
   // must adopt the minimum-id survivor, not create a duplicate document
-  const gate = deferred<string>()
+  const gate = deferred<void>()
   const { idx, calls, controller } = harness({
-    createDoc: async data => {
-      calls.push({ op: 'create', text: data.cipher ?? data.text })
+    createDoc: async (id, data) => {
+      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
       return gate.promise
     },
   })
@@ -372,7 +371,7 @@ test('a create adopts a same-name record already known locally instead of creati
   // the decision from creating a duplicate
   controller.save('n', { mine: 2 })
   void arrive(controller, idx, { id: 'srv1', name: 'n', item: { theirs: 1 } })
-  gate.resolve('would-be-duplicate')
+  gate.resolve()
   await flush()
   expect(calls.filter(c => c.op == 'create')).toHaveLength(0)
   const updates = calls.filter(c => c.op == 'update')
@@ -384,14 +383,13 @@ test('a create adopts a same-name record already known locally instead of creati
 
 test('not-found recovery with an authoritative no-op confirmation adopts the retained survivor', async () => {
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       if (id == 'gone1') {
         const e: any = new Error('missing')
         e.code = 'not-found'
         throw e
       }
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      return expectedRev + 1
     },
     confirmIndex: async _name => void calls.push({ op: 'confirm' }), // authoritative: registers nothing
   })
@@ -459,29 +457,27 @@ test('a save whose wrapper is replaced while its write is in flight drops on not
   expect(idx.byName.get('n')).toBe(replacement) // untouched
 })
 
-test('remote transitions queue behind in-flight writes for the same name', async () => {
-  const inFlight = deferred<void>()
+test('remote transitions are not delayed by an unacknowledged local write', async () => {
+  // the chain used to hold until the server acknowledged, which delayed every remote transition
+  // for that name behind it — and offline, indefinitely. writes are issued and released now, so
+  // a remote change applies promptly; our own echo is filtered by payload instead (isOwnEcho)
+  const ack = deferred<void>()
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      await inFlight.promise
-      return expectedRev + 1
+      await ack.promise
     },
   })
   const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('n', wrapper)
   controller.save('n', { v: 1 })
-  await flush() // write in flight
+  await flush() // write issued, still unacknowledged
   const order: string[] = []
-  const applied = controller.applyRemote('n', () => order.push('remote'))
-  void controller.applyRemote('other', () => order.push('other-name')) // no chain: immediate
-  expect(order).toEqual(['other-name']) // same-name transition waits for the write
-  inFlight.resolve()
-  await applied
-  expect(order).toEqual(['other-name', 'remote'])
+  await controller.applyRemote(['n'], () => order.push('remote'))
+  expect(order).toEqual(['remote']) // applied without waiting for the acknowledgement
+  ack.resolve()
 })
-
 test('the saving mirror clears per wrapper even when the name chain continues with a new wrapper', async () => {
   const gate = deferred<void>()
   let gated = true
@@ -489,9 +485,8 @@ test('the saving mirror clears per wrapper even when the name chain continues wi
   const { idx } = h
   const controller = createHiddenPersistence({
     ...h.deps,
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async () => {
       if (gated) await gate.promise
-      return expectedRev + 1
     },
   })
   const first: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
@@ -501,7 +496,7 @@ test('the saving mirror clears per wrapper even when the name chain continues wi
   expect(first.saving).toBeTruthy()
   // the record is replaced remotely while that write is in flight, and the NEW wrapper takes
   // over the name's chain
-  const replacement: HiddenWrapper = { id: 'd1', name: 'n', item: { remote: true }, rev: 9 }
+  const replacement: HiddenWrapper = { id: 'd1', name: 'n', item: { remote: true } }
   idx.byId.set('d1', replacement)
   idx.byName.set('n', replacement)
   controller.save('n', { v: 2 })
@@ -513,106 +508,31 @@ test('the saving mirror clears per wrapper even when the name chain continues wi
   expect(first.saving).toBeNull()
   expect(fresh.saving).toBeNull()
 })
-test('a write is preconditioned on the revision it was built from', async () => {
-  // the ONE ordering rule, replacing the payload-provenance system: our write carries the
-  // revision we hold, so it lands only if nothing committed in between
-  const { idx, calls, revs, controller } = harness()
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 }, rev: 3 }
-  idx.byId.set('d1', wrapper)
-  idx.byName.set('n', wrapper)
-  revs.set('d1', 3)
-  controller.save('n', { v: 1 })
-  await flush()
-  const write = calls.find(c => c.op == 'update')!
-  expect(write.rev).toBe(3) // preconditioned on what we held ...
-  expect(revs.get('d1')).toBe(4) // ... and the server advanced exactly one revision
-  expect(wrapper.rev).toBe(4) // the wrapper now tracks it, so the next write preconditions on 4
-})
-
-test('a write superseded on the server is reported, not silently applied over', async () => {
-  const { idx, calls, revs, controller } = harness()
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 }, rev: 1 }
-  idx.byId.set('d1', wrapper)
-  idx.byName.set('n', wrapper)
-  revs.set('d1', 2) // another writer already committed revision 2
-  controller.save('n', { mine: 1 })
-  await flush()
-  // the conflict is an explicit outcome: the write did not land, and nothing rolled the server
-  // back to our state. the listener delivers revision 2 and applies it by isNewerRevision
-  expect(revs.get('d1')).toBe(2)
-  expect(calls.filter(c => c.op == 'update')).toHaveLength(1) // attempted once, not retried blindly
-})
-
-test('older deliveries never overwrite, and equal revisions are decided by content', async () => {
-  // covers own echoes (equal revision), redeliveries, and a queued arrival that lands after a
-  // newer write — the three cases the provenance map, the own-delete set, and the post-settle
-  // server reconcile each used to handle separately
-  const index: HiddenIndex = { byId: new Map(), byName: new Map() }
-  const held: HiddenWrapper = { id: 'd1', name: 'n', item: { current: true }, rev: 5 }
-  index.byId.set('d1', held)
-  index.byName.set('n', held)
-  // an equal revision with the SAME state is an echo ...
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { current: true }, rev: 5 })).toBe(false)
-  // ... but an equal revision with DIFFERENT state is a real change: a client predating the
-  // revision field updates the ciphertext while firestore preserves the old rev, and two clients
-  // can optimistically hold the same next revision after an offline write
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { theirs: true }, rev: 5 })).toBe(true)
-  // ... unless a write of OUR OWN is in flight for that document: then local state has moved on
-  // by definition, and replacing the wrapper would strand the queued write
-  held.saving = Promise.resolve('d1')
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { theirs: true }, rev: 5 })).toBe(false)
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { newer: true }, rev: 6 })).toBe(true) // still newer
-  held.saving = null
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { stale: true }, rev: 4 })).toBe(false)
-  expect(isNewerRevision(index, { id: 'd1', name: 'n', item: { newer: true }, rev: 6 })).toBe(true)
-  // a document we have never seen is always newer
-  expect(isNewerRevision(index, { id: 'd2', name: 'other', item: {}, rev: 1 })).toBe(true)
-})
-
-test('an adopted create writes at the adopted revision and a stale arrival cannot roll it back', async () => {
-  // the rollback round 10 found: the create adopts a known server record, merges, and writes —
-  // then that record's own (older) delivery lands from the queue. it is now simply rejected
-  const { idx, calls, revs, controller } = harness()
-  revs.set('srv1', 2)
-  // known from RECEIPT only (its application is still queued), so the create adopts it
-  controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 1 }, rev: 2 }, 'srv1', false)
-  controller.save('n', { mine: 2 })
-  await flush()
-  const update = calls.find(c => c.op == 'update')!
-  expect(update.rev).toBe(2) // preconditioned on the adopted record's revision
-  expect(itemOf(update.text)).toEqual({ theirs: 1, mine: 2 })
-  // the stale delivery of revision 2 arrives afterwards and is rejected
-  const stale = { id: 'srv1', name: 'n', item: { theirs: 1 }, rev: 2 }
-  await controller.applyRemote(['n'], () => {
-    if (isNewerRevision(idx, stale)) applyRemoteAdded(idx, stale)
-  })
-  expect(idx.byName.get('n')!.item).toEqual({ theirs: 1, mine: 2 })
-})
-
-test('a gated old-name write cannot rename the document back when a rename arrives', async () => {
-  // round-9 finding 6: a rename was routed only by its NEW name, so an already-issued write on
-  // the OLD name ran concurrently and wrote the old name back
-  const inFlight = deferred<void>()
+test('a write already issued is not retracted by a later rename (durability over rename order)', async () => {
+  // round-9 finding 6 wanted a remote rename to wait for an in-flight old-name write, so the
+  // write could not put the old name back. that guarantee is incompatible with durable offline
+  // writes: a write reaches the SDK's queue the moment it is issued and cannot be recalled by
+  // information that arrives afterwards. the app never renames hidden records (their names are
+  // global_store_<owner id>), so durability wins and this is a documented residual, pinned here
+  // so it cannot become an accident
+  const ack = deferred<void>()
   const { idx, calls, controller } = harness({
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      if (calls.filter(c => c.op == 'update').length == 1) await inFlight.promise
-      return expectedRev + 1
+      await ack.promise
     },
   })
   const wrapper: HiddenWrapper = { id: 'd1', name: 'old', item: { v: 0 } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('old', wrapper)
   controller.save('old', { v: 1 })
-  await flush() // the old-name write is in flight
+  await flush() // issued, carrying name 'old'
   const order: string[] = []
-  const renamed = controller.applyRemote([idx.byId.get('d1')?.name, 'new'], () => order.push('rename applied'))
-  expect(order).toEqual([]) // the rename waits for the old name's chain, not just the new one
-  inFlight.resolve()
-  await renamed
-  expect(order).toEqual(['rename applied'])
+  await controller.applyRemote(['old', 'new'], () => order.push('rename applied'))
+  expect(order).toEqual(['rename applied']) // applies immediately; the queued write is not held
+  expect(itemOf(calls[0].text)).toEqual({ v: 1 })
+  ack.resolve()
 })
-
 test('a removal arriving during an adopted create serializes on the adopting name', async () => {
   // the adopted server id is not in byId until finalization, so its name can only be derived
   // from the pending adoption — otherwise the removal ran outside the chain entirely
@@ -624,10 +544,9 @@ test('a removal arriving during an adopted create serializes on the adopting nam
     confirmIndex: async _name => {
       registerHidden(idx, { id: 'srv1', name: 'n', item: {} }, () => {})
     },
-    updateDoc: async (id, data, expectedRev) => {
+    updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       await update.promise
-      return expectedRev + 1
     },
   })
   controller.save('n', { v: 1 })
@@ -643,22 +562,20 @@ test('a removal arriving during an adopted create serializes on the adopting nam
 })
 
 
-test('emptying a store is an ordinary revisioned save, not a deletion', async () => {
+test('emptying a store is an ordinary save, not a deletion', async () => {
   // round-12: physical deletion is what made emptying dangerous — the delete landed later than
   // the classification that authorized it, and could race a concurrent rename into destroying a
   // live record. an empty store is now just state, written through the same path as any other
-  const { idx, calls, revs, controller } = harness()
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 }, rev: 2 }
+  const { idx, calls, controller } = harness()
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('n', wrapper)
-  revs.set('d1', 2)
   controller.save('n', {})
   await flush()
   expect(calls.filter(c => c.op == 'delete')).toHaveLength(0) // nothing is deleted, ever
   const update = calls.find(c => c.op == 'update')!
   expect(itemOf(update.text)).toEqual({}) // the empty state is persisted as state
-  expect(idx.byName.get('n')!.item).toEqual({}) // and the record survives, at the next revision
-  expect(revs.get('d1')).toBe(3)
+  expect(idx.byName.get('n')!.item).toEqual({}) // and the record survives
 })
 
 test('the controller exposes no deletion surface at all', () => {

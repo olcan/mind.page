@@ -29,12 +29,18 @@ export type HiddenPersistenceDeps = {
   // encryptItem/getSecretPhrase in index.svelte), during which a fixed-page validation can
   // register the account's hidden items and ADOPT a pending create
   encryptState: (state: HiddenDocData) => Promise<Record<string, any>>
-  // updates the document ONLY if it is still at `expectedRev`, and stamps rev = expectedRev + 1.
-  // resolves the new revision, or rejects with a conflict (see isConflict) carrying the record
-  // the server actually holds — the client never has to infer commit order
-  updateDoc: (id: string, data: Record<string, any>, expectedRev: number) => Promise<number>
-  createDoc: (data: Record<string, any>) => Promise<string> // resolves the persistent id
-  deleteDoc: (id: string) => Promise<void>
+  // an ordinary firestore update. it reaches the SDK's durable, ordered mutation queue as soon
+  // as it is called; the promise resolves only when the server acknowledges, which offline can
+  // be much later (or never, until reconnect) — so the controller must not wait on it to decide
+  // anything, and callers must not treat resolution as "saved"
+  updateDoc: (id: string, data: Record<string, any>) => Promise<void>
+  // creates the document AT the given id. the id is allocated by the caller (newDocId) so the
+  // payload can be registered as outstanding BEFORE the write is issued — the local echo of a
+  // create arrives through latency compensation almost immediately, and an id known only after
+  // the promise resolves leaves a window in which our own create looks like a remote record and
+  // replaces the very wrapper whose next save is still queued
+  createDoc: (id: string, data: Record<string, any>) => Promise<void>
+  newDocId: () => string
   // server re-confirmation of the hidden index before an unconfirmed create (registration may
   // adopt the pending wrapper); resolves immediately when the index is authoritative, rejects
   // to FAIL the create (a partial index must never lead to a duplicate document)
@@ -60,10 +66,6 @@ const payload = (wrapper: HiddenWrapper): HiddenDocData => ({
 
 const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(String(e?.message ?? e))
 
-// a write rejected because the document moved on: the server holds a newer revision. this is an
-// OBSERVABLE conflict outcome rather than a silent overwrite in either direction
-export type HiddenConflict = { conflict: true; rev: number }
-export const isConflict = (e: any): boolean => !!e?.conflict
 
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
@@ -71,8 +73,35 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // answer "is this delivery our own echo?" by matching payloads — which needed a size cap (an
   // evicted old echo then applied as remote state), consumption rules, and failure bookkeeping.
   // the document REVISION answers it exactly: an echo of our own write carries the revision we
-  // already hold, so isNewerRevision rejects it, while any genuinely later change carries a
-  // higher one
+  // already hold, so the listener's echo check rejects it (see isOwnEcho)
+
+  // payloads this controller has ISSUED and the server has not acknowledged yet, per document.
+  // this is the whole echo story: firestore delivers a document's changes in commit order, so a
+  // delivery is either newer state (apply it) or the echo of a write we issued (skip it), and an
+  // exact payload match identifies the latter. entries leave when the write settles, so there is
+  // no cap to evict a still-live identity — the failure that made the previous provenance map
+  // unsound. it deliberately does NOT try to order two writers: that is the server's job, and
+  // the advisory revision that pretended to do it on the client is gone
+  const outstanding = new Map<string, Set<string>>()
+  // the WRAPPER whose save task is queued but has not built its payload yet, per name. a queued
+  // task serializes that wrapper's current state, so a second save in the same window coalesces
+  // into it instead of issuing an identical write. keyed on the wrapper, not just the name: if
+  // the record was replaced in between, the queued task will be dropped by stillCurrent and the
+  // new state must get a task of its own rather than coalescing into a doomed one
+  const pendingSaves = new Map<string, HiddenWrapper>()
+  const addOutstanding = (id: string, text: string) => {
+    const texts = outstanding.get(id) ?? new Set<string>()
+    texts.add(text)
+    outstanding.set(id, texts)
+    // the entry is released when its ECHO is seen (isOwnEcho consumes it), not when the server
+    // acknowledges: the acknowledgement can beat the delivery, and clearing on it left our own
+    // create looking like a remote record — which replaced the wrapper whose next save was still
+    // queued, and that save was then dropped as stale. this returns the FAILURE release only
+    return () => {
+      texts.delete(text)
+      if (!texts.size) outstanding.delete(id)
+    }
+  }
 
   // remote records observed at RECEIPT but whose application is queued (possibly behind the very
   // create that needs to know about them): serialization must not HIDE a same-name survivor from
@@ -109,7 +138,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     let survivor: HiddenWrapper | undefined
     const consider = (w: HiddenWrapper) => {
       if (w === wrapper || w.name != wrapper.name) return
-      if (w.pending_create || w.adopt_id || w.deleted || inboxRemoved.has(w.id)) return
+      if (w.pending_create || w.adopt_id || inboxRemoved.has(w.id)) return
       if (!survivor || compareIds(w.id, survivor.id) < 0) survivor = w
     }
     for (const w of index.byId.values()) consider(w)
@@ -127,11 +156,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   async function persistCreate(wrapper: HiddenWrapper) {
     try {
       await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
-      if (wrapper.deleted) return
       // the pending name is passed so the caller can register THAT name inline (the adoption
       // decision) while routing every other name through its own chain (see confirmIndex)
       if (!wrapper.adopt_id) await deps.confirmIndex(wrapper.name) // rejects to fail the create
-      if (wrapper.deleted) return
       if (!wrapper.adopt_id) {
         // a same-name record can already be known locally even when confirmation was a no-op
         // (an authoritative index with a retained duplicate, or a remote arrival mid-create):
@@ -139,17 +166,21 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const survivor = findSurvivor(deps.index(), wrapper)
         if (survivor) {
           wrapper.adopt_id = survivor.id
-          wrapper.rev = survivor.rev // precondition the adopted write on the survivor's revision
           deps.adopt(wrapper, survivor)
         }
       }
       if (wrapper.adopt_id) {
         const state = payload(wrapper) // merged state (see deps.adopt)
+        const text = state.text // encryptState MUTATES state and nulls text
+        const settled = addOutstanding(wrapper.adopt_id, text)
         try {
-          // the adopted record's revision travels on the wrapper (set where adoption is decided:
-          // registerHidden, or findSurvivor below), since the record may be known only from the
-          // receipt inbox and not yet present in the index
-          wrapper.rev = await deps.updateDoc(wrapper.adopt_id, await deps.encryptState(state), wrapper.rev ?? 0)
+          // adoption DOES await its write: the create is not settled until the document it
+          // adopted actually carries the merged state, and finalizing onto an unacknowledged
+          // document would let a failure strand the wrapper on an id it never wrote
+          await deps.updateDoc(wrapper.adopt_id, await deps.encryptState(state)).catch(e => {
+            settled()
+            throw e
+          })
         } catch (e) {
           // the adopted document is gone (deleted concurrently, possibly by a removal that
           // arrived while we adopted): finalizing would settle the wrapper onto a document that
@@ -162,12 +193,16 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         }
         finalizeAdoption(deps.index(), wrapper)
       } else {
-        const id = await deps.createDoc(await deps.encryptState(payload(wrapper)))
-        wrapper.rev = 1 // a fresh document starts at revision 1
+        const state = payload(wrapper)
+        const id = deps.newDocId()
+        const settled = addOutstanding(id, state.text) // BEFORE issuing: see newDocId above
+        await deps.createDoc(id, await deps.encryptState(state)).catch(e => {
+          settled()
+          throw e
+        })
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
-      if (wrapper.deleted) throw e // the maps were already cleared by the delete: leave them alone
       if (wrapper.adopt_id) {
         // the document exists: settle onto it so the next save UPDATES it — deleting the
         // wrapper would send the next save down the create path and duplicate it
@@ -191,7 +226,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // RENAMED remotely, and writing through it would put the old store's value into the live
     // record under its new name
     return (
-      !wrapper.deleted &&
       wrapper.name == name &&
       index.byName.get(name) === wrapper &&
       index.byId.get(wrapper.id) === wrapper
@@ -209,53 +243,53 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (existing) {
         existing.item = item
         if (deps.readonly()) return
+        if (pendingSaves.get(name) === existing) return // a queued save will pick this state up
+        pendingSaves.set(name, existing)
         enqueue(name, existing, async () => {
-          // re-resolve the target at execution, and AGAIN after the encryption await (remote
-          // transitions serialize on this same chain, but the index can still move underneath
-          // through non-chain paths, e.g. an authoritative cleanup); dropped saves are the
-          // explicit remote-wins outcome, logged so the conflict is observable
+          if (pendingSaves.get(name) === existing) pendingSaves.delete(name) // payload fixed from here
+          // re-resolve the target at execution, and AGAIN after the encryption await: the index
+          // can move underneath a queued save (a remote replacement, a failed create's cleanup),
+          // and writing through a wrapper that is no longer current would resurrect stale state.
+          // dropping is the explicit remote-wins outcome, logged so it is observable
           if (!stillCurrent(name, existing)) {
             console.warn(`dropping hidden save for '${name}': wrapper removed or replaced while queued`)
             return
           }
+          let data
+          const state = payload(existing)
+          const text = state.text // encryptState MUTATES state and nulls text
           try {
-            const data = await deps.encryptState(payload(existing))
-            if (!stillCurrent(name, existing)) {
-              console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
-              return
-            }
-            try {
-              // preconditioned on the revision this state was built from: if anything committed
-              // in between — another tab, another device, a queued transition — the write does
-              // not land and the conflict is reported instead of being silently resolved
-              existing.rev = await deps.updateDoc(existing.id, data, existing.rev ?? 0)
-            } catch (e) {
-              if (isConflict(e)) {
-                // the server moved on. the listener delivers that newer revision (and applies it
-                // by isNewerRevision), so this write is simply superseded — an explicit,
-                // observable remote-wins outcome, not a lost update discovered later
-                console.warn(`hidden save for '${name}' superseded by a newer revision on the server`)
-                return
-              }
-              if (!isNotFound(e)) throw e
-              // the target can have been displaced WHILE the write was in flight (a remote
-              // replacement or rename landed and the server deleted the old document): the
-              // replacement is canonical, so the stale write is dropped, not recovered
-              if (!stillCurrent(name, existing)) {
-                console.warn(`dropping hidden save for '${name}': wrapper replaced while its write was in flight`)
-                return
-              }
-              // deleted concurrently (e.g. another client's cleanup): a create-like transition.
-              // the missing target also proves the index is stale — authority must be revoked
-              // so the confirmation below actually re-reads the server instead of no-opping
+            data = await deps.encryptState(state)
+          } catch (e) {
+            console.error('hidden item update failed:', e)
+            return
+          }
+          if (!stillCurrent(name, existing)) {
+            console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
+            return
+          }
+          // ISSUE the write and let the chain continue. awaiting the acknowledgement is what
+          // broke offline durability: updateDoc reaches the SDK's durable queue immediately, but
+          // its promise stays pending until the server accepts — so a second offline save waited
+          // behind the first forever and vanished on reload while the first survived. the SDK's
+          // queue preserves issue order, which is the ordering this chain was reconstructing by
+          // hand. what still belongs on the chain is building the payload (encryption can prompt)
+          const settled = addOutstanding(existing.id, text)
+          deps
+            .updateDoc(existing.id, data)
+            .catch(e => {
+              settled()
+              if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
+              // the document was removed server-side: recover as a create-like transition, on
+              // this name's chain rather than inline (we are outside it by now)
+              if (!stillCurrent(name, existing)) return
               deps.invalidateAuthority(`hidden update target ${existing.id} not found`)
               existing.pending_create = true
               existing.adopt_id = null
-              await persistCreate(existing)
-            }
-          } catch (e) {
-            console.error('hidden item update failed:', e)
-          }
+              enqueue(name, existing, () =>
+                persistCreate(existing).catch(err => void console.error('hidden item create failed:', err))
+              )
+            })
         })
         return
       }
@@ -312,12 +346,24 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // order, so a queued transition could land after a local write the server ordered first —
       // the client then had to re-read to discover the truth. with revisions the application
       // itself carries the answer: a queued delivery that is older than what we hold is rejected
-      // by isNewerRevision, and a newer one is exactly what should win
+      // by the echo check, and anything else is exactly what should win
       return acquire(0)
     },
 
     // records a remote record/removal at RECEIPT so create/adopt decisions can see it before its
     // application runs (which may be queued behind the very create that needs it)
+    // true when this delivery is the echo of a write this controller ISSUED and the server has
+    // not acknowledged yet. firestore delivers a document's changes in commit order, so anything
+    // else is genuinely newer state and must be applied — including another tab's write that
+    // arrives while our own is still pending, which the old blanket in-flight skip lost
+    isOwnEcho(id: string, text: string) {
+      const texts = outstanding.get(id)
+      if (!texts?.has(text)) return false
+      texts.delete(text) // CONSUMED: a second delivery of the same payload is not ours
+      if (!texts.size) outstanding.delete(id)
+      return true
+    },
+
     noteRemote(wrapper: HiddenWrapper | undefined, id: string, removed: boolean) {
       if (removed) {
         inboxRemoved.add(id)
