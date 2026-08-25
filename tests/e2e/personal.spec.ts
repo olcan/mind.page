@@ -277,10 +277,29 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
         '<iframe srcdoc="&lt;script&gt;parent.__HTML_BYPASS = 1&lt;/script&gt;"></iframe>',
         '<img src="x" onerror="window.__HTML_BYPASS = 2">',
         '<svg onload="window.__HTML_BYPASS = 3"><circle r="5"></circle></svg>',
+        // a RAW style element: owner css that the style-item guard and the style-ATTRIBUTE
+        // removal both miss, and which can overlay the page or build a page-wide click target
+        '<style>body { --e2e-raw-css: injected }</style>',
         '```',
+        // mathjax builds NEW dom from owner TeX after the render-time scrub, and TeX authors links
+        'math link: $`\\href{javascript:window.__MATH_BYPASS=1}{click}`$',
         '[a javascript link](javascript:window.__LINK_BYPASS=1)',
       ].join('\n'),
       attr: { shared: { keys: ['trap'], indices: { trap: 1 } } },
+    })
+  await firestore()
+    .collection('items')
+    .doc('e2e-foreign-title')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now() - 3,
+      text: [
+        '#webcam-title narration title',
+        '```html',
+        '<img src="x" onerror="window.__TITLE_BYPASS = 1">',
+        '```',
+      ].join('\n'),
+      attr: { shared: { keys: ['trap'], indices: { trap: 3 } } },
     })
   await firestore()
     .collection('items')
@@ -299,12 +318,19 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     // (the standing shared-page welcome notice queues ahead of it and is dismissed first)
     const dismissNotice = async () => {
       const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
-      if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.click()
+      // dispatchEvent, not click: narration mode (enabled below) overlays the page with the
+      // webcam layer, which is topmost and swallows even a forced click — modal buttons listen
+      // on mousedown, so dispatching to the element directly bypasses hit-testing
+      if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.dispatchEvent('mousedown')
     }
+    // narration is restored from local state, so a visitor can arrive with it already enabled —
+    // the narration sink writes an item's RAW html into the page, outside toHTML
     await page.goto('/?shared=crawl_e2e/trap')
+    await page.evaluate(() => localStorage.setItem('mindpage_narrating', 'true'))
+    await page.reload()
     await dismissNotice()
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).click()
+    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).dispatchEvent('mousedown')
     await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 }) // content renders
     expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // code did NOT run
     expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy() // the asset the gate protects
@@ -318,18 +344,31 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     const jsLink = page.getByText('a javascript link')
     await expect(jsLink).toBeVisible({ timeout: 30_000 })
     expect(await jsLink.getAttribute('href')).toBeNull()
-    await jsLink.click({ force: true })
+    await jsLink.dispatchEvent('click')
     await page.waitForTimeout(1_000)
     expect(await page.evaluate(() => (window as any).__LINK_BYPASS ?? null)).toBeNull()
-    // owner css is not installed either (it can overlay the page or build a click target)
+    // owner css is not installed either (it can overlay the page or build a click target) —
+    // neither the special style item nor a RAW <style> element inside owner html
     expect(
       await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--e2e-owner-css').trim())
     ).toBe('')
+    expect(
+      await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--e2e-raw-css').trim())
+    ).toBe('')
+    expect(await page.evaluate(() => document.querySelectorAll('style[data-e2e], .item style').length)).toBe(0)
+    // the narration sink wrote scrubbed html (its handler is gone), and mathjax's generated dom
+    // is re-scrubbed after typesetting, so an owner-authored TeX link cannot execute either
+    await page.waitForTimeout(2_000) // let narration fill and typesetting settle
+    expect(await page.evaluate(() => (window as any).__TITLE_BYPASS ?? null)).toBeNull()
+    expect(await page.evaluate(() => (window as any).__MATH_BYPASS ?? null)).toBeNull()
+    expect(
+      await page.evaluate(() => document.querySelectorAll('a[href^="javascript:"], [onerror], [onload]').length)
+    ).toBe(0)
     // consenting runs the code, and the choice is remembered for the session (no re-prompt)
     await page.reload()
     await dismissNotice()
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    await page.locator('.modal .button.confirm', { hasText: 'Run Code' }).click()
+    await page.locator('.modal .button.confirm', { hasText: 'Run Code' }).dispatchEvent('mousedown')
     await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
     await page.reload()
     await dismissNotice()
@@ -346,7 +385,7 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await dismissNotice()
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
   } finally {
-    for (const id of ['e2e-foreign-init', 'e2e-foreign-vectors', 'e2e-foreign-style'])
+    for (const id of ['e2e-foreign-init', 'e2e-foreign-vectors', 'e2e-foreign-style', 'e2e-foreign-title'])
       await firestore().collection('items').doc(id).delete()
   }
 })

@@ -6173,6 +6173,7 @@
     hash_128_murmur3_x64,
     hash_128_murmur3_x86,
     hash_160_sha1,
+    scrubForeignHtml,
   } from '../util.js'
   import {
     hashSecretPhrase as hashSecretPhraseForUid,
@@ -7489,8 +7490,16 @@
                 }
 
                 // if narrating, fill .webcam-title from #webcam-title item if it exists
-                if (narrating)
-                  document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
+                // NOTE: read('html') returns the item's RAW html block — it never passes through
+                // toHTML, so the render-time scrub does not cover it. narration state is restored
+                // from local storage, so a visitor arriving with it enabled would otherwise
+                // execute owner html here despite choosing view only
+                if (narrating) {
+                  const title = _item('#webcam-title')?.read('html') ?? ''
+                  document.querySelector('.webcam-title').innerHTML = foreignCodeBlocked
+                    ? scrubForeignHtml(title)
+                    : title
+                }
               })
 
               firstSnapshot = false

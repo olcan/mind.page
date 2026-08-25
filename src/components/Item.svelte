@@ -22,6 +22,8 @@
     skipExclusions,
     destroyElem,
     scrubForeignHtml,
+    scrubForeignNode,
+    isSafeForeignNavigation,
     hash as _hash,
   } from '../util.js'
 
@@ -185,6 +187,14 @@
   function onSourceClick(e) {
     e.stopPropagation()
     e.preventDefault()
+    // `source` is owner-controlled item attr and never passes through the html scrub: a
+    // javascript: (or other active) scheme here is a user-gesture code sink, so the scheme is
+    // validated on EVERY page — not only in view only, where the control is dead anyway
+    if (!isSafeForeignNavigation(source)) {
+      console.warn('refusing to open item source with unsafe url:', source)
+      return
+    }
+    if (window['_foreign_code_blocked']) return // view only: no owner-directed navigation at all
     window.open(source)
   }
 
@@ -992,6 +1002,9 @@
       .then(() => {
         const itemdiv = elems[0].closest('.item')
         if (!itemdiv) return
+        // view only: typesetting turned owner TeX into NEW dom after the render-time scrub, and
+        // TeX can author links (\href{javascript:...}) — re-apply the policy to what it built
+        if (window['_foreign_code_blocked']) scrubForeignNode(itemdiv)
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv.querySelectorAll('.MathJax').forEach(elem => elem.setAttribute('tabindex', '-1'))
         if (done) done()
@@ -1672,6 +1685,7 @@
       .then(() => window['MathJax'].typesetPromise(math))
       .then(function () {
         const itemdiv = math[0].closest('.item')
+        if (itemdiv && window['_foreign_code_blocked']) scrubForeignNode(itemdiv) // see renderMath
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv?.querySelectorAll('.MathJax').forEach(elem => elem.setAttribute('tabindex', '-1'))
         dot.querySelectorAll('.node > text > .MathJax > svg').forEach(mathsvg => {

@@ -259,14 +259,17 @@ function sanitizeInner(html) {
         }
         // paint and clipping attributes take url() VALUES, which the scheme allow-list never
         // sees: only local url(#fragment) references are kept, so no external reference and no
-        // literal javascript: survives inside an attribute value
-        for (const name of SVG_URL_VALUED)
-          if (
-            typeof kept[name] == 'string' &&
-            /url\(/i.test(kept[name]) &&
-            !/^url\(\s*['"]?#[^)'"]*['"]?\s*\)$/i.test(kept[name].trim())
-          )
-            delete kept[name]
+        // literal javascript: survives inside an attribute value.
+        // NOTE: css DECODES backslash escapes, so a literal `url(` test is bypassable — the
+        // verified `u\72l(https://evil.example/x)` still denotes an external reference. any
+        // backslash in these values is therefore rejected outright rather than decoded: none of
+        // the paint values these attributes legitimately carry contains one
+        for (const name of SVG_URL_VALUED) {
+          const value = typeof kept[name] == 'string' ? kept[name].trim() : null
+          if (value == null) continue
+          const local_reference = /^url\(\s*['"]?#[^)'"]*['"]?\s*\)$/i.test(value)
+          if ((value.includes('\\') || /url\(/i.test(value)) && !local_reference) delete kept[name]
+        }
         return { tagName, attribs: kept }
       },
     },

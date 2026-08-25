@@ -914,6 +914,7 @@ const FOREIGN_REMOVED_TAGS = new Set([
   'meta',
   'link',
   'form',
+  'style', // a raw owner stylesheet: applies globally, can @import, overlay, or build a click target
   'foreignobject', // html (and thus script-capable markup) smuggled inside svg
   'animate', // smil can drive an attribute to a javascript: url
   'animatetransform',
@@ -927,8 +928,11 @@ const FOREIGN_URL_ATTRS = new Set(['href', 'xlink:href', 'src', 'action', 'forma
 // http/https/mailto schemes only (plus inline data: IMAGES, which items use routinely)
 function isSafeForeignUrl(url, tag) {
   // control characters and whitespace are stripped first: they are the standard way to hide a
-  // scheme from a naive prefix check (e.g. a tab inside "javascript:")
-  const value = String(url).replace(/[\u0000-\u0020]/g, '')
+  // scheme from a naive prefix check (e.g. a tab inside "javascript:"). done without a regex:
+  // a control-character class trips eslint's no-control-regex, and the intent is clearer here
+  const value = Array.from(String(url))
+    .filter(c => c.charCodeAt(0) > 0x20)
+    .join('')
   if (!value) return false
   if (value.startsWith('#') || value.startsWith('/')) return true
   if (/^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value)) return tag == 'img' || tag == 'source'
@@ -944,10 +948,13 @@ function isSafeForeignUrl(url, tag) {
 // the page or turn a link into a page-wide click target. app-generated handlers (tag clicks,
 // deps summaries) are removed along with the rest: view only is a READING mode, so navigation
 // and interaction inside foreign items are deliberately dead rather than selectively trusted.
-export function scrubForeignHtml(html) {
-  const template = document.createElement('template')
-  template.innerHTML = html
-  for (const elem of Array.from(template.content.querySelectorAll('*'))) {
+// applies the policy to a LIVE node (element or fragment), in place. rendering is not the only
+// producer of owner-controlled dom: post-render processors build new nodes from owner content
+// after any string-level scrub has run (mathjax turns owner TeX into markup, and \href{} yields
+// a real anchor), so those passes are re-scrubbed at their own completion
+export function scrubForeignNode(root) {
+  if (!root) return root
+  for (const elem of Array.from(root.querySelectorAll('*'))) {
     const tag = elem.tagName.toLowerCase()
     if (FOREIGN_REMOVED_TAGS.has(tag)) {
       elem.remove()
@@ -963,5 +970,18 @@ export function scrubForeignHtml(html) {
       if (FOREIGN_URL_ATTRS.has(name) && !isSafeForeignUrl(attr.value, tag)) elem.removeAttribute(attr.name)
     }
   }
+  return root
+}
+
+export function scrubForeignHtml(html) {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  scrubForeignNode(template.content)
   return template.innerHTML
+}
+
+// true when the url may be handed to a navigation sink (window.open, location) for foreign
+// content: owner-controlled values reach these sinks without passing through any html scrub
+export function isSafeForeignNavigation(url) {
+  return isSafeForeignUrl(url, '')
 }

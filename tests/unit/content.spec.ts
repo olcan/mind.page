@@ -68,6 +68,19 @@ test('svg execution vectors are removed: foreignObject, script, smil, handlers, 
   expect(clean).toContain('<path d="M0 0"></path>') // the shape itself survives
 })
 
+test('url-valued presentation attributes reject external references, including css-escaped ones', () => {
+  const external =
+    '<svg><rect fill="url(https://evil.example/x)" clip-path="url(//evil.example/x)" mask="url(javascript:alert(1))"></rect></svg>'
+  const clean = sanitizeBlock(external)
+  expect(clean).not.toContain('evil.example')
+  expect(clean).not.toContain('javascript:')
+  // css decodes backslash escapes, so a literal `url(` test is bypassable: `u\72l(` is `url(`
+  const escaped = String.raw`<svg><rect fill="u\72l(https://evil.example/x)"></rect></svg>`
+  expect(sanitizeBlock(escaped)).not.toContain('evil.example')
+  // local fragment references (the legitimate case: gradients, clips, masks) still survive
+  expect(sanitizeBlock('<svg><rect fill="url(#g)" clip-path="url(#c)"></rect></svg>')).toContain('fill="url(#g)"')
+})
+
 test('url()-valued paint and clipping attributes keep only local fragment references', () => {
   // round-9 finding 10: the scheme allow-list only sees href/src, so url(...) VALUES bypassed it
   // entirely — external references and a literal javascript: survived inside attribute values
