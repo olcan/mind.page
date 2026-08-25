@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   buildHiddenIndex,
+  compareIds,
   classifyInvalidHidden,
   registerHidden,
   applyRemoteAdded,
@@ -195,4 +196,24 @@ test('current-state invalidity: non-canonical duplicates and ownerless canonical
   expect(classifyInvalidHidden(index, id => id == 'x')).toEqual([{ wrapper: orphan, reason: 'orphaned' }])
   // an owner arriving revalidates the store the same way
   expect(classifyInvalidHidden(index, () => true)).toEqual([])
+})
+
+test('canonical selection is code-unit ordered, so mixed-case ids agree everywhere', () => {
+  // round-10 finding 9: registration in secret.ts ordered by localeCompare while the index
+  // selects the minimum id with compareIds. mixed-case firestore ids order DIFFERENTLY under a
+  // locale collator ('B' < 'a' by code unit, 'a' < 'B' by locale), so the two disagreed and one
+  // record could be adopted while another was retained as the canonical holder
+  expect(compareIds('B1', 'a1') < 0).toBe(true) // code-unit: uppercase first
+  expect('B1'.localeCompare('a1') < 0).toBe(false) // locale: the opposite
+  const index = { byId: new Map(), byName: new Map() }
+  const upper = { id: 'B1', name: 'n', item: {} }
+  const lower = { id: 'a1', name: 'n', item: {} }
+  // arriving in either order, the SAME record wins the name
+  applyRemoteAdded(index, lower)
+  applyRemoteAdded(index, upper)
+  expect(index.byName.get('n')).toBe(upper)
+  const reversed = { byId: new Map(), byName: new Map() }
+  applyRemoteAdded(reversed, upper)
+  applyRemoteAdded(reversed, lower)
+  expect(reversed.byName.get('n')).toBe(upper)
 })

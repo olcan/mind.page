@@ -11,6 +11,7 @@
 //   concurrent encrypted save that saw the settled secret early could create a duplicate of a
 //   hidden document that registration had not reached yet
 
+import { compareIds } from './hidden.js'
 import { decryptWithSecret } from './crypto.js'
 
 export type AccountDoc = { id: string; data: () => Record<string, any> }
@@ -77,7 +78,10 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // only hidden documents are touched ('hidden' is a plaintext field — an unrelated corrupt
   // ordinary item must not fail this), in ascending id order so a pending create adopts the
   // MINIMUM-id duplicate (the index invariant; the query itself is ordered by descending time)
-  for (const doc of docs.filter(doc => doc.data().hidden).sort((a, b) => a.id.localeCompare(b.id))) {
+  // compareIds, not localeCompare: the index's canonical (minimum-id) selection is code-unit
+  // ordered, and mixed-case firestore ids order differently under a locale collator — the two
+  // must agree or registration adopts one record while cleanup retains a different one
+  for (const doc of docs.filter(doc => doc.data().hidden).sort((a, b) => compareIds(a.id, b.id))) {
     try {
       const item: Record<string, any> = Object.assign(doc.data(), { id: doc.id })
       if (item.cipher) {

@@ -6372,7 +6372,16 @@
   // enough on its own: a later revision can begin applying while an earlier one is still queued
   let hiddenReceivedGen = 0
   let hiddenAppliedGen = 0
-  let hiddenCleanupPending = false // cleanup requested while the frontier was behind
+  // sticky: any event that can change hidden VALIDITY marks cleanup owed, and it stays owed
+  // until a run actually happens. a non-authoritative hidden revision can introduce a duplicate
+  // and be followed only by a metadata-only acknowledgement, and removing a VISIBLE item orphans
+  // its global store without any hidden transition at all — neither would ever be recomputed if
+  // cleanup only followed a grant or the current revision's own hidden count
+  let hiddenCleanupPending = false
+  const requestHiddenCleanup = () => {
+    hiddenCleanupPending = true
+    if (hiddenAuthorityUsable()) deleteInvalidHiddenCandidates()
+  }
 
   // the flag alone never authorizes anything: it means "a current revision granted at some
   // point", while USABLE additionally requires that nothing received is still unapplied and no
@@ -6444,7 +6453,7 @@
       // recompute on the grant AND on any later authoritative revision that changed hidden
       // records: duplicates and orphans arriving while authority is already true would
       // otherwise wait for an unrelated revoke/re-grant that may never come
-      if (granting || hiddenChanged) deleteInvalidHiddenCandidates()
+      if (granting || hiddenChanged || hiddenCleanupPending) deleteInvalidHiddenCandidates()
     } else if (fromCache) revoke('cached revision')
   }
 
@@ -7369,6 +7378,7 @@
                     lastEditorChangeTime = 0 // disable debounce even if editor focused
                     // hideIndex++; // show one more item (skip this for remote add)
                     onEditorChange(editorText) // integrate new item at index 0
+                    requestHiddenCleanup() // an arriving owner can un-orphan a retained store
                   } else if (change.type == 'removed') {
                     if (savedItem.hidden) {
                       // NOTE: a miss is fine: hasPendingWrites can be false for local deletes,
@@ -7403,6 +7413,10 @@
                       attr: _.cloneDeep(item.savedAttr),
                       text: item.savedText,
                     }) // for /undelete
+                    // this item's global_store (if any) just became an ORPHAN, with no hidden
+                    // change to trigger reclassification — mark cleanup owed (see
+                    // requestHiddenCleanup); an ADD can likewise un-orphan a retained store
+                    requestHiddenCleanup()
                   } else if (change.type == 'modified') {
                     if (savedItem.hidden) {
                       const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
@@ -7676,6 +7690,7 @@
                           // time this runs, in-flight work for the name has settled
                           if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
                           applyRemoteChange(change, doc, savedItem)
+                          hiddenCleanupPending = true // validity may have changed (see requestHiddenCleanup)
                         },
                         doc.id // a transition that had to queue reconciles against the server after
                       )

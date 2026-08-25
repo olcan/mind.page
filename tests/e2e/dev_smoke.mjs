@@ -91,7 +91,12 @@ function cleanup() {
         // the npm parent's exit event may have fired long ago: what must be proven is that the
         // GROUP is gone, so poll liveness rather than waiting on that event
         for (let i = 0; i < 20 && groupAlive(); i++) await new Promise(resolve => setTimeout(resolve, 100))
-        if (groupAlive()) console.error('dev server process group survived SIGKILL')
+        if (groupAlive()) {
+          // stranded descendants hold the dev port and break the NEXT run: this must fail the
+          // command, not merely narrate (the comment above describes a proof, so prove it)
+          console.error('dev server process group survived SIGKILL')
+          process.exitCode = 1
+        }
       }
     } catch {}
   })()
