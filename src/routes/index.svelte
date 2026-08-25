@@ -7040,6 +7040,14 @@
           }
           if (action == 'apply_user') {
             resetUser() // clean up first
+            // an actual principal change invalidates every remembered foreign-code consent on
+            // this device: the record lives in session storage, which owner code authorized by a
+            // previous visitor could have written for another uid (see the gate in initialize)
+            if (localStorage.getItem('mindpage_consent_principal') != (authUser?.uid ?? '')) {
+              for (const key of Object.keys(window.sessionStorage))
+                if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
+              localStorage.setItem('mindpage_consent_principal', authUser?.uid ?? '')
+            }
             user = authUser
             const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
             localStorage.setItem('mindpage_user', userInfoString)
@@ -7665,7 +7673,19 @@
                     names = [hiddenPersistence.nameForDocument(doc.id)]
                   } else {
                     wrapper = parseHiddenWrapper(doc.id, savedItem.text)
-                    if (!wrapper) continue // quarantined (reported, never indexed): not a failure
+                    if (!wrapper) {
+                      // a valid -> MALFORMED server modification: the record is quarantined
+                      // (never indexed), but the previously valid wrapper is still in the index
+                      // and would be treated as this document's current state. that is a gap,
+                      // not a clean skip — mark it dirty and fail closed so nothing grants
+                      // authority (or deletes anything) on a view that includes the stale record
+                      if (hiddenItems.has(doc.id)) {
+                        hiddenApplyFailed = true
+                        markHiddenDirty(doc.id)
+                        revokeHiddenAuthority('hidden record became malformed')
+                      }
+                      continue
+                    }
                     // a RENAME must also join the in-flight write on the OLD name, which could
                     // otherwise complete and write the old name back
                     names = [hiddenItems.get(doc.id)?.name, wrapper.name]
