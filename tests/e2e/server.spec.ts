@@ -103,6 +103,56 @@ test.describe('crawlable public pages', () => {
     }
   })
 
+  test('item-authored html cannot execute in the injected page content', async ({ request, browser }) => {
+    // a shared page renders ANOTHER user's items into this origin, ahead of the app container: a
+    // surviving script or event handler would run before client boot could remove it, with access
+    // to the secret in localStorage. item text is therefore rendered as markdown with its html
+    // ESCAPED (see renderMarkdown in $lib/server/content.js). the payload is written and removed
+    // here, under its own shared key, so no other test sees it
+    await firestore()
+      .collection('items')
+      .doc('e2e-hostile')
+      .set({
+        user: 'crawl_e2e',
+        time: Date.now(),
+        text: [
+          '#e2e_hostile payload follows',
+          '<script>window.__XSS_RAN = 1</script>',
+          '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" onerror="window.__XSS_RAN = 1">',
+          '<a href="javascript:window.__XSS_RAN = 1">click</a>',
+          '<div onclick="window.__XSS_RAN = 1" style="background:url(javascript:1)">styled</div>',
+        ].join('\n'),
+        attr: { shared: { keys: ['hostile'], indices: { hostile: 0 } } },
+      })
+    try {
+      const html = await (await request.get('/?shared=crawl_e2e/hostile')).text()
+      const block = html.slice(html.indexOf('class="ssr-content"'), html.indexOf('id="sapper"'))
+      expect(block).toContain('payload follows') // the item IS rendered
+      expect(block).toContain('&lt;script&gt;') // ... with its html inert, as text
+      expect(block).not.toMatch(/<script/i) // no active markup of any kind
+      expect(block).not.toMatch(/<[a-z]+[^>]*\son\w+\s*=/i) // no event-handler attributes
+      expect(block).not.toMatch(/<a[^>]*href\s*=\s*["']?javascript:/i)
+      expect(block).not.toMatch(/<(iframe|object|embed|form)/i)
+      // nothing in the injected block executes with javascript enabled: the app's own bundle is
+      // blocked so only server-injected content can run (once the app boots it evaluates item
+      // code by design — visiting a shared page runs that page owner's items, as on the app's own
+      // pages; the server block must not be a second, pre-boot execution path)
+      const context = await browser.newContext()
+      try {
+        const page = await context.newPage()
+        await page.route(/_app\/immutable/, route => route.abort())
+        await page.goto('/?shared=crawl_e2e/hostile')
+        await page.waitForTimeout(3_000)
+        expect(await page.evaluate(() => (window as any).__XSS_RAN ?? null)).toBeNull()
+        await expect(page.getByText('payload follows')).toBeVisible() // and the text is readable
+      } finally {
+        await context.close()
+      }
+    } finally {
+      await firestore().collection('items').doc('e2e-hostile').delete()
+    }
+  })
+
   test('a signed-in session gets no server-rendered content', async ({ request }) => {
     const html = await (await request.get('/', { headers: { Cookie: '__session=some-id-token' } })).text()
     expect(html).not.toContain('#load function for loading external libraries')

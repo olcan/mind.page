@@ -5,6 +5,7 @@
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { marked } from 'marked'
+import sanitizeHtml from 'sanitize-html'
 import { firebaseConfig } from '../../../firebase-config.js'
 
 function firestore() {
@@ -67,6 +68,67 @@ function snippet(text, length = 160) {
 
 // wraps rendered item html into the block injected into the page (see hooks.server.js): the
 // noscript style hides the app's loading overlay and empty shell so the content is readable
+// SECURITY: everything injected into the page is item-authored (a shared page renders ANOTHER
+// user's items) and lands in the mind.page origin ahead of the app container, where a script or
+// event handler would run before client boot can remove it — and could read the secret in
+// localStorage. marked deliberately preserves raw html and unsafe url schemes, and the frozen
+// render's capture-time cleanup is an optimization, not a trust boundary, so every path is
+// sanitized here at the final insertion point with an allow-list
+// sanitizing is deterministic, so results are memoized: the item fetch is cached (see
+// fetchItems) but rendering and sanitizing ran on EVERY request, which for a full account is
+// large enough to slow every page load
+const sanitized = new Map() // inner html -> sanitized html (bounded, cleared wholesale)
+function sanitize(html) {
+  const hit = sanitized.get(html)
+  if (hit !== undefined) return hit
+  const clean = sanitizeInner(html)
+  if (sanitized.size >= 8) sanitized.clear()
+  sanitized.set(html, clean)
+  return clean
+}
+
+function sanitizeInner(html) {
+  return sanitizeHtml(html, {
+    allowedTags: [
+      ...sanitizeHtml.defaults.allowedTags, // no script/style/iframe/object/embed/form/input
+      'img',
+      'figure',
+      'figcaption',
+      'article',
+      'section',
+      'span',
+      'del',
+      'ins',
+      'sup',
+      'sub',
+      'mark',
+      'details',
+      'summary',
+    ],
+    allowedAttributes: {
+      // NOTE: no 'style': the frozen render carries thousands of inline declarations, and
+      // parsing/validating each one (the only safe way to keep them) cost enough per request to
+      // stall page loads; the block's own stylesheet linearizes the layout anyway (contentBlock)
+      '*': ['class', 'title', 'align', 'width', 'height', 'colspan', 'rowspan', 'start', 'id'],
+      a: ['href', 'name', 'target', 'rel'],
+      img: ['src', 'alt', 'srcset', 'sizes', 'loading'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto'], // no javascript:/data: hrefs
+    allowedSchemesByTag: { img: ['http', 'https', 'data'] }, // inline images are used by items
+    allowProtocolRelative: false,
+    disallowedTagsMode: 'discard',
+  })
+}
+
+// item text rendered as markdown with its raw html ESCAPED: item html is author-controlled (a
+// shared page renders ANOTHER user's items into this origin) and marked deliberately passes raw
+// html and unsafe url schemes through, so for the crawler/no-javascript view it is shown as text
+// rather than parsed — strictly safer than filtering, and markdown structure still renders
+function renderMarkdown(text) {
+  const escaped = text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+  return marked.parse(escaped, { breaks: true })
+}
+
 function contentBlock(inner) {
   return (
     // without javascript the app shell is useless, so hide all of it; the frozen render is an
@@ -104,7 +166,7 @@ export async function pageContent({ url, cookie, hostname }) {
       if (!items.length) return null
       return {
         meta: { title: `${key} @ ${hostname}`, description: snippet(items[0].text) },
-        html: contentBlock(items.map(item => `<article>${marked.parse(item.text, { breaks: true })}</article>`).join('')),
+        html: contentBlock(items.map(item => `<article>${renderMarkdown(item.text)}</article>`).join('')),
       }
     }
     if (!cookie || url.searchParams.get('user') == 'anonymous') {
@@ -115,7 +177,10 @@ export async function pageContent({ url, cookie, hostname }) {
       const [frozen] = await fetchItems('prerender', firestore().collection('prerender'))
       if (frozen?.html) {
         if (frozen.description) meta.description = frozen.description
-        return { meta, html: contentBlock(frozen.html) }
+        // the frozen render is app-generated html (already cleaned at capture, see
+        // prerender.mjs), so it is the one path that keeps tags — sanitized here as the trust
+        // boundary, since it is stored and served like any other item-derived content
+        return { meta, html: contentBlock(sanitize(frozen.html)) }
       }
       const items = await fetchItems(
         'anonymous',
@@ -126,7 +191,7 @@ export async function pageContent({ url, cookie, hostname }) {
       return {
         meta,
         html: contentBlock(
-          visible.map(item => `<article>${marked.parse(item.text, { breaks: true })}</article>`).join('')
+          visible.map(item => `<article>${renderMarkdown(item.text)}</article>`).join('')
         ),
       }
     }
