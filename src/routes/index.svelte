@@ -60,6 +60,11 @@
   let shared_key = url_params?.shared?.replace(/^\w+\//, '')
   let sharer = url_params?.shared?.match(/^(\w+)\//)?.pop() // may be set to user.uid later
   let sharer_name // fetched via /user/<uid> once sharer uid is determined
+  // a shared page runs its OWNER's item code (macros, _init, commands) in this origin; for a
+  // visitor signed in to their own account that code could reach the visitor's stored secret,
+  // so foreign code runs only after explicit consent (see initialize) and every execution path
+  // funnels through Item.eval, which throws while blocked
+  let foreignCodeBlocked = false
   let sharer_short_name
   // let spinnerSize = isClient ? Math.max(60, Math.min(innerWidth, innerHeight) * 0.2) : 0 // resized in checkLayout
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
@@ -1165,6 +1170,10 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
+      // foreign shared-page code runs only with the visitor's consent (see initialize): every
+      // execution path — _init, macros, commands, listeners, toggles — funnels through here
+      if (foreignCodeBlocked) throw new Error(`item code is disabled on this shared page (owner's code not confirmed)`)
+
       // disallow deep recursive eval on same item to prevent infinite recursion and stack overflow
       const evalStackCount = _.sumBy(evalStack, id => (id == this.id ? 1 : 0))
       if (evalStackCount >= 3) throw new Error(`eval item ${this.name} already on stack ${evalStackCount}x`)
@@ -6329,6 +6338,37 @@
     // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
     // per save (see saveHiddenItem)
     hiddenIndexAuthoritative = false
+
+    // consent gate for foreign code (see foreignCodeBlocked above): a visitor signed in to
+    // their OWN account (a stored secret exists and the page owner is someone else) must
+    // explicitly allow the owner's code before anything evals — item content renders either
+    // way. consent is remembered per owner for the browser session; anonymous visitors and the
+    // owner's own pages are not gated (no foreign code, or nothing at risk beyond the page's
+    // own account)
+    foreignCodeBlocked = false
+    if (fixed && sharer && localStorage.getItem('mindpage_secret')) {
+      const visitor = JSON.parse(localStorage.getItem('mindpage_user') || 'null')
+      if (visitor && visitor.uid != sharer) {
+        if (window.sessionStorage.getItem('mindpage_run_code_' + sharer) != '1') {
+          const run = await new Promise(resolve =>
+            _modal(
+              `This shared page includes code written by its owner, which would run with access ` +
+                `to this browser's MindPage data — including the secret for your own account. ` +
+                `Run the owner's code?`,
+              {
+                confirm: 'Run Code',
+                cancel: 'View Only',
+                background: 'cancel',
+                onConfirm: () => resolve(true),
+                onCancel: () => resolve(false),
+              }
+            )
+          )
+          foreignCodeBlocked = !run
+          if (run) window.sessionStorage.setItem('mindpage_run_code_' + sharer, '1')
+        }
+      }
+    }
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state

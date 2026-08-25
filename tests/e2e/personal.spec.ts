@@ -231,6 +231,57 @@ test('a complete cache without the stored secret still initializes from the serv
     .toBe(true)
 })
 
+test('foreign shared-page code needs consent from a signed-in visitor (and cannot reach the secret unconfirmed)', async ({ page }) => {
+  // a shared page runs its OWNER's item code in this origin (macros, _init, commands): with the
+  // app bundle enabled and a visitor signed in to their own account, an unconfirmed foreign
+  // #_init would execute with the visitor's stored secret reachable in localStorage. the gate
+  // (see initialize in index.svelte) must ask first; declining still renders content
+  await firestore()
+    .collection('items')
+    .doc('e2e-foreign-init')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now(),
+      text: [
+        '#e2e_trap #_init a foreign item with init code',
+        '```js_init',
+        'function _init() { window.__FOREIGN_RAN = (window.__FOREIGN_RAN ?? 0) + 1 }',
+        '```',
+      ].join('\n'),
+      attr: { shared: { keys: ['trap'], indices: { trap: 0 } } },
+    })
+  try {
+    await withSecret(page)
+    await loadUser(page, ALICE)
+    await waitForApp(page)
+    // visit the foreign shared page as the signed-in visitor: the consent modal must gate code
+    // (the standing shared-page welcome notice queues ahead of it and is dismissed first)
+    const dismissNotice = async () => {
+      const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
+      if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.click()
+    }
+    await page.goto('/?shared=crawl_e2e/trap')
+    await dismissNotice()
+    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
+    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).click()
+    await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 }) // content renders
+    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // code did NOT run
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy() // the asset the gate protects
+    // consenting runs the code, and the choice is remembered for the session (no re-prompt)
+    await page.reload()
+    await dismissNotice()
+    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
+    await page.locator('.modal .button.confirm', { hasText: 'Run Code' }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
+    await page.reload()
+    await dismissNotice()
+    await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
+    expect(await page.getByText(/includes code written by its owner/).count()).toBe(0) // remembered
+  } finally {
+    await firestore().collection('items').doc('e2e-foreign-init').delete()
+  }
+})
+
 test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)
