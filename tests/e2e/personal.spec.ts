@@ -420,10 +420,16 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
     await page.locator('.modal .button.confirm', { hasText: 'Run Code' }).dispatchEvent('mousedown')
     await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
+    // consent is PER LOAD and in memory: a stored record cannot be an integrity boundary against
+    // code running in the same origin (an ungated anonymous visit could write one for another
+    // uid), so the next load asks again rather than honoring anything persisted
     await page.reload()
     await dismissNotice()
-    await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
-    expect(await page.getByText(/includes code written by its owner/).count()).toBe(0) // remembered
+    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
+    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // not yet run
+    expect(
+      await page.evaluate(() => Object.keys(sessionStorage).filter(k => k.startsWith('mindpage_run_code_')).length)
+    ).toBe(0) // nothing persisted to forge against
     // an authenticated visitor with NO stored secret is gated just the same: window.firebase
     // exposes their authenticated firestore/storage/auth handles and the id token sits in a
     // javascript-readable __session cookie, so the secret is not the only asset at risk
@@ -501,7 +507,7 @@ test('global-store updates and deletions reach a second tab of the same account'
   }
 })
 
-test('a corrupt hidden change revokes authority until healed, and re-granting cleans up invalid records', async ({ page }) => {
+test('a corrupt hidden change revokes authority until healed, and invalid records are reported not deleted', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -537,7 +543,12 @@ test('a corrupt hidden change revokes authority until healed, and re-granting cl
   // recomputes invalidity from CURRENT state and deletes the now-orphaned store
   await firestore().collection('items').doc('e2e-corrupt-hidden').delete()
   await expect.poll(authority, { timeout: 30_000 }).toBe(true)
-  await expect.poll(hiddenDocs, { timeout: 30_000 }).toBe(base - 1)
+  // the now-orphaned store is REPORTED and quarantined, not deleted: a classification describes
+  // one moment while the delete it used to queue landed later, after another client could have
+  // renamed or updated that very document into a valid record. nothing is destroyed from a
+  // render-time client any more (see reportInvalidHiddenCandidates)
+  await page.waitForTimeout(3_000)
+  expect(await hiddenDocs()).toBe(base)
 })
 
 test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
@@ -554,8 +565,14 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   // document, not duplicate it, even when the save itself triggers the phrase prompt
   const hiddenCount = async () =>
     (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
+  // counts are RELATIVE to what the account already holds: invalid records are reported and
+  // quarantined rather than deleted (see reportInvalidHiddenCandidates), so earlier tests leave
+  // their stores behind. what this test is about is that the shared-page saves below UPDATE this
+  // store rather than duplicating it
+  const hiddenBefore = await hiddenCount()
   await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_pre = 1))
-  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(hiddenBefore + 1)
+  const hiddenExpected = hiddenBefore + 1
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   // sign in on the shared page itself (as the owner, without the stored secret)
@@ -601,7 +618,7 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   }
   // the probe save updated the pre-existing store (adopted mid-save once the phrase validation
   // loaded the account's hidden items), not a duplicate
-  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(hiddenExpected)
   // the adopted update must be PERSISTED (merged probe present in the document) before
   // navigating away: a navigation discards a write not yet handed to the sdk
   await expect
@@ -630,7 +647,7 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await waitForApp(page)
   await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe2 = Date.now()))
   await page.waitForTimeout(3_000) // allow the (dispatched) save to complete before checking
-  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(1)
+  await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(hiddenExpected)
   await expect
     .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe2')), { timeout: 30_000 })
     .toBe(true)

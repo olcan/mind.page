@@ -157,7 +157,20 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
 export function isNewerRevision(index: HiddenIndex, wrapper: HiddenWrapper) {
   const existing = index.byId.get(wrapper.id)
   if (!existing) return true
-  return (wrapper.rev ?? 0) > (existing.rev ?? 0)
+  const rev = wrapper.rev ?? 0
+  const held = existing.rev ?? 0
+  if (rev > held) return true
+  if (rev < held) return false
+  // EQUAL revisions are ambiguous. two cases have to be told apart:
+  // - OUR OWN echo of the revision we already hold. local state can legitimately have moved on
+  //   since (the caller mutated the store and its write is still queued), so content differing
+  //   proves nothing here — and replacing the wrapper would strand that queued write.
+  // - a client that predates the revision field, which updates the ciphertext while firestore
+  //   preserves the old rev. that IS a real change and must not be dropped.
+  // in-flight local work distinguishes them: while this document has a write of its own pending,
+  // an equal revision is our echo; otherwise different content at the same revision is a change
+  if (existing.saving) return false
+  return JSON.stringify(wrapper.item) != JSON.stringify(existing.item) || wrapper.name != existing.name
 }
 
 export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
@@ -229,6 +242,22 @@ export function classifyInvalidHidden(
     if (owner && !ownerExists(owner)) invalid.push({ wrapper, reason: 'orphaned' })
   }
   return invalid
+}
+
+// removes non-canonical records from the PROMOTABLE index without touching the server: a
+// retained duplicate is the only reason a name could resurrect old state (removing its canonical
+// record promotes it), so quarantining is the non-destructive way to get the same guarantee that
+// deleting duplicates used to provide. quarantined records stay reported; they are simply no
+// longer candidates for promotion or classification
+export function quarantineNonCanonical(
+  index: HiddenIndex,
+  invalid: { wrapper: HiddenWrapper; reason: 'duplicate' | 'orphaned' }[]
+) {
+  for (const { wrapper, reason } of invalid) {
+    if (reason != 'duplicate') continue
+    if (index.byName.get(wrapper.name) === wrapper) continue // canonical: never quarantine
+    if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id)
+  }
 }
 
 // settles a pending create's ADOPTION (its document was found to exist, see saveHiddenItem in

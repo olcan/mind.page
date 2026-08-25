@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   buildHiddenIndex,
+  quarantineNonCanonical,
   compareIds,
   classifyInvalidHidden,
   registerHidden,
@@ -216,4 +217,28 @@ test('canonical selection is code-unit ordered, so mixed-case ids agree everywhe
   applyRemoteAdded(reversed, upper)
   applyRemoteAdded(reversed, lower)
   expect(reversed.byName.get('n')).toBe(upper)
+})
+
+test('quarantining a duplicate stops it being promoted when the canonical record is removed', () => {
+  // the non-destructive replacement for deleting duplicates: a retained duplicate is the only
+  // way a name resurrects old state, so it is dropped from the PROMOTABLE index instead of the
+  // server (see quarantineNonCanonical)
+  const index = { byId: new Map(), byName: new Map() }
+  const canonical = { id: 'a1', name: 'n', item: { current: true } }
+  const duplicate = { id: 'b2', name: 'n', item: { ancient: true } }
+  index.byId.set('a1', canonical)
+  index.byId.set('b2', duplicate)
+  index.byName.set('n', canonical)
+  quarantineNonCanonical(index, [{ wrapper: duplicate, reason: 'duplicate' }])
+  expect(index.byId.has('b2')).toBe(false) // no longer promotable ...
+  expect(index.byName.get('n')).toBe(canonical) // ... and the canonical record is untouched
+  // removing the canonical record now leaves the name empty rather than resurrecting old state
+  removeHidden(index, 'a1')
+  expect(index.byName.get('n')).toBeUndefined()
+  // a CANONICAL record is never quarantined, whatever it is classified as
+  const solo = { id: 'c3', name: 'm', item: {} }
+  index.byId.set('c3', solo)
+  index.byName.set('m', solo)
+  quarantineNonCanonical(index, [{ wrapper: solo, reason: 'orphaned' }])
+  expect(index.byId.get('c3')).toBe(solo)
 })

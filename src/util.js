@@ -972,7 +972,11 @@ export function scrubForeignNode(root) {
     // safe navigation is PERMITTED in view only (a reading mode still needs working links), but
     // never with an opener: the markdown renderer emits rel="opener" by design, and owner html
     // can carry it too, which lets a clicked cross-origin destination navigate this tab
-    if (tag == 'a' && elem.getAttribute('href')) elem.setAttribute('rel', 'noopener noreferrer')
+    // `area` navigates exactly like `a` (image maps) and supports rel/target the same way
+    if ((tag == 'a' || tag == 'area') && elem.getAttribute('href')) {
+      elem.setAttribute('rel', 'noopener noreferrer')
+      elem.removeAttribute('target') // a reading mode has no reason to open new contexts
+    }
   }
   return root
 }

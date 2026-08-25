@@ -73,19 +73,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // the document REVISION answers it exactly: an echo of our own write carries the revision we
   // already hold, so isNewerRevision rejects it, while any genuinely later change carries a
   // higher one
-  const deleteDocTracked = (id: string) => deps.deleteDoc(id)
 
-  // name-level deletion tombstones: while a logical deletion is unsettled, any same-name
-  // document DISCOVERED (e.g. registered during another task's confirmation, or arriving at the
-  // listener) is added to the deletion's targets instead of being registered — see
-  // deleteName/deleteDiscovered
-  const deleting = new Map<string, string[]>()
   // remote records observed at RECEIPT but whose application is queued (possibly behind the very
   // create that needs to know about them): serialization must not HIDE a same-name survivor from
   // a create/adopt decision, which would create a duplicate the listener then has to clean up
   const inbox = new Map<string, HiddenWrapper>() // document id -> record as received
   const inboxRemoved = new Set<string>() // ids whose removal was received (never adopt these)
-  let bornSeq = 0 // stamps local creates so a deletion can exclude causally-later ones
 
   // enqueue work for the name; failures settle inside each task, so the chain always continues;
   // the wrapper mirrors in-flight status via `saving`, cleared when ITS latest mirrored promise
@@ -277,7 +270,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         saving: null,
         pending_create: true,
         adopt_id: null,
-        born: ++bornSeq,
       }
       index.byId.set(wrapper.id, wrapper)
       index.byName.set(name, wrapper)
@@ -348,117 +340,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // promotion would otherwise resurrect old state — and tombstones the name until the
     // deletion settles, so a same-name document discovered mid-flight (e.g. registered during
     // another task's confirmation) is deleted instead of registered
-    // `expectedName` is the name the CALLER believes it is emptying. it is authoritative when
-    // given: resolving the name from the id alone lets a stale alias (an id whose live wrapper
-    // was renamed remotely) delete every record of the record's NEW name — the caller's own
-    // store is not what would die
-    deleteName(id: string, expectedName?: string) {
-      const index = deps.index()
-      const live = index.byId.get(id)?.name
-      if (expectedName && live && live != expectedName) {
-        console.warn(`hidden delete for '${expectedName}' targeted a record now named '${live}': deleting by name only`)
-      }
-      const name = expectedName ?? live
-      if (!name) {
-        // unknown id (e.g. already removed): best-effort record deletion
-        if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
-        return
-      }
-      // removes every record currently known under the name; called again INSIDE the task, since
-      // arrivals queued ahead of it can add more records between now and then (a snapshot list
-      // taken here would let those survive and resurrect the store)
-      // records created (locally) AFTER this deletion was issued are causally later intent and
-      // must survive it: "empty this store, then put this in it" cannot end empty
-      const issuedAt = bornSeq
-      const removedList: HiddenWrapper[] = []
-      const removeAllNamed = () => {
-        const index = deps.index()
-        for (const w of [...index.byId.values()])
-          if (w.name == name && !w.deleted && !((w.born ?? 0) > issuedAt)) {
-            const { removed } = removeHidden(index, w.id)
-            if (removed) {
-              removed.deleted = true
-              removedList.push(removed)
-            }
-          }
-      }
-      removeAllNamed()
-      if (deps.readonly()) return
-      const discovered: string[] = []
-      deleting.set(name, discovered)
-      const run = async () => {
-        try {
-          // an index that is not authoritative may not KNOW every record of this name (a partial
-          // cache can hold one while an older one is unseen): confirm against the server first,
-          // with the tombstone routing every same-name document it finds into this deletion.
-          // without it, deleting a store can be undone by later discovery of an unseen record
-          // a failed confirmation means the index may still be missing records of this name:
-          // authority is revoked so nothing later treats the deletion as complete evidence
-          await deps.confirmIndex(name).catch(e => {
-            console.error('hidden delete confirmation failed:', e)
-            deps.invalidateAuthority('hidden delete confirmation failed')
-          })
-          // by the time the task runs, any preceding create has settled: on success the wrapper
-          // carries the persistent id (re-keyed even when tombstoned), on failure nothing was
-          // persisted (and is skipped below)
-          const deleted = new Set<string>()
-          const targets = new Set<string>()
-          // discoveries and applied arrivals can keep landing WHILE a delete is in flight: drain
-          // until nothing new is left rather than snapshotting the list once
-          for (;;) {
-            removeAllNamed() // records applied since the last pass
-            for (const w of removedList)
-              if (!(w.pending_create && !w.adopt_id)) targets.add(!w.pending_create ? w.id : (w.adopt_id ?? w.id))
-            for (const id of discovered.splice(0)) targets.add(id)
-            const pending = [...targets].filter(id => !deleted.has(id))
-            if (!pending.length) break
-            for (const target of pending) {
-              deleted.add(target)
-              // a failed delete leaves the document ALIVE server-side while the local record is
-              // gone: revoke authority so the next same-name create re-confirms and adopts it
-              // instead of creating a duplicate beside the survivor
-              await deleteDocTracked(target).catch(e => {
-                console.error('hidden item delete failed:', e)
-                deps.invalidateAuthority('hidden delete failed')
-              })
-            }
-          }
-        } finally {
-          if (deleting.get(name) === discovered) deleting.delete(name)
-        }
-      }
-      // the canonical wrapper (if any) mirrors saving through the deletion so item code can
-      // still observe the in-flight work; the mirror clears when this task settles
-      enqueue(name, removedList[0], run)
-    },
-
-    // RECORD deletion of one hidden document (invalid-record cleanup): removes only this
-    // wrapper — a same-name canonical record stays — and deletes only this document
-    deleteRecord(id: string) {
-      const { removed } = removeHidden(deps.index(), id)
-      if (removed) removed.deleted = true
-      if (deps.readonly()) return
-      const run = async () => {
-        const target = removed && !removed.pending_create ? removed.id : (removed?.adopt_id ?? removed?.id ?? id)
-        if (removed?.pending_create && !removed.adopt_id) return // nothing persisted
-        await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
-      }
-      if (removed) enqueue(removed.name, removed, run)
-      else void run()
-    },
-
-    // true while a logical deletion of the name is unsettled: registration paths consult this
-    // and hand same-name discoveries to deleteDiscovered instead of registering them
-    isDeleting(name: string) {
-      return deleting.has(name)
-    },
-
-    // routes a document discovered during an unsettled logical deletion into that deletion's
-    // targets (or deletes it directly if the deletion settled in the meantime)
-    deleteDiscovered(name: string, id: string) {
-      const targets = deleting.get(name)
-      if (targets) targets.push(id)
-      else if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
-    },
+    // NOTE: the controller no longer deletes anything. emptying a store is an ordinary
+    // revisioned save of `{}` (see save_global_store), and invalid records are quarantined out
+    // of the promotable index rather than removed from the server (see quarantineNonCanonical).
+    // that retired name tombstones, mid-flight discovery drains, causally-later `born` stamps,
+    // the expected-name validation, and both delete entry points — all of which existed only to
+    // make client-side destructive writes safe against concurrent renames and late deliveries
   }
 }

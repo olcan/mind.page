@@ -67,13 +67,22 @@
   // so foreign code runs only after explicit consent (see initialize) and every execution path
   // funnels through Item.eval, which throws while blocked
   let foreignCodeBlocked = false
+  // a sign-in gesture started on a foreign shared page is completed on the next clean load (see
+  // signIn): the visitor asked to sign in, so the prompt should not be lost, but it must not
+  // happen in a realm where owner code may be live
+  if (isClient && window.sessionStorage.getItem('mindpage_signin_after_reload')) {
+    window.sessionStorage.removeItem('mindpage_signin_after_reload')
+    if (!url_params?.shared) setTimeout(() => signIn(), 0)
+  }
 
-  // drops every remembered foreign-code consent AND the principal marker. called on any
-  // transition out of an authenticated principal (sign-out included), not just on one uid
-  // replacing another: an ungated anonymous visit can run owner code that writes a consent key
-  // for the previous uid, which would then be honored when that account signs back in
+  // per-load, in-memory foreign-code consent (owner uid -> granted). deliberately NOT persisted:
+  // see the gate in initialize
+  const foreignCodeConsent = new Map()
+  // legacy persisted consent from earlier builds is removed on sight, so an old forged key
+  // cannot outlive this change
   function clearForeignCodeConsent() {
     if (!isClient) return
+    foreignCodeConsent.clear()
     for (const key of Object.keys(window.sessionStorage))
       if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
     localStorage.removeItem('mindpage_consent_principal')
@@ -738,7 +747,7 @@
     }
 
     // saves item.global_store to firebase
-    // deletes from firebase if item or item.global_store is missing, or if object is empty
+    // an EMPTY store is saved as empty (not deleted): see the note in the non-anonymous branch
     // saving changes to global_store triggers re-render in case rendering is affected
     // always dispatched as a task with configurable delay (default 0)
     // redirects to save_local_store() for anonymous user
@@ -763,10 +772,15 @@
             const name = 'global_store_' + __item.savedId
             modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
             if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-            // the NAME is what the caller is emptying; the id can belong to a record renamed
-            // remotely since (see deleteName)
-            if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id, name)
-            else if (modified) saveHiddenItem(name, _.cloneDeep(__item.global_store))
+            // an empty store is SAVED as empty, not physically deleted. emptying is an ordinary
+            // state change and travels the same revisioned write path as any other, so it needs
+            // no deletion tombstone, no causally-later-save bookkeeping and no discovery drain —
+            // and it cannot race a concurrent rename into deleting a live record. a store that
+            // never existed is simply not created
+            if (modified) {
+              if (_.isEmpty(__item.global_store) && !hiddenItemsByName.has(name)) return // nothing to record
+              saveHiddenItem(name, _.cloneDeep(__item.global_store))
+            }
           }
 
           // if modified, invoke _on_global_store_change(id, false) on all listener (or self) items
@@ -6241,6 +6255,7 @@
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
+    quarantineNonCanonical,
     compareIds,
     repairNameIndex,
     registerHidden,
@@ -6400,7 +6415,7 @@
   let hiddenCleanupPending = false
   const requestHiddenCleanup = () => {
     hiddenCleanupPending = true
-    if (hiddenAuthorityUsable()) deleteInvalidHiddenCandidates()
+    if (hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
   }
 
   // the flag alone never authorizes anything: it means "a current revision granted at some
@@ -6440,7 +6455,7 @@
       if (hiddenReceived) hiddenAppliedGen++ // this revision has now crossed the frontier
       if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged, revoke })
       // a cleanup deferred because the frontier was behind runs as soon as it catches up
-      if (hiddenCleanupPending && hiddenAuthorityUsable()) deleteInvalidHiddenCandidates()
+      if (hiddenCleanupPending && hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
     })
     // the slot's own revoke is handed to the application: failure paths must record their
     // revocation HERE rather than bumping the global epoch directly, or settlement bumps a
@@ -6476,7 +6491,7 @@
       // recompute on the grant AND on any later authoritative revision that changed hidden
       // records: duplicates and orphans arriving while authority is already true would
       // otherwise wait for an unrelated revoke/re-grant that may never come
-      if (granting || hiddenChanged || hiddenCleanupPending) deleteInvalidHiddenCandidates()
+      if (granting || hiddenChanged || hiddenCleanupPending) reportInvalidHiddenCandidates()
     } else if (fromCache) revoke('cached revision')
   }
 
@@ -6489,28 +6504,28 @@
   // and only one still ownerless is deleted; duplicates and post-init arrivals are recomputed
   // from the live index by classifyInvalidHidden (a record renamed to a unique name, or a store
   // whose owner arrived, is simply no longer classified). malformed stays quarantined.
-  function deleteInvalidHiddenCandidates() {
-    // DESTRUCTIVE: only ever run against a fully caught-up frontier. a revision that is received
-    // but still queued (behind a name chain, a phrase prompt, or its own decrypt) can be about
-    // to remove or rename the very record that makes another look like a redundant duplicate —
-    // deleting on an ordered-but-incomplete view can leave a name with no surviving record
-    if (!hiddenAuthorityUsable()) {
-      hiddenCleanupPending = true // retried when the frontier catches up (see reserveHiddenAuthority)
-      return
-    }
+  // REPORTS invalid hidden records; it no longer deletes any. automatic client-side deletion is
+  // what made this path dangerous: a classification is a statement about the state at one
+  // moment, while the delete it queues lands later — after another client may have renamed or
+  // updated that very document into a valid record. every attempt to make that safe (a frontier,
+  // then generations, then per-write preconditions) added machinery without closing it, so the
+  // destructive half is simply gone. duplicates stay quarantined OUT of the promotable index
+  // (see quarantineNonCanonical) so they cannot resurrect old state, and physical compaction —
+  // if it is ever wanted — belongs in an explicit maintenance path, not in a render-time client
+  function reportInvalidHiddenCandidates() {
     hiddenCleanupPending = false
-    // point every name that HAS a live record at that record first: a stale rename alias would
-    // otherwise make the real current record look like a duplicate and get it deleted
+    // point every name that HAS a live record at that record first, so a stale alias cannot make
+    // the real current record look redundant
     repairNameIndex(hiddenIndex())
     const ownerExists = id => _exists(tempIdFromSavedId.get(id) ?? id) // owner may be under a temp id
     const retained = []
     for (const entry of hiddenItemsInvalid ?? []) {
       const { wrapper, reason } = entry
       if (reason == 'malformed') {
-        retained.push(entry) // quarantined, never auto-deleted
+        retained.push(entry) // unreadable: reported, never touched
         continue
       }
-      if (reason != 'orphaned') continue // duplicates are recomputed from the live index below
+      if (reason != 'orphaned') continue
       if (hiddenItems.has(wrapper.id)) continue // re-keyed by a remote change: live rules decide
       const owner = wrapper.name.replace(/^global_store_/, '')
       if (ownerExists(owner)) {
@@ -6520,15 +6535,21 @@
         if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
         continue
       }
-      console.warn('deleting invalid hidden item (orphaned)', wrapper.name, wrapper.id, wrapper)
-      deleteHiddenRecord(wrapper.id)
+      retained.push(entry) // still ownerless: reported and left alone
     }
     hiddenItemsInvalid = retained
-    for (const { wrapper, reason } of classifyInvalidHidden(hiddenIndex(), ownerExists)) {
-      console.warn(`deleting invalid hidden item (${reason})`, wrapper.name, wrapper.id, wrapper)
-      deleteHiddenRecord(wrapper.id)
-    }
+    const invalid = classifyInvalidHidden(hiddenIndex(), ownerExists)
+    // duplicates are removed from the PROMOTABLE index (not from the server): a retained
+    // duplicate whose canonical record is later removed would otherwise be promoted and
+    // resurrect old state, which is the only reason deleting them ever seemed necessary
+    quarantineNonCanonical(hiddenIndex(), invalid)
+    if (invalid.length)
+      console.warn(
+        `${invalid.length} invalid hidden record(s) reported and quarantined (not deleted):`,
+        invalid.map(({ wrapper, reason }) => `${reason} ${wrapper.name} (${wrapper.id})`).join('; ')
+      )
   }
+
   let hiddenItemsByName
   let hiddenItemsInvalid
   let resolve_init // set below
@@ -6622,8 +6643,12 @@
       // enough to hold a secret, and an unidentifiable visitor must not silently run owner code
       const gated = principal ? principal.uid != sharer : secret_present
       if (gated) {
-        const consent_key = `mindpage_run_code_${principal?.uid ?? 'unknown'}_${sharer}`
-        if (window.sessionStorage.getItem(consent_key) != '1') {
+        // consent is asked once PER LOAD and kept in memory only. a stored record cannot be an
+        // integrity boundary here: any owner code that ever ran in this origin — including on an
+        // ungated ANONYMOUS visit — can write the storage key for another uid and have it
+        // honored later. per-load consent costs one prompt per visit and cannot be forged ahead
+        // of time
+        if (!foreignCodeConsent.get(sharer)) {
           const run = await new Promise(resolve =>
             _modal(
               `This shared page includes code written by its owner, which would run with access ` +
@@ -6639,7 +6664,7 @@
             )
           )
           foreignCodeBlocked = !run
-          if (run) window.sessionStorage.setItem(consent_key, '1')
+          if (run) foreignCodeConsent.set(sharer, true)
         }
       }
     }
@@ -6880,6 +6905,16 @@
 
   let signingIn = false
   function signIn() {
+    // a foreign shared page may be running its OWNER's code in this realm right now (the visitor
+    // consented, or is anonymous and therefore ungated). authenticating here would hand that
+    // code a live authenticated firebase session — it can register its own auth-state listener
+    // and act before this page reloads. so leave the realm FIRST and let the visitor complete
+    // the gesture on a clean first-party load
+    if (fixed && sharer && sharer != user?.uid) {
+      window.sessionStorage.setItem('mindpage_signin_after_reload', '1')
+      location.href = '/'
+      return
+    }
     // if user appears to be signed in, sign out instead
     if (getAuth(firebase).currentUser) {
       console.warn('attempted to sign in while already signed in, signing out ...')
@@ -7733,13 +7768,6 @@
                   // receipt-time intent: a create/adopt decision must see this record even though
                   // its application is queued — possibly behind that very create
                   hiddenPersistence.noteRemote(wrapper, doc.id, removed)
-                  // an arrival for a name under logical deletion joins that deletion instead of
-                  // being applied: delivery order must not resurrect a store the user emptied
-                  const deletingName = names.find(name => name && hiddenPersistence.isDeleting(name))
-                  if (deletingName && !removed) {
-                    hiddenPersistence.deleteDiscovered(deletingName, doc.id)
-                    continue
-                  }
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   hiddenApplied.push(
                     hiddenPersistence
@@ -8560,13 +8588,6 @@
     // time it is applied (a confirmation query result queued behind a write that has since
     // committed). the revision decides here too
     if (!isNewerRevision(hiddenIndex(), wrapper)) return
-    // a document discovered while its name is being logically deleted joins the deletion's
-    // targets instead of being registered (the caller deleted the store; a mid-flight
-    // discovery must not resurrect it)
-    if (hiddenPersistence.isDeleting(wrapper.name)) {
-      hiddenPersistence.deleteDiscovered(wrapper.name, wrapper.id)
-      return
-    }
     // a pending create that claimed this name adopts the document (update instead of create),
     // with the pending (shared-page) changes taking precedence over the loaded state
     registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
@@ -8578,24 +8599,17 @@
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
-    // conditional update: the document must still be at `expectedRev`, and lands at rev + 1.
-    // this is the ONE place server order is established for hidden records — everything else
-    // (listener application, adoption, cleanup) just compares revisions
-    updateDoc: (id, data, expectedRev) =>
-      runTransaction(getFirestore(firebase), async tx => {
-        const ref = doc(getFirestore(firebase), 'items', id)
-        const snapshot = await tx.get(ref)
-        if (!snapshot.exists()) {
-          const e: any = new Error('not-found')
-          e.code = 'not-found'
-          throw e
-        }
-        const current = snapshot.data().rev ?? 0
-        if (current != expectedRev) throw { conflict: true, rev: current } // see isConflict
-        const rev = current + 1
-        tx.update(ref, { ...data, rev })
-        return rev
-      }),
+    // an ORDINARY queued update that carries the next revision. NOT a transaction: firestore
+    // transactions fail outright while offline instead of queueing, so routing every hidden save
+    // through one silently dropped offline changes — the app's persistent cache explicitly
+    // promises that offline writes survive a reload (see client-globals.ts). the revision here
+    // is advisory ordering for DELIVERY (see isNewerRevision), not a compare-and-set: making it
+    // a server invariant needs a firestore rule plus a staged cutover for already-open tabs,
+    // which is recorded as the next step rather than switched on under a live client
+    updateDoc: (id, data, expectedRev) => {
+      const rev = expectedRev + 1
+      return updateDoc(doc(getFirestore(firebase), 'items', id), { ...data, rev }).then(() => rev)
+    },
     // the plaintext user field is required for creates (see firestore rules); updates keep it
     createDoc: data =>
       addDoc(collection(getFirestore(firebase), 'items'), { ...data, user: user.uid, rev: 1 }).then(added => added.id),
@@ -8671,22 +8685,6 @@
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')
     hiddenPersistence.save(name, item)
-  }
-
-  // record-level deletion for invalid-record cleanup: removes ONE document; a same-name
-  // canonical record stays (see deleteInvalidHiddenCandidates)
-  function deleteHiddenRecord(id) {
-    if (readonly) return
-    hiddenPersistence.deleteRecord(id)
-  }
-
-  // LOGICAL deletion ("this store is empty"): removes every record of the id's name —
-  // canonical plus retained duplicates, whose later promotion would resurrect old state — and
-  // tombstones the name so a document discovered mid-flight is deleted, not registered
-  function deleteHiddenItem(id, expectedName = undefined) {
-    if (!id) return // nothing to delete
-    if (!initialized) throw new Error('deleteHiddenItem called before initialized')
-    hiddenPersistence.deleteName(id, expectedName)
   }
 
   function hiddenItemChangedRemotely(name, change_type) {
