@@ -82,11 +82,22 @@ test.describe('crawlable public pages', () => {
     }
   })
 
-  test('a frozen render replaces the markdown fallback once captured', async ({ request }) => {
+  test('a frozen render replaces the markdown fallback once captured, keeping math and canvas', async ({ request }) => {
     test.setTimeout(240_000) // captures in a real browser, then polls through the 60s content cache
+    // the frozen render's contract includes charts drawn and math typeset (see prerender.mjs):
+    // seed an item whose capture must carry a mathjax svg equation and a canvas husk through the
+    // final sanitizer (its constrained svg profile, see $lib/server/content.js)
+    await firestore()
+      .collection('items')
+      .doc('e2e-frozen-math')
+      .set({
+        user: 'anonymous',
+        time: Date.now(),
+        text: '#e2e_frozen_math #_pin typeset $`e=mc^2`$ and keep <canvas width="80" height="40"></canvas>',
+      })
     // capture the app's default view from the running server into the emulator (see prerender.mjs)
-    execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
     try {
+      execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
       await expect
         .poll(async () => (await request.get('/')).text(), { timeout: 90_000, intervals: [5_000] })
         .toMatch(/ssr-content[^]*class="items/) // the captured items region, not the markdown fallback
@@ -98,7 +109,15 @@ test.describe('crawlable public pages', () => {
       expect(block).not.toContain('<script')
       expect(block).not.toContain('onclick')
       expect(block).not.toContain('onmousedown')
+      // the equation survives as mathjax svg (fontCache 'local': glyph defs + fragment <use>),
+      // and the canvas husk survives (its pixels never serialize; layout is preserved)
+      const item = block.slice(block.indexOf('e2e_frozen_math'))
+      expect(item).toMatch(/<svg[^>]*viewbox=/i)
+      expect(item).toMatch(/<use[^>]*href="#/)
+      expect(item).toMatch(/<path[^>]*d="/)
+      expect(item).toContain('<canvas width="80" height="40">')
     } finally {
+      await firestore().collection('items').doc('e2e-frozen-math').delete()
       await firestore().collection('prerender').doc('anonymous').delete() // restore the markdown fallback
     }
   })

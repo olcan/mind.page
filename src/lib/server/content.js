@@ -78,6 +78,118 @@ function snippet(text, length = 160) {
 // fetchItems) but rendering and sanitizing ran on EVERY request, which for a full account is
 // large enough to slow every page load
 const sanitized = new Map() // inner html -> sanitized html (bounded, cleared wholesale)
+// svg presentation attributes shared by the constrained svg profile below: geometry, paint and
+// text layout only — no event handlers (sanitize-html drops on* by default since they are not
+// listed), no style (see the NOTE below), no external references (use/href is fragment-gated)
+// NOTE: attribute names are matched lowercased by sanitize-html, and the html parser
+// re-adjusts known svg attributes (viewbox -> viewBox etc.) when the page is parsed, so
+// this list is all-lowercase on purpose
+const SVG_PRESENTATION = [
+  'viewbox',
+  'preserveaspectratio',
+  'transform',
+  'x',
+  'y',
+  'x1',
+  'y1',
+  'x2',
+  'y2',
+  'dx',
+  'dy',
+  'cx',
+  'cy',
+  'r',
+  'rx',
+  'ry',
+  'd',
+  'points',
+  'pathlength',
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'stroke',
+  'stroke-width',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-miterlimit',
+  'stroke-opacity',
+  'opacity',
+  'color',
+  'display',
+  'visibility',
+  'overflow',
+  'clip-path',
+  'clip-rule',
+  'mask',
+  'font-family',
+  'font-size',
+  'font-style',
+  'font-weight',
+  'text-anchor',
+  'dominant-baseline',
+  'letter-spacing',
+  'vector-effect',
+  'shape-rendering',
+  'text-rendering',
+  'offset',
+  'stop-color',
+  'stop-opacity',
+  'gradientunits',
+  'gradienttransform',
+  'spreadmethod',
+  'patternunits',
+  'patterncontentunits',
+  'patterntransform',
+  'markerunits',
+  'markerwidth',
+  'markerheight',
+  'refx',
+  'refy',
+  'orient',
+  'maskunits',
+  'maskcontentunits',
+  'clippathunits',
+  'xmlns',
+  'xmlns:xlink',
+  'role',
+  'aria-hidden',
+  'aria-label',
+  'focusable',
+]
+
+// the constrained svg profile: enough for mathjax svg output (fontCache 'local' keeps each
+// equation's glyph defs inside its own svg, referenced via fragment-only <use>) and item-drawn
+// charts, without foreignObject (html injection inside svg), smil animation elements (event-like
+// begin/end attributes), script, or external references
+const SVG_TAGS = [
+  'svg',
+  'g',
+  'defs',
+  'symbol',
+  'use',
+  'path',
+  'rect',
+  'circle',
+  'ellipse',
+  'line',
+  'polyline',
+  'polygon',
+  'text',
+  'tspan',
+  'textPath',
+  'title',
+  'desc',
+  'clipPath',
+  'mask',
+  'marker',
+  'pattern',
+  'linearGradient',
+  'radialGradient',
+  'stop',
+]
+
 function sanitize(html) {
   const hit = sanitized.get(html)
   if (hit !== undefined) return hit
@@ -104,21 +216,46 @@ function sanitizeInner(html) {
       'mark',
       'details',
       'summary',
+      // charts drawn and math typeset are part of the frozen render's contract (see
+      // prerender.mjs): svg survives under the constrained profile below, and canvas survives
+      // as an empty husk (its pixels never serialize; the husk keeps layout and is inert)
+      ...SVG_TAGS,
+      'canvas',
     ],
     allowedAttributes: {
       // NOTE: no 'style': the frozen render carries thousands of inline declarations, and
       // parsing/validating each one (the only safe way to keep them) cost enough per request to
-      // stall page loads; the block's own stylesheet linearizes the layout anyway (contentBlock)
+      // stall page loads; the block's own stylesheet linearizes the layout anyway
+      // (contentBlock). this also drops mathjax's vertical-align on equation roots — a baseline
+      // shift, accepted over reintroducing style parsing
       '*': ['class', 'title', 'align', 'width', 'height', 'colspan', 'rowspan', 'start', 'id'],
       a: ['href', 'name', 'target', 'rel'],
       img: ['src', 'alt', 'srcset', 'sizes', 'loading'],
+      ...Object.fromEntries(SVG_TAGS.map(tag => [tag, SVG_PRESENTATION])),
+      use: [...SVG_PRESENTATION, 'href'], // fragment-gated by the transform below
     },
     allowedSchemes: ['http', 'https', 'mailto'], // no javascript:/data: hrefs
     allowedSchemesByTag: { img: ['http', 'https', 'data'] }, // inline images are used by items
     allowProtocolRelative: false,
     disallowedTagsMode: 'discard',
+    transformTags: {
+      // <use> may reference only same-document fragments (mathjax glyph defs): an external href
+      // would make the frozen page fetch and render foreign svg content
+      use: (tagName, attribs) => {
+        const href = attribs['xlink:href'] ?? attribs.href
+        const safe = typeof href == 'string' && href.startsWith('#') ? href : null
+        const kept = { ...attribs }
+        delete kept.href
+        delete kept['xlink:href']
+        if (safe) kept.href = safe
+        return { tagName, attribs: kept }
+      },
+    },
   })
 }
+
+// exported for tests: the exact sanitizer applied to every injected content block
+export const sanitizeBlock = sanitize
 
 // item text rendered as markdown with its raw html ESCAPED: item html is author-controlled (a
 // shared page renders ANOTHER user's items into this origin) and marked deliberately passes raw
