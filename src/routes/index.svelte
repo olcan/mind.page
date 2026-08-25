@@ -3178,6 +3178,9 @@
 
   function resetUser() {
     user = null
+    // NOTE: foreign-code consent is NOT cleared here: resetUser also runs on routine
+    // initialization, and the consent key is scoped by visitor uid + owner (see the gate in
+    // initialize), so another account signed in on this device never inherits it
     // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
     localStorage.removeItem('mindpage_user')
     window.sessionStorage.removeItem('mindpage_signin_pending')
@@ -3628,7 +3631,7 @@
           )
           item.shouldReload = true
         }
-        if ((item.style || prev_style) && !dependency) installStyleItem(item) // install new/modified style item
+        if ((item.style || prev_style) && !dependency && !foreignCodeBlocked) installStyleItem(item) // install new/modified style item
         setTimeout(() => {
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
@@ -6186,7 +6189,9 @@
     if (itemInitTime) return // already initialized items
     itemInitTime = Date.now()
     items.forEach(item => {
-      if (item.style) installStyleItem(item) // initial install of style item
+      // view only: owner css is untrusted too (it can overlay the page or turn a link into a
+      // page-wide click target), so style items are not installed either
+      if (item.style && !foreignCodeBlocked) installStyleItem(item) // initial install of style item
       if (!item.init) return // not init item
       // if item has js_init block, use that, otherwise use js block (without dependencies to avoid complications due to init order etc)
       const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
@@ -6400,17 +6405,24 @@
     revokeHiddenAuthority()
     hiddenDirtyIds = new Set() // initialization rebuilds the index from scratch
 
-    // consent gate for foreign code (see foreignCodeBlocked above): a visitor signed in to
-    // their OWN account (a stored secret exists and the page owner is someone else) must
-    // explicitly allow the owner's code before anything evals — item content renders either
-    // way. consent is remembered per owner for the browser session; anonymous visitors and the
-    // owner's own pages are not gated (no foreign code, or nothing at risk beyond the page's
-    // own account)
+    // consent gate for foreign code (see foreignCodeBlocked above): a shared page runs its
+    // OWNER's code in this origin, which is dangerous for ANY authenticated visitor who is not
+    // the owner — window.firebase exposes their authenticated firestore/storage/auth handles and
+    // the id token sits in a javascript-readable __session cookie, so a stored encryption secret
+    // is only the most valuable of several assets at risk. the decision is therefore based on
+    // the VALIDATED firebase principal, never on local-storage metadata, and consent is
+    // remembered per visitor+owner for the browser session (an owner-only key would carry one
+    // visitor's consent into the next account signed in on this device)
     foreignCodeBlocked = false
-    if (fixed && sharer && localStorage.getItem('mindpage_secret')) {
-      const visitor = JSON.parse(localStorage.getItem('mindpage_user') || 'null')
-      if (visitor && visitor.uid != sharer) {
-        if (window.sessionStorage.getItem('mindpage_run_code_' + sharer) != '1') {
+    if (fixed && sharer) {
+      const principal = getAuth(firebase)?.currentUser ?? null
+      const secret_present = !!localStorage.getItem('mindpage_secret')
+      // fail closed on unknown identity WITH key material present: something is authenticated
+      // enough to hold a secret, and an unidentifiable visitor must not silently run owner code
+      const gated = principal ? principal.uid != sharer : secret_present
+      if (gated) {
+        const consent_key = `mindpage_run_code_${principal?.uid ?? 'unknown'}_${sharer}`
+        if (window.sessionStorage.getItem(consent_key) != '1') {
           const run = await new Promise(resolve =>
             _modal(
               `This shared page includes code written by its owner, which would run with access ` +
@@ -6426,10 +6438,12 @@
             )
           )
           foreignCodeBlocked = !run
-          if (run) window.sessionStorage.setItem('mindpage_run_code_' + sharer, '1')
+          if (run) window.sessionStorage.setItem(consent_key, '1')
         }
       }
     }
+    // read by the renderer to make owner html inert (see toHTML in Item.svelte)
+    window['_foreign_code_blocked'] = foreignCodeBlocked
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
@@ -6492,7 +6506,11 @@
     items = items.filter(item => !item.hidden)
 
     // extract special tag functions
+    // NOTE: this evaluates owner-authored js DIRECTLY (not through Item.eval), so it is one of
+    // the paths the consent gate must cover — the gate's guarantee is "no owner code runs", not
+    // "no Item.eval runs" (see foreignCodeBlocked)
     for (const item of items) {
+      if (foreignCodeBlocked) break // view only: owner code must not evaluate here either
       if (!item.text.includes('_special_tag_aliases')) continue // quick check
       const js = extractBlock(item.text, 'js')
       if (!js) continue

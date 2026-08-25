@@ -20,6 +20,7 @@
     skipEscaped,
     exclusionRegExp,
     skipExclusions,
+    scrubForeignHtml,
     hash as _hash,
   } from '../util.js'
 
@@ -915,6 +916,13 @@
           .join('')
       text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`
     }
+
+    // VIEW ONLY on a foreign shared page: the visitor declined to run the owner's code, so the
+    // rendered html is made inert before it is inserted (or cached) — the item-code evaluator is
+    // only one execution path, and browser-native active content never passes through it (see
+    // scrubForeignHtml in util.js and the consent gate in index.svelte). the flag is decided
+    // once, before any item renders, so scrubbing before caching is safe
+    if (window['_foreign_code_blocked']) text = scrubForeignHtml(text)
 
     // include html cache key in content to include in svelte content cache key and force svelte update whenever html is re-generated even if generated html is identical since arguments (in particular deephash and version) may capture changes not reflected in generated html
     text += `<!-- html_cache_key=${cache_key} -->`

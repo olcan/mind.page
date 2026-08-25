@@ -897,3 +897,72 @@ export function hash_160_sha1(x) {
   if (x.constructor.name != 'Uint8Array') throw new Error('x must be Uint8Array')
   return sha1.hex(x)
 }
+
+// --- foreign (shared-page) content isolation ---
+
+// elements that can execute, navigate, or embed foreign content on their own, with no event
+// handler and no item code involved
+const FOREIGN_REMOVED_TAGS = new Set([
+  'script',
+  'iframe',
+  'frame',
+  'frameset',
+  'portal',
+  'object',
+  'embed',
+  'applet',
+  'base',
+  'meta',
+  'link',
+  'form',
+  'foreignobject', // html (and thus script-capable markup) smuggled inside svg
+  'animate', // smil can drive an attribute to a javascript: url
+  'animatetransform',
+  'set',
+])
+
+// attributes whose value is a url and therefore carries a scheme to validate
+const FOREIGN_URL_ATTRS = new Set(['href', 'xlink:href', 'src', 'action', 'formaction', 'data', 'poster', 'ping'])
+
+// a url is safe if it cannot introduce script: same-document fragments, relative paths, and the
+// http/https/mailto schemes only (plus inline data: IMAGES, which items use routinely)
+function isSafeForeignUrl(url, tag) {
+  // control characters and whitespace are stripped first: they are the standard way to hide a
+  // scheme from a naive prefix check (e.g. a tab inside "javascript:")
+  const value = String(url).replace(/[\u0000-\u0020]/g, '')
+  if (!value) return false
+  if (value.startsWith('#') || value.startsWith('/')) return true
+  if (/^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value)) return tag == 'img' || tag == 'source'
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return /^(https?|mailto):/i.test(value)
+  return true // no scheme: a relative url
+}
+
+// makes owner-authored html INERT for the "view only" mode of a foreign shared page (see the
+// consent gate in index.svelte). the visitor declined to run the page owner's code, so nothing
+// the owner wrote may execute -- and the item-code evaluator is only one of the ways it could:
+// browser-native active content (frames, objects, svg/smil, handler attributes, javascript:
+// urls) never passes through it at all. inline styles go too, since untrusted css can overlay
+// the page or turn a link into a page-wide click target. app-generated handlers (tag clicks,
+// deps summaries) are removed along with the rest: view only is a READING mode, so navigation
+// and interaction inside foreign items are deliberately dead rather than selectively trusted.
+export function scrubForeignHtml(html) {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const elem of Array.from(template.content.querySelectorAll('*'))) {
+    const tag = elem.tagName.toLowerCase()
+    if (FOREIGN_REMOVED_TAGS.has(tag)) {
+      elem.remove()
+      continue
+    }
+    for (const attr of Array.from(elem.attributes)) {
+      const name = attr.name.toLowerCase()
+      // on* handlers, inline css, and the frame-content/submission-target attributes
+      if (name.startsWith('on') || name == 'style' || name == 'srcdoc' || name == 'formaction') {
+        elem.removeAttribute(attr.name)
+        continue
+      }
+      if (FOREIGN_URL_ATTRS.has(name) && !isSafeForeignUrl(attr.value, tag)) elem.removeAttribute(attr.name)
+    }
+  }
+  return template.innerHTML
+}

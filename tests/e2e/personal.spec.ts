@@ -257,6 +257,40 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
       ].join('\n'),
       attr: { shared: { keys: ['trap'], indices: { trap: 0 } } },
     })
+  // the OTHER owner-code execution paths, none of which passes through Item.eval: the
+  // special-tag evaluator runs an item's js block directly, _html content is inserted with
+  // {@html} where browser-native active content executes on its own, markdown links keep
+  // javascript: urls by design, and a style item installs owner css into the page
+  await firestore()
+    .collection('items')
+    .doc('e2e-foreign-vectors')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now() - 1,
+      text: [
+        '#e2e_trap_vectors a foreign item with non-eval execution paths',
+        '```js',
+        'window.__SPECIAL_BYPASS = localStorage.getItem("mindpage_secret")',
+        'function _special_tag_aliases() { return false }',
+        '```',
+        '```_html',
+        '<iframe srcdoc="&lt;script&gt;parent.__HTML_BYPASS = 1&lt;/script&gt;"></iframe>',
+        '<img src="x" onerror="window.__HTML_BYPASS = 2">',
+        '<svg onload="window.__HTML_BYPASS = 3"><circle r="5"></circle></svg>',
+        '```',
+        '[a javascript link](javascript:window.__LINK_BYPASS=1)',
+      ].join('\n'),
+      attr: { shared: { keys: ['trap'], indices: { trap: 1 } } },
+    })
+  await firestore()
+    .collection('items')
+    .doc('e2e-foreign-style')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now() - 2,
+      text: ['#e2e_trap_style #_style', '```css', 'body { --e2e-owner-css: injected }', '```'].join('\n'),
+      attr: { shared: { keys: ['trap'], indices: { trap: 2 } } },
+    })
   try {
     await withSecret(page)
     await loadUser(page, ALICE)
@@ -274,6 +308,23 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 }) // content renders
     expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // code did NOT run
     expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy() // the asset the gate protects
+    // ... and neither did any of the paths that never reach Item.eval
+    await expect(page.getByText('non-eval execution paths')).toBeVisible({ timeout: 60_000 }) // rendered ...
+    expect(await page.evaluate(() => (window as any).__SPECIAL_BYPASS ?? null)).toBeNull() // ... special-tag eval
+    expect(await page.evaluate(() => (window as any).__HTML_BYPASS ?? null)).toBeNull() // ... {@html} content
+    expect(await page.evaluate(() => document.querySelectorAll('iframe').length)).toBe(0) // frame removed
+    expect(await page.evaluate(() => document.querySelectorAll('[onerror],[onload]').length)).toBe(0) // handlers gone
+    // a javascript: link keeps its text but loses its href, so clicking it cannot navigate/execute
+    const jsLink = page.getByText('a javascript link')
+    await expect(jsLink).toBeVisible({ timeout: 30_000 })
+    expect(await jsLink.getAttribute('href')).toBeNull()
+    await jsLink.click({ force: true })
+    await page.waitForTimeout(1_000)
+    expect(await page.evaluate(() => (window as any).__LINK_BYPASS ?? null)).toBeNull()
+    // owner css is not installed either (it can overlay the page or build a click target)
+    expect(
+      await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--e2e-owner-css').trim())
+    ).toBe('')
     // consenting runs the code, and the choice is remembered for the session (no re-prompt)
     await page.reload()
     await dismissNotice()
@@ -284,8 +335,19 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await dismissNotice()
     await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
     expect(await page.getByText(/includes code written by its owner/).count()).toBe(0) // remembered
+    // an authenticated visitor with NO stored secret is gated just the same: window.firebase
+    // exposes their authenticated firestore/storage/auth handles and the id token sits in a
+    // javascript-readable __session cookie, so the secret is not the only asset at risk
+    await page.evaluate(() => {
+      localStorage.removeItem('mindpage_secret')
+      sessionStorage.clear() // drop the remembered consent for this check
+    })
+    await page.reload()
+    await dismissNotice()
+    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
   } finally {
-    await firestore().collection('items').doc('e2e-foreign-init').delete()
+    for (const id of ['e2e-foreign-init', 'e2e-foreign-vectors', 'e2e-foreign-style'])
+      await firestore().collection('items').doc(id).delete()
   }
 })
 
