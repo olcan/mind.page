@@ -194,7 +194,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // state, bypass create confirmation, or rename the document back
   function stillCurrent(name: string, wrapper: HiddenWrapper) {
     const index = deps.index()
-    return !wrapper.deleted && index.byName.get(name) === wrapper && index.byId.get(wrapper.id) === wrapper
+    // wrapper.name is checked too: a stale byName alias can still point at a record that was
+    // RENAMED remotely, and writing through it would put the old store's value into the live
+    // record under its new name
+    return (
+      !wrapper.deleted &&
+      wrapper.name == name &&
+      index.byName.get(name) === wrapper &&
+      index.byId.get(wrapper.id) === wrapper
+    )
   }
 
   return {

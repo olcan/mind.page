@@ -5381,6 +5381,9 @@
     confirm_delete ??= (item.savedText || item.savingText) && item.labelUnique
     if (confirm_delete && !confirm(confirm_msg || `Delete ${item.name}?`)) return false
     const { name, contextLabel } = item
+    // this item's global_store_<id> (if any) is now an ORPHAN, and the listener echo of our own
+    // removal is classified as ours and skipped, so nothing else requests the reclassification
+    requestHiddenCleanup()
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
@@ -6439,7 +6442,10 @@
       // a cleanup deferred because the frontier was behind runs as soon as it catches up
       if (hiddenCleanupPending && hiddenAuthorityUsable()) deleteInvalidHiddenCandidates()
     })
-    return applied
+    // the slot's own revoke is handed to the application: failure paths must record their
+    // revocation HERE rather than bumping the global epoch directly, or settlement bumps a
+    // second time and invalidates a newer revision's already-captured grant
+    return { settle: applied, revoke }
   }
 
   function revokeHiddenAuthority(reason = '') {
@@ -7521,7 +7527,7 @@
               // server catching up after a cache initialization): it takes its receipt-ordered
               // slot and settles immediately — it carries no transitions of its own, but cannot
               // overtake an earlier revision that does
-              reserveHiddenAuthority({ authoritative, fromCache: snapshot.metadata.fromCache })({
+              reserveHiddenAuthority({ authoritative, fromCache: snapshot.metadata.fromCache }).settle({
                 failed: false,
                 hiddenChanged: false,
               })
@@ -7557,7 +7563,7 @@
                   // the FIRST revision takes the first slot on the authority chain: revisions
                   // received while initialization runs reserve theirs behind it, so an old
                   // authoritative first snapshot can never grant after a later revision revoked
-                  reserveHiddenAuthority({ authoritative, fromCache: false })({
+                  reserveHiddenAuthority({ authoritative, fromCache: false }).settle({
                     failed: false,
                     hiddenChanged: false,
                   })
@@ -7622,12 +7628,16 @@
             // snapshot can never interleave with (or overtake) an earlier one mid-application
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
-            const settleApplied = reserveHiddenAuthority({
+            const { settle: settleApplied, revoke: revokeThisRevision } = reserveHiddenAuthority({
               authoritative,
               fromCache: snapshot.metadata.fromCache,
               // plaintext field, readable at receipt without decryption: enough to suspend
-              // usable authority for exactly the revisions that can change hidden completeness
-              hiddenReceived: snapshot.docChanges().some(change => !!change.doc.data().hidden),
+              // usable authority for exactly the revisions that can change hidden completeness.
+              // a document we currently hold as hidden counts too, even when it arrives with
+              // hidden false — that discriminator change REMOVES a hidden record
+              hiddenReceived: snapshot
+                .docChanges()
+                .some(change => !!change.doc.data().hidden || hiddenItems.has(change.doc.id)),
             })
             const applyTask = async () => {
               await initialization
@@ -7669,10 +7679,28 @@
                     if (couldBeHidden) {
                       hiddenApplyFailed = true
                       markHiddenDirty(doc.id)
-                      revokeHiddenAuthority('hidden change could not be decrypted') // as soon as known
+                      revokeThisRevision('hidden change could not be decrypted') // as soon as known
                     }
                     continue
                   }
+                }
+                // DISCRIMINATOR CHANGE: the record moved between the hidden and visible worlds.
+                // each world indexes documents separately, so the old representation has to go
+                // or it lingers as a phantom — a hidden wrapper cleanup could still act on, or a
+                // visible item nothing will ever update again
+                if (!savedItem.hidden && hiddenItems.has(doc.id) && change.type != 'removed') {
+                  const stale = hiddenItems.get(doc.id)
+                  console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
+                  await hiddenPersistence
+                    .applyRemote([stale?.name], () => removeHidden(hiddenIndex(), doc.id))
+                    .catch(e => console.error('could not drop stale hidden representation:', doc.id, e))
+                  hiddenCleanupPending = true
+                }
+                if (savedItem.hidden && indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)) {
+                  // the inverse: a visible item became hidden, so its visible representation is
+                  // removed through the ordinary path before the hidden branch indexes it
+                  console.warn(`item ${doc.id} became hidden; removing its visible representation`)
+                  applyRemoteChange({ type: 'removed' }, doc, { hidden: false, text: '' })
                 }
                 if (savedItem.hidden) {
                   const seenDirtySeq = hiddenDirtySeq // this transition can only heal what it saw
@@ -7694,7 +7722,7 @@
                       if (hiddenItems.has(doc.id)) {
                         hiddenApplyFailed = true
                         markHiddenDirty(doc.id)
-                        revokeHiddenAuthority('hidden record became malformed')
+                        revokeThisRevision('hidden record became malformed')
                       }
                       continue
                     }
@@ -7731,7 +7759,7 @@
                           console.error('could not apply remote change:', doc.id, e)
                           hiddenApplyFailed = true
                           markHiddenDirty(doc.id)
-                          revokeHiddenAuthority('hidden change could not be applied') // as soon as known
+                          revokeThisRevision('hidden change could not be applied') // as soon as known
                         }
                       )
                   )
