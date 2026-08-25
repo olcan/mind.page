@@ -441,17 +441,11 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await page.goto('/?shared=crawl_e2e/trap')
     await dismissNotice()
     await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
-    expect(
-      await page.evaluate(() =>
-        [
-          'signInWithPopup',
-          'signInWithRedirect',
-          'signInWithCustomToken',
-          'signInAnonymously',
-          'getRedirectResult',
-        ].filter(m => typeof (window as any).firebase?.auth?.[m] == 'function')
-      )
-    ).toEqual([]) // no way to establish a session from this realm
+    // NOTE: no assertion that the realm cannot authenticate. removing methods from this window
+    // is not a boundary — a same-origin iframe at '/' recreates the whole facade — so the
+    // documented model is that running owner code grants its author full same-origin trust.
+    // what IS asserted here is that content renders and that an authenticated visitor is gated
+    expect(await page.evaluate(() => window._items().length)).toBeGreaterThan(0)
     await withSecret(page)
     await loadUser(page, ALICE)
     await page.goto('/?shared=crawl_e2e/trap')

@@ -71,43 +71,15 @@
   // the visitor lands on a clean first-party page and clicks sign in there, which is also the
   // only way the gesture is genuinely theirs
 
-  // removes every way to establish a session from the firebase object item code can reach. the
-  // page keeps its authenticated READS (a shared page still renders), but nothing running here
-  // can create or swap a principal. residual, documented: owner code already running in another
-  // still-open foreign tab can observe a session created later elsewhere, since auth state is
-  // shared across tabs of an origin — closing that needs a separate execution origin
-  function disableForeignAuth() {
-    const auth = (window['firebase'] as any)?.auth
-    if (!auth) return
-    for (const method of [
-      'signInWithPopup',
-      'signInWithRedirect',
-      'signInWithCustomToken',
-      'signInWithCredential',
-      'signInWithEmailAndPassword',
-      'signInWithEmailLink',
-      'signInAnonymously',
-      'createUserWithEmailAndPassword',
-      'getRedirectResult',
-      'updateCurrentUser',
-      'linkWithPopup',
-      'linkWithRedirect',
-      'reauthenticateWithPopup',
-      'reauthenticateWithRedirect',
-    ])
-      try {
-        delete auth[method]
-      } catch (e) {} // non-configurable in some builds: best effort, the gate below still applies
-  }
-
-  // per-load, in-memory foreign-code consent (owner uid -> granted). deliberately NOT persisted:
-  // see the gate in initialize
-  const foreignCodeConsent = new Map()
+  // per-load, in-memory foreign-code consent. deliberately NOT persisted (see the gate in
+  // initialize): a stored record cannot be an integrity boundary against code running in the
+  // same origin. one load has one page owner, so a boolean says everything
+  let foreignCodeConsented = false
   // legacy persisted consent from earlier builds is removed on sight, so an old forged key
   // cannot outlive this change
   function clearForeignCodeConsent() {
     if (!isClient) return
-    foreignCodeConsent.clear()
+    foreignCodeConsented = false
     for (const key of Object.keys(window.sessionStorage))
       if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
     localStorage.removeItem('mindpage_consent_principal')
@@ -3568,7 +3540,7 @@
     // console.debug("itemTextChanged", item.name);
     item.hash = hash(text)
     item.lctext = text.toLowerCase()
-    item.runnable = item.lctext.match(blockRegExp('\\S+_input(?:_hidden|_removed)? *')) // note input type required
+    item.runnable = item.lctext.match(inputBlockRegExp()) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
     if (text == item.previewText) item.previewable = false
@@ -5662,7 +5634,7 @@
       // runnable but matched nothing here, so `match` returned null and `.join` threw an
       // uncaught TypeError — every installed item whose inputs are all hidden (e.g. the
       // #agent/chat/* providers, whose only block is js_input_removed) had a dead run button
-      const input_regex = blockRegExp('\\S+_input(?:_hidden|_removed)? *')
+      const input_regex = inputBlockRegExp() // the SAME grammar the runnable flag uses
       const inputs = item.text.match(input_regex)
       if (!inputs) {
         // unreachable while the two regexes agree; a modal beats an uncaught error if they drift
@@ -5673,7 +5645,7 @@
 
       // hide input blocks (via _removed suffix), normalizing any suffix the source already had
       // so an already-hidden block does not become _input_removed_removed
-      run_text = run_text.replace(input_regex, m => m.replace(/_input(?:_hidden|_removed)?/, '_input_removed'))
+      run_text = run_text.replace(input_regex, m => m.replace(/_input(?:_hidden|_removed)?(?= |$)/im, '_input_removed'))
 
       // focus on run item (w/o scrolling) unless it (or a descendant) is already focused
       if (!editorText.trim().toLowerCase().startsWith(run_name.toLowerCase())) {
@@ -6673,10 +6645,11 @@
     foreignCodeBlocked = false
     if (fixed && sharer) {
       const principal = getAuth(firebase)?.currentUser ?? null
-      // a foreign page can no longer AUTHENTICATE anyone (see disableForeignAuth below), so an
-      // anonymous visitor has nothing to lose here and keeps a working page. an authenticated
-      // visitor is a different matter: their session already exists, and consent is the only
-      // thing standing between owner code and it
+      // an ANONYMOUS visitor is not gated: they have no session and no stored key, so there is
+      // nothing here to expose, and shared pages stay usable for the audience they are shared
+      // with. the cost is documented rather than papered over — see the trust-model note below:
+      // if such a visitor later signs in ON THIS ORIGIN, owner code that ran here can reach that
+      // session. an AUTHENTICATED visitor is gated, because their session already exists
       const gated = principal ? principal.uid != sharer : false
       if (gated) {
         // consent is asked once PER LOAD and kept in memory only. a stored record cannot be an
@@ -6684,7 +6657,7 @@
         // ungated ANONYMOUS visit — can write the storage key for another uid and have it
         // honored later. per-load consent costs one prompt per visit and cannot be forged ahead
         // of time
-        if (!foreignCodeConsent.get(sharer)) {
+        if (!foreignCodeConsented) {
           const run = await new Promise(resolve =>
             _modal(
               `This shared page includes code written by its owner, which would run with access ` +
@@ -6700,18 +6673,20 @@
             )
           )
           foreignCodeBlocked = !run
-          if (run) foreignCodeConsent.set(sharer, true)
+          if (run) foreignCodeConsented = true
         }
       }
     }
     // read by the renderer to make owner html inert (see toHTML in Item.svelte)
     window['_foreign_code_blocked'] = foreignCodeBlocked
-    // on a foreign page, remove the ability to AUTHENTICATE from the exposed firebase surface
-    // before any owner code runs. otherwise owner code can call signInWithPopup itself under a
-    // click it intercepted, and end up holding a live authenticated session in a realm it
-    // controls — the app's own signIn() leaving for a clean page cannot help when the hostile
-    // code is what handles the gesture. the visitor signs in from a first-party page instead
-    if (fixed && sharer && sharer != user?.uid) disableForeignAuth()
+    // NOTE: there is no attempt to remove the authentication surface from a foreign page. that
+    // was tried and it is not a boundary: any same-origin realm — an iframe at '/', an auxiliary
+    // window opened under an intercepted click — recreates the complete firebase facade, and
+    // auth persistence is origin-wide. RUNNING OWNER CODE MEANS GRANTING ITS AUTHOR FULL
+    // SAME-ORIGIN TRUST, including any session established later in this origin. that is the
+    // documented trust model for shared pages; only a separate execution origin would change it.
+    // what the consent gate above genuinely provides is that an AUTHENTICATED visitor's existing
+    // session is never exposed without an explicit per-load decision
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
@@ -7393,12 +7368,13 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            // the echo of a write this client ISSUED and the server has not acknowledged yet.
-            // firestore delivers a document's changes in commit order, so everything else is
-            // genuinely newer state and must be applied — including another tab's write that
-            // lands while ours is still pending, which the old blanket in-flight skip lost.
-            // removals are id-driven and idempotent, so they always apply
-            return change.type != 'removed' && hiddenPersistence.isOwnEcho(doc.id, savedItem.text)
+            // the echo of a write this client ISSUED, matched on the RAW CIPHERTEXT (unique per
+            // write via the random IV, so two identical states are still two identities) before
+            // any decryption. firestore delivers a document's changes in commit order, so
+            // everything else is genuinely newer state and must be applied — including another
+            // tab's write that lands while ours is still pending, which the old blanket
+            // in-flight skip lost. removals are id-driven and idempotent, so they always apply
+            return change.type != 'removed' && hiddenPersistence.isOwnEcho(doc.id, doc.data().cipher)
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
@@ -7441,7 +7417,7 @@
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === 'added') {
                     if (savedItem.hidden) {
-                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
                       if (!wrapper) return // quarantined
                       // older or equal revision: a redelivery, or the echo of our own write —
                       // never allowed to overwrite what we hold (this single rule replaces the
@@ -7520,7 +7496,7 @@
                     requestHiddenCleanup()
                   } else if (change.type == 'modified') {
                     if (savedItem.hidden) {
-                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
                       if (!wrapper) return // quarantined
                       const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
@@ -7735,7 +7711,7 @@
               // applied mid-write could displace the wrapper the write targets); authority
               // settles only after every queued transition of this revision lands
               const hiddenApplied = []
-              for (const change of snapshot.docChanges()) {
+              for (let change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
                 // a change that cannot be decrypted is logged and skipped: it must not break the
@@ -7769,7 +7745,12 @@
                   await hiddenPersistence
                     .applyRemote([stale?.name], () => removeHidden(hiddenIndex(), doc.id))
                     .catch(e => console.error('could not drop stale hidden representation:', doc.id, e))
+                  hiddenPersistence.releaseRemote(doc.id)
                   hiddenCleanupPending = true
+                  // the record now belongs to the VISIBLE world, where it has no representation
+                  // yet: passing the original 'modified' on would hit the ordinary branch, find
+                  // no row for this id and return, leaving the document in neither world
+                  if (change.type == 'modified') change = { ...change, type: 'added', doc } as any
                 }
                 if (savedItem.hidden && indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)) {
                   // the inverse: a visible item became hidden, so its visible representation is
@@ -7787,7 +7768,7 @@
                     // finalization: its removal must still serialize on the adopting name
                     names = [hiddenPersistence.nameForDocument(doc.id)]
                   } else {
-                    wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
+                    wrapper = parseHiddenWrapper(doc.id, savedItem.text)
                     if (!wrapper) {
                       // a valid -> MALFORMED server modification: the record is quarantined
                       // (never indexed), but the previously valid wrapper is still in the index
@@ -7830,6 +7811,8 @@
                           revokeThisRevision('hidden change could not be applied') // as soon as known
                         }
                       )
+                      // the receipt entry existed only to cover the window before this applied
+                      .finally(() => hiddenPersistence.releaseRemote(doc.id))
                   )
                   continue
                 }
@@ -8595,11 +8578,10 @@
   // or a missing/non-string name) exactly as initialization does: an invalid record is reported
   // and never indexed — a partially indexed wrapper made later application throw, and a wrapper
   // with an undefined name made cleanup throw AFTER authority was already granted
-  // `rev` is a plaintext field (like `hidden`), so it is readable without decryption and travels
-  // with every delivery of the document
-  function parseHiddenWrapper(id, text, rev = 0) {
+  // parses one hidden document's plaintext wrapper; malformed records are quarantined
+  function parseHiddenWrapper(id, text) {
     try {
-      const wrapper = Object.assign(JSON.parse(text), { id, rev })
+      const wrapper = Object.assign(JSON.parse(text), { id })
       if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
       return wrapper
     } catch (e) {
@@ -8613,20 +8595,20 @@
   // confirmation can still make its own adoption decision inline on its own chain
   let confirmedRecords = new Map()
   let confirmIndexInFlight = null
-  function registerConfirmed(pendingName) {
+  // registers ONLY the records matching the confirming create's own name. records for other
+  // names are deliberately ignored: a query result applied outside the listener's commit order
+  // can roll a document back to whatever the query happened to capture
+  function registerConfirmedName(pendingName) {
     for (const hidden_item of confirmedRecords.values()) {
-      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
+      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
       if (wrapper?.name == pendingName) registerHiddenItem(hidden_item)
     }
   }
 
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
-    const wrapper = parseHiddenWrapper(item.id, item.text, item.rev ?? 0)
+    const wrapper = parseHiddenWrapper(item.id, item.text)
     if (!wrapper) return
-    // a server READ is a delivery like any other, and it can be older than what we hold by the
-    // time it is applied (a confirmation query result queued behind a write that has since
-    // committed). the revision decides here too
     // a pending create that claimed this name adopts the document (update instead of create),
     // with the pending (shared-page) changes taking precedence over the loaded state
     registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
@@ -8651,63 +8633,45 @@
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: pendingName => {
-      // the frontier matters as much as the flag: received-but-unapplied hidden data is exactly
-      // what a create must not miss (it would create a duplicate of a record already delivered)
+      // answers ONE question: does a record for `pendingName` already exist server-side? the
+      // full account query is unavoidable (names live inside the ciphertext) but its result is
+      // used only for the caller. it used to be fanned out across every other name and used to
+      // infer absence account-wide, which applied a snapshot OUTSIDE the listener's commit
+      // order: a document the listener had already advanced could be rolled back to the state
+      // the query happened to capture, and a record added after the query was taken could be
+      // removed locally as "absent". a create's confirmation has no business deciding that
       if (hiddenAuthorityUsable()) return Promise.resolve()
-      // one confirmation at a time for the whole account: concurrent creates on different names
-      // would otherwise each issue the same full query, and (before this) each hold its own name
-      // chain while awaiting the others' — a cycle that deadlocked both permanently
-      if (confirmIndexInFlight) return confirmIndexInFlight.then(() => registerConfirmed(pendingName))
-      // the read can only heal failures that were already known when it STARTED: a document
-      // corrupted after this snapshot was taken is not proven by it
-      const seenDirtySeq = hiddenDirtySeq
+      // one query at a time for the whole account: concurrent creates on different names would
+      // otherwise each issue the same read
+      if (confirmIndexInFlight) return confirmIndexInFlight.then(() => registerConfirmedName(pendingName))
       const query_promise = getDocsFromServer(
         query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
       ).then(async hidden_docs => {
         // ascending id order so a pending create adopts the MINIMUM-id duplicate; any failure
         // rejects (failing the create): a server read proves query completeness, not a
-        // successfully constructed name index. no durable authority is granted — on fixed pages
-        // the listener (shared subset) cannot see later hidden documents, so the next new-name
-        // create re-confirms again
-        // STAGE the whole result first; nothing is awaited on another name's chain while the
-        // caller holds its own (see the deadlock note above)
+        // successfully constructed name index
         confirmedRecords = new Map()
         for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
           const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
           if (!hidden_item.hidden || !hidden_item.text) continue
-          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
-          if (!wrapper) continue
+          if (!parseHiddenWrapper(hidden_item.id, hidden_item.text)) continue
           confirmedRecords.set(hidden_item.id, hidden_item)
         }
-        // every name OTHER than the caller's is applied through its own chain, ENQUEUED and not
-        // awaited: registering inline would replace a wrapper that name may be writing right
-        // now, and awaiting it from inside a held chain is the deadlock
-        for (const hidden_item of confirmedRecords.values()) {
-          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
-          if (!wrapper || wrapper.name == pendingName) continue
-          void hiddenPersistence.applyRemote([wrapper.name], () => registerHiddenItem(hidden_item))
-        }
-        // a COMPLETE server result also proves absence: a persisted local wrapper the query did
-        // not return no longer exists server-side, so it is removed through its own chain rather
-        // than left to mask a later create (the read otherwise "healed" ids it never proved)
-        for (const wrapper of [...hiddenIndex().byId.values()]) {
-          if (wrapper.pending_create || wrapper.adopt_id || wrapper.deleted) continue // transitional
-          if (confirmedRecords.has(wrapper.id)) continue
-          console.warn('hidden record absent from server confirmation; removing locally', wrapper.name, wrapper.id)
-          void hiddenPersistence.applyRemote([wrapper.name], () => removeHidden(hiddenIndex(), wrapper.id))
-        }
-        // heal ONLY what this read actually proves: a returned document (now staged) or one it
-        // showed to be absent. anything else — e.g. a record corrupted after the read started —
-        // keeps authority closed
-        for (const id of [...hiddenDirtyIds.keys()])
-          if (confirmedRecords.has(id) || !hiddenIndex().byId.has(id)) healHiddenDirty(id, seenDirtySeq)
       })
       confirmIndexInFlight = query_promise.finally(() => (confirmIndexInFlight = null))
-      return confirmIndexInFlight.then(() => registerConfirmed(pendingName))
+      return confirmIndexInFlight.then(() => registerConfirmedName(pendingName))
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
   })
+
+  // the ONE definition of what counts as an input block. the runnable flag (which shows the run
+  // button) and the installed-item run path (which copies the blocks) both use it: when they
+  // disagreed, an item could be marked runnable while the run path matched nothing, and the
+  // resulting null match threw an uncaught TypeError on every click
+  function inputBlockRegExp() {
+    return blockRegExp('\\S+_input(?:_hidden|_removed)? *')
+  }
 
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')

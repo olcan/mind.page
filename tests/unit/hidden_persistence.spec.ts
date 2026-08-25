@@ -190,28 +190,29 @@ test('a create claims the name, confirms the index, persists and re-keys to the 
   expect(wrapper.id).toMatch(/^doc/)
 })
 
-test('updates queued behind a create wait for it and use the persistent id', async () => {
-  const gate = deferred<void>()
+test('a save after a create does not wait for the create to be acknowledged', async () => {
+  // round-14 finding 2: this test previously asserted the opposite — that no update may be
+  // issued until the create's promise resolved. offline that promise never resolves, so a store
+  // created and then changed offline persisted only its FIRST state and lost every later one on
+  // reload. the id is preallocated, so nothing downstream needs the server's answer
+  const ack = deferred<void>()
   const { idx, calls, controller } = harness({
     createDoc: async (id, data) => {
       calls.push({ op: 'create', id, text: data.cipher ?? data.text })
-      return gate.promise
+      await ack.promise // never acknowledged during this test
     },
   })
   controller.save('n', { v: 1 })
   await flush()
+  const createdId = calls.find(c => c.op == 'create')!.id!
   controller.save('n', { v: 2 }) // update path: the pending wrapper already owns the name
   await flush()
-  expect(calls.filter(c => c.op == 'update')).toHaveLength(0) // waiting behind the create
-  const createdId = calls.find(c => c.op == 'create')!.id! // allocated before the write is issued
-  gate.resolve()
-  await flush()
   const updates = calls.filter(c => c.op == 'update')
-  expect(updates).toHaveLength(1)
-  expect(updates[0].id).toBe(createdId)
+  expect(updates).toHaveLength(1) // issued despite the unacknowledged create
+  expect(updates[0].id).toBe(createdId) // targeting the preallocated id
   expect(itemOf(updates[0].text)).toEqual({ v: 2 })
+  ack.resolve()
 })
-
 test('a failed confirmation fails the create: no document is written and the name is released', async () => {
   const { idx, calls, controller } = harness({
     confirmIndex: async _name => {
@@ -311,27 +312,18 @@ test('a save queued across an adoption still persists the merged state (adopted 
   expect(itemOf(updates[1].text)).toEqual({ theirs: 1, mine: 2 })
 })
 
-test('a fresh create settles to the minimum id when a lower-id duplicate arrives while it is in flight', async () => {
-  const gate = deferred<void>()
-  const { idx, calls, controller } = harness({
-    createDoc: async (id, data) => {
-      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
-      return gate.promise
-    },
-  })
+test('a fresh create settles to the minimum id when a lower-id duplicate arrives right after it', async () => {
+  // the create no longer stays "in flight" (it settles as soon as the write is ISSUED, see the
+  // durability note in persistCreate), but the minimum-id rule must still hold when a lower-id
+  // duplicate arrives: the remote record wins the name, and ours is retained in byId
+  const { idx, calls, controller } = harness()
   controller.save('n', { v: 1 })
   await flush()
-  // a remote lower-id duplicate arrives mid-create; the pending claim is not displaced ...
-  void arrive(controller, idx, { id: 'aaa1', name: 'n', item: { remote: true } })
-  expect(idx.byName.get('n')!.pending_create).toBe(true)
-  gate.resolve()
-  await flush()
-  // ... but settlement restores the module's minimum-id rule: the remote duplicate wins the name
-  expect(idx.byName.get('n')!.id).toBe('aaa1')
-  const createdId = calls.find(c => c.op == 'create')!.id! // allocated before the write is issued
-  expect(idx.byId.get(createdId)!.item).toEqual({ v: 1 }) // the created document is retained in byId
+  const createdId = calls.find(c => c.op == 'create')!.id!
+  await arrive(controller, idx, { id: 'aaa1', name: 'n', item: { remote: true } })
+  expect(idx.byName.get('n')!.id).toBe('aaa1') // lower id wins the name
+  expect(idx.byId.get(createdId)!.item).toEqual({ v: 1 }) // ours is retained, not lost
 })
-
 test('a save against a wrapper displaced from byId (remote replacement or rename) is dropped', async () => {
   const gate = deferred<void>()
   const { idx, calls, controller } = harness({
@@ -584,6 +576,68 @@ test('the controller exposes no deletion surface at all', () => {
   const { controller } = harness()
   for (const gone of ['deleteName', 'deleteRecord', 'isDeleting', 'deleteDiscovered'])
     expect((controller as any)[gone]).toBeUndefined()
+})
+
+
+test('two writes of identical state have distinct echo identities (multiplicity preserved)', async () => {
+  // round-14 finding 5: matching echoes by PLAINTEXT collapsed two identical writes to one
+  // entry, so the first echo consumed it and the second applied as remote state. every
+  // encryption uses a fresh random IV, so the outbound ciphertext is unique per write
+  let n = 0
+  const { idx, calls, controller } = harness({
+    encryptState: async state => {
+      const encrypted: any = state
+      encrypted.cipher = `cipher${++n}:` + state.text // a distinct cipher per write, as in production
+      encrypted.text = null
+      encrypted.attr = null
+      return encrypted
+    },
+  })
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', wrapper)
+  idx.byName.set('n', wrapper)
+  controller.save('n', { same: true })
+  await flush()
+  controller.save('n', { same: true }) // identical STATE, second write
+  await flush()
+  const ciphers = calls.filter(c => c.op == 'update').map(c => c.text!)
+  expect(ciphers).toHaveLength(2)
+  expect(new Set(ciphers).size).toBe(2) // two identities, not one
+  // each echo consumes exactly its own entry; neither is mistaken for a remote change
+  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(true)
+  expect(controller.isOwnEcho('d1', ciphers[1])).toBe(true)
+  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(false) // consumed: a redelivery is not ours
+})
+
+test('a failed write releases only its own echo identity', async () => {
+  let n = 0
+  const failures = new Set<string>()
+  const { idx, calls, controller } = harness({
+    encryptState: async state => {
+      const encrypted: any = state
+      encrypted.cipher = `cipher${++n}:` + state.text
+      encrypted.text = null
+      encrypted.attr = null
+      return encrypted
+    },
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher })
+      if (failures.has(data.cipher)) throw new Error('unavailable')
+    },
+  })
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', wrapper)
+  idx.byName.set('n', wrapper)
+  failures.add('cipher1:' + JSON.stringify({ name: 'n', item: { same: true } }))
+  controller.save('n', { same: true })
+  await flush()
+  controller.save('n', { same: true })
+  await flush()
+  const ciphers = calls.filter(c => c.op == 'update').map(c => c.text!)
+  // the FAILED write's identity is released; the live one survives (plaintext matching deleted
+  // the single shared entry and erased the live write's identity with it)
+  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(false)
+  expect(controller.isOwnEcho('d1', ciphers[1])).toBe(true)
 })
 
 test('readonly mode mutates the index but never writes', async () => {

@@ -94,7 +94,7 @@ Object.assign((firebase['firestore'] = {}), {
   addDoc,
   updateDoc,
   deleteDoc,
-  runTransaction, // hidden-record writes are conditional on the document revision
+  runTransaction, // available to item code; the app itself uses ordinary queued writes
   query,
   where,
   orderBy,
