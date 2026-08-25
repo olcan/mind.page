@@ -202,3 +202,26 @@ test('an expired live element is torn down exactly once when its replacement ren
   await page.waitForTimeout(2_000)
   expect(await page.evaluate(() => (window as any).__destroys)).toBe(2) // and stays there
 })
+
+test('an edit in one tab reaches another tab sharing the persistent cache', async ({ page }) => {
+  // regression: with the multi-tab persistence manager both tabs share the mutation queue, so the
+  // other tab sees the change with hasPendingWrites set; skipping every pending change as "local"
+  // dropped it for good, since the acknowledging snapshot that follows is metadata-only (see
+  // isOwnPendingChange in index.svelte)
+  await loadAdmin(page)
+  const other = await page.context().newPage() // a second tab: same origin, same indexeddb
+  try {
+    await loadAdmin(other)
+    await page.evaluate(() => void window._create('#e2e_xtab original text'))
+    await expect.poll(() => savedId(page, '#e2e_xtab'), { timeout: 30_000 }).toBeTruthy()
+    // the new item reaches the other tab
+    await expect.poll(() => itemText(other, '#e2e_xtab'), { timeout: 30_000 }).toBe('#e2e_xtab original text')
+    // ... and so do later writes, in both directions (write appends an _output block)
+    await page.evaluate(() => window._item('#e2e_xtab')!.write('from the first tab'))
+    await expect.poll(() => itemText(other, '#e2e_xtab'), { timeout: 30_000 }).toContain('from the first tab')
+    await other.evaluate(() => window._item('#e2e_xtab')!.write('from the second tab'))
+    await expect.poll(() => itemText(page, '#e2e_xtab'), { timeout: 30_000 }).toContain('from the second tab')
+  } finally {
+    await other.close()
+  }
+})

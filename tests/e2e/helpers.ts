@@ -19,6 +19,7 @@ declare global {
       text: string
       saved_id?: string
       global_store: Record<string, unknown>
+      write: (text: string) => void
       delete: (confirm?: boolean) => void
       share: (key: string, index?: number) => void
       unshare: (key: string) => void

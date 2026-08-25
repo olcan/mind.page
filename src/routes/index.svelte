@@ -6846,8 +6846,44 @@
           return
         }
 
-        // applies one remote (non-pending) change from a snapshot; called with the decrypted
-        // item, sequentially per change (see the serialized snapshot handler below)
+        // a pending-write change carries a local mutation the server has not acknowledged yet. it
+        // can come from THIS tab — already applied locally, and re-applying it can clobber state
+        // that is still in flight — or, under the multi-tab persistence manager (see
+        // client-globals.ts), from ANOTHER tab sharing the cache. the latter MUST be applied:
+        // the acknowledging snapshot that follows carries no doc changes (metadata only) and
+        // would drop the change for good, which is why cross-tab updates only landed sometimes
+        function isOwnPendingChange(change, doc, savedItem) {
+          if (savedItem.hidden) {
+            const wrapper = hiddenItems.get(doc.id)
+            if (!wrapper) return change.type == 'removed' // a removal already applied locally
+            // never clobber a wrapper with work in flight: its operation state lives on the
+            // object (see hidden_persistence.ts)
+            if (wrapper.saving || wrapper.pending_create) return true
+            return JSON.stringify({ name: wrapper.name, item: wrapper.item }) == savedItem.text
+          }
+          const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
+          if (change.type == 'removed') return index === undefined // already removed locally
+          if (change.type == 'added') {
+            if (index !== undefined) return true // already present locally
+            // an item created HERE is still saving under a temporary id, so its new document id
+            // cannot be mapped yet: match it by the text of the save in flight
+            return items.some(item => item.savingText != null && item.savingText == savedItem.text)
+          }
+          if (index === undefined) return false // not present here: another tab has it
+          const item = items[index]
+          // our own write echoes back with exactly the text we sent; anything else is another
+          // tab's change and must be applied (a blanket in-flight skip would drop those for as
+          // long as any save is settling)
+          if (item.savingText != null && item.savingText == savedItem.text) return true
+          return (
+            item.savedText == savedItem.text &&
+            item.savedTime == savedItem.time &&
+            _.isEqual(item.savedAttr, savedItem.attr)
+          )
+        }
+
+        // applies one remote change from a snapshot; called with the decrypted item, sequentially
+        // per change (see the serialized snapshot handler below)
         function applyRemoteChange(change, doc, savedItem) {
                   // remote changes indicate non-focus: update sessionTime and invoke onFocus
                   sessionTime = Date.now() + 1000 /* margin for small time differences */
@@ -7112,7 +7148,6 @@
                 )
               for (const change of snapshot.docChanges()) {
                 const doc = change.doc
-                if (doc.metadata.hasPendingWrites) continue // ignore local changes
                 // a change that cannot be decrypted is logged and skipped: it must not break the
                 // chain for later snapshots (destructive reconciliation stays init-gated)
                 const savedItem = await decryptItem(doc.data()).catch(e => {
@@ -7120,6 +7155,8 @@
                   return null
                 })
                 if (!savedItem) continue
+                // pending writes are skipped only when they are OUR OWN (see isOwnPendingChange)
+                if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) continue
                 applyRemoteChange(change, doc, savedItem)
               }
             })
