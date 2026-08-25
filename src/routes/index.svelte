@@ -5657,12 +5657,23 @@
       let run_item = _item(run_name, { silent: true })
 
       // copy only input blocks, prepend label and dependency on parent
-      const input_regex = blockRegExp('\\S+_input *') // input type is required as w/ runnable flag
-      let run_text =
-        run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' + item.text.match(input_regex).join('\n').trim()
+      // NOTE: this must accept the SAME blocks as the runnable flag above (which decides whether
+      // the button is shown at all). it did not: hidden/removed input blocks made an item
+      // runnable but matched nothing here, so `match` returned null and `.join` threw an
+      // uncaught TypeError — every installed item whose inputs are all hidden (e.g. the
+      // #agent/chat/* providers, whose only block is js_input_removed) had a dead run button
+      const input_regex = blockRegExp('\\S+_input(?:_hidden|_removed)? *')
+      const inputs = item.text.match(input_regex)
+      if (!inputs) {
+        // unreachable while the two regexes agree; a modal beats an uncaught error if they drift
+        _modal(`cannot run installed item ${item.name}: no input blocks found`)
+        return
+      }
+      let run_text = run_name + ' ' + item.label.replace(/^#/, '#_') + '\n' + inputs.join('\n').trim()
 
-      // hide input blocks (via _removed suffix)
-      run_text = run_text.replace(input_regex, m => m.replace(/_input/, '_input_removed'))
+      // hide input blocks (via _removed suffix), normalizing any suffix the source already had
+      // so an already-hidden block does not become _input_removed_removed
+      run_text = run_text.replace(input_regex, m => m.replace(/_input(?:_hidden|_removed)?/, '_input_removed'))
 
       // focus on run item (w/o scrolling) unless it (or a descendant) is already focused
       if (!editorText.trim().toLowerCase().startsWith(run_name.toLowerCase())) {

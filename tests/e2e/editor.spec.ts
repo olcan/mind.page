@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { firestore, loadAdmin } from './helpers.js'
+import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
 // editor flows driven by keyboard and mouse, as admin on the anonymous account: creating items from
 // the mindbox, searching and url state, tag navigation and history, editing items in place, undelete
@@ -332,4 +332,41 @@ test('images loading in small steps still trigger a layout within seconds', asyn
       { timeout: 3_000 } // well under the 10s periodic pass
     )
     .toBe(true)
+})
+
+test('the run button works on an installed item whose input blocks are all hidden', async ({ page }) => {
+  // reported bug (issues/MindPage Run Button Crash on Installed Agent Items.md): the `runnable`
+  // flag that SHOWS the button accepts hidden/removed input blocks, but the installed-item run
+  // path extracted inputs with a stricter regex — so `match` returned null and `.join` threw an
+  // uncaught TypeError. every installed #agent/chat/* provider is exactly this shape: its only
+  // block is js_input_removed
+  await loadAdmin(page)
+  const errors: string[] = []
+  page.on('pageerror', e => errors.push(String(e)))
+  await page.evaluate(() =>
+    window._create(['#e2e_hidden_input hidden-only input', '```js_input_removed', '1 + 1', '```'].join('\n'))
+  )
+  await expect.poll(() => savedId(page, '#e2e_hidden_input'), { timeout: 30_000 }).toBeTruthy()
+  // mark it INSTALLED the way /_install does — in the stored document — then reload so the app
+  // loads it as an installed item (attr.source is what selects the run path under test)
+  const id = await savedId(page, '#e2e_hidden_input')
+  await firestore()
+    .collection('items')
+    .doc(id!)
+    .update({ attr: { source: 'https://github.com/olcan/mind.items/blob/master/e2e.md' } })
+  await page.reload()
+  await waitForApp(page)
+  await page.evaluate(() => void (location.hash = '#e2e_hidden_input')) // bring it up so it renders
+  // NOTE: .button.run lives in .item-menu, a SIBLING of .item — not inside it
+  const run = page.locator('.button.run')
+  await expect(run).toHaveCount(1, { timeout: 30_000 }) // only this item is runnable
+  await run.click()
+  // the run item is created from the hidden input, and nothing throws
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_hidden_input/run')), { timeout: 30_000 }).toBe(true)
+  expect(errors.filter(e => e.includes('TypeError'))).toEqual([])
+  // the copied block keeps ONE suffix: normalizing an already-hidden block must not produce
+  // js_input_removed_removed
+  const runText = await page.evaluate(() => window._item('#e2e_hidden_input/run', true)?.text ?? '')
+  expect(runText).toContain('js_input_removed')
+  expect(runText).not.toContain('_removed_removed')
 })
