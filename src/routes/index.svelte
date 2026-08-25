@@ -6039,6 +6039,7 @@
     removeHidden,
   } from '../hidden'
   import { createHiddenPersistence } from '../hidden_persistence'
+  import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
 
   let consoleLog = []
@@ -6586,29 +6587,34 @@
         authUser => {
           init_log('user:', authUser?.email || 'anonymous')
 
-          // console.debug("onAuthStateChanged", user, authUser)
-          if (signingIn || signingOut) return // ignore auth changes when signing in/out, which should trigger a reload
-
-          // reload automatically if auth state is modified, e.g. due to signin/signout on another tab
-          if (authStateReceived) {
+          // the branch decision is extracted and table-tested (see authStateAction in
+          // src/session.ts); this callback owns every effect
+          const action = authStateAction({
+            signingIn,
+            signingOut,
+            authStateReceived,
+            hasUser: !!authUser,
+            anonymous,
+          })
+          if (action == 'ignore_transition') return // a sign-in/out flow in this tab ends in a reload
+          if (action == 'reload') {
+            // auth state modified after this page initialized, e.g. sign-in/out on another tab
             console.warn('auth state modified, reloading ...')
             location.reload()
             return
           }
           authStateReceived = true
 
-          if (!authUser) {
-            // if we were expecting signin, then we should let user know that we failed and offer to retry ...
-            if (!anonymous) {
-              _modal(`MindPage could not sign you in to your Google account.`, {
-                confirm: 'Try Again',
-                cancel: 'Cancel',
-                onConfirm: signIn,
-                onCancel: () => location.reload(),
-              })
-              return // cancel init (no need to indicate visually since reload is required)
-            }
-          } else {
+          if (action == 'signin_failed') {
+            _modal(`MindPage could not sign you in to your Google account.`, {
+              confirm: 'Try Again',
+              cancel: 'Cancel',
+              onConfirm: signIn,
+              onCancel: () => location.reload(),
+            })
+            return // cancel init (no need to indicate visually since reload is required)
+          }
+          if (action == 'apply_user') {
             resetUser() // clean up first
             user = authUser
             const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
