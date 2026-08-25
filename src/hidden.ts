@@ -19,6 +19,10 @@ export type HiddenWrapper = {
   pending_create?: boolean | null
   adopt_id?: string | null
   saving?: Promise<string> | null
+  // monotonic stamp assigned when a LOCAL create claims the name (see hidden_persistence.ts):
+  // a logical deletion removes only records that existed when it was issued, so a save made
+  // after the deletion began is causally later and must survive it
+  born?: number
   // tombstone set by a delete while controller work is in flight (see hidden_persistence.ts):
   // settlement transitions re-key the wrapper (so the queued delete can target the persisted
   // document) but never reinsert it into the maps

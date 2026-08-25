@@ -885,6 +885,73 @@ test('a queued arrival that would roll an adopted create back is settled from th
   expect(idx.byName.get('n')!.item).toEqual({ theirs: 1, mine: 2 })
 })
 
+
+test('a save issued AFTER a deletion begins survives it (causally later intent)', async () => {
+  // round-10 finding 7: the delete task re-sweeps the name while it runs, which also swept away
+  // a wrapper the caller created after asking for the deletion — "empty this store, then put
+  // this in it" ended empty, silently
+  const gate = deferred<void>()
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    deleteDoc: async id => {
+      calls.push({ op: 'delete', id })
+      await gate.promise // hold the deletion in flight while the new save arrives
+    },
+  })
+  const existing: HiddenWrapper = { id: 'd1', name: 'n', item: { old: true } }
+  idx.byId.set('d1', existing)
+  idx.byName.set('n', existing)
+  controller.deleteName('d1', 'n')
+  controller.save('n', { fresh: 1 }) // causally AFTER the delete
+  gate.resolve()
+  await flush()
+  await flush()
+  expect(calls.filter(c => c.op == 'delete').map(c => c.id)).toEqual(['d1']) // only the old record
+  const survivor = idx.byName.get('n')
+  expect(survivor?.item).toEqual({ fresh: 1 }) // the later save survived the sweep
+  expect(survivor?.deleted).toBeFalsy()
+  expect(calls.some(c => c.op == 'create')).toBe(true) // and it was persisted
+})
+
+test('a logical deletion uses the caller name, not a stale alias to a renamed record', async () => {
+  // round-10 finding 7: the old-name alias is deliberately readable until reload; resolving the
+  // deletion target from its id alone made emptying the OLD store delete every record of the
+  // record's NEW name — a live store the caller never referred to
+  const { idx, calls, controller } = harness()
+  const renamed: HiddenWrapper = { id: 'd1', name: 'new_name', item: { live: true } }
+  idx.byId.set('d1', renamed)
+  idx.byName.set('new_name', renamed)
+  idx.byName.set('old_name', renamed) // the stale alias applyRemoteModified leaves behind
+  const other: HiddenWrapper = { id: 'd2', name: 'new_name', item: { alsoLive: true } }
+  idx.byId.set('d2', other)
+  controller.deleteName('d1', 'old_name') // caller empties what it knows as old_name
+  await flush()
+  // nothing under the live new_name is touched: no record of it is deleted or removed locally
+  expect(calls.filter(c => c.op == 'delete').map(c => c.id)).not.toContain('d2')
+  expect(idx.byId.get('d1')).toBe(renamed)
+  expect(idx.byId.get('d2')).toBe(other)
+  expect(idx.byName.get('new_name')).toBe(renamed)
+})
+
+test('a failed delete revokes authority so the survivor is adopted, not duplicated', async () => {
+  const { idx, calls, controller } = harness({
+    deleteDoc: async id => {
+      calls.push({ op: 'delete', id })
+      throw new Error('unavailable')
+    },
+  })
+  const existing: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
+  idx.byId.set('d1', existing)
+  idx.byName.set('n', existing)
+  controller.deleteName('d1', 'n')
+  await flush()
+  // the document is still alive server-side while the local record is gone: authority must not
+  // stay usable, or the next same-name create skips confirmation and creates a duplicate
+  expect(calls.some(c => c.op == 'invalidate')).toBe(true)
+})
+
 test('readonly mode mutates the index but never writes', async () => {
   const { idx, calls, controller } = harness({ readonly: () => true })
   controller.save('n', { v: 1 })

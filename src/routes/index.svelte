@@ -751,7 +751,9 @@
             const name = 'global_store_' + __item.savedId
             modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
             if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-            if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id)
+            // the NAME is what the caller is emptying; the id can belong to a record renamed
+            // remotely since (see deleteName)
+            if (_.isEmpty(__item.global_store)) deleteHiddenItem(hiddenItemsByName.get(name)?.id, name)
             else if (modified) saveHiddenItem(name, _.cloneDeep(__item.global_store))
           }
 
@@ -8623,10 +8625,10 @@
   // LOGICAL deletion ("this store is empty"): removes every record of the id's name —
   // canonical plus retained duplicates, whose later promotion would resurrect old state — and
   // tombstones the name so a document discovered mid-flight is deleted, not registered
-  function deleteHiddenItem(id) {
+  function deleteHiddenItem(id, expectedName = undefined) {
     if (!id) return // nothing to delete
     if (!initialized) throw new Error('deleteHiddenItem called before initialized')
-    hiddenPersistence.deleteName(id)
+    hiddenPersistence.deleteName(id, expectedName)
   }
 
   function hiddenItemChangedRemotely(name, change_type) {

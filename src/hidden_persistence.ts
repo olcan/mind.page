@@ -100,6 +100,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // a create/adopt decision, which would create a duplicate the listener then has to clean up
   const inbox = new Map<string, HiddenWrapper>() // document id -> record as received
   const inboxRemoved = new Set<string>() // ids whose removal was received (never adopt these)
+  let bornSeq = 0 // stamps local creates so a deletion can exclude causally-later ones
 
   // enqueue work for the name; failures settle inside each task, so the chain always continues;
   // the wrapper mirrors in-flight status via `saving`, cleared when ITS latest mirrored promise
@@ -275,6 +276,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         saving: null,
         pending_create: true,
         adopt_id: null,
+        born: ++bornSeq,
       }
       index.byId.set(wrapper.id, wrapper)
       index.byName.set(name, wrapper)
@@ -356,9 +358,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // promotion would otherwise resurrect old state — and tombstones the name until the
     // deletion settles, so a same-name document discovered mid-flight (e.g. registered during
     // another task's confirmation) is deleted instead of registered
-    deleteName(id: string) {
+    // `expectedName` is the name the CALLER believes it is emptying. it is authoritative when
+    // given: resolving the name from the id alone lets a stale alias (an id whose live wrapper
+    // was renamed remotely) delete every record of the record's NEW name — the caller's own
+    // store is not what would die
+    deleteName(id: string, expectedName?: string) {
       const index = deps.index()
-      const name = index.byId.get(id)?.name
+      const live = index.byId.get(id)?.name
+      if (expectedName && live && live != expectedName) {
+        console.warn(`hidden delete for '${expectedName}' targeted a record now named '${live}': deleting by name only`)
+      }
+      const name = expectedName ?? live
       if (!name) {
         // unknown id (e.g. already removed): best-effort record deletion
         if (!deps.readonly()) void deleteDocTracked(id).catch(e => console.error('hidden item delete failed:', e))
@@ -367,11 +377,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // removes every record currently known under the name; called again INSIDE the task, since
       // arrivals queued ahead of it can add more records between now and then (a snapshot list
       // taken here would let those survive and resurrect the store)
+      // records created (locally) AFTER this deletion was issued are causally later intent and
+      // must survive it: "empty this store, then put this in it" cannot end empty
+      const issuedAt = bornSeq
       const removedList: HiddenWrapper[] = []
       const removeAllNamed = () => {
         const index = deps.index()
         for (const w of [...index.byId.values()])
-          if (w.name == name && !w.deleted) {
+          if (w.name == name && !w.deleted && !((w.born ?? 0) > issuedAt)) {
             const { removed } = removeHidden(index, w.id)
             if (removed) {
               removed.deleted = true
@@ -389,7 +402,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           // cache can hold one while an older one is unseen): confirm against the server first,
           // with the tombstone routing every same-name document it finds into this deletion.
           // without it, deleting a store can be undone by later discovery of an unseen record
-          await deps.confirmIndex(name).catch(e => console.error('hidden delete confirmation failed:', e))
+          // a failed confirmation means the index may still be missing records of this name:
+          // authority is revoked so nothing later treats the deletion as complete evidence
+          await deps.confirmIndex(name).catch(e => {
+            console.error('hidden delete confirmation failed:', e)
+            deps.invalidateAuthority('hidden delete confirmation failed')
+          })
           // by the time the task runs, any preceding create has settled: on success the wrapper
           // carries the persistent id (re-keyed even when tombstoned), on failure nothing was
           // persisted (and is skipped below)
@@ -406,7 +424,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
             if (!pending.length) break
             for (const target of pending) {
               deleted.add(target)
-              await deleteDocTracked(target).catch(e => console.error('hidden item delete failed:', e))
+              // a failed delete leaves the document ALIVE server-side while the local record is
+              // gone: revoke authority so the next same-name create re-confirms and adopts it
+              // instead of creating a duplicate beside the survivor
+              await deleteDocTracked(target).catch(e => {
+                console.error('hidden item delete failed:', e)
+                deps.invalidateAuthority('hidden delete failed')
+              })
             }
           }
         } finally {
