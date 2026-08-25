@@ -7,7 +7,7 @@
 <span class="hljs-title function_">run</span>(<span class="hljs-params">
 </span>) {
   <span class="hljs-keyword">const</span> events = <span class="hljs-keyword">await</span>
-<span class="hljs-title function_">fetch_events</span>(<span class="hljs-number">5</span>) <span class="hljs-comment">// from <a href="#" title="#gapi/examples/calendar" onmousedown="_handleTagClick('A2fG1zs0sYow3P1YPf40','#gapi/examples/calendar','#gapi/examples/calendar',event)" onclick="event.preventDefault();event.stopPropagation();">#gapi/examples/calendar</a>
+<span class="hljs-title function_">fetch_events</span>(<span class="hljs-number">5</span>) <span class="hljs-comment">// from <a href="#" title="#gapi/examples/calendar" data-tag-click="#gapi/examples/calendar">#gapi/examples/calendar</a>
 </span>
 <span class="hljs-keyword">let</span> agenda = events.<span class="hljs-property">length</span> == <span class="hljs-number">0</span> ? <span class="hljs-string">'No upcoming events.'</span> :
     [<span class="hljs-string">"|||"</span>, <span class="hljs-string">"|-|-"</span>, ...events.<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">event</span>) =&gt;</span> {

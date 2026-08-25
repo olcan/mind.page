@@ -969,6 +969,10 @@ export function scrubForeignNode(root) {
       }
       if (FOREIGN_URL_ATTRS.has(name) && !isSafeForeignUrl(attr.value, tag)) elem.removeAttribute(attr.name)
     }
+    // safe navigation is PERMITTED in view only (a reading mode still needs working links), but
+    // never with an opener: the markdown renderer emits rel="opener" by design, and owner html
+    // can carry it too, which lets a clicked cross-origin destination navigate this tab
+    if (tag == 'a' && elem.getAttribute('href')) elem.setAttribute('rel', 'noopener noreferrer')
   }
   return root
 }

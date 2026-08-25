@@ -66,6 +66,17 @@
   // so foreign code runs only after explicit consent (see initialize) and every execution path
   // funnels through Item.eval, which throws while blocked
   let foreignCodeBlocked = false
+
+  // drops every remembered foreign-code consent AND the principal marker. called on any
+  // transition out of an authenticated principal (sign-out included), not just on one uid
+  // replacing another: an ungated anonymous visit can run owner code that writes a consent key
+  // for the previous uid, which would then be honored when that account signs back in
+  function clearForeignCodeConsent() {
+    if (!isClient) return
+    for (const key of Object.keys(window.sessionStorage))
+      if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
+    localStorage.removeItem('mindpage_consent_principal')
+  }
   let sharer_short_name
   // let spinnerSize = isClient ? Math.max(60, Math.min(innerWidth, innerHeight) * 0.2) : 0 // resized in checkLayout
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
@@ -3222,6 +3233,10 @@
     setTimeout(() => (document.activeElement as HTMLElement).blur())
 
     localStorage.removeItem('mindpage_secret') // also remove secret when signing out
+    // and every remembered foreign-code consent, plus the principal marker: an ANONYMOUS visit
+    // is not gated, so owner code running there could otherwise write a consent key for the uid
+    // that just signed out and have it honored when that account signs back in
+    clearForeignCodeConsent()
     resetUser()
     getAuth(firebase)
       .signOut()
@@ -7044,8 +7059,7 @@
             // this device: the record lives in session storage, which owner code authorized by a
             // previous visitor could have written for another uid (see the gate in initialize)
             if (localStorage.getItem('mindpage_consent_principal') != (authUser?.uid ?? '')) {
-              for (const key of Object.keys(window.sessionStorage))
-                if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
+              clearForeignCodeConsent()
               localStorage.setItem('mindpage_consent_principal', authUser?.uid ?? '')
             }
             user = authUser

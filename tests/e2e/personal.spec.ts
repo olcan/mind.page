@@ -303,6 +303,35 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     })
   await firestore()
     .collection('items')
+    .doc('e2e-foreign-comment')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now() - 4,
+      // no math in this item: nothing re-scrubs it after the comment linkifier runs
+      text: [
+        '#e2e_trap_comment a foreign item with a hostile code comment',
+        '```js',
+        "// see https://evil.example/',globalThis.__POST_SCRUB=1,'",
+        'const x = 1',
+        '```',
+      ].join('\n'),
+      attr: { shared: { keys: ['trap'], indices: { trap: 4 } } },
+    })
+  // an owner-controlled source url reaches window.open through the source control
+  await firestore()
+    .collection('items')
+    .doc('e2e-foreign-source')
+    .set({
+      user: 'crawl_e2e',
+      time: Date.now() - 5,
+      text: '#e2e_trap_source an item whose source control carries a javascript url',
+      attr: {
+        source: 'javascript:window.__SOURCE_BYPASS=1',
+        shared: { keys: ['trap'], indices: { trap: 5 } },
+      },
+    })
+  await firestore()
+    .collection('items')
     .doc('e2e-foreign-style')
     .set({
       user: 'crawl_e2e',
@@ -347,6 +376,27 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await jsLink.dispatchEvent('click')
     await page.waitForTimeout(1_000)
     expect(await page.evaluate(() => (window as any).__LINK_BYPASS ?? null)).toBeNull()
+    // the code-comment linkifier runs in afterUpdate, AFTER the render-time scrub, and used to
+    // build its click handler by interpolating the url into javascript source (html-escaped,
+    // which the parser decodes before compiling the attribute). clicking such a link executed
+    // the owner's expression despite View Only
+    const comment = page.locator('.hljs-comment').first()
+    if (await comment.isVisible({ timeout: 15_000 }).catch(() => false)) await comment.dispatchEvent('click')
+    for (const link of await page.locator('.hljs-comment a').all()) await link.dispatchEvent('click')
+    expect(await page.evaluate(() => (window as any).__POST_SCRUB ?? null)).toBeNull()
+    expect(await page.evaluate(() => document.querySelectorAll('[onclick],[onmousedown]').length)).toBe(0)
+    // the source control cannot navigate to an owner javascript: url either
+    for (const src of await page.locator('.source, [class*="source"]').all())
+      await src.dispatchEvent('click').catch(() => {})
+    expect(await page.evaluate(() => (window as any).__SOURCE_BYPASS ?? null)).toBeNull()
+    // safe links keep working but never carry an opener into this tab
+    expect(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll('a[href^="http"]')).every(a =>
+          (a.getAttribute('rel') ?? '').includes('noopener')
+        )
+      )
+    ).toBe(true)
     // owner css is not installed either (it can overlay the page or build a click target) —
     // neither the special style item nor a RAW <style> element inside owner html
     expect(
@@ -385,7 +435,14 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
     await dismissNotice()
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
   } finally {
-    for (const id of ['e2e-foreign-init', 'e2e-foreign-vectors', 'e2e-foreign-style', 'e2e-foreign-title'])
+    for (const id of [
+      'e2e-foreign-init',
+      'e2e-foreign-vectors',
+      'e2e-foreign-style',
+      'e2e-foreign-title',
+      'e2e-foreign-comment',
+      'e2e-foreign-source',
+    ])
       await firestore().collection('items').doc(id).delete()
   }
 })

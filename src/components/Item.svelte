@@ -1399,21 +1399,41 @@
         if (!pathname && !host) host = host_base // do not allow empty host + path
         let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
         if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
+        // NOTE: no inline handler. `_.escape` is HTML escaping, and an event-handler attribute
+        // is compiled AFTER character references are decoded, so an owner url containing a quote
+        // used to close the javascript string and run its own expression on click. the anchor
+        // carries data only; its listener is attached from the DOM below (linkifyComments)
         return (
-          `${pfx}<a href="${_.escape(href)}" target="_blank" title="${_.escape(href)}" ` +
-          `onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label}</a>`
+          `${pfx}<a href="${_.escape(href)}" target="_blank" rel="noopener noreferrer" ` +
+          `title="${_.escape(href)}" data-link-click>${label}</a>`
         )
       })
     const link_tags = text =>
       text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, (m, pfx, tag) => {
         const tag_resolved = window['_resolve_tag'](label, tag) ?? tag
-        return `${pfx}<a href="#" title="${_.escape(tag_resolved)}" onmousedown="_handleTagClick('${id}','${_.escape(
-          tag_resolved
-        )}','${_.escape(tag_resolved)}',event)" onclick="event.preventDefault();event.stopPropagation();">${tag}</a>`
+        // same reasoning as link_urls: data only, listener attached from the DOM below
+        return `${pfx}<a href="#" title="${_.escape(tag_resolved)}" data-tag-click="${_.escape(tag_resolved)}">${tag}</a>`
       })
-    itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
-      comments.innerHTML = link_tags(link_urls(comments.innerHTML))
-    })
+    // VIEW ONLY: this runs AFTER the render-time scrub and rewrites owner-controlled comment
+    // text, so it is one more post-render producer — the visitor declined the owner's code, so
+    // no new owner-derived links are generated at all
+    if (!window['_foreign_code_blocked'])
+      itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
+        comments.innerHTML = link_tags(link_urls(comments.innerHTML))
+        // attach listeners from the DOM: the anchors above carry data attributes only, so no
+        // owner-controlled value is ever compiled as javascript
+        comments.querySelectorAll('a[data-link-click]').forEach((a: any) => {
+          a.onclick = e => window['_handleLinkClick'](id, a.getAttribute('href'), e)
+        })
+        comments.querySelectorAll('a[data-tag-click]').forEach((a: any) => {
+          const tag = a.getAttribute('data-tag-click')
+          a.onmousedown = e => window['_handleTagClick'](id, tag, tag, e)
+          a.onclick = e => {
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        })
+      })
 
     // add click handler to links w/ custom onclick that does not trigger _handleLinkClick
     itemdiv.querySelectorAll('a').forEach(a => {
