@@ -19,6 +19,12 @@ export type HiddenWrapper = {
   pending_create?: boolean | null
   adopt_id?: string | null
   saving?: Promise<string> | null
+  // the document REVISION this wrapper's state came from (server-assigned, monotonic per
+  // document). it is the whole ordering story for hidden records: a change is applied only when
+  // it is NEWER than what we hold, and a write only lands if the document is still at the
+  // revision we based it on. that replaces reconstructing server order on the client from
+  // payload provenance, receipt sequencing and post-hoc reconciliation
+  rev?: number
   // monotonic stamp assigned when a LOCAL create claims the name (see hidden_persistence.ts):
   // a logical deletion removes only records that existed when it was issued, so a save made
   // after the deletion began is causally later and must survive it
@@ -70,14 +76,14 @@ export function reassignName(index: HiddenIndex, name: string) {
 //   account was fully loaded (checkOrphans false on fixed pages, which load a shared subset)
 export function buildHiddenIndex(
   index: HiddenIndex,
-  hidden_items: { id: string; text: string }[],
+  hidden_items: { id: string; text: string; rev?: number }[],
   { anonymous, checkOrphans, existingIds }: { anonymous: boolean; checkOrphans: boolean; existingIds: Set<string> }
 ): InvalidHidden[] {
   const invalid: InvalidHidden[] = []
   for (const item of [...hidden_items].sort((a, b) => compareIds(a.id, b.id))) {
     let wrapper: HiddenWrapper
     try {
-      wrapper = Object.assign(JSON.parse(item.text), { id: item.id })
+      wrapper = Object.assign(JSON.parse(item.text), { id: item.id, rev: item.rev ?? 0 })
       if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
     } catch (e) {
       invalid.push({ wrapper: { id: item.id, name: '' }, reason: 'malformed' })
@@ -121,6 +127,7 @@ export function registerHidden(
   if (existing) {
     if (existing.pending_create && !existing.adopt_id) {
       existing.adopt_id = wrapper.id
+      existing.rev = wrapper.rev // the adopted write preconditions on the record's revision
       mergeAdopted(existing, wrapper)
       return 'adopted'
     }
@@ -142,6 +149,15 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
   return { warning }
+}
+
+// true when the incoming record is NEWER than what the index holds for that document: the one
+// rule that makes ordering total. an equal revision is our own echo (or a redelivery) and an
+// older one is a stale delivery — neither may overwrite current state
+export function isNewerRevision(index: HiddenIndex, wrapper: HiddenWrapper) {
+  const existing = index.byId.get(wrapper.id)
+  if (!existing) return true
+  return (wrapper.rev ?? 0) > (existing.rev ?? 0)
 }
 
 export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {

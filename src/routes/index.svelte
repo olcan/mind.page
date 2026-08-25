@@ -21,6 +21,7 @@
     getDocFromServer,
     getDocsFromServer,
     setDoc,
+    runTransaction,
     addDoc,
     updateDoc,
     deleteDoc,
@@ -6241,6 +6242,7 @@
     repairNameIndex,
     registerHidden,
     applyRemoteAdded,
+    isNewerRevision,
     applyRemoteModified,
     removeHidden,
   } from '../hidden'
@@ -7309,20 +7311,11 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            const wrapper = hiddenItems.get(doc.id)
-            if (change.type == 'removed') {
-              // ours only if THIS controller deleted the document (or nothing is left to
-              // remove); another tab's pending removal must apply even though our wrapper's
-              // serialized content matches the removed document
-              return hiddenPersistence.isOwnDelete(doc.id) || !wrapper
-            }
-            // exact payload identity: the controller records every plaintext payload it writes,
-            // so another tab's update applies even while OUR wrapper has work in flight (the
-            // old in-flight blanket skip lost those updates for good — the ack is metadata-only)
-            if (hiddenPersistence.isOwnWrite(doc.id, savedItem.time, savedItem.text)) return true
-            if (!wrapper) return false // unknown document: another tab's create
-            // a settled write leaves the wrapper at the written state; an echo matching it is ours
-            return JSON.stringify({ name: wrapper.name, item: wrapper.item }) == savedItem.text
+            // hidden records need no own-write classification at all: the REVISION decides. an
+            // echo of our own write carries the revision we already hold and is rejected by
+            // isNewerRevision at application; anything newer — from any tab or device — is
+            // exactly what should win. removals are id-driven and idempotent
+            return false
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
@@ -7365,8 +7358,12 @@
                   // console.debug("detected remote change:", change.type, doc.id);
                   if (change.type === 'added') {
                     if (savedItem.hidden) {
-                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
                       if (!wrapper) return // quarantined
+                      // older or equal revision: a redelivery, or the echo of our own write —
+                      // never allowed to overwrite what we hold (this single rule replaces the
+                      // whole own-write provenance system)
+                      if (!isNewerRevision(hiddenIndex(), wrapper)) return
                       const { warning } = applyRemoteAdded(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -7441,8 +7438,9 @@
                     requestHiddenCleanup()
                   } else if (change.type == 'modified') {
                     if (savedItem.hidden) {
-                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                      const wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
                       if (!wrapper) return // quarantined
+                      if (!isNewerRevision(hiddenIndex(), wrapper)) return // see the added branch
                       const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
                       hiddenItemChangedRemotely(wrapper.name, change.type)
@@ -7686,7 +7684,7 @@
                     // finalization: its removal must still serialize on the adopting name
                     names = [hiddenPersistence.nameForDocument(doc.id)]
                   } else {
-                    wrapper = parseHiddenWrapper(doc.id, savedItem.text)
+                    wrapper = parseHiddenWrapper(doc.id, savedItem.text, savedItem.rev ?? 0)
                     if (!wrapper) {
                       // a valid -> MALFORMED server modification: the record is quarantined
                       // (never indexed), but the previously valid wrapper is still in the index
@@ -7725,8 +7723,7 @@
                           if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
                           applyRemoteChange(change, doc, savedItem)
                           hiddenCleanupPending = true // validity may have changed (see requestHiddenCleanup)
-                        },
-                        doc.id // a transition that had to queue reconciles against the server after
+                        }
                       )
                       .then(
                         () => healHiddenDirty(doc.id, seenDirtySeq), // heals only ITS OWN generation
@@ -8502,9 +8499,11 @@
   // or a missing/non-string name) exactly as initialization does: an invalid record is reported
   // and never indexed — a partially indexed wrapper made later application throw, and a wrapper
   // with an undefined name made cleanup throw AFTER authority was already granted
-  function parseHiddenWrapper(id, text) {
+  // `rev` is a plaintext field (like `hidden`), so it is readable without decryption and travels
+  // with every delivery of the document
+  function parseHiddenWrapper(id, text, rev = 0) {
     try {
-      const wrapper = Object.assign(JSON.parse(text), { id })
+      const wrapper = Object.assign(JSON.parse(text), { id, rev })
       if (typeof wrapper.name != 'string' || !wrapper.name) throw new Error('missing name')
       return wrapper
     } catch (e) {
@@ -8520,15 +8519,19 @@
   let confirmIndexInFlight = null
   function registerConfirmed(pendingName) {
     for (const hidden_item of confirmedRecords.values()) {
-      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
       if (wrapper?.name == pendingName) registerHiddenItem(hidden_item)
     }
   }
 
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
-    const wrapper = parseHiddenWrapper(item.id, item.text)
+    const wrapper = parseHiddenWrapper(item.id, item.text, item.rev ?? 0)
     if (!wrapper) return
+    // a server READ is a delivery like any other, and it can be older than what we hold by the
+    // time it is applied (a confirmation query result queued behind a write that has since
+    // committed). the revision decides here too
+    if (!isNewerRevision(hiddenIndex(), wrapper)) return
     // a document discovered while its name is being logically deleted joins the deletion's
     // targets instead of being registered (the caller deleted the store; a mid-flight
     // discovery must not resurrect it)
@@ -8547,10 +8550,27 @@
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
-    updateDoc: (id, data) => updateDoc(doc(getFirestore(firebase), 'items', id), data),
+    // conditional update: the document must still be at `expectedRev`, and lands at rev + 1.
+    // this is the ONE place server order is established for hidden records — everything else
+    // (listener application, adoption, cleanup) just compares revisions
+    updateDoc: (id, data, expectedRev) =>
+      runTransaction(getFirestore(firebase), async tx => {
+        const ref = doc(getFirestore(firebase), 'items', id)
+        const snapshot = await tx.get(ref)
+        if (!snapshot.exists()) {
+          const e: any = new Error('not-found')
+          e.code = 'not-found'
+          throw e
+        }
+        const current = snapshot.data().rev ?? 0
+        if (current != expectedRev) throw { conflict: true, rev: current } // see isConflict
+        const rev = current + 1
+        tx.update(ref, { ...data, rev })
+        return rev
+      }),
     // the plaintext user field is required for creates (see firestore rules); updates keep it
     createDoc: data =>
-      addDoc(collection(getFirestore(firebase), 'items'), { ...data, user: user.uid }).then(added => added.id),
+      addDoc(collection(getFirestore(firebase), 'items'), { ...data, user: user.uid, rev: 1 }).then(added => added.id),
     deleteDoc: id =>
       deleteDoc(doc(getFirestore(firebase), 'items', id)).catch(e => {
         // the server document survives while the local wrapper is gone: revoke authority so the
@@ -8560,7 +8580,6 @@
       }),
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
-    reconcileDocument: id => void reconcileHiddenDocument(id),
     confirmIndex: pendingName => {
       // the frontier matters as much as the flag: received-but-unapplied hidden data is exactly
       // what a create must not miss (it would create a duplicate of a record already delivered)
@@ -8586,7 +8605,7 @@
         for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
           const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
           if (!hidden_item.hidden || !hidden_item.text) continue
-          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
           if (!wrapper) continue
           confirmedRecords.set(hidden_item.id, hidden_item)
         }
@@ -8594,7 +8613,7 @@
         // awaited: registering inline would replace a wrapper that name may be writing right
         // now, and awaiting it from inside a held chain is the deadlock
         for (const hidden_item of confirmedRecords.values()) {
-          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+          const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text, hidden_item.rev ?? 0)
           if (!wrapper || wrapper.name == pendingName) continue
           void hiddenPersistence.applyRemote([wrapper.name], () => registerHiddenItem(hidden_item))
         }
@@ -8619,44 +8638,6 @@
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
   })
-
-  // settles one hidden document against the SERVER after its transition had to queue behind
-  // local writes (see reconcileDocument in hidden_persistence.ts). the read is the only sound
-  // arbiter: payload times are semantic, and our own later write is acknowledged by a
-  // metadata-only snapshot that redelivers nothing, so pure local ordering can leave the tab
-  // holding a state the server does not have
-  const reconcilingHidden = new Set()
-  async function reconcileHiddenDocument(id) {
-    if (readonly || anonymous || fixed || reconcilingHidden.has(id)) return
-    reconcilingHidden.add(id)
-    try {
-      const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
-      const name = hiddenIndex().byId.get(id)?.name
-      if (!snapshot.exists()) {
-        // gone server-side: drop the local record (reconcile:false — this IS the settlement)
-        void hiddenPersistence.applyRemote([name], () => removeHidden(hiddenIndex(), id), id, { reconcile: false })
-        return
-      }
-      const hidden_item = await decryptItem(Object.assign(snapshot.data(), { id }))
-      if (!hidden_item.hidden || !hidden_item.text) return
-      const wrapper = parseHiddenWrapper(id, hidden_item.text)
-      if (!wrapper) return // malformed: quarantined by the parser, nothing to apply
-      void hiddenPersistence.applyRemote(
-        [name, wrapper.name],
-        () => {
-          const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
-          if (warning) console.warn(warning)
-          hiddenItemChangedRemotely(wrapper.name, 'modified')
-        },
-        id,
-        { reconcile: false }
-      )
-    } catch (e) {
-      console.error('could not reconcile hidden document:', id, e)
-    } finally {
-      reconcilingHidden.delete(id)
-    }
-  }
 
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')

@@ -73,6 +73,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  runTransaction,
   query,
   where,
   orderBy,
@@ -93,6 +94,7 @@ Object.assign((firebase['firestore'] = {}), {
   addDoc,
   updateDoc,
   deleteDoc,
+  runTransaction, // hidden-record writes are conditional on the document revision
   query,
   where,
   orderBy,

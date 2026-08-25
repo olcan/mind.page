@@ -29,7 +29,10 @@ export type HiddenPersistenceDeps = {
   // encryptItem/getSecretPhrase in index.svelte), during which a fixed-page validation can
   // register the account's hidden items and ADOPT a pending create
   encryptState: (state: HiddenDocData) => Promise<Record<string, any>>
-  updateDoc: (id: string, data: Record<string, any>) => Promise<void>
+  // updates the document ONLY if it is still at `expectedRev`, and stamps rev = expectedRev + 1.
+  // resolves the new revision, or rejects with a conflict (see isConflict) carrying the record
+  // the server actually holds — the client never has to infer commit order
+  updateDoc: (id: string, data: Record<string, any>, expectedRev: number) => Promise<number>
   createDoc: (data: Record<string, any>) => Promise<string> // resolves the persistent id
   deleteDoc: (id: string) => Promise<void>
   // server re-confirmation of the hidden index before an unconfirmed create (registration may
@@ -43,13 +46,6 @@ export type HiddenPersistenceDeps = {
   // revokes hidden-index authority (see settleHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
-  // re-reads one hidden document from the SERVER and applies what it finds. name-chain order is
-  // local execution order, not server commit order: a remote change that had to queue behind
-  // local writes can apply after them even though the server ordered it first, and our own
-  // later write is acknowledged by a metadata-only snapshot that redelivers nothing. after such
-  // an inversion the document is reconciled against the server, which is the only authority on
-  // its final state
-  reconcileDocument: (id: string) => void
   newTempId: () => string
   readonly: () => boolean
 }
@@ -64,32 +60,21 @@ const payload = (wrapper: HiddenWrapper): HiddenDocData => ({
 
 const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(String(e?.message ?? e))
 
+// a write rejected because the document moved on: the server holds a newer revision. this is an
+// OBSERVABLE conflict outcome rather than a silent overwrite in either direction
+export type HiddenConflict = { conflict: true; rev: number }
+export const isConflict = (e: any): boolean => !!e?.conflict
+
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
-  // OPERATION identity of each write this controller issued, per document: {time, text} of the
-  // plaintext payload, recorded BEFORE encryption (deps.encryptState MUTATES its argument and
-  // nulls text — recording after it stored nulls and broke provenance entirely). the time makes
-  // each entry unique, so a later same-content write from another tab cannot match ours, and a
-  // matched entry is CONSUMED so one echo cannot cover a second delivery
-  const recentWrites = new Map<string, { time: number; text: string }[]>()
-  const recordWrite = (id: string, state: HiddenDocData) => {
-    const writes = recentWrites.get(id) ?? []
-    writes.push({ time: state.time, text: state.text })
-    if (writes.length > 8) writes.shift()
-    recentWrites.set(id, writes)
-  }
-  // documents THIS controller is deleting: a pending removal echo for one is our own. tracked
-  // before the call (the echo can arrive while it is in flight), CONSUMED on that echo, and
-  // dropped if the delete FAILS — the document then still exists, so a later genuine remote
-  // deletion of the same id must apply instead of being skipped forever
-  const ownDeletes = new Set<string>()
-  const deleteDocTracked = (id: string) => {
-    ownDeletes.add(id)
-    return deps.deleteDoc(id).catch(e => {
-      ownDeletes.delete(id)
-      throw e
-    })
-  }
+  // NOTE: there is no write-provenance map and no own-delete set any more. both existed to
+  // answer "is this delivery our own echo?" by matching payloads — which needed a size cap (an
+  // evicted old echo then applied as remote state), consumption rules, and failure bookkeeping.
+  // the document REVISION answers it exactly: an echo of our own write carries the revision we
+  // already hold, so isNewerRevision rejects it, while any genuinely later change carries a
+  // higher one
+  const deleteDocTracked = (id: string) => deps.deleteDoc(id)
+
   // name-level deletion tombstones: while a logical deletion is unsettled, any same-name
   // document DISCOVERED (e.g. registered during another task's confirmation, or arriving at the
   // listener) is added to the deletion's targets instead of being registered — see
@@ -161,14 +146,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const survivor = findSurvivor(deps.index(), wrapper)
         if (survivor) {
           wrapper.adopt_id = survivor.id
+          wrapper.rev = survivor.rev // precondition the adopted write on the survivor's revision
           deps.adopt(wrapper, survivor)
         }
       }
       if (wrapper.adopt_id) {
         const state = payload(wrapper) // merged state (see deps.adopt)
-        recordWrite(wrapper.adopt_id, state) // BEFORE encryption: it mutates state and nulls text
         try {
-          await deps.updateDoc(wrapper.adopt_id, await deps.encryptState(state))
+          // the adopted record's revision travels on the wrapper (set where adoption is decided:
+          // registerHidden, or findSurvivor below), since the record may be known only from the
+          // receipt inbox and not yet present in the index
+          wrapper.rev = await deps.updateDoc(wrapper.adopt_id, await deps.encryptState(state), wrapper.rev ?? 0)
         } catch (e) {
           // the adopted document is gone (deleted concurrently, possibly by a removal that
           // arrived while we adopted): finalizing would settle the wrapper onto a document that
@@ -181,10 +169,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         }
         finalizeAdoption(deps.index(), wrapper)
       } else {
-        const state = payload(wrapper)
-        const created = { ...state } // identity survives the mutation below
-        const id = await deps.createDoc(await deps.encryptState(state))
-        recordWrite(id, created) // the create's own echo can arrive as added-then-modified
+        const id = await deps.createDoc(await deps.encryptState(payload(wrapper)))
+        wrapper.rev = 1 // a fresh document starts at revision 1
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
@@ -232,17 +218,24 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
             return
           }
           try {
-            const state = payload(existing)
-            const written = { ...state } // encryptState MUTATES state (nulls text): snapshot first
-            const data = await deps.encryptState(state)
+            const data = await deps.encryptState(payload(existing))
             if (!stillCurrent(name, existing)) {
               console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
               return
             }
             try {
-              recordWrite(existing.id, written)
-              await deps.updateDoc(existing.id, data)
+              // preconditioned on the revision this state was built from: if anything committed
+              // in between — another tab, another device, a queued transition — the write does
+              // not land and the conflict is reported instead of being silently resolved
+              existing.rev = await deps.updateDoc(existing.id, data, existing.rev ?? 0)
             } catch (e) {
+              if (isConflict(e)) {
+                // the server moved on. the listener delivers that newer revision (and applies it
+                // by isNewerRevision), so this write is simply superseded — an explicit,
+                // observable remote-wins outcome, not a lost update discovered later
+                console.warn(`hidden save for '${name}' superseded by a newer revision on the server`)
+                return
+              }
               if (!isNotFound(e)) throw e
               // the target can have been displaced WHILE the write was in flight (a remote
               // replacement or rename landed and the server deleted the old document): the
@@ -296,12 +289,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // immediately. returns a promise that settles when the transition has applied — the caller
     // aggregates these before settling revision authority. pass the name when known; a removal
     // of an id not in the index applies immediately (nothing in flight can target it)
-    applyRemote(
-      names: (string | undefined)[] | string | undefined,
-      apply: () => void,
-      docId?: string,
-      { reconcile = true } = {}
-    ): Promise<void> {
+    applyRemote(names: (string | undefined)[] | string | undefined, apply: () => void): Promise<void> {
       // EVERY affected name is acquired, in a canonical order so two renames in opposite
       // directions cannot deadlock: a rename must join the in-flight write on its OLD name too,
       // otherwise an already-issued old-name update can write the old name back
@@ -320,18 +308,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         i == affected.length
           ? Promise.resolve(apply())
           : (enqueue(affected[i], undefined, () => acquire(i + 1)) as Promise<void>)
-      const applied = acquire(0)
-      // this transition had to WAIT for local work, so local and server order may have diverged
-      // for the document: settle it against the server once the affected chains have DRAINED —
-      // reading while more local writes are queued would just reconcile against a state about to
-      // change (a reconcile's own application passes reconcile:false, so this cannot recur)
-      if (reconcile && docId)
-        void applied.then(async () => {
-          for (let i = 0; i < 20 && affected.some(name => chains.has(name)); i++)
-            await Promise.all(affected.map(name => chains.get(name)).filter(Boolean)).catch(() => {})
-          deps.reconcileDocument(docId)
-        })
-      return applied
+      // NOTE: no post-settle server reconcile. it existed because chain order is local execution
+      // order, so a queued transition could land after a local write the server ordered first —
+      // the client then had to re-read to discover the truth. with revisions the application
+      // itself carries the answer: a queued delivery that is older than what we hold is rejected
+      // by isNewerRevision, and a newer one is exactly what should win
+      return acquire(0)
     },
 
     // records a remote record/removal at RECEIPT so create/adopt decisions can see it before its
@@ -455,23 +437,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       }
       if (removed) enqueue(removed.name, removed, run)
       else void run()
-    },
-
-    // classification for the remote listener: a pending change whose OPERATION identity matches
-    // one THIS controller issued, or a removal of a document it is deleting, is our own echo and
-    // is skipped; everything else — including another tab's work on a wrapper we are still
-    // writing — applies. matches are consumed, so a single write covers a single echo
-    isOwnWrite(id: string, time: number, text: string) {
-      const writes = recentWrites.get(id)
-      const i = writes?.findIndex(w => w.time == time && w.text == text) ?? -1
-      if (i < 0) return false
-      writes!.splice(i, 1)
-      return true
-    },
-    isOwnDelete(id: string) {
-      if (!ownDeletes.has(id)) return false
-      ownDeletes.delete(id)
-      return true
     },
 
     // true while a logical deletion of the name is unsettled: registration paths consult this
