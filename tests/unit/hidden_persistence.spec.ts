@@ -1284,15 +1284,16 @@ test('a target with an undecoded delivery is REFUSED, and writes once it decodes
   // requeued instead, which fails closed and leaves the chain free for that application to run.
   // this test releases its encryption gate: the previous version did not, so it passed on the
   // implementation it was meant to distinguish
-  const { idx, calls, controller, awaitGate, releaseGate, drainAll } = gatedHarness()
+  const { idx, calls, controller, pending, drainAll } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
   const entering = controller.noteRemotePending('d1') // a delivery for our target is decoding
   controller.save('n', { v: 'D' })
-  await awaitGate('the first attempt')
-  await releaseGate() // it builds, then REFUSES because the delivery is still undecoded
   for (let turn = 0; turn < 6; turn++) await flush()
+  // it does not even ENCRYPT: refusing only after the build cost a secret acquisition and a full
+  // encryption per retry, which a slow decode turns into repeated builds
+  expect(pending, 'no encryption is attempted while the delivery is undecoded').toHaveLength(0)
   expect(calls.filter(c => c.op == 'update'), 'nothing written while the delivery is undecoded').toHaveLength(0)
   expect(controller.owes('n'), 'the change is still owed').toBe(true)
   controller.releaseRemote('d1', entering) // decoded, and nothing about the record changed
@@ -1303,15 +1304,17 @@ test('a target with an undecoded delivery is REFUSED, and writes once it decodes
   expect(controller.owes('n')).toBe(false)
 })
 
+// NOTE this one pins the OUTCOME, not the barrier specifically: with the refusal disabled it still
+// passes, because the stamp catches the removal at the final recheck. that is a genuine second line
+// of defence and worth keeping pinned, but the test above is the one that distinguishes the barrier
 test('a delivery that decodes into a removal is not written through by the retry', async () => {
-  const { idx, calls, controller, awaitGate, releaseGate, drainAll } = gatedHarness()
+  const { idx, calls, controller, drainAll } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
   const entering = controller.noteRemotePending('d1')
   controller.save('n', { v: 'D' })
-  await awaitGate('the first attempt')
-  await releaseGate()
+  for (let turn = 0; turn < 6; turn++) await flush()
   void arriveRemoval(controller, idx, 'd1') // what the delivery turned out to be
   controller.releaseRemote('d1', entering)
   await drainAll()

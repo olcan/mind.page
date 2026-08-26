@@ -7703,9 +7703,11 @@
               // usable authority for exactly the revisions that can change hidden completeness.
               // a document we currently hold as hidden counts too, even when it arrives with
               // hidden false — that discriminator change REMOVES a hidden record
-              hiddenReceived: snapshot
-                .docChanges()
-                .some(change => !!change.doc.data().hidden || hiddenItems.has(change.doc.id)),
+              // EVERY data change, matching the entry pre-scan below. the old predicate missed the
+              // same sequence entry marking had to fix: a pending hidden add is absent from
+              // hiddenItems, so a following hidden:false change for that id was not counted as
+              // affecting hidden completeness, and could grant authority over a stale record
+              hiddenReceived: snapshot.docChanges().length > 0,
             })
             // ENTRY receipts, taken SYNCHRONOUSLY for the whole snapshot before anything is
             // queued: a write already encrypting for one of these documents must not issue while a
@@ -7784,13 +7786,34 @@
                 if (!savedItem.hidden && hiddenItems.has(doc.id) && change.type != 'removed') {
                   const stale = hiddenItems.get(doc.id)
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
-                  // ENQUEUED, NOT AWAITED. this application goes on the name's chain, which a
-                  // local write for that same name may own — and that write refuses to issue while
-                  // this document's entry marker stands. awaiting here made the listener wait for
-                  // the writer while the writer waited for the listener
-                  void hiddenPersistence
-                    .applyRemote([stale?.name], () => removeHidden(hiddenIndex(), doc.id))
-                    .catch(e => console.error('could not drop stale hidden representation:', doc.id, e))
+                  // the hidden-side REMOVAL is published as a semantic receipt BEFORE the entry
+                  // marker can go away. without it the marker appears and disappears entirely
+                  // inside one encryption — live object, pending, live object again — and the
+                  // writer sees nothing changed, then issues a stale hidden update that the echo
+                  // turns hidden again. nameForDocument, not just the byId lookup: an adoption
+                  // target is absent from byId until finalization
+                  const dropped = hiddenPersistence.noteRemote(undefined, doc.id, true)
+                  // ENQUEUED, NOT AWAITED: this application goes on the name's chain, which a local
+                  // write for that name may own, and that write refuses while this document's
+                  // marker stands. awaiting here made the listener wait for the writer while the
+                  // writer waited for the listener. it is still tracked in hiddenApplied, so
+                  // authority cannot declare the revision applied while the removal is queued —
+                  // dropping it out of that set was a regression introduced with the `void`
+                  hiddenApplied.push(
+                    hiddenPersistence
+                      .applyRemote([hiddenPersistence.nameForDocument(doc.id) ?? stale?.name], () =>
+                        removeHidden(hiddenIndex(), doc.id)
+                      )
+                      .then(
+                        () => hiddenPersistence.releaseRemote(doc.id, dropped),
+                        e => {
+                          console.error('could not drop stale hidden representation:', doc.id, e)
+                          hiddenApplyFailed = true
+                          markHiddenDirty(doc.id)
+                          revokeThisRevision('hidden representation could not be dropped')
+                        }
+                      )
+                  )
                   hiddenCleanupPending = true
                   // the record now belongs to the VISIBLE world, where it has no representation
                   // yet: passing the original 'modified' on would hit the ordinary branch, find

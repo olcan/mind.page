@@ -298,6 +298,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       holder.item = state
       return await attemptCreate(holder, generation)
     }
+    // check BEFORE the expensive work as well as after it: a refusal discovered only at the end
+    // costs a secret acquisition and a full encryption per retry, and a slow decode turns that into
+    // repeated builds. (this is still polling — see the requeue below — but cheap polling)
+    if (isPending(holder.id)) return false
     // build the payload for a target WITHOUT mutating it unless it is live in the index: a record
     // that has only been received is about to be applied, and writing our state into that object
     // would make its own application carry our change instead of what arrived
@@ -326,6 +330,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const name = wrapper.name
     const current = () => currentOwed(name, generation)
     try {
+      // as in the ordinary path: refuse before confirming the index or allocating an id, not after
+      if (wrapper.adopt_id ? isPending(wrapper.adopt_id) : hasPendingReceipts()) return false
       if (!wrapper.adopt_id) {
         // the pending name is passed so the caller can register THAT name inline (the adoption
         // decision) while routing every other name through its own chain (see confirmIndex)
