@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir } from '../host.js'
+import { SHARED_HOST, canonicalizeHost, getHostDir } from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -55,6 +55,18 @@ paths.push('/')
 const scoped = express.Router()
 scoped.use(
 
+  // the generic proxy is DISABLED on the shared-page host. it returns the backend's own
+  // content-type and headers, so `/proxy/<attacker>` is a same-origin endpoint that can serve
+  // `application/javascript` with `Service-Worker-Allowed: /` — a root-scope service-worker
+  // registration primitive, i.e. persistent control of every page on the origin. that is
+  // incompatible with a host whose entire purpose is running other people's code (see
+  // SHARED_HOST in src/host.js)
+  (req, res, next) => {
+    if (!/^\/proxy\//.test(req.url ?? '')) return next()
+    if (canonicalizeHost(req.headers.host ?? '') != SHARED_HOST) return next()
+    res.status(403).type('text/plain').send('proxy is not available on this host')
+  },
+
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
   // redirects are followed instead of exposed to server for robust CORS bypass
@@ -86,9 +98,12 @@ scoped.use(
         fixRequestBody(proxyReq, req) // see http-proxy-middleware > dist > handlers > fix-request-body.js
         // console.debug(proxyReq.headers)
       },
-      // proxyRes: (proxyRes, req, res) => {
-      //   console.debug(proxyRes.headers)
-      // },
+      proxyRes: proxyRes => {
+        // never let a proxied response widen service-worker scope: with this header a backend we
+        // do not control could register at '/' and take over the origin. the proxy exists for
+        // CORS bypass, which does not need it
+        delete proxyRes.headers['service-worker-allowed']
+      },
       // error: (error, req, res, target) => console.error(error),
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
