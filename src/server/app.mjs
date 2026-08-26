@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import crypto from 'crypto'
 import mime from 'mime'
-import { SHARED_HOST, canonicalizeHost, getHostDir } from '../host.js'
+import { canonicalizeHost, getHostDir } from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -62,36 +62,24 @@ const requestHost = req =>
 const scoped = express.Router()
 scoped.use(
 
-  // the generic proxy is DISABLED on the shared-page host. it returns the backend's own
-  // content-type and headers, so `/proxy/<attacker>` is a same-origin endpoint that can serve
-  // `application/javascript` with `Service-Worker-Allowed: /` — a root-scope service-worker
-  // registration primitive, i.e. persistent control of every page on the origin. that is
-  // incompatible with a host whose entire purpose is running other people's code (see
-  // SHARED_HOST in src/host.js)
+  // the generic proxy is LOCAL-ONLY. it returns an arbitrary backend's body and content type
+  // under our own origin, which makes it, on any deployed host:
+  //   - an attacker-controlled same-origin document: a backend returning HTML with script became
+  //     a mind.page page, with access to localStorage (the encryption secret included)
+  //   - unrestricted server-side request forgery: it reached the cloud metadata service and
+  //     returned the function's own service-account OAuth token to any internet client
+  //   - a cookie forwarder: browser cookies for our origin were sent to the chosen backend
+  // stripping response headers cannot repair any of that; the endpoint itself is the capability.
+  // the gate is the REMOTE ADDRESS, never a header: x-forwarded-host and friends are supplied by
+  // the client, and an earlier host-based guard was both spoofable and (behind firebase hosting)
+  // simply wrong. deployed requests arrive from the hosting frontend, so only genuine loopback
+  // callers — local dev and the e2e stack — keep the CORS bypass
   (req, res, next) => {
     if (!/^\/proxy\//.test(req.url ?? '')) return next()
-    if (requestHost(req) != SHARED_HOST) return next()
-    res.status(403).type('text/plain').send('proxy is not available on this host')
-  },
-
-  // strip the header that would let a proxied script widen service-worker scope, at the EXPRESS
-  // layer rather than through the proxy's own response event: this does not depend on the proxy
-  // library's version or on how it handles followed redirects, and a header we never emit cannot
-  // be re-added by a backend
-  (req, res, next) => {
-    if (!/^\/proxy\//.test(req.url ?? '')) return next()
-    const setHeader = res.setHeader.bind(res)
-    res.setHeader = (name, value) =>
-      String(name).toLowerCase() == 'service-worker-allowed' ? res : setHeader(name, value)
-    const writeHead = res.writeHead.bind(res)
-    res.writeHead = function (status, ...rest) {
-      const headers = rest.find(a => a && typeof a == 'object')
-      if (headers)
-        for (const k of Object.keys(headers)) if (k.toLowerCase() == 'service-worker-allowed') delete headers[k]
-      res.removeHeader?.('service-worker-allowed')
-      return writeHead(status, ...rest)
-    }
-    next()
+    const address = req.socket?.remoteAddress ?? ''
+    const local = dev || address == '127.0.0.1' || address == '::1' || address == '::ffff:127.0.0.1'
+    if (local) return next()
+    res.status(403).type('text/plain').send('proxy is not available')
   },
 
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware

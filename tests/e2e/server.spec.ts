@@ -368,3 +368,18 @@ test.describe('localhost-only dev routes', () => {
     expect(res.status()).toBe(404)
   })
 })
+
+test('the generic proxy is refused for non-local callers', async ({ request }) => {
+  // the proxy returns an arbitrary backend's body and content type under OUR origin. deployed,
+  // that made it an attacker-controlled same-origin document (script with access to the
+  // encryption secret), unrestricted SSRF (it reached the cloud metadata service and returned
+  // the function's own service-account token to any caller), and a cookie forwarder. it is now
+  // gated on the REMOTE ADDRESS — headers are client-supplied and cannot be trusted for this
+  const localhost = await request.get('/proxy/http://127.0.0.1:3100/server_id')
+  expect(localhost.status(), 'loopback callers keep the CORS bypass').toBe(200)
+  // a forwarding header must not be able to buy access: only the socket's address counts
+  const spoofed = await request.get('/proxy/http://127.0.0.1:3100/server_id', {
+    headers: { 'x-forwarded-for': '8.8.8.8', 'x-forwarded-host': 'mind.page', host: 'mind.page' },
+  })
+  expect(spoofed.status(), 'the gate does not read headers, so spoofing changes nothing').toBe(200)
+})
