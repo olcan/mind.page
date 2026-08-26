@@ -46,6 +46,38 @@ export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '
   return `https://${SHARED_HOST}${path}${search}${hash}`
 }
 
+// whether a request carrying this `Origin` may use the local proxy.
+//
+// a loopback REMOTE ADDRESS identifies the browser process, not the page running inside it: any
+// page on any origin can open a WebSocket to 127.0.0.1, and WebSockets have no CORS response
+// gate — the handshake completes and the outbound request happens regardless of what the page is
+// allowed to read. so the address check alone let `Origin: https://attacker.example` through.
+//
+// an ABSENT Origin is not a browser-initiated cross-origin request (curl, a local script); such a
+// caller already has local access and is not the thing this defends against. an unparseable or
+// opaque origin (the literal `null` a sandboxed frame sends) is refused.
+//
+// NOTE this deliberately does NOT go through canonicalizeHost, which exists for DISPLAY and maps
+// `localhost.<anything>` (and some LAN addresses) to 'localhost'. that wildcard makes it unusable
+// as a security predicate: an attacker who registers `localhost.attacker.example` would pass it.
+// only an exact local name or a genuine loopback literal is accepted here.
+//
+// NOTE this does NOT isolate mutually untrusted code that is already same-origin. another owner's
+// shared page is still served from localhost in development (see sharedOriginRedirect), and code
+// running there passes this check. a javascript-level token cannot fix that; only a distinct
+// origin/port for foreign content can.
+const LOCAL_ORIGIN_HOSTS = ['localhost', 'local.dev'] // EXACT matches only, never suffixes
+export function isAllowedProxyOrigin(origin) {
+  if (!origin) return true
+  let hostname
+  try {
+    hostname = new URL(origin).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return false // includes the opaque 'null' origin
+  }
+  return LOCAL_ORIGIN_HOSTS.includes(hostname) || isLoopbackAddress(hostname)
+}
+
 // true for any loopback remote address, in every form node reports one: IPv4 127.0.0.0/8 (not
 // just 127.0.0.1), IPv6 ::1, and IPv4-mapped IPv6. used to gate the development-only proxy, so
 // an exact string check would both miss valid loopback callers and be easy to get subtly wrong

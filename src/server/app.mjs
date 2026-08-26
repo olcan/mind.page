@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir, isLoopbackAddress } from '../host.js'
+import { canonicalizeHost, getHostDir, isAllowedProxyOrigin, isLoopbackAddress } from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -59,76 +59,26 @@ paths.push('/')
 const requestHost = req =>
   canonicalizeHost(req.headers['x-forwarded-host'] || req.headers['host'] || req.headers[':authority'] || 'localhost')
 
-let proxy // the proxy middleware, so its upgrade handler can be invoked explicitly (see below)
+// the ONE predicate for "this request is for the proxy", shared by the http gate and the upgrade
+// guard. two spellings of the same idea is how a request can be refused by one and served by the
+// other. deliberately BROADER than the middleware's own pathFilter: anything under /proxy/ is
+// gated, whether or not the middleware would have proxied it
+const isProxyPath = url => /^\/proxy\//.test(url ?? '')
+
+// both halves of the local-proxy gate in one place, so the http path and the upgrade path cannot
+// drift: the caller must be loopback AND, if it is a browser, on one of our own local origins
+const isProxyAllowed = (address, origin) => isLoopbackAddress(address) && isAllowedProxyOrigin(origin)
+
+// the local proxy is not part of the app until a LOCAL server asks for it (see enableLocalProxy).
+// the cloud function imports this module for its middleware stack and never calls that, so the
+// arbitrary-target capability is not merely denied there — it is never constructed or mounted, and
+// no frontend or socket topology change can restore it
+let proxy
+const proxyRouter = express.Router() // empty (a pass-through) until enableLocalProxy runs
+
 const scoped = express.Router()
 scoped.use(
-
-  // the generic proxy is LOCAL-ONLY. it returns an arbitrary backend's body and content type
-  // under our own origin, which makes it, on any deployed host:
-  //   - an attacker-controlled same-origin document: a backend returning HTML with script became
-  //     a mind.page page, with access to localStorage (the encryption secret included)
-  //   - unrestricted server-side request forgery: it reached the cloud metadata service and
-  //     returned the function's own service-account OAuth token to any internet client
-  //   - a cookie forwarder: browser cookies for our origin were sent to the chosen backend
-  // stripping response headers cannot repair any of that; the endpoint itself is the capability.
-  // the gate is the REMOTE ADDRESS, never a header: x-forwarded-host and friends are supplied by
-  // the client, and an earlier host-based guard was both spoofable and (behind firebase hosting)
-  // simply wrong. deployed requests arrive from the hosting frontend, so only genuine loopback
-  // callers — local dev and the e2e stack — keep the CORS bypass
-  (req, res, next) => {
-    if (!/^\/proxy\//.test(req.url ?? '')) return next()
-    // LOOPBACK ONLY, and `dev` is deliberately NOT an alternative: the dev server binds the
-    // wildcard address, so allowing it would authorize every caller on the LAN
-    if (isLoopbackAddress(req.socket?.remoteAddress)) return next()
-    res.status(403).type('text/plain').send('proxy is not available')
-  },
-
-  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
-  // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
-  // redirects are followed instead of exposed to server for robust CORS bypass
-  // note // in https?:// can be rewritted to / by browser or intemediaries
-  // websockets can also be proxied
-    (proxy = createProxyMiddleware({
-    changeOrigin: true,
-    pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
-    pathRewrite: (path, _req) => {
-      path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
-      if (!path.startsWith('/')) path = '/' + path
-      // console.debug('proxy path', path)
-      return path
-    },
-    router: req => {
-      const backend = req.url
-        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
-        .pop()
-        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
-      // console.debug('proxying to', backend)
-      return backend
-    },
-    on: {
-      proxyReq: (proxyReq, req) => {
-        // note this fixes missing body issue in some cases (e.g. to tiny0.duckdns.org) but not in all cases (e.g. claude) and in fact can conceal the missing body error (e.g. for claude, which returns simply 400 with html that says only "cloudflare"); we have confirmed the body is "fixed" in both cases and there is no need to call proxyReq.end (as some do) so the problem must be about something else (vs "concealed" missing body), likely a security/cors issue with intentionally obscured responses
-        // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
-        // also https://github.com/chimurai/http-proxy-middleware/issues/40
-        // also https://github.com/chimurai/http-proxy-middleware/blob/45fce2ccb80b8617773b92a8dc563767fb7e2a61/src/handlers/fix-request-body.ts#L9
-        fixRequestBody(proxyReq, req) // see http-proxy-middleware > dist > handlers > fix-request-body.js
-        // console.debug(proxyReq.headers)
-      },
-      proxyRes: proxyRes => {
-        // belt and braces alongside the express-layer strip above
-        delete proxyRes.headers['service-worker-allowed']
-      },
-      // error: (error, req, res, target) => console.error(error),
-    },
-    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
-    // NO automatic websocket listener: with ws:true the middleware registers its own 'upgrade'
-    // listener on the server, and a guard that merely destroys the client socket does NOT stop it
-    // — node keeps calling later listeners, so the proxy still resolved the target, opened the
-    // outbound connection and forwarded cookies. blind SSRF with the response hidden is still
-    // SSRF. upgrades go through guardProxyUpgrades, which calls proxy.upgrade() only when allowed
-    ws: false,
-    // logger: console,
-  })),
+  proxyRouter,
 
   compression({ threshold: 0 }),
   sirv('static', {
@@ -159,12 +109,12 @@ scoped.use(
         display: scope.includes('f')
           ? 'fullscreen'
           : scope.includes('s')
-          ? 'standalone'
-          : scope.includes('m')
-          ? 'minimal-ui'
-          : scope.includes('b')
-          ? 'browser'
-          : 'standalone',
+            ? 'standalone'
+            : scope.includes('m')
+              ? 'minimal-ui'
+              : scope.includes('b')
+                ? 'browser'
+                : 'standalone',
         background_color: '#111',
         theme_color: '#111',
         icons: [
@@ -276,11 +226,7 @@ scoped.use(
         // see https://developer.twitter.com/en/docs/twitter-api/enterprise/account-activity-api/guides/securing-webhooks
         res.json({
           response_token:
-            'sha256=' +
-            crypto
-              .createHmac('sha256', req.query.crc_key)
-              .update(req.query.crc_token)
-              .digest('base64'),
+            'sha256=' + crypto.createHmac('sha256', req.query.crc_key).update(req.query.crc_token).digest('base64'),
         })
         return
       }
@@ -314,7 +260,7 @@ scoped.use(
     } else {
       next()
     }
-  }
+  },
 )
 
 // the stack is mounted at the root and again at the pwa scope prefixes, which strip the prefix so
@@ -322,11 +268,14 @@ scoped.use(
 // inside a path array, hence the separate root mount)
 const app = express()
 app.use(scoped)
-app.use(paths.filter(path => path != '/'), scoped)
+app.use(
+  paths.filter(path => path != '/'),
+  scoped,
+)
 
 app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
 
- // for use as handler in functions.ts
+// for use as handler in functions.ts
 // WebSocket upgrades never pass through the express stack, and a guard that only destroys the
 // client socket does not prevent the proxy's own listener from running — node invokes every
 // listener, so the outbound request still happened (blind SSRF, with cookies forwarded). the
@@ -334,11 +283,87 @@ app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverf
 // it: reject unless the request is for the proxy AND the real remote address is loopback, and
 // only then hand it to the proxy explicitly. install on every LOCAL server that serves this app;
 // the cloud function has no server here and must not expose an arbitrary-target proxy at all
+// mounts the LOCAL-ONLY proxy. called by the standalone server and the vite dev/preview servers;
+// NEVER by the cloud function, which is why the function's stack does not merely refuse the
+// arbitrary-target proxy but never builds it (round-19 finding 6: denial by socket address is a
+// property of the current frontend topology, not of the code)
+export function enableLocalProxy() {
+  if (proxy) return // idempotent: server.mjs starts both an http and an https server
+  // the generic proxy is LOCAL-ONLY. it returns an arbitrary backend's body and content type
+  // under our own origin, which makes it, on any deployed host:
+  //   - an attacker-controlled same-origin document: a backend returning HTML with script became
+  //     a mind.page page, with access to localStorage (the encryption secret included)
+  //   - unrestricted server-side request forgery: it reached the cloud metadata service and
+  //     returned the function's own service-account OAuth token to any internet client
+  //   - a cookie forwarder: browser cookies for our origin were sent to the chosen backend
+  // stripping response headers cannot repair any of that; the endpoint itself is the capability.
+  // the gate is the REMOTE ADDRESS, never a header: x-forwarded-host and friends are supplied by
+  // the client, and an earlier host-based guard was both spoofable and (behind firebase hosting)
+  // simply wrong. deployed requests arrive from the hosting frontend, so only genuine loopback
+  // callers — local dev and the e2e stack — keep the CORS bypass
+
+  // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
+  // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
+  // redirects are followed instead of exposed to server for robust CORS bypass
+  // note // in https?:// can be rewritted to / by browser or intemediaries
+  // websockets can also be proxied
+  proxy = createProxyMiddleware({
+    changeOrigin: true,
+    pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
+    pathRewrite: (path, _req) => {
+      path = path.replace(/^\/proxy\/(?:http|ws)s?:\/\/?[^/?#]+/, '')
+      if (!path.startsWith('/')) path = '/' + path
+      // console.debug('proxy path', path)
+      return path
+    },
+    router: req => {
+      const backend = req.url
+        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
+        .pop()
+        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
+      // console.debug('proxying to', backend)
+      return backend
+    },
+    on: {
+      proxyReq: (proxyReq, req) => {
+        // note this fixes missing body issue in some cases (e.g. to tiny0.duckdns.org) but not in all cases (e.g. claude) and in fact can conceal the missing body error (e.g. for claude, which returns simply 400 with html that says only "cloudflare"); we have confirmed the body is "fixed" in both cases and there is no need to call proxyReq.end (as some do) so the problem must be about something else (vs "concealed" missing body), likely a security/cors issue with intentionally obscured responses
+        // see https://github.com/chimurai/http-proxy-middleware?tab=readme-ov-file#intercept-and-manipulate-requests
+        // also https://github.com/chimurai/http-proxy-middleware/issues/40
+        // also https://github.com/chimurai/http-proxy-middleware/blob/45fce2ccb80b8617773b92a8dc563767fb7e2a61/src/handlers/fix-request-body.ts#L9
+        fixRequestBody(proxyReq, req) // see http-proxy-middleware > dist > handlers > fix-request-body.js
+        // console.debug(proxyReq.headers)
+      },
+      proxyRes: proxyRes => {
+        // belt and braces alongside the express-layer strip above
+        delete proxyRes.headers['service-worker-allowed']
+      },
+      // error: (error, req, res, target) => console.error(error),
+    },
+    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
+    // NO automatic websocket listener: with ws:true the middleware registers its own 'upgrade'
+    // listener on the server, and a guard that merely destroys the client socket does NOT stop it
+    // — node keeps calling later listeners, so the proxy still resolved the target, opened the
+    // outbound connection and forwarded cookies. blind SSRF with the response hidden is still
+    // SSRF. upgrades go through guardProxyUpgrades, which calls proxy.upgrade() only when allowed
+    ws: false,
+    // logger: console,
+  })
+  proxyRouter.use((req, res, next) => {
+    if (!isProxyPath(req.url)) return next()
+    if (isProxyAllowed(req.socket?.remoteAddress, req.headers['origin'])) return next()
+    res.status(403).type('text/plain').send('proxy is not available')
+  }, proxy)
+}
+
 export function guardProxyUpgrades(server) {
   server.on('upgrade', (req, socket, head) => {
-    if (!/^\/proxy\//.test(req.url ?? '')) return
-    if (!isLoopbackAddress(socket.remoteAddress)) return socket.destroy()
-    proxy?.upgrade?.(req, socket, head)
+    if (!isProxyPath(req.url)) return
+    // the ORIGIN matters as much as the address here: a WebSocket has no CORS response gate, so
+    // a hostile page's handshake to 127.0.0.1 completed and the outbound request happened even
+    // though the page could never read the reply
+    if (!isProxyAllowed(socket.remoteAddress, req.headers['origin'])) return socket.destroy()
+    if (!proxy) return socket.destroy() // no proxy on this server: refuse, never leave it hanging
+    proxy.upgrade(req, socket, head) // no optional call: a missing upgrade must fail loudly
   })
   return server
 }

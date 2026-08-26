@@ -1,6 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite'
 import { defineConfig } from 'vite'
-import { guardProxyUpgrades, middleware } from './src/server/app.mjs'
+import { enableLocalProxy, guardProxyUpgrades, middleware } from './src/server/app.mjs'
 import fs from 'fs'
 import tls from 'tls'
 
@@ -60,6 +60,7 @@ export default defineConfig({
       // prototypes are restored before the request continues down vite's own middlewares
       name: 'mindpage-server',
       configureServer: server => {
+        enableLocalProxy() // a LOCAL server: the proxy exists here and nowhere else
         restrictALPN(server.httpServer)
         // the dev/preview servers mount the same middleware stack, and vite binds the wildcard
         // address — without this the proxy's upgrade path is reachable from the whole LAN
@@ -67,6 +68,7 @@ export default defineConfig({
         server.middlewares.use(h1CompatMiddleware)
       },
       configurePreviewServer: server => {
+        enableLocalProxy()
         restrictALPN(server.httpServer)
         if (server.httpServer) guardProxyUpgrades(server.httpServer)
         server.middlewares.use(h1CompatMiddleware)

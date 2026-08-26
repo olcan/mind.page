@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
-// @ts-expect-error host.js is plain js shared with the node server, without a declaration file
-import { SHARED_HOST, getHostDir, isLoopbackAddress, sharedOriginRedirect } from '../../src/host.js'
+import {
+  SHARED_HOST,
+  getHostDir,
+  isAllowedProxyOrigin,
+  isLoopbackAddress,
+  sharedOriginRedirect,
+  // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
+} from '../../src/host.js'
 
 // the isolated-origin decision is a SECURITY control (see sharedOriginRedirect): a shared page
 // runs its owner's code, and the origin is the only real boundary against it, so the rule for
@@ -62,4 +68,61 @@ test('loopback detection covers every form node reports, and nothing else', () =
     undefined,
   ])
     expect(isLoopbackAddress(address as any), String(address)).toBe(false)
+})
+
+// round-19 finding 5: the proxy gate read only the socket address, which identifies the browser
+// PROCESS. a page on any origin can open a WebSocket to 127.0.0.1, and a WebSocket has no CORS
+// response gate, so `Origin: https://attacker.example` handshook successfully and the outbound
+// request happened. the origin is therefore part of the gate
+test('proxy origins: our own local origins are allowed, foreign and opaque ones are not', () => {
+  for (const origin of [
+    undefined, // not browser-initiated (curl, a local script): a caller that is already local
+    '',
+    'http://localhost:3100',
+    'https://localhost',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.5', // the whole loopback block, as with isLoopbackAddress
+    'http://[::1]:5173',
+    'https://local.dev', // an EXACT local dev alias
+  ])
+    expect(isAllowedProxyOrigin(origin as any), String(origin)).toBe(true)
+  for (const origin of [
+    'https://attacker.example',
+    'http://mind.page', // a DEPLOYED origin is not a local one: the proxy exists only locally
+    'https://shared.mind.page',
+    'null', // the opaque origin a sandboxed frame sends
+    'not a url',
+    'http://127.0.0.1.attacker.example', // suffix, not loopback
+    // canonicalizeHost maps `localhost.<anything>` to 'localhost' for DISPLAY. reusing it here
+    // would have let an attacker-registered domain pass, so the check is exact-match only
+    'http://localhost.attacker.example',
+    'http://localhost.localdomain',
+    'http://192.168.86.101', // canonicalizeHost calls this localhost too; it is LAN, not loopback
+    'http://local.dev.attacker.example',
+  ])
+    expect(isAllowedProxyOrigin(origin as any), String(origin)).toBe(false)
+})
+
+// round-19 finding 5 asked for the vite/preview wiring to be PINNED, not just asserted once by
+// hand: the dev and preview servers mount the same middleware stack and bind the wildcard
+// address, so a hook that loses its guard silently exposes the proxy to the whole LAN. this is a
+// source-level check on purpose — it fails loudly if either call is dropped or renamed
+test('both vite server hooks enable the local proxy and guard its upgrades', async () => {
+  const fs = await import('fs')
+  const config = fs.readFileSync(new URL('../../vite.config.mts', import.meta.url), 'utf8')
+  for (const hook of ['configureServer', 'configurePreviewServer']) {
+    const body = config.slice(config.indexOf(`${hook}: server => {`))
+    expect(body, `${hook} is present`).not.toBe('')
+    const scope = body.slice(0, body.indexOf('\n      },'))
+    expect(scope, `${hook} enables the proxy`).toContain('enableLocalProxy()')
+    expect(scope, `${hook} guards upgrades`).toContain('guardProxyUpgrades(server.httpServer)')
+  }
+})
+
+// the cloud function must not merely REFUSE the arbitrary-target proxy (that was a property of
+// the hosting frontend's socket address, not of this code) — it must never construct or mount it
+test('the cloud function never enables the local proxy', async () => {
+  const fs = await import('fs')
+  const source = fs.readFileSync(new URL('../../src/firebase/functions.ts', import.meta.url), 'utf8')
+  expect(source.replace(/\/\/.*$/gm, '')).not.toContain('enableLocalProxy')
 })

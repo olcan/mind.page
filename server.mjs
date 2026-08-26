@@ -3,10 +3,11 @@
 // usage: [NO_HTTPS=1] [PORT=3000] node server.mjs
 import fs from 'fs'
 import https from 'https'
-import { guardProxyUpgrades, middleware, server_id } from './src/server/app.mjs'
+import { enableLocalProxy, guardProxyUpgrades, middleware, server_id } from './src/server/app.mjs'
 import { handler } from './build/handler.js'
 
 const { PORT = 3000 } = process.env
+enableLocalProxy() // local server: mount the proxy BEFORE the kit handler claims the path
 middleware.use(handler) // kit handles all remaining requests (pages, assets, service worker)
 guardProxyUpgrades(
   middleware.listen(PORT, () => {

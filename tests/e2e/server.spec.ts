@@ -83,7 +83,7 @@ test.describe('crawlable public pages', () => {
   })
 
   test('a frozen render replaces the markdown fallback once captured, keeping math and canvas', async ({ request }) => {
-    test.setTimeout(240_000) // captures in a real browser, then polls through the 60s content cache
+    test.setTimeout(180_000) // captures in a real browser; the content cache is pinned to 100ms in tests
     // the frozen render's contract includes charts drawn and math typeset (see prerender.mjs):
     // seed an item whose capture must carry a mathjax svg equation and a canvas husk through the
     // final sanitizer (its constrained svg profile, see $lib/server/content.js)
@@ -99,7 +99,7 @@ test.describe('crawlable public pages', () => {
     try {
       execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
       await expect
-        .poll(async () => (await request.get('/')).text(), { timeout: 90_000, intervals: [5_000] })
+        .poll(async () => (await request.get('/')).text(), { timeout: 30_000, intervals: [250] })
         .toMatch(/ssr-content[^]*class="items/) // the captured items region, not the markdown fallback
       const html = await (await request.get('/')).text()
       // the injected block is sanitized: no scripts or handlers from item content (the page's own
@@ -373,7 +373,10 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
   // round-18 finding 1: destroying the CLIENT socket does not stop the proxy — node keeps calling
   // its listener, so the outbound connection was still made and cookies forwarded (blind SSRF).
   // the question is therefore what the BACKEND saw, and it must be asked after a settling delay:
-  // the previous version checked the counter immediately, before the outbound request could land
+  // an earlier version checked the counter immediately, before the outbound request could land.
+  // round-19 finding 5: a loopback ADDRESS only identifies the browser process. any page on any
+  // origin can open a WebSocket to 127.0.0.1, and a WebSocket has no CORS response gate, so the
+  // hostile-origin case below completed its handshake and made the outbound request
   const http = await import('http')
   const os = await import('os')
   const lan = Object.values(os.networkInterfaces())
@@ -389,7 +392,7 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
   })
   await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', () => resolve()))
   const port = (backend.address() as any).port // dynamic: a fixed port collides across runs
-  const upgrade = (host: string) =>
+  const upgrade = (host: string, origin?: string) =>
     new Promise<string>(resolve => {
       const timer = setTimeout(() => resolve('timeout'), 4_000)
       const done = (outcome: string) => {
@@ -400,7 +403,12 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
         host,
         port: 3100,
         path: `/proxy/ws://127.0.0.1:${port}/mutate?q=1`,
-        headers: { Connection: 'Upgrade', Upgrade: 'websocket', Cookie: '__session=victim-cookie' },
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+          Cookie: '__session=victim-cookie',
+          ...(origin ? { Origin: origin } : {}),
+        },
       })
       req.on('upgrade', (_res, socket) => {
         sockets.push(socket)
@@ -411,21 +419,19 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
       req.end()
     })
   try {
-    // the proxy attaches nothing on its own now, but an ordinary proxied request first mirrors
-    // how the endpoint is really used
-    await new Promise<void>(resolve =>
-      http
-        .get({ host: '127.0.0.1', port: 3100, path: `/proxy/http://127.0.0.1:${port}/x` }, res => {
-          res.resume()
-          res.on('end', () => resolve())
-        })
-        .on('error', () => resolve())
+    // ALLOWED: loopback, from our own origin — this is the case the personal account relies on
+    expect(await upgrade('127.0.0.1', 'http://localhost:3100'), 'same-origin loopback keeps proxying').toBe(
+      'upgraded'
     )
-    expect(await upgrade('127.0.0.1'), 'loopback keeps websocket proxying').toBe('upgraded')
-    expect(seen.length, 'the backend served the loopback upgrade').toBe(1)
-    test.skip(!lan, 'no non-loopback address available on this host')
-    expect(await upgrade(lan!)).toMatch(/^refused:|^timeout$/)
+    expect(seen.length, 'the backend served the allowed upgrade').toBe(1)
+    // REFUSED: loopback process, hostile page. a timeout is NOT accepted as equivalent to a
+    // refusal — it cannot distinguish "gate closed" from "still connecting"
+    expect(await upgrade('127.0.0.1', 'https://attacker.example')).toMatch(/^refused:/)
     await new Promise(resolve => setTimeout(resolve, 1_500)) // let any outbound request land
+    expect(seen, 'the backend saw nothing from the hostile origin').toHaveLength(1)
+    test.skip(!lan, 'no non-loopback address available on this host')
+    expect(await upgrade(lan!, 'http://localhost:3100')).toMatch(/^refused:/)
+    await new Promise(resolve => setTimeout(resolve, 1_500))
     expect(seen, 'the backend saw nothing from the rejected caller').toHaveLength(1)
   } finally {
     for (const socket of sockets) socket.destroy()
