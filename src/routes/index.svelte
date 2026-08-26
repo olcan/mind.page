@@ -1835,10 +1835,16 @@
 
     checkIfRenderingVisibleItems()
 
-    // as soon as header is available, scroll down to header and set flag gating page visibility
+    // as soon as header is available, scroll down to header and set flag gating page visibility.
+    // the flag latches only if the scroll actually LANDED: this runs before the items have been
+    // measured, so the document can still be shorter than the target and the browser silently
+    // clamps the scroll — leaving the header a little below the top with the column padding
+    // visible above it, permanently, since nothing tried again. it is only visible on short
+    // columns (a new account, a page with few items) because a tall one already exceeds the
+    // target at first layout. retrying on the next layout pass costs nothing and self-corrects
     if (headerdiv && !headerScrolled) {
       scrollTo(headerdiv.offsetTop)
-      headerScrolled = true
+      headerScrolled = document.body.scrollTop >= headerdiv.offsetTop - 1
     }
 
     // from this point we try to auto-scroll for layout changes

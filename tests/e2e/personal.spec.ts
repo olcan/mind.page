@@ -238,6 +238,32 @@ test('a complete cache without the stored secret still initializes from the serv
     .toBe(true)
 })
 
+test('the header scrolls to the top on a short column (new account)', async ({ page }) => {
+  // reported bug: the auto-scroll runs before the items are measured, so on a SHORT column the
+  // document is briefly shorter than the target, the browser clamps the scroll, and the flag
+  // latched anyway — leaving the header a few inches below the top with column padding above it,
+  // permanently. tall columns (the public home page, a shared intro) already exceed the target
+  // at first layout, which is why it only showed for new accounts
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const header = document.querySelector('.header') as HTMLElement
+          return Math.round(header.getBoundingClientRect().top)
+        }),
+      { timeout: 30_000 }
+    )
+    .toBeLessThanOrEqual(1) // the header reaches the top of the viewport
+  // and stays there once settled
+  await page.waitForTimeout(2_000)
+  expect(
+    await page.evaluate(() => Math.round((document.querySelector('.header') as HTMLElement).getBoundingClientRect().top))
+  ).toBeLessThanOrEqual(1)
+})
+
 test('a foreign shared page never coexists with a session on this origin', async ({ page }) => {
   // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
   // realm recreates the firebase facade, and auth persistence, the session cookie and
