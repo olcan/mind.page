@@ -37,6 +37,12 @@ export const ACCOUNT_HOST = 'mind.page'
 // http://<name>.dev to https and the plain-http e2e stack on port 3100 cannot answer it
 export const SHARED_LOCAL_HOST = 'shared.localhost'
 
+// true on EITHER isolated shared-page origin. every persistence rule must use this rather than
+// compare against one hostname: the deployed and local origins are the same trust boundary, and
+// pairing the comparisons by hand is exactly how the local origin kept persisting item state and
+// github tokens after its firestore cache had already been fixed
+export const isSharedOrigin = host => host == SHARED_HOST || host == SHARED_LOCAL_HOST
+
 // exact local names, plus loopback literals. exact matches only, and callers must pass the RAW
 // hostname: canonicalizeHost maps `localhost.<anything>` — including SHARED_LOCAL_HOST — to
 // 'localhost' for DISPLAY, so a canonicalized host makes this function redirect the isolated

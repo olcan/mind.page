@@ -147,3 +147,22 @@ test('a document with no saved id is not ours to settle', async () => {
   expect(await reconcileDeferred(deps, { savedId: null }, 1)).toBe(true)
   expect(applied).toEqual([])
 })
+
+test('a THROWING application stays retryable, with its marker intact', async () => {
+  // round-32 finding 2: settle() ran BEFORE applyRemote, so an application that threw returned
+  // "retryable" with nothing left to retry from — the marker was already gone and nothing else
+  // redelivers a deferred change
+  for (const snapshot of [
+    { exists: true, data: { text: 'server', time: 2, attr: null } }, // modified
+    { exists: false }, // removed
+  ]) {
+    const { deps, item, deferrals } = harness({
+      readFromServer: async () => snapshot,
+      applyRemote: () => {
+        throw new Error('reducer failed')
+      },
+    })
+    expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
+    expect(deferrals.get('d1'), 'the marker survives so the scheduler can retry').toBe(1)
+  }
+})

@@ -1706,7 +1706,7 @@
   // code — the origin protects account state, it is not a boundary between owners. keeping item
   // storage in memory means there is simply nothing of one owner's for another to read, without
   // needing an origin per owner
-  const itemStorePersists = isClient && hostname != SHARED_HOST
+  const itemStorePersists = isClient && !isSharedOrigin(hostname)
   const itemStore = {
     get: key => (itemStorePersists ? localStorage.getItem(key) : (memoryItemStore.get(key) ?? null)),
     set: (key, value) => (itemStorePersists ? localStorage.setItem(key, value) : void memoryItemStore.set(key, value)),
@@ -4468,7 +4468,7 @@
               if (!owner) owner = 'olcan'
               // NOT read on the isolated shared origin: a github token stored there by one
               // owner's page would be readable by the next owner's code (see itemStore)
-              if (!token && hostname != SHARED_HOST) token = localStorage.getItem('mindpage_github_token')
+              if (!token && !isSharedOrigin(hostname)) token = localStorage.getItem('mindpage_github_token')
               if (!token) token = null // no token, use unauthenticated client
               if (!path) return alert(`usage: ${cmd} path [repo branch owner token]`)
               // drop optional leading slash in paths for consistency
@@ -4531,7 +4531,7 @@
                       input: '',
                       password: false,
                     })
-                    if (token && hostname != SHARED_HOST) localStorage.setItem('mindpage_github_token', token)
+                    if (token && !isSharedOrigin(hostname)) localStorage.setItem('mindpage_github_token', token)
                     // else token = null // no token, use unauthenticated client
                     else return // cancelled
                   }
@@ -4994,6 +4994,12 @@
     // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
     // if (!item.saving) itemToSave.text = ''
 
+    // VERSION the intent here TOO. this is the item CREATE path: it preallocates a document ref
+    // and setDoc()s it directly, never passing through saveItem — so versioning only there left a
+    // create that starts and finishes inside a reconcile's server read as invisible as the save
+    // case had been (see saveSeq and src/reconcile.ts)
+    item.saveSeq = (item.saveSeq ?? 0) + 1
+
     encryptItem(itemToSave)
       .then(itemToSave => {
         // the document id is PREALLOCATED and mapped to the temp id before the write is issued:
@@ -5299,9 +5305,10 @@
       item.savingText = item.text // required when saving == true
       items = items // trigger svelte render for saving state change
     }
-    // VERSION the intent, do not merely flag it: hasLocalIntent below answers "is a save in
-    // flight NOW", which a save that starts and finishes inside a reconcile's server read escapes
-    // entirely. every save passes through here, silent or not
+    // VERSION the intent, do not merely flag it: hasLocalIntent answers "is a save in flight NOW",
+    // which a save that starts and finishes inside a reconcile's server read escapes entirely (see
+    // src/reconcile.ts). every SAVE passes through here, silent or not — but item CREATION does
+    // not: it writes from onEditorDone, which bumps this too. two paths, both versioned
     item.saveSeq = (item.saveSeq ?? 0) + 1
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
@@ -6248,7 +6255,7 @@
     decryptWithSecret,
     decryptBytesWithSecret,
   } from '../crypto'
-  import { ACCOUNT_HOST, SHARED_HOST, sharedOriginRedirect } from '../host.js'
+  import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { reconcileDeferred } from '../reconcile'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'

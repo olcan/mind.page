@@ -8,7 +8,7 @@ window['_'] = _
 
 // import/expose firebase on window
 import { firebaseConfig } from '../firebase-config.js' // ~0
-import { SHARED_HOST, SHARED_LOCAL_HOST } from './host.js'
+import { isSharedOrigin } from './host.js'
 import { initializeApp, onLog } from 'firebase/app' // ~10K
 const firebase = initializeApp(firebaseConfig)
 firebase['onLog'] = onLog // for use in index.svelte
@@ -29,7 +29,7 @@ import { initializeFirestore, memoryLocalCache, persistentLocalCache, persistent
 // SHARED_LOCAL_HOST belongs here for the same reason it is absent from LOCAL_REQUEST_HOSTS: it is
 // the local counterpart, and every rule naming one has to name the other
 initializeFirestore(firebase, {
-  localCache: [SHARED_HOST, SHARED_LOCAL_HOST].includes(location.hostname)
+  localCache: isSharedOrigin(location.hostname)
     ? memoryLocalCache()
     : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })

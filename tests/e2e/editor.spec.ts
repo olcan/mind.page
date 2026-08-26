@@ -27,6 +27,20 @@ test('typing in the mindbox and pressing shift+enter creates an item', async ({ 
   await expect(mindbox(page)).toHaveValue('#e2e_typed ') // the new item's label stays as the search
   await expect.poll(() => savedId(page, '#e2e_typed'), { timeout: 30_000 }).toBeTruthy()
   expect(await itemText(page, '#e2e_typed')).toBe('#e2e_typed created via keyboard')
+  // PIN THE PRODUCER of the local-intent version that deferred reconciliation compares across its
+  // server read (see saveSeq in index.svelte and tests/unit/reconcile.spec.ts). the unit schedules
+  // set it directly, so without this deleting the increment leaves the whole suite green
+  // __items holds the RAW items (as the layout tests read item.column); _item() returns a mapped
+  // public object, which deliberately does not expose internal save state
+  const seq = () =>
+    page.evaluate(() => {
+      const id = window._item('#e2e_typed', true)?.id
+      return (window.__items as any[]).find(i => i.id == id)?.saveSeq ?? 0
+    })
+  // the CREATE producer. item creation writes from onEditorDone and does NOT pass through
+  // saveItem, so versioning only there left creates invisible to deferred reconciliation — which
+  // is what writing this pin uncovered. the save producer is pinned in the cross-tab test below
+  expect(await seq(), 'the create path versions local intent').toBeGreaterThan(0)
 })
 
 test('searching filters items and puts the tag in the url; escape and shift+backspace clear', async ({ page }) => {
@@ -225,10 +239,19 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
     // pending change and must be recognized as our own even though a newer save has already
     // superseded savingText — a stale echo applied over local state would also be PERSISTED by
     // the queued save reading the rolled-back text (see unackedWrites in index.svelte)
+    // the SAVE producer, pinned where writes demonstrably reach the server (see saveSeq in
+    // index.svelte and tests/unit/reconcile.spec.ts): deleting the increment must fail a test
+    const xtabSeq = () =>
+      page.evaluate(() => {
+        const id = window._item('#e2e_xtab', true)?.id
+        return (window.__items as any[]).find(i => i.id == id)?.saveSeq ?? 0
+      })
+    const beforeBurst = await xtabSeq()
     await page.evaluate(() => {
       const item = window._item('#e2e_xtab')!
       for (const n of [1, 2, 3, 4]) item.write(`burst ${n}`)
     })
+    await expect.poll(xtabSeq, { timeout: 30_000 }).toBeGreaterThan(beforeBurst)
     await expect.poll(() => itemText(page, '#e2e_xtab'), { timeout: 30_000 }).toContain('burst 4')
     await page.waitForTimeout(2_000) // let every echo and queued save settle ...
     expect(await itemText(page, '#e2e_xtab')).toContain('burst 4') // ... none may roll it back

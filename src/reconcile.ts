@@ -73,10 +73,10 @@ export async function reconcileDeferred(
     const snapshot = await deps.readFromServer(id)
     if (stale()) return true // a newer deferral or new local intent owns this document now
     if (!snapshot.exists) {
-      settle(true)
-      // removal applies by ID, so the fabricated empty text is enough for the text-dependent paths
+      // application BEFORE settle: it is fallible, and clearing the marker first meant a throwing
+      // apply returned "retryable" with nothing left to retry from
       deps.applyRemote('removed', id, { hidden: false, text: '' })
-      return true
+      return settle(true)
     }
     const savedItem = await deps.decryptItem(Object.assign(snapshot.data, { id }))
     if (stale()) return true
@@ -90,9 +90,8 @@ export async function reconcileDeferred(
       deepEqual(savedItem.attr, item.savedAttr)
     )
       return settle(true)
-    settle(true)
-    deps.applyRemote('modified', id, savedItem)
-    return true
+    deps.applyRemote('modified', id, savedItem) // before settle: see the removal branch above
+    return settle(true)
   } catch (e) {
     // transient read/decrypt failure: the marker stays, the caller retries
     console.error('could not reconcile deferred remote change (will retry):', id, e)
