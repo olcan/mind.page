@@ -65,7 +65,10 @@ export function normalize(html: string): string {
     })
     .replace(/ style=""/g, '') // empty style attributes come and go
     .replace(/c3-\d{10,}/g, 'c3-TIMESTAMP') // c3 chart clip-path ids
-    .replace(/https?:\/\/localhost(?::\d+)?\//g, '/') // page origin, e.g. in c3 clip-path urls
+    // page origin, e.g. in c3 clip-path urls and relative image srcs. ANY local origin: a foreign
+    // shared page now renders on shared.localhost (see SHARED_LOCAL_HOST), so goldens captured on
+    // localhost would otherwise differ by hostname alone
+    .replace(/https?:\/\/(?:[\w-]+\.)*localhost(?::\d+)?\//g, '/')
     .replace(/ aria-(?:owns|labelledby)="[^"]*"/g, '') // mathjax aria refs to dropped ids
     .replace(/>\s*</g, '>\n<') // one tag per line
     .trim()

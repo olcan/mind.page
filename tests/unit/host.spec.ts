@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   SHARED_HOST,
+  SHARED_LOCAL_HOST,
   getHostDir,
   isProxyRequestAllowed,
   isLoopbackAddress,
@@ -30,11 +31,26 @@ test('the owner stays on their own domain, where their shared page is theirs to 
   expect(decide({ shared: 'e2e-key', search: '?shared=e2e-key' })).toBeNull()
 })
 
-test('never redirects into a loop, and never on localhost', () => {
+test('never redirects into a loop', () => {
   expect(decide({ host: SHARED_HOST })).toBeNull() // already there
-  expect(decide({ host: 'localhost' })).toBeNull()
-  expect(decide({ host: '127.0.0.1' })).toBeNull() // canonicalized (dev/e2e stack)
-  expect(decide({ host: 'local.dev' })).toBeNull()
+})
+
+test("someone else's shared page moves on a LOCAL host too, to the local isolated origin", () => {
+  // local hosts used to be exempt, on the grounds that there was no second origin to move to.
+  // that left the one place the origin split did not apply: a stranger's code ran on the
+  // developer's own origin, beside their session, with the local proxy reachable
+  for (const host of ['localhost', '127.0.0.1', 'local.dev'])
+    expect(decide({ host, protocol: 'http:', port: '3100' }), host).toBe(
+      `http://${SHARED_LOCAL_HOST}:3100/?shared=alice/notes`
+    )
+  // scheme and port are PRESERVED: the dev server and the e2e stack serve this origin themselves,
+  // and the emulator switch keys on port 3100
+  expect(decide({ host: 'localhost', protocol: 'https:', port: '' })).toBe(
+    `https://${SHARED_LOCAL_HOST}/?shared=alice/notes`
+  )
+  expect(decide({ host: SHARED_LOCAL_HOST })).toBeNull() // already isolated: no loop
+  // the owner's own shared page still stays put, locally as anywhere else
+  expect(decide({ host: 'localhost', uid: 'alice' })).toBeNull()
 })
 
 test('a page that is not shared at all is untouched', () => {
@@ -92,16 +108,18 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
     isProxyRequestAllowed({ address: '127.0.0.1', host: 'local.dev:443', secure: true, origin: 'https://local.dev:443' }),
     'https dev alias, matching'
   ).toBe(true)
-  // localhost.dev is advertised by the dev server (see vite.config.mts) and must not be denied
+  // localhost.dev is the LOCAL ISOLATED ORIGIN for foreign shared pages (see SHARED_LOCAL_HOST):
+  // the proxy refuses it even though it is loopback and same-origin, because serving other
+  // people's code there is the whole point of it
   expect(
     isProxyRequestAllowed({
       address: '127.0.0.1',
-      host: 'localhost.dev:443',
-      secure: true,
-      origin: 'https://localhost.dev:443',
+      host: 'shared.localhost:3100',
+      secure: false,
+      origin: 'http://shared.localhost:3100',
     }),
-    'the advertised localhost.dev alias'
-  ).toBe(true)
+    'the local isolated origin is proxy-free'
+  ).toBe(false)
   // no Origin: fetch metadata decides, and anything but same-origin is refused
   expect(allow({ secFetchSite: 'same-origin' }), 'same-origin navigation').toBe(true)
   expect(allow({ secFetchSite: 'cross-site' }), 'THE reproduced exploit: cross-site, no Origin').toBe(false)

@@ -7107,9 +7107,14 @@
           //    localStorage (secret included) are per-ORIGIN. moving the page removes the risk
           //    instead of asking the visitor to weigh it
           const shared_redirect = sharedOriginRedirect({
-            host: hostname,
+            // location.hostname, NOT the canonicalized `hostname`: canonicalizeHost maps
+            // localhost.dev to 'localhost', so passing it would hide the fact that we are ALREADY
+            // on the local isolated origin and redirect us to it again, forever
+            host: location.hostname,
             shared: url_params?.shared,
             uid: authUser?.uid,
+            protocol: location.protocol, // preserved for the LOCAL isolated origin
+            port: location.port,
             path: location.pathname,
             search: location.search,
             hash: location.hash,

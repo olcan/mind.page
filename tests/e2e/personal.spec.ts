@@ -246,26 +246,25 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
     .toMatchObject({
       attr: { shared: { keys: ['e2e-key'] } },
     })
-  await page.evaluate(() => void window._create('/_signout', { command: true })) // also clears the cache
-  await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
-  // cache alice's shared item by visiting her shared page as a signed-out visitor
+  // cache alice's shared item by visiting her OWN shared page, which stays on the account origin
+  // (see sharedOriginRedirect). a signed-out visit would now be redirected to the isolated origin,
+  // whose cache is memory-only — so it can no longer produce a partial cache here at all. the
+  // scenario this test guards is the one that remains reachable: an owner's own shared-page visit
+  // warms the persistent cache, and a later sign-in on a device WITHOUT the stored secret must not
+  // initialize from that partial snapshot and prompt for a new phrase over encrypted items
   await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
   await waitForApp(page)
-  expect(await page.evaluate(() => window._items().length)).toBe(1)
-  // sign in with the firestore channel stalled: the first snapshot comes from the partial cache
-  await page.goto('/')
+  expect(await page.evaluate(() => window._items().length)).toBe(1) // PARTIAL: the shared item only
+  // drop the stored secret WITHOUT signing out: sign-out also clears the firestore cache, which is
+  // the very state under test. what remains is exactly "a device that has this account's partial
+  // cache and no stored secret"
+  await page.evaluate(() => localStorage.removeItem('mindpage_secret'))
   const channel = holdFirestore(page)
   const cacheWait = watchCacheWait(page)
   await channel.install()
   try {
-    const token = await customToken(ALICE)
-    await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
-    await page.evaluate(token => {
-      sessionStorage.setItem('mindpage_signin_pending', '1')
-      document.cookie = '__session=signin_pending;max-age=600'
-      void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
-    }, token)
-    await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+    // initialize with the firestore channel stalled: the first snapshot comes from the partial cache
+    await page.goto('/')
     // EXACTLY this navigation's decision: >= would also accept one from a later reload. and the
     // hold must be REAL — if the route pattern ever stops matching, the cached snapshot still logs
     // wait_for_server and this test would pass having stalled nothing
@@ -495,7 +494,14 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   expect(await hiddenDocs()).toBe(base)
 })
 
-test('a shared-page sign-in validates the phrase and warms the cache for the main page', async ({ page }) => {
+// NOTE this test used to SIGN IN on the shared page itself. That route no longer exists: a
+// signed-out visit to any shared page is redirected to the isolated origin (see
+// sharedOriginRedirect), and sign-in there deliberately opens the account domain in a NEW TAB
+// rather than authenticating in place, since the isolated origin is not an authorized auth domain.
+// It kept passing only because local hosts were exempt from that redirect. The phrase validation it
+// incidentally covered is covered directly by 'a new device must enter the phrase' above; what is
+// unique here, and still reachable, is what a shared-page SAVE does to the account's hidden store
+test('a save from the owner\'s own shared page updates its store rather than duplicating it', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -519,17 +525,14 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   const hiddenExpected = hiddenBefore + 1
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
-  // sign in on the shared page itself (as the owner, without the stored secret)
-  const signInOnSharedPage = async () => {
-    const token = await customToken(ALICE)
+  // reach the state the save is about: signed in as the OWNER (so the shared page stays on this
+  // origin), on their own shared page, with NO stored secret — so the save itself raises the prompt
+  const saveFromOwnSharedPage = async () => {
+    await withSecret(page)
+    await loadUser(page, ALICE)
+    await waitForApp(page)
+    await page.evaluate(() => localStorage.removeItem('mindpage_secret')) // a device without it
     await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
-    await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
-    await page.evaluate(token => {
-      sessionStorage.setItem('mindpage_signin_pending', '1')
-      document.cookie = '__session=signin_pending;max-age=600'
-      void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
-    }, token)
-    await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
     await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 }) // fixed-page welcome
     await waitForApp(page)
     // an encrypted save (item code saving global state, as the production #sharer item does)
@@ -538,7 +541,7 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
     await expect(page.getByText(/Enter your secret phrase/)).toBeVisible({ timeout: 60_000 })
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
   }
-  await signInOnSharedPage()
+  await saveFromOwnSharedPage()
   // a wrong phrase is rejected and re-prompted instead of encrypting under the wrong key
   await page.fill('#modal-input', 'wrong phrase')
   await page.locator('.modal .button.confirm', { hasText: 'Continue' }).click()
@@ -548,9 +551,8 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   // cancelling signs out instead of re-prompting forever
   await page.locator('.modal .button.cancel', { hasText: 'Sign Out' }).click()
   await expect(page.getByText(/Welcome to MindPage/)).toBeVisible({ timeout: 60_000 }) // shared page, signed out
-  // the correct phrase validates, and the validation fetch warms the cache: the main page then
-  // initializes without any prompt
-  await signInOnSharedPage()
+  // the correct phrase validates against the account's ciphertext
+  await saveFromOwnSharedPage()
   await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
   await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
   expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))

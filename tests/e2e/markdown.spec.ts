@@ -40,7 +40,10 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
   page.on('requestfinished', request => started.delete(request.url()))
   // external content references (e.g. images) stay deterministic offline; scripts and styles from
   // the app shell (mathjax, c3, ... from cdns, see app.html) are still allowed
-  await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, route =>
+  // the negative lookahead must cover ANY local origin: a foreign shared page renders on
+  // shared.localhost (see SHARED_LOCAL_HOST), and matching only bare `localhost` aborted the
+  // corpus's own relative image srcs, marking them _failed in the goldens
+  await page.route(/^https?:\/\/(?!(?:[\w-]+\.)*localhost|127\.0\.0\.1)/, route =>
     ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue(),
   )
   try {

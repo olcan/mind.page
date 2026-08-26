@@ -28,21 +28,51 @@ export const SHARED_HOST = 'shared.mind.page'
 // not an authorized auth domain — so a sign-in gesture there has to go somewhere that is
 export const ACCOUNT_HOST = 'mind.page'
 
+// the LOCAL isolated origin, the counterpart of SHARED_HOST for development and the e2e stack. a
+// dedicated name used for nothing else: absent from LOCAL_REQUEST_HOSTS so the proxy refuses it,
+// and a separate origin from `localhost`/`local.dev`, so it holds none of the developer's storage,
+// cache or sign-in state.
+// `*.localhost` resolves to loopback by convention (RFC 6761) with no /etc/hosts entry. it is
+// deliberately NOT a `.dev` name: that whole TLD is HSTS-preloaded, so chrome force-upgrades
+// http://<name>.dev to https and the plain-http e2e stack on port 3100 cannot answer it
+export const SHARED_LOCAL_HOST = 'shared.localhost'
+
+// exact local names, plus loopback literals. exact matches only, and callers must pass the RAW
+// hostname: canonicalizeHost maps `localhost.<anything>` — including SHARED_LOCAL_HOST — to
+// 'localhost' for DISPLAY, so a canonicalized host makes this function redirect the isolated
+// origin to itself in a loop
+const isLocalHost = host =>
+  ['localhost', 'local.dev', 'localhost.dev', SHARED_LOCAL_HOST].includes(host) || isLoopbackAddress(host)
+
 // decides whether a shared page must be served from the isolated origin instead of here, and
 // returns the url to move to (or null to stay). kept pure and separate because it is a security
 // control: everything it needs is passed in, so it can be tested directly.
 // - only shared pages move, and only SOMEONE ELSE'S: the owner's own shared page stays on their
 //   domain, where it is theirs to write to
-// - never when already on the isolated origin (that would loop), and never on localhost, which
-//   has no second origin
+// - never when already on either isolated origin (that would loop)
+// - LOCAL HOSTS ARE NOT EXEMPT. A foreign shared page opened locally used to stay on the
+//   developer's own origin, beside their session and with the local proxy reachable — the one
+//   place the origin split did not apply. It now moves to SHARED_LOCAL_HOST, keeping scheme and
+//   port so the dev server and the e2e stack still serve it. A different PORT alone would not
+//   have done: cookies are not port-scoped, so only a distinct hostname isolates.
 // - an UNKNOWN visitor moves. erring that way costs a redirect to a working page; erring the
 //   other way runs a stranger's code beside a live session
-export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '', hash = '' }) {
+export function sharedOriginRedirect({
+  host,
+  shared,
+  uid,
+  path = '/',
+  search = '',
+  hash = '',
+  protocol = 'https:',
+  port = '',
+}) {
   if (!shared) return null // not a shared page
   const owner = shared.match(/^(\w+)\//)?.pop()
   if (!owner) return null // '?shared=<key>' has no owner prefix: the visitor's own page
-  if (host == SHARED_HOST || canonicalizeHost(host) == 'localhost') return null
+  if (host == SHARED_HOST || host == SHARED_LOCAL_HOST) return null // already isolated
   if (uid && uid == owner) return null // the owner's own page
+  if (isLocalHost(host)) return `${protocol}//${SHARED_LOCAL_HOST}${port ? ':' + port : ''}${path}${search}${hash}`
   return `https://${SHARED_HOST}${path}${search}${hash}`
 }
 
@@ -75,6 +105,8 @@ export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '
 
 // approved local REQUEST hosts: exact names only, never suffixes. keep in step with the dev
 // server's advertised hosts (see vite.config.mts)
+// NOTE SHARED_LOCAL_HOST is deliberately ABSENT: it is the local isolated origin for foreign
+// shared pages, and the proxy must refuse the code that runs there
 const LOCAL_REQUEST_HOSTS = ['localhost', 'local.dev', 'localhost.dev']
 
 // the header a non-browser local tool sends to opt in. a cross-origin page cannot set it on a
