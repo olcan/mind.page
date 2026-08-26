@@ -46,12 +46,12 @@ async function expectConsistentColumns(page: Page) {
   return ids
 }
 
-// NOTE these are deliberately TWO loads. Review round 30 proposed merging them into one that
-// starts fresh at 1200 (so multi-column startup sizing is checked before any resize) and then
-// cycles 900 -> 1200 -> 1600 -> 900. That was implemented and FAILS: after the first 1200 -> 900
-// reflow, returning to 1200 never regains the second column and the 15s poll times out. The
-// merge is therefore not free, and the second load is what keeps the fresh multi-column case
-// honest — do not merge them again without explaining that transition.
+// NOTE two loads, kept apart because of an INTERMITTENT, unexplained stall. Merging them into one
+// test that cycles 900 -> 1200 -> 1600 -> 900 was tried; twice the grow back to 1200 left the page
+// at one column for more than 8s. It has NOT reproduced since — 29 consecutive round trips settled
+// in 400-500ms, including under a fully concurrent gate — so the cause is unknown and the merge is
+// not proven unsafe, only unproven. Until it is explained, these stay separate: only a merged test
+// exercises 1200 -> 900 -> 1200, and a rare multi-second stall there would flake the gate.
 test('column count follows viewport width; items stay unique and ordered', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 900 }) // floor(900 / 500) = 1 column
   await loadAnonymous(page)
