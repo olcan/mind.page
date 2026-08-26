@@ -59,6 +59,7 @@ paths.push('/')
 const requestHost = req =>
   canonicalizeHost(req.headers['x-forwarded-host'] || req.headers['host'] || req.headers[':authority'] || 'localhost')
 
+let proxy // the proxy middleware, so its upgrade handler can be invoked explicitly (see below)
 const scoped = express.Router()
 scoped.use(
 
@@ -87,7 +88,7 @@ scoped.use(
   // redirects are followed instead of exposed to server for robust CORS bypass
   // note // in https?:// can be rewritted to / by browser or intemediaries
   // websockets can also be proxied
-    createProxyMiddleware({
+    (proxy = createProxyMiddleware({
     changeOrigin: true,
     pathFilter: path => /^\/proxy\/(?:http|ws)s?:\/\/?.+$/.test(path),
     pathRewrite: (path, _req) => {
@@ -120,9 +121,14 @@ scoped.use(
       // error: (error, req, res, target) => console.error(error),
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
-    ws: true, // proxy websockets also (gated by guardProxyUpgrades, see below)
+    // NO automatic websocket listener: with ws:true the middleware registers its own 'upgrade'
+    // listener on the server, and a guard that merely destroys the client socket does NOT stop it
+    // — node keeps calling later listeners, so the proxy still resolved the target, opened the
+    // outbound connection and forwarded cookies. blind SSRF with the response hidden is still
+    // SSRF. upgrades go through guardProxyUpgrades, which calls proxy.upgrade() only when allowed
+    ws: false,
     // logger: console,
-  }),
+  })),
 
   compression({ threshold: 0 }),
   sirv('static', {
@@ -321,15 +327,18 @@ app.use(paths.filter(path => path != '/'), scoped)
 app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
 
  // for use as handler in functions.ts
-// WebSocket upgrades never pass through the express stack: the proxy attaches its own listener
-// to the http server, so the loopback gate above cannot see them and `/proxy/ws://...` was
-// reachable from anywhere. install this on every server that serves this app, BEFORE anything
-// else can attach an upgrade listener, so a non-loopback upgrade dies on the socket
+// WebSocket upgrades never pass through the express stack, and a guard that only destroys the
+// client socket does not prevent the proxy's own listener from running — node invokes every
+// listener, so the outbound request still happened (blind SSRF, with cookies forwarded). the
+// proxy therefore registers NO listener of its own (ws:false above) and this is the only path to
+// it: reject unless the request is for the proxy AND the real remote address is loopback, and
+// only then hand it to the proxy explicitly. install on every LOCAL server that serves this app;
+// the cloud function has no server here and must not expose an arbitrary-target proxy at all
 export function guardProxyUpgrades(server) {
-  server.prependListener('upgrade', (req, socket) => {
+  server.on('upgrade', (req, socket, head) => {
     if (!/^\/proxy\//.test(req.url ?? '')) return
-    if (isLoopbackAddress(socket.remoteAddress)) return
-    socket.destroy() // no response: an upgrade has no status code to refuse with
+    if (!isLoopbackAddress(socket.remoteAddress)) return socket.destroy()
+    proxy?.upgrade?.(req, socket, head)
   })
   return server
 }

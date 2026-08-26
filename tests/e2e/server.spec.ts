@@ -369,67 +369,97 @@ test.describe('localhost-only dev routes', () => {
   })
 })
 
-test('the proxy refuses a non-loopback WebSocket upgrade but still serves loopback', async () => {
-  // round-17 finding 1: upgrades are handled by the proxy's own server-level listener and never
-  // reach the express gate, so /proxy/ws://... was reachable from any address even in production
-  // mode. the guard is installed with prependListener on the http server (see guardProxyUpgrades)
+test('a rejected WebSocket upgrade never reaches the backend', async () => {
+  // round-18 finding 1: destroying the CLIENT socket does not stop the proxy — node keeps calling
+  // its listener, so the outbound connection was still made and cookies forwarded (blind SSRF).
+  // the question is therefore what the BACKEND saw, and it must be asked after a settling delay:
+  // the previous version checked the counter immediately, before the outbound request could land
   const http = await import('http')
   const os = await import('os')
   const lan = Object.values(os.networkInterfaces())
     .flat()
     .find(i => i && i.family == 'IPv4' && !i.internal)?.address
-  let upgrades = 0
+  const seen: string[] = []
+  const sockets: any[] = []
   const backend = http.createServer((_req, res) => res.end('ok'))
-  backend.on('upgrade', (_req, socket) => {
-    upgrades++
+  backend.on('upgrade', (req, socket) => {
+    seen.push(`${req.url} cookie=${req.headers.cookie ?? 'none'}`)
+    sockets.push(socket)
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
   })
-  await new Promise<void>(resolve => backend.listen(3121, '127.0.0.1', () => resolve()))
-  // the proxy attaches its upgrade listener lazily, on the first HTTP request it handles
-  await new Promise<void>(resolve =>
-    http
-      .get({ host: '127.0.0.1', port: 3100, path: '/proxy/http://127.0.0.1:3121/x' }, res => {
-        res.resume()
-        res.on('end', () => resolve())
-      })
-      .on('error', () => resolve())
-  )
+  await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', () => resolve()))
+  const port = (backend.address() as any).port // dynamic: a fixed port collides across runs
   const upgrade = (host: string) =>
     new Promise<string>(resolve => {
+      const timer = setTimeout(() => resolve('timeout'), 4_000)
+      const done = (outcome: string) => {
+        clearTimeout(timer) // otherwise the run is held open by an armed timer
+        resolve(outcome)
+      }
       const req = http.request({
         host,
         port: 3100,
-        path: '/proxy/ws://127.0.0.1:3121/socket',
-        headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+        path: `/proxy/ws://127.0.0.1:${port}/mutate?q=1`,
+        headers: { Connection: 'Upgrade', Upgrade: 'websocket', Cookie: '__session=victim-cookie' },
       })
-      req.on('upgrade', () => resolve('upgraded'))
-      req.on('error', e => resolve(`refused:${(e as any).code}`))
-      req.on('response', res => resolve(`http:${res.statusCode}`))
+      req.on('upgrade', (_res, socket) => {
+        sockets.push(socket)
+        done('upgraded')
+      })
+      req.on('error', e => done(`refused:${(e as any).code}`))
+      req.on('response', res => done(`http:${res.statusCode}`))
       req.end()
-      setTimeout(() => resolve('timeout'), 5_000)
     })
   try {
+    // the proxy attaches nothing on its own now, but an ordinary proxied request first mirrors
+    // how the endpoint is really used
+    await new Promise<void>(resolve =>
+      http
+        .get({ host: '127.0.0.1', port: 3100, path: `/proxy/http://127.0.0.1:${port}/x` }, res => {
+          res.resume()
+          res.on('end', () => resolve())
+        })
+        .on('error', () => resolve())
+    )
     expect(await upgrade('127.0.0.1'), 'loopback keeps websocket proxying').toBe('upgraded')
-    expect(upgrades, 'the backend saw the loopback upgrade').toBe(1)
+    expect(seen.length, 'the backend served the loopback upgrade').toBe(1)
     test.skip(!lan, 'no non-loopback address available on this host')
-    expect(await upgrade(lan!), 'a non-loopback upgrade is killed at the socket').toMatch(/^refused:/)
-    expect(upgrades, 'the backend never saw the non-loopback upgrade').toBe(1)
+    expect(await upgrade(lan!)).toMatch(/^refused:|^timeout$/)
+    await new Promise(resolve => setTimeout(resolve, 1_500)) // let any outbound request land
+    expect(seen, 'the backend saw nothing from the rejected caller').toHaveLength(1)
   } finally {
-    backend.close()
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>(resolve => backend.close(() => resolve()))
   }
 })
 
-test('the generic proxy is refused for non-local callers', async ({ request }) => {
-  // the proxy returns an arbitrary backend's body and content type under OUR origin. deployed,
-  // that made it an attacker-controlled same-origin document (script with access to the
-  // encryption secret), unrestricted SSRF (it reached the cloud metadata service and returned
-  // the function's own service-account token to any caller), and a cookie forwarder. it is now
-  // gated on the REMOTE ADDRESS — headers are client-supplied and cannot be trusted for this
+test('the generic proxy is refused for a real non-loopback caller', async ({ request }) => {
+  // the previous version made two LOOPBACK requests and saw two 200s, so despite its name it
+  // never observed a refusal. the gate reads the socket's address, so the only way to test it is
+  // to connect from one
+  const http = await import('http')
+  const os = await import('os')
+  const lan = Object.values(os.networkInterfaces())
+    .flat()
+    .find(i => i && i.family == 'IPv4' && !i.internal)?.address
   const localhost = await request.get('/proxy/http://127.0.0.1:3100/server_id')
   expect(localhost.status(), 'loopback callers keep the CORS bypass').toBe(200)
-  // a forwarding header must not be able to buy access: only the socket's address counts
-  const spoofed = await request.get('/proxy/http://127.0.0.1:3100/server_id', {
-    headers: { 'x-forwarded-for': '8.8.8.8', 'x-forwarded-host': 'mind.page', host: 'mind.page' },
+  test.skip(!lan, 'no non-loopback address available on this host')
+  const status = await new Promise<number>(resolve => {
+    const req = http.get(
+      // spoofed forwarding headers must not help: the gate never reads them
+      {
+        host: lan,
+        port: 3100,
+        path: '/proxy/http://127.0.0.1:3100/server_id',
+        headers: { 'x-forwarded-for': '127.0.0.1', 'x-forwarded-host': 'localhost', host: 'localhost' },
+      },
+      res => {
+        res.resume()
+        resolve(res.statusCode ?? 0)
+      }
+    )
+    req.on('error', () => resolve(0))
   })
-  expect(spoofed.status(), 'the gate does not read headers, so spoofing changes nothing').toBe(200)
+  expect(status, 'a non-loopback caller is refused, whatever it claims in headers').toBe(403)
 })
