@@ -257,11 +257,25 @@ test('/server_id identifies the server process', async ({ request }) => {
   expect(await (await request.get('/server_id')).text()).toBe(id)
 })
 
+test('every cdn loader precedes kit\'s bootstrap in the BUILT shell', async ({ request }) => {
+  // tests/unit/app_html.spec.ts pins the exact loader list and their classic/parser-blocking
+  // properties in the SOURCE shell. what it cannot see is kit's bootstrap moving above them —
+  // %sveltekit.head% precedes those tags, and the bootstrap is generated, not written by hand.
+  // this reads the built response and is the whole remaining guarantee: it replaces a browser test
+  // that intercepted the c3 request and waited 1.5s to prove the app had not started
+  const html = await (await request.get('/')).text()
+  const bootstrap = html.search(/\/_app\/immutable\/entry\/start\.[^"']+/)
+  expect(bootstrap, "kit's generated bootstrap is present").toBeGreaterThan(-1)
+  const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)]
+  expect(scripts.length, 'the built shell loads the cdn scripts').toBeGreaterThan(0)
+  for (const script of scripts)
+    expect(script.index, `${script[1]} precedes the bootstrap`).toBeLessThan(bootstrap)
+})
+
 test.describe('/user/<uid>', () => {
   test('returns the display name, preferring the custom one', async ({ request }) => {
     expect(await (await request.get(`/user/${ADMIN.uid}`)).text()).toBe('Olcan (seeded)')
-    // a profile-only uid: asserting this against alice_e2e made the read lane wait for the personal
-    // lane, which signs in and overwrites her user document (see seed.mjs)
+    // a profile-only uid (see the fixture boundary note in seed.mjs)
     expect(await (await request.get(`/user/${PROFILE_ONLY.uid}`)).text()).toBe(PROFILE_ONLY.custom)
   })
 

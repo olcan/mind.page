@@ -13,11 +13,11 @@
 # It still starts fresh emulators, seeds, and serves the build already in `build/`. Never report a
 # SKIP_BUILD run as the gate.
 #
-# TARGETED ITERATION: naming a write spec still runs the whole chromium project first, because the
-# write project DEPENDS on it — `run.sh tests/e2e/personal.spec.ts` selects 55 tests, not the 14 in
-# that file (editor: 55 rather than 10, now that its dependency closure includes admin). Add
-# --no-deps to select only the file's own tests:
-#     tests/e2e/run.sh tests/e2e/personal.spec.ts --no-deps
+# TARGETED ITERATION: a spec whose project has DEPENDENCIES drags their closure along. `editor`
+# depends on `admin`, which depends on `chromium`, so naming editor.spec.ts selects 55 tests rather
+# than its own 10; add --no-deps for just the file's own:
+#     tests/e2e/run.sh tests/e2e/editor.spec.ts --no-deps
+# `personal` has no dependencies, so naming it already selects only its own 14.
 # This still builds and starts a fresh stack each time; it is the fast path that stays honest.
 # Do NOT flip reuseExistingServer globally to avoid that (see playwright.config.ts) — a second
 # shell reaching a server started elsewhere is how a run can end up against production data.

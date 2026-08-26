@@ -45,12 +45,11 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 
 ## Tests
 
-Tests run as five projects (see `playwright.config.ts`), each capped to one worker with two
-workers overall: `unit` (no browser), `chromium` (read-only), then the write lanes, which change
-the seeded accounts. `admin` installs items that `editor` then edits, so `editor` depends on
-`admin`; `personal` touches only its own account and runs BESIDE that chain. Add `--no-deps` to
-iterate on one spec without dragging its dependency closure along (naming `editor.spec.ts` selects
-55 tests otherwise, rather than its own 10).
+Tests run as five projects (see `playwright.config.ts`), each capped to one worker with two overall.
+`unit` (no browser), `chromium` (read-only) and `personal` are eligible immediately, so `personal`
+overlaps the read lane; `admin` and `editor` mutate the shared anonymous account and form a chain
+behind it. Only projects with dependencies drag a closure along, so `--no-deps` matters for
+`editor.spec.ts` (55 tests otherwise, rather than its own 10) and not for `personal.spec.ts`.
 
 - `server.spec.ts` - `server.mjs` over http (no browser): the ssr shell and the session fields it
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their

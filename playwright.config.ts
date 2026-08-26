@@ -21,13 +21,12 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  // unit tests (tests/unit) run in the playwright node process, no browser or app instance; then
-  // read-only tests (server, rules, rendering goldens); then the write lanes, which change the
-  // seeded accounts.
-  // the write lanes are SPLIT by what they actually share: admin installs items that the editor
-  // then edits, so that stays an explicit dependency chain, while `personal` touches only its own
-  // account (alice_e2e) and runs BESIDE it. each lane is capped to one worker of its own, so the
-  // read lane stays serial (server tests mutate anonymous/prerender data the render tests inspect)
+  // `unit` (no browser or app instance), `chromium` (read-only) and `personal` are all eligible
+  // immediately; with two workers, unit runs beside chromium and personal takes the worker unit
+  // releases. `admin` and `editor` mutate the shared anonymous account, so they are an explicit
+  // chain behind the read lane. each project is capped to one worker of its own, so nothing inside
+  // a lane overlaps — the read lane in particular stays serial, since its server tests mutate
+  // anonymous/prerender data the render tests inspect
   projects: [
     { name: 'unit', testDir: 'tests/unit', workers: 1 }, // capped like the rest: the comment above says every project is
     {
@@ -57,11 +56,8 @@ export default defineConfig({
       name: 'personal',
       testDir: 'tests/e2e',
       testMatch: /personal\.spec\.ts/,
-      // NO dependency: it writes only its own account. it used to need one because the read lane
-      // asserted display-name precedence against alice_e2e, whom personal signs in as — signing in
-      // overwrites the user document and erases the seeded mindpageDisplayName. that assertion now
-      // uses a profile-only uid nothing signs into (see seed.mjs), so the lanes are genuinely
-      // independent and this one starts as soon as a worker frees up
+      // NO dependency: it does not mutate any fixture the read lane inspects (see the fixture
+      // boundary note in tests/e2e/seed.mjs). it starts as soon as a worker frees up
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },

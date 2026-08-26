@@ -7691,22 +7691,21 @@
             }
 
             applyRemoteChangeRef = applyRemoteChange
-            // handle changes in non-first snapshot, waiting for init if necessary; snapshots are
-            // SERIALIZED and each change's decrypt is awaited before it is applied, so a later
-            // snapshot can never interleave with (or overtake) an earlier one mid-application
+            // handle changes in non-first snapshot, waiting for init if necessary. the APPLY TASKS
+            // are serialized and each change's decrypt is awaited before it is applied — but hidden
+            // applications are enqueued onto name chains and outlive the task that scheduled them
+            // (see hiddenApplied below), so two deliveries for one document routed through different
+            // names can still land out of receipt order. that is one of the things the ingress
+            // coordinator has to fix
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
             const { settle: settleApplied, revoke: revokeThisRevision } = reserveHiddenAuthority({
               authoritative,
               fromCache: snapshot.metadata.fromCache,
-              // plaintext field, readable at receipt without decryption: enough to suspend
-              // usable authority for exactly the revisions that can change hidden completeness.
-              // a document we currently hold as hidden counts too, even when it arrives with
-              // hidden false — that discriminator change REMOVES a hidden record
-              // EVERY data change, matching the entry pre-scan below. the old predicate missed the
-              // same sequence entry marking had to fix: a pending hidden add is absent from
-              // hiddenItems, so a following hidden:false change for that id was not counted as
-              // affecting hidden completeness, and could grant authority over a stale record
+              // CONSERVATIVE: every data revision suspends usable authority, matching the entry
+              // pre-scan below. a plaintext predicate cannot classify this exactly — a pending
+              // hidden add is absent from hiddenItems, so a following hidden:false change for that
+              // id would not be counted as affecting hidden completeness
               hiddenReceived: snapshot.docChanges().length > 0,
             })
             // ENTRY receipts, taken SYNCHRONOUSLY for the whole snapshot before anything is
@@ -7723,9 +7722,10 @@
             for (const change of snapshot.docChanges())
               entryReceipts.set(change.doc.id, hiddenPersistence.noteRemotePending(change.doc.id))
             const applyTask = async () => {
-              // GUARANTEED release: writes await these markers, so any path that leaves one behind
-              // blocks that document's saves for the rest of the session. the per-change finally
-              // below releases them as they are handled; this covers every early return
+              // GUARANTEED release: a write REFUSES and requeues while a marker stands for its
+              // target, so one left behind makes that document's saves poll without ever issuing.
+              // the per-change finally below releases them as they are handled; this covers every
+              // early return
               try {
                 await applyChanges()
               } finally {
@@ -7783,14 +7783,17 @@
                 // each world indexes documents separately, so the old representation has to go
                 // or it lingers as a phantom — a hidden wrapper cleanup could still act on, or a
                 // visible item nothing will ever update again
-                // the hidden side is keyed by NAME, and an adoption target is absent from byId until
-                // finalization — so membership is asked of nameForDocument, not hiddenItems. the
-                // lookup scans on a miss, so it is only made for a change that could actually be
-                // this transition
+                // an adoption target is absent from byId until finalization, so whether hidden
+                // persistence depends on this id is asked of nameForDocument rather than hiddenItems.
+                // that is a BEST-EFFORT lookup: under the one-slot receipt overlap a later pending
+                // delivery can erase the decoded wrapper it reads. the lookup scans on a miss, so it
+                // is only made for a change that could actually be this transition
                 const hiddenName =
                   !savedItem.hidden && change.type != 'removed' ? hiddenPersistence.nameForDocument(doc.id) : undefined
                 if (hiddenName) {
-                  // heal only what this transition SAW: an older success must not clear a newer failure
+                  // BEST-EFFORT guard, not a guarantee: this is captured when the newer delivery
+                  // DECODES, while a failing application receives its generation later, so completion
+                  // order and delivery order can disagree. the versioned coordinator replaces it
                   const seenDirtySeqForDrop = hiddenDirtySeq
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
                   // PUBLISH the hidden-side removal before the entry marker can be released, or the

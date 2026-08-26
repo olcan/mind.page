@@ -19,32 +19,6 @@ test('anonymous account loads from the emulator', async ({ page }) => {
   expect(await page.evaluate(() => window._items().length)).toBe(120)
 })
 
-test('the app cannot start until the cdn globals have loaded', async ({ page }) => {
-  // tests/unit/app_html.spec.ts pins the shell's script order, which is most of this guarantee —
-  // but %sveltekit.head% precedes those tags, so kit bootstrap moving into the head would satisfy
-  // the structural check and still break this. that is what the browser is here for.
-  // the quiet window is REAL: proving the app has not started needs elapsed time with the script
-  // held. an earlier version used expect.poll(...).toBe(false), which returns on its FIRST sample
-  // and so passed whether or not startup had been reordered
-  const errors: string[] = []
-  page.on('pageerror', error => errors.push(String(error)))
-  let release: () => void = () => {}
-  const held = new Promise<void>(resolve => (release = resolve))
-  let reached = false
-  await page.route(/c3@[\d.]+\/c3\.min\.js/, async route => {
-    reached = true
-    await held
-    await route.continue()
-  })
-  const loaded = loadAnonymous(page)
-  await expect.poll(() => reached, { timeout: 30_000 }).toBe(true) // the parser reached the script
-  await page.waitForTimeout(1_500) // held: the app below it must not have started in that time
-  expect(await page.evaluate(() => Boolean((window as any)._items)), 'the app started early').toBe(false)
-  release()
-  await loaded
-  expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
-})
-
 test('charts regenerate after a stale hidden render (zero-width skip)', async ({ page }) => {
   // clicking a section separator transiently renders off-screen items; their chart scripts measure
   // zero width in a delayed callback, skip generation and invalidate the element cache — which
