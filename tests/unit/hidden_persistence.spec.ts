@@ -579,65 +579,121 @@ test('the controller exposes no deletion surface at all', () => {
 })
 
 
-test('two writes of identical state have distinct echo identities (multiplicity preserved)', async () => {
-  // round-14 finding 5: matching echoes by PLAINTEXT collapsed two identical writes to one
-  // entry, so the first echo consumed it and the second applied as remote state. every
-  // encryption uses a fresh random IV, so the outbound ciphertext is unique per write
-  let n = 0
+test('a remote change applied after our write is issued does not leave the client behind', async () => {
+  // round-15 finding 2: B is received while our save C holds the name chain in encryption, so
+  // B's application queues BEHIND C. C is issued, the chain releases, B applies — and the client
+  // sits at B while the server ends at C. skipping C's own echo (the old ciphertext rule) left
+  // nothing to correct it; applying it does, because firestore delivers a document's changes in
+  // commit order, so the echo IS the newest server state
+  const encrypting = deferred<void>()
   const { idx, calls, controller } = harness({
     encryptState: async state => {
+      await encrypting.promise
       const encrypted: any = state
-      encrypted.cipher = `cipher${++n}:` + state.text // a distinct cipher per write, as in production
+      encrypted.cipher = 'cipher:' + state.text
       encrypted.text = null
-      encrypted.attr = null
       return encrypted
     },
   })
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('n', wrapper)
-  controller.save('n', { same: true })
+  controller.save('n', { v: 'C' })
+  await flush() // the save task is running, held in encryption; the name chain is occupied
+  const applyingB = arrive(controller, idx, { id: 'd1', name: 'n', item: { v: 'B' } }) // queues behind
+  encrypting.resolve()
   await flush()
-  controller.save('n', { same: true }) // identical STATE, second write
-  await flush()
-  const ciphers = calls.filter(c => c.op == 'update').map(c => c.text!)
-  expect(ciphers).toHaveLength(2)
-  expect(new Set(ciphers).size).toBe(2) // two identities, not one
-  // each echo consumes exactly its own entry; neither is mistaken for a remote change
-  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(true)
-  expect(controller.isOwnEcho('d1', ciphers[1])).toBe(true)
-  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(false) // consumed: a redelivery is not ours
+  await applyingB
+  expect(idx.byId.get('d1')!.item).toEqual({ v: 'B' }) // B applied after C was issued
+  expect(itemOf(calls.find(c => c.op == 'update')!.text)).toEqual({ v: 'C' }) // the server has C
+  // C's own delivery now arrives. the listener's rule is hasPendingSave (see isOwnPendingChange
+  // in index.svelte), and with no queued save it says APPLY — which is the decision under test
+  expect(controller.hasPendingSave('n')).toBe(false)
+  await arrive(controller, idx, { id: 'd1', name: 'n', item: { v: 'C' } })
+  expect(idx.byId.get('d1')!.item).toEqual({ v: 'C' }) // client and server agree again
 })
 
-test('a failed write releases only its own echo identity', async () => {
-  let n = 0
-  const failures = new Set<string>()
-  const { idx, calls, controller } = harness({
-    encryptState: async state => {
-      const encrypted: any = state
-      encrypted.cipher = `cipher${++n}:` + state.text
-      encrypted.text = null
-      encrypted.attr = null
-      return encrypted
-    },
-    updateDoc: async (id, data) => {
-      calls.push({ op: 'update', id, text: data.cipher })
-      if (failures.has(data.cipher)) throw new Error('unavailable')
-    },
-  })
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+test('a delivery IS skipped while a queued save will supersede it', async () => {
+  // the other half: applying every delivery would roll back newer local intent. a save that is
+  // queued but has not built its payload yet is exactly that intent
+  const { idx, calls, controller } = harness()
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('n', wrapper)
-  failures.add('cipher1:' + JSON.stringify({ name: 'n', item: { same: true } }))
-  controller.save('n', { same: true })
+  controller.save('n', { v: 'C' })
   await flush()
-  controller.save('n', { same: true })
+  controller.save('n', { v: 'D' }) // queued: this is the newest local intent
+  expect(controller.hasPendingSave('n')).toBe(true)
   await flush()
-  const ciphers = calls.filter(c => c.op == 'update').map(c => c.text!)
-  // the FAILED write's identity is released; the live one survives (plaintext matching deleted
-  // the single shared entry and erased the live write's identity with it)
-  expect(controller.isOwnEcho('d1', ciphers[0])).toBe(false)
-  expect(controller.isOwnEcho('d1', ciphers[1])).toBe(true)
+  expect(controller.hasPendingSave('n')).toBe(false) // released once its payload is built
+  const updates = calls.filter(c => c.op == 'update')
+  expect(itemOf(updates.at(-1)!.text)).toEqual({ v: 'D' }) // D reaches the server last
+})
+
+test('a survivor received during the final encryption is adopted, not duplicated', async () => {
+  // round-15 finding 3: findSurvivor ran once, then the fresh-create branch awaited ANOTHER
+  // encryption. a same-name record received in that window was already known locally, yet the
+  // create issued anyway — a duplicate we caused ourselves
+  let encryptions = 0
+  const second = deferred<void>()
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      if (++encryptions == 2) await second.promise // hold the FINAL encryption of the create
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  controller.save('n', { mine: 1 })
+  await flush()
+  // the survivor arrives while that last encryption is held
+  void arrive(controller, idx, { id: 'srv1', name: 'n', item: { theirs: 1 } })
+  second.resolve()
+  await flush()
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // no duplicate document
+  const update = calls.find(c => c.op == 'update')!
+  expect(update.id).toBe('srv1') // adopted instead
+  expect(itemOf(update.text)).toEqual({ theirs: 1, mine: 1 })
+})
+
+test('an adopted write rejected as not-found does not leave the wrapper on a vanished document', async () => {
+  // round-15 finding 4: the adopted update's rejection was handled in a DETACHED catch, so
+  // finalizeAdoption had already settled the wrapper onto an id the server says is gone — and
+  // the merged state was never persisted anywhere
+  let updates = 0
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmIndex: async name => {
+      // the same merge production passes (mergeAdoptedStore): pending changes win
+      if (updates == 0)
+        registerHidden(idx, { id: 'gone1', name, item: { theirs: 1 } }, (pending, found) =>
+          Object.assign(pending.item, { ...found.item, ...pending.item })
+        )
+    },
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
+      if (++updates == 1) {
+        const e: any = new Error('missing')
+        e.code = 'not-found'
+        throw e
+      }
+    },
+  })
+  controller.save('n', { mine: 1 })
+  await flush()
+  await flush()
+  // the create is re-entered for the name rather than left settled on the vanished document
+  expect(calls.filter(c => c.op == 'invalidate')).not.toHaveLength(0) // authority revoked
+  const created = calls.find(c => c.op == 'create')
+  expect(created).toBeTruthy() // the state reached a real document
+  expect(itemOf(created!.text)).toEqual({ theirs: 1, mine: 1 }) // ... carrying the merged state
+  expect(idx.byName.get('n')!.id).toBe(created!.id)
 })
 
 test('readonly mode mutates the index but never writes', async () => {

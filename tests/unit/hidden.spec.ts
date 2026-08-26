@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   buildHiddenIndex,
+  isQuarantined,
   quarantineNonCanonical,
   compareIds,
   classifyInvalidHidden,
@@ -241,4 +242,27 @@ test('quarantining a duplicate stops it being promoted when the canonical record
   index.byName.set('m', solo)
   quarantineNonCanonical(index, [{ wrapper: solo, reason: 'orphaned' }])
   expect(index.byId.get('c3')).toBe(solo)
+})
+
+test('a quarantined duplicate cannot be re-registered or adopted for the rest of the session', () => {
+  // round-15 finding 5: quarantine only deleted the wrapper from byId, so a confirmation query
+  // or a redelivery re-registered the same record — and a pending create then ADOPTED it,
+  // merging the old state back into a store the user had emptied
+  const index: any = { byId: new Map(), byName: new Map() }
+  const canonical = { id: 'a1', name: 'n', item: { current: true } }
+  const duplicate = { id: 'b2', name: 'n', item: { ancient: true } }
+  index.byId.set('a1', canonical)
+  index.byId.set('b2', duplicate)
+  index.byName.set('n', canonical)
+  quarantineNonCanonical(index, [{ wrapper: duplicate, reason: 'duplicate' }])
+  expect(isQuarantined(index, 'b2')).toBe(true)
+  // the canonical record goes away and the name is claimed by a fresh pending create
+  removeHidden(index, 'a1')
+  const pending = { id: 'temp1', name: 'n', item: {}, pending_create: true }
+  index.byId.set('temp1', pending)
+  index.byName.set('n', pending)
+  // a confirmation returns the quarantined record: it must neither register nor be adopted
+  expect(registerHidden(index, { id: 'b2', name: 'n', item: { ancient: true } }, () => {})).toBe('quarantined')
+  expect(pending.item).toEqual({}) // no merge of the old state
+  expect(index.byId.has('b2')).toBe(false)
 })

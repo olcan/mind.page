@@ -63,8 +63,7 @@
   let sharer_name // fetched via /user/<uid> once sharer uid is determined
   // a shared page runs its OWNER's item code (macros, _init, commands) in this origin; for a
   // visitor signed in to their own account that code could reach the visitor's stored secret,
-  // so foreign code runs only after explicit consent (see initialize) and every execution path
-  // funnels through Item.eval, which throws while blocked
+  // foreign shared pages are served from an isolated origin instead (see sharedOriginRedirect)
   // NOTE: a sign-in gesture started on a foreign shared page is NOT auto-resumed after the
   // navigation. a programmatic call carries no user activation and would simply be popup-blocked;
   // the visitor lands on a clean first-party page and clicks sign in there, which is also the
@@ -3193,9 +3192,6 @@
 
   function resetUser() {
     user = null
-    // NOTE: foreign-code consent is NOT cleared here: resetUser also runs on routine
-    // initialization, and the consent key is scoped by visitor uid + owner (see the gate in
-    // initialize), so another account signed in on this device never inherits it
     // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
     localStorage.removeItem('mindpage_user')
     window.sessionStorage.removeItem('mindpage_signin_pending')
@@ -6687,8 +6683,7 @@
 
     // extract special tag functions
     // NOTE: this evaluates owner-authored js DIRECTLY (not through Item.eval), so it is one of
-    // the paths the consent gate must cover — the gate's guarantee is "no owner code runs", not
-    // "no Item.eval runs"
+    // NOTE: this evaluates owner-authored js directly, not through Item.eval
     for (const item of items) {
       if (!item.text.includes('_special_tag_aliases')) continue // quick check
       const js = extractBlock(item.text, 'js')
@@ -7078,12 +7073,6 @@
           }
           if (action == 'apply_user') {
             resetUser() // clean up first
-            // an actual principal change invalidates every remembered foreign-code consent on
-            // this device: the record lives in session storage, which owner code authorized by a
-            // previous visitor could have written for another uid (see the gate in initialize)
-            if (localStorage.getItem('mindpage_consent_principal') != (authUser?.uid ?? '')) {
-              localStorage.setItem('mindpage_consent_principal', authUser?.uid ?? '')
-            }
             user = authUser
             const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)
             localStorage.setItem('mindpage_user', userInfoString)
@@ -7331,13 +7320,13 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            // the echo of a write this client ISSUED, matched on the RAW CIPHERTEXT (unique per
-            // write via the random IV, so two identical states are still two identities) before
-            // any decryption. firestore delivers a document's changes in commit order, so
-            // everything else is genuinely newer state and must be applied — including another
-            // tab's write that lands while ours is still pending, which the old blanket
-            // in-flight skip lost. removals are id-driven and idempotent, so they always apply
-            return change.type != 'removed' && hiddenPersistence.isOwnEcho(doc.id, doc.data().cipher)
+            // a delivery is skipped ONLY when a queued save will supersede it. everything else
+            // applies, including the echo of our own write: firestore delivers a document's
+            // changes in commit order, so an echo is simply the newest server state, and
+            // skipping it left the client behind whenever a remote change had been applied
+            // between our write being issued and its echo arriving
+            const name = hiddenItems.get(doc.id)?.name ?? parseHiddenWrapper(doc.id, savedItem.text)?.name
+            return !!name && hiddenPersistence.hasPendingSave(name)
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
@@ -7702,7 +7691,6 @@
                   await hiddenPersistence
                     .applyRemote([stale?.name], () => removeHidden(hiddenIndex(), doc.id))
                     .catch(e => console.error('could not drop stale hidden representation:', doc.id, e))
-                  hiddenPersistence.releaseRemote(doc.id)
                   hiddenCleanupPending = true
                   // the record now belongs to the VISIBLE world, where it has no representation
                   // yet: passing the original 'modified' on would hit the ordinary branch, find
@@ -7745,7 +7733,7 @@
                   }
                   // receipt-time intent: a create/adopt decision must see this record even though
                   // its application is queued — possibly behind that very create
-                  hiddenPersistence.noteRemote(wrapper, doc.id, removed)
+                  const receipt = hiddenPersistence.noteRemote(wrapper, doc.id, removed)
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   hiddenApplied.push(
                     hiddenPersistence
@@ -7768,8 +7756,9 @@
                           revokeThisRevision('hidden change could not be applied') // as soon as known
                         }
                       )
-                      // the receipt entry existed only to cover the window before this applied
-                      .finally(() => hiddenPersistence.releaseRemote(doc.id))
+                      // the receipt covered only the window before this applied; releasing by
+                      // TOKEN means a newer receipt for the same document is never discarded
+                      .finally(() => hiddenPersistence.releaseRemote(doc.id, receipt))
                   )
                   continue
                 }
@@ -8548,28 +8537,16 @@
     }
   }
 
-  // the most recent server confirmation's records, staged so a create that JOINED an in-flight
-  // confirmation can still make its own adoption decision inline on its own chain
-  let confirmedRecords = new Map()
-  let confirmIndexInFlight = null
-  // registers ONLY the records matching the confirming create's own name. records for other
-  // names are deliberately ignored: a query result applied outside the listener's commit order
-  // can roll a document back to whatever the query happened to capture
-  function registerConfirmedName(pendingName) {
-    for (const hidden_item of confirmedRecords.values()) {
-      const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
-      if (wrapper?.name == pendingName) registerHiddenItem(hidden_item)
-    }
-  }
 
+  // registers one decrypted hidden document into the index. used when a fixed page loads the
+  // OWNER's own records after their phrase is validated (see resolveFixedOwnerSecret) — that is
+  // initial loading, not a query result being replayed across names
   function registerHiddenItem(item) {
     if (!item.hidden || !item.text) return
     const wrapper = parseHiddenWrapper(item.id, item.text)
-    if (!wrapper) return
-    // a pending create that claimed this name adopts the document (update instead of create),
-    // with the pending (shared-page) changes taking precedence over the loaded state
-    registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
+    if (wrapper) registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
   }
+
   // persistence runs through the per-name controller (src/hidden_persistence.ts, matrix-tested):
   // writes for a name are serialized, settlement goes through the index transitions, and an
   // unconfirmed create re-confirms the hidden index against the server first (failing closed on
@@ -8589,34 +8566,30 @@
     newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
-    confirmIndex: pendingName => {
-      // answers ONE question: does a record for `pendingName` already exist server-side? the
-      // full account query is unavoidable (names live inside the ciphertext) but its result is
-      // used only for the caller. it used to be fanned out across every other name and used to
-      // infer absence account-wide, which applied a snapshot OUTSIDE the listener's commit
-      // order: a document the listener had already advanced could be rolled back to the state
-      // the query happened to capture, and a record added after the query was taken could be
-      // removed locally as "absent". a create's confirmation has no business deciding that
-      if (hiddenAuthorityUsable()) return Promise.resolve()
-      // one query at a time for the whole account: concurrent creates on different names would
-      // otherwise each issue the same read
-      if (confirmIndexInFlight) return confirmIndexInFlight.then(() => registerConfirmedName(pendingName))
-      const query_promise = getDocsFromServer(
+    confirmIndex: async pendingName => {
+      // answers ONE question for ONE caller: does a record for `pendingName` already exist
+      // server-side? the full-account query is unavoidable (names live inside the ciphertext),
+      // but every caller runs its own and uses only its own answer.
+      // sharing one in-flight query across callers looked like an obvious saving and was not: a
+      // create for B could join a query that had already been fixed BEFORE B's record was
+      // committed, be told the name was free, and duplicate it. per-name chains already
+      // serialize same-name callers, so the only thing the sharing saved was a duplicate read
+      // for genuinely concurrent DIFFERENT names — at the cost of answering one of them from a
+      // snapshot older than its own operation
+      if (hiddenAuthorityUsable()) return
+      const hidden_docs = await getDocsFromServer(
         query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
-      ).then(async hidden_docs => {
-        // ascending id order so a pending create adopts the MINIMUM-id duplicate; any failure
-        // rejects (failing the create): a server read proves query completeness, not a
-        // successfully constructed name index
-        confirmedRecords = new Map()
-        for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
-          const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
-          if (!hidden_item.hidden || !hidden_item.text) continue
-          if (!parseHiddenWrapper(hidden_item.id, hidden_item.text)) continue
-          confirmedRecords.set(hidden_item.id, hidden_item)
-        }
-      })
-      confirmIndexInFlight = query_promise.finally(() => (confirmIndexInFlight = null))
-      return confirmIndexInFlight.then(() => registerConfirmedName(pendingName))
+      )
+      // ascending id order so the MINIMUM-id record wins the name; any failure rejects (failing
+      // the create), since a server read proves query completeness, not a usable name index
+      for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
+        const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
+        if (!hidden_item.hidden || !hidden_item.text) continue
+        const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
+        if (wrapper?.name != pendingName) continue // not this caller's question
+        registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
+        return // the minimum-id match is the answer
+      }
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,

@@ -24,6 +24,11 @@ export type HiddenWrapper = {
 export type HiddenIndex = {
   byId: Map<string, HiddenWrapper>
   byName: Map<string, HiddenWrapper> // minimum-id wrapper per name (see above)
+  // documents quarantined THIS SESSION as non-canonical duplicates (see quarantineNonCanonical).
+  // nothing on the server marks them, so this lasts only as long as the page: it exists so a
+  // record already judged redundant cannot come back through registration, a redelivery or an
+  // adoption and resurrect the state it holds
+  quarantined?: Set<string>
 }
 
 export type InvalidHidden = {
@@ -108,7 +113,8 @@ export function registerHidden(
   index: HiddenIndex,
   wrapper: HiddenWrapper,
   mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => void
-): 'adopted' | 'exists' | 'added' {
+): 'adopted' | 'exists' | 'added' | 'quarantined' {
+  if (isQuarantined(index, wrapper.id)) return 'quarantined' // judged redundant this session
   const existing = index.byName.get(wrapper.name)
   if (existing) {
     if (existing.pending_create && !existing.adopt_id) {
@@ -186,7 +192,7 @@ export function repairNameIndex(index: HiddenIndex) {
 // - 'duplicate': a wrapper that is not its name's byName holder (the minimum-id rule keeps the
 //   canonical one; the rest are redundant records)
 // - 'orphaned': a canonical global_store_<id> wrapper whose owner item is absent per ownerExists
-// wrappers with settlement in flight (pending_create/adopt_id) or tombstoned are never
+// wrappers with settlement in flight (pending_create/adopt_id) are never
 // classified — their state is transitional and the next grant recomputes
 export function classifyInvalidHidden(
   index: HiddenIndex,
@@ -219,8 +225,13 @@ export function quarantineNonCanonical(
     if (reason != 'duplicate') continue
     if (index.byName.get(wrapper.name) === wrapper) continue // canonical: never quarantine
     if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id)
+    // remembered, so the record cannot be re-indexed by a confirmation or redelivery and then
+    // adopted — which would merge its old state back into a store the user has since emptied
+    ;(index.quarantined ??= new Set()).add(wrapper.id)
   }
 }
+
+export const isQuarantined = (index: HiddenIndex, id: string) => index.quarantined?.has(id) ?? false
 
 // settles a pending create's ADOPTION (its document was found to exist, see saveHiddenItem in
 // index.svelte): re-keys the wrapper to the persistent id, clears the pending claim, then
