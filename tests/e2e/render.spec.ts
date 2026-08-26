@@ -19,34 +19,10 @@ test('anonymous account loads from the emulator', async ({ page }) => {
   expect(await page.evaluate(() => window._items().length)).toBe(120)
 })
 
-test('the app waits for the cdn scripts even when they are slow', async ({ page }) => {
-  // kit's bootstrap is an inline import(), which unlike sapper's classic bundle tag is not parser
-  // ordered: the app container sits below the parser-blocking cdn script tags (see app.html) so
-  // that items cannot evaluate before the globals (c3, hljs, graphviz, ...) exist
-  const errors: string[] = []
-  page.on('pageerror', error => errors.push(String(error)))
-  // ONE representative parser-blocking global (c3) is HELD and released explicitly, rather than
-  // delaying every cdn request by a fixed 2.5s. the claim is that items cannot evaluate before
-  // the globals exist, so holding one of those globals states it directly — and the test costs
-  // the time the app actually needs instead of a constant
-  let release: () => void = () => {}
-  const held = new Promise<void>(resolve => (release = resolve))
-  let reached = false
-  await page.route(/c3@[\d.]+\/c3\.min\.js/, async route => {
-    reached = true
-    await held
-    await route.continue()
-  })
-  const loaded = loadAnonymous(page)
-  await expect.poll(() => reached, { timeout: 30_000 }).toBe(true) // the parser reached the script
-  // WHILE it is held, the app below it must not have booted. releasing as soon as the request is
-  // observed asserted nothing: the test would pass even if startup were reordered, as long as it
-  // had not yet won a few-millisecond race
-  await expect.poll(() => page.evaluate(() => Boolean(window._items)), { timeout: 5_000, intervals: [250] }).toBe(false)
-  release()
-  await loaded
-  expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
-})
+// NOTE the cdn-ordering test that lived here is now a structural assertion on app.html (see
+// tests/unit/app_html.spec.ts): it held one script and polled for "the app has not booted", but
+// expect.poll(...).toBe(false) returns on its first sample, so it asserted almost nothing — and it
+// cost 2.2s per run to do it
 
 test('charts regenerate after a stale hidden render (zero-width skip)', async ({ page }) => {
   // clicking a section separator transiently renders off-screen items; their chart scripts measure

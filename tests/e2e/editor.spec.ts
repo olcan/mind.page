@@ -241,7 +241,8 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
       page.evaluate(() => window._item('#e2e_xtab')!.write('overlap A')),
       other.evaluate(() => window._item('#e2e_xtab')!.write('overlap B')),
     ])
-    await page.waitForTimeout(3_000) // let every echo, deferred change and queued save settle
+    // no fixed settle: the convergence assertions below POLL the backend and the two tabs, which
+    // is the event-driven wait this was standing in for
     // the invariant that matters is that what each tab SHOWS matches what the backend HOLDS: a
     // deferred change must not be applied under an unsettled local write (whose queued save
     // would then persist the rollback), and a deferred change must not be silently dropped —

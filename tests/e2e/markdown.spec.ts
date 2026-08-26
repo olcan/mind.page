@@ -22,6 +22,7 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
   // report either way. deliberately NOT a retry and NOT a longer timeout: both hide the fault
   test.setTimeout(45_000)
   const diagnostics: string[] = []
+  const started = new Set<string>() // external scripts/stylesheets that have not finished
   page.on('pageerror', error => diagnostics.push(`pageerror ${error}`))
   // our own server's failures, AND external scripts/stylesheets: the parser-blocking cdn tags are
   // the leading suspect for the hang this instruments, so recording only local failures would have
@@ -30,8 +31,8 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
     const type = request.resourceType()
     if (/localhost|127\.0\.0\.1/.test(request.url()) || type == 'script' || type == 'stylesheet')
       diagnostics.push(`requestfailed ${type} ${request.url()} ${request.failure()?.errorText ?? ''}`)
+    started.delete(request.url()) // it FAILED; reporting it again as "still pending" is noise
   })
-  const started = new Set<string>()
   page.on('request', request => {
     const type = request.resourceType()
     if (type == 'script' || type == 'stylesheet') started.add(request.url())

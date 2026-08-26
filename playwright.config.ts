@@ -29,7 +29,7 @@ export default defineConfig({
   // account (alice_e2e) and runs BESIDE it. each lane is capped to one worker of its own, so the
   // read lane stays serial (server tests mutate anonymous/prerender data the render tests inspect)
   projects: [
-    { name: 'unit', testDir: 'tests/unit' },
+    { name: 'unit', testDir: 'tests/unit', workers: 1 }, // capped like the rest: the comment above says every project is
     {
       name: 'chromium',
       testDir: 'tests/e2e',

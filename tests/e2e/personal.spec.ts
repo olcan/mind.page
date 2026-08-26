@@ -88,35 +88,68 @@ test('a new device must enter the phrase; a wrong one can only sign out', async 
     .toContain('secret text 12345')
 })
 
+// ONE lifecycle for "stall the firestore channel, then let it go", shared by the two slow-cache
+// tests. requests are DELAYED, not frozen: a channel held indefinitely is abandoned by the sdk and
+// does not recover when resumed, which fails for a reason unrelated to what these tests assert.
+// `active` counts only requests STILL held — leaving an entry whose timer already resumed it made
+// the old `held.length` a lie that a test then waited on
+function holdFirestore(page: Page) {
+  let blocked = true
+  const held = new Set<() => void>()
+  const install = () =>
+    page.route(/:8080\/google\.firestore/, route => {
+      const go = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
+      if (!blocked) return go()
+      let entry!: () => void
+      const timer = setTimeout(() => {
+        held.delete(entry)
+        go()
+      }, 8_000)
+      entry = () => {
+        clearTimeout(timer)
+        held.delete(entry)
+        go()
+      }
+      held.add(entry)
+    })
+  return {
+    install,
+    release: () => {
+      blocked = false
+      for (const entry of [...held]) entry()
+    },
+    get active() {
+      return held.size
+    },
+  }
+}
+
+// counts the app's own "keep waiting for the server" decision PER PAGE LOAD, so a late log from
+// the signed-out navigation cannot satisfy an assertion about the signed-in one
+function watchCacheWait(page: Page) {
+  let epoch = 0
+  let decided = -1
+  page.on('load', () => epoch++)
+  page.on('console', message => {
+    if (message.text().includes('ignoring first snapshot from cache (waiting for server)')) decided = epoch
+  })
+  return {
+    get epoch() {
+      return epoch
+    },
+    get decided() {
+      return decided
+    },
+  }
+}
+
 test('a slow first connection does not reset the account to empty', async ({ page }) => {
   // a fresh device has an empty persistent cache; if the firestore channel is slow, the empty
   // cache snapshot must not initialize the account (which would create a welcome item and, on a
   // device without the secret, prompt for a NEW phrase over the existing items)
   await withSecret(page)
-  // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
-  // and are released explicitly, so the stall lasts exactly as long as the assertions need and
-  // never 8s more. `finally` releases them however the test ends.
-  // `waiting` resolves on the app's OWN decision to keep waiting (init_log in index.svelte), which
-  // is the milestone this test is actually about — an arbitrary firestore request arriving, plus a
-  // sleep, proved neither that the cached snapshot reached the decision nor that it was refused
-  let blocked = true
-  const held: Array<() => void> = []
-  const release = () => {
-    blocked = false
-    for (const resume of held.splice(0)) resume()
-  }
-  await page.route(/:8080\/google\.firestore/, route => {
-    const resume = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
-    if (!blocked) return resume()
-    // DELAYED, not frozen. holding indefinitely is not the same as being slow: the sdk abandons a
-    // channel held that long and does not recover when it is finally resumed, so the test failed
-    // for a reason unrelated to what it asserts. the milestone below normally releases long before
-    const timer = setTimeout(resume, 8_000)
-    held.push(() => {
-      clearTimeout(timer)
-      resume()
-    })
-  })
+  const channel = holdFirestore(page)
+  await channel.install()
   try {
     // sign in without waiting for initialization (as signIn in helpers, which polls past it)
     const token = await customToken(ALICE)
@@ -133,11 +166,11 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     // app never reaches the `wait_for_server` decision that logs. the state under test is exactly
     // "nothing has arrived and nothing was invented", which only a quiet window can evidence.
     // waiting for the listen to be held first makes the window mean something
-    await expect.poll(() => held.length).toBeGreaterThan(0)
+    await expect.poll(() => channel.active).toBeGreaterThan(0)
     await page.waitForTimeout(1_500)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
-    release()
+    channel.release()
     await expect
       .poll(() => page.evaluate(() => window._init_time > 0 && window._readonly === false).catch(() => false), {
         timeout: 90_000,
@@ -148,7 +181,7 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     expect(names).toContain('#e2e_private') // account intact, no welcome item added
     expect(names.filter(name => name == '#e2e_private')).toHaveLength(1)
   } finally {
-    release() // however this test ends, no route is left held
+    channel.release() // however this test ends, no route is left held
   }
 })
 
@@ -207,39 +240,10 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
   expect(await page.evaluate(() => window._items().length)).toBe(1)
   // sign in with the firestore channel stalled: the first snapshot comes from the partial cache
   await page.goto('/')
-  // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
-  // and are released explicitly, so the stall lasts exactly as long as the assertions need and
-  // never 8s more. `finally` releases them however the test ends.
-  // `waiting` resolves on the app's OWN decision to keep waiting (init_log in index.svelte), which
-  // is the milestone this test is actually about — an arbitrary firestore request arriving, plus a
-  // sleep, proved neither that the cached snapshot reached the decision nor that it was refused
-  let blocked = true
-  const held: Array<() => void> = []
-  const release = () => {
-    blocked = false
-    for (const resume of held.splice(0)) resume()
-  }
-  // COUNTED, not awaited as a one-shot: the signed-out page makes this same decision before we
-  // sign in, so a bare waitForEvent resolves on the wrong page's log. what this test is about is
-  // the decision the SIGNED-IN app makes, so the count is sampled after sign-in and must grow
-  let waited = 0
-  page.on('console', message => {
-    if (message.text().includes('ignoring first snapshot from cache (waiting for server)')) waited++
-  })
-  await page.route(/:8080\/google\.firestore/, route => {
-    const resume = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
-    if (!blocked) return resume()
-    // DELAYED, not frozen. holding indefinitely is not the same as being slow: the sdk abandons a
-    // channel held that long and does not recover when it is finally resumed, so the test failed
-    // for a reason unrelated to what it asserts. the milestone below normally releases long before
-    const timer = setTimeout(resume, 8_000)
-    held.push(() => {
-      clearTimeout(timer)
-      resume()
-    })
-  })
+  const channel = holdFirestore(page)
+  const cacheWait = watchCacheWait(page)
+  await channel.install()
   try {
-    const before = waited // whatever the signed-out page already decided does not count
     const token = await customToken(ALICE)
     await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
     await page.evaluate(token => {
@@ -248,10 +252,12 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
       void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
     }, token)
     await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-    await expect.poll(() => waited, { timeout: 60_000 }).toBeGreaterThan(before)
+    // the decision must belong to THIS (signed-in) navigation, not the signed-out one before it
+    const epoch = cacheWait.epoch
+    await expect.poll(() => cacheWait.decided, { timeout: 60_000 }).toBeGreaterThanOrEqual(epoch)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
-    release()
+    channel.release()
     // the server snapshot arrives with the encrypted items, which prompt for the existing phrase
     await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
     await waitForApp(page)
@@ -261,7 +267,7 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
     await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
     await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
   } finally {
-    release() // however this test ends, no route is left held
+    channel.release() // however this test ends, no route is left held
   }
 })
 
@@ -566,7 +572,7 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 })
   await waitForApp(page)
   await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe2 = Date.now()))
-  await page.waitForTimeout(3_000) // allow the (dispatched) save to complete before checking
+  // no fixed wait: both assertions below already poll for the save to land
   await expect.poll(hiddenCount, { timeout: 30_000 }).toBe(hiddenExpected)
   await expect
     .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe2')), { timeout: 30_000 })

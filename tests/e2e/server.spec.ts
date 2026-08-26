@@ -181,7 +181,8 @@ test.describe('crawlable public pages', () => {
         const page = await context.newPage()
         await page.route(/_app\/immutable/, route => route.abort())
         await page.goto('/?shared=crawl_e2e/hostile')
-        await page.waitForTimeout(3_000)
+        // no settle wait: an injected inline script executes during PARSING, so it would already
+        // have run by the time goto() resolves. waiting 3s afterwards proved nothing it did not
         expect(await page.evaluate(() => (window as any).__XSS_RAN ?? null)).toBeNull()
         await expect(page.getByText('payload follows')).toBeVisible() // and the text is readable
       } finally {

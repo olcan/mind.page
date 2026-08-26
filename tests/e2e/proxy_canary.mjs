@@ -20,18 +20,27 @@ const port = canary.address().port
 
 // every shape the gate distinguishes: no headers at all, a same-origin browser request, and the
 // explicit local-tool opt-in. none of them may reach a backend through the cloud function
-for (const headers of [{}, { 'sec-fetch-site': 'same-origin' }, { 'x-mindpage-local-proxy': '1' }])
-  await new Promise(resolve => {
-    const request = http.get(
-      { host: '127.0.0.1', port: front, path: `/proxy/http://127.0.0.1:${port}/probe`, headers },
-      response => {
-        response.resume()
-        response.on('end', resolve)
-      }
-    )
-    request.on('error', resolve)
-  })
-canary.close()
+try {
+  for (const headers of [{}, { 'sec-fetch-site': 'same-origin' }, { 'x-mindpage-local-proxy': '1' }])
+    await new Promise(resolve => {
+      // BOUNDED: a connected but nonresponding frontend would otherwise hang function-smoke
+      // indefinitely, and this runs inside the emulator's lifetime
+      const request = http.get(
+        { host: '127.0.0.1', port: front, path: `/proxy/http://127.0.0.1:${port}/probe`, headers, timeout: 10_000 },
+        response => {
+          response.resume()
+          response.on('end', resolve)
+        }
+      )
+      request.on('timeout', () => {
+        request.destroy()
+        resolve()
+      })
+      request.on('error', resolve)
+    })
+} finally {
+  await new Promise(resolve => canary.close(resolve)) // awaited: never leave the port held
+}
 if (hits) {
   console.error(`FAIL: the cloud function proxied ${hits} request(s) to the canary`)
   process.exit(1)

@@ -12,16 +12,19 @@ Browser tests that run the production build against local Firebase emulators, ne
 
 ```sh
 npm run build        # production build served by the tests (vite build)
-npm run test:e2e     # = tests/e2e/run.sh: emulators + seed + node __sapper__/build + playwright
+npm run test:e2e     # = tests/e2e/run.sh: build + emulators + seed + node server.mjs + playwright
 npm run test:e2e:update   # re-create snapshots after an intentional rendering change
 npx playwright show-report   # inspect failures (html report, traces retained on failure)
 npm run test:e2e:serve       # serve the seeded stack interactively, see below
 ```
 
 To see items rendered: `npm run test:e2e:serve` brings up the emulators, seeds them, and serves the
-production build until Ctrl-C; open <http://localhost:3100/> in a browser to browse the
-seeded anonymous account, or in another terminal run `npx playwright test --ui` (step through the
-tests with a live browser view) or `npx playwright test --headed`; both reuse the running server.
+production build until Ctrl-C; open <http://localhost:3100/> in a browser to browse the seeded
+anonymous account. That server is for LOOKING, not for running the suite against: the tests do not
+reuse it (`reuseExistingServer: false`, after a stale bundle once passed a whole round), and a
+second shell is outside the emulator environment anyway. To iterate, use `run.sh` with the build
+skipped: `SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts --no-deps` — non-authoritative,
+since it serves whatever `build/` already holds.
 
 `run.sh` runs everything under `firebase emulators:exec --only auth,firestore`, so the emulators
 start fresh and shut down after the run. The production build (`build/`, served by `server.mjs`)
@@ -32,18 +35,22 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 - `seed.mjs` writes `fixtures/anonymous_items.json` (the anonymous account, copied from the vault's
   `external/mindbox.io/items.json` as fetched by `fetch_mind_page.py`) into the Firestore emulator.
 - The app connects to the emulators whenever it is served on localhost port 3100 (`client.ts`),
-  the port dedicated to this stack: a separate origin from `sapper dev` on 3000, so storage, the
+  the port dedicated to this stack: a separate origin from the dev server, so storage, the
   Firestore cache and sign-in state never mix, and no flag is needed.
-- `playwright.config.ts` serves `node __sapper__/build` on port 3100 with `NO_HTTPS=1` (no 443
-  listener, so the tests can run while `sapper dev` is up, given a production build) and with
-  `FIREBASE_CONFIG` removed
-  from the environment (set by `emulators:exec`, it would make `server.ts` skip listening).
+- `playwright.config.ts` serves `node server.mjs` on port 3100 with `NO_HTTPS=1` (no 443 listener,
+  so the tests can run while `npm run dev` is up, given a production build), `CONTENT_CACHE_MS=100`
+  (the production 60s crawler-content ttl would otherwise make one test poll through a cache whose
+  age depends on what ran before it) and with `FIREBASE_CONFIG` removed from the environment (set
+  by `emulators:exec`, it would make the server skip listening).
 
 ## Tests
 
-Tests run as two projects (see `playwright.config.ts`): `chromium` (read-only) first, then `write`
-(`admin`, `editor` and `personal` specs), which changes the seeded accounts. Use
-`--project write --no-deps <spec>` to iterate on a write spec.
+Tests run as five projects (see `playwright.config.ts`), each capped to one worker with two
+workers overall: `unit` (no browser), `chromium` (read-only), then the write lanes, which change
+the seeded accounts. `admin` installs items that `editor` then edits, so `editor` depends on
+`admin`; `personal` touches only its own account and runs BESIDE that chain. Add `--no-deps` to
+iterate on one spec without dragging its dependency closure along (naming `editor.spec.ts` selects
+55 tests otherwise, rather than its own 10).
 
 - `server.spec.ts` - `server.ts` over http (no browser): the ssr shell and the session fields it
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their

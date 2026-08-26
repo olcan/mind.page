@@ -15,7 +15,8 @@
 #
 # TARGETED ITERATION: naming a write spec still runs the whole chromium project first, because the
 # write project DEPENDS on it — `run.sh tests/e2e/personal.spec.ts` selects 55 tests, not the 14 in
-# that file (editor: 51 rather than 10). Add --no-deps to select only the file's own tests:
+# that file (editor: 55 rather than 10, now that its dependency closure includes admin). Add
+# --no-deps to select only the file's own tests:
 #     tests/e2e/run.sh tests/e2e/personal.spec.ts --no-deps
 # This still builds and starts a fresh stack each time; it is the fast path that stays honest.
 # Do NOT flip reuseExistingServer globally to avoid that (see playwright.config.ts) — a second
