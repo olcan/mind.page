@@ -1345,3 +1345,4 @@ test('settlement does not reconcile the owner when its own echo failed to apply'
   expect(controller.owes('n')).toBe(false) // committed: the record is not held open
   expect(reconciled, 'the owner already holds what was written').toEqual([])
 })
+

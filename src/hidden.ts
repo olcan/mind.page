@@ -125,6 +125,7 @@ export function registerHidden(
       return 'adopted'
     }
     // retain the record; the name keeps its minimum-id (or pending) holder
+    invalidateAdopters(index, wrapper.id) // this replaces the state an adopter merged from
     index.byId.set(wrapper.id, wrapper)
     indexByName(index, wrapper)
     return 'exists'
@@ -132,6 +133,23 @@ export function registerHidden(
   index.byId.set(wrapper.id, wrapper)
   index.byName.set(wrapper.name, wrapper)
   return 'added'
+}
+
+// INVALIDATES ANY ADOPTION POINTING AT `id`.
+//
+// An adoption merges the found document's state under the pending wrapper's changes (see
+// mergeAdopted / mergeAdoptedStore), mutating the pending wrapper IN PLACE. That merge is only
+// sound against the exact document state it saw, so every transition that replaces or rewrites
+// that document invalidates it: a remote add, a modify, a rename (which is a modify carrying a new
+// name), a re-registration under the minimum-id rule, and a removal. Without this, a same-id
+// same-name replacement can fully apply before an adopting write retries, and the retry settles a
+// merge computed against state that no longer exists — silently keeping the OLD values, because
+// defaultsDeep will not overwrite keys the first merge already filled in.
+//
+// The adopter is NOT `byId.get(id)`: an adoption target is absent from byId until finalization
+// (see registerHidden's 'adopted' branch), so it can only be found by scanning for the pointer.
+export function invalidateAdopters(index: HiddenIndex, id: string) {
+  for (const w of index.byId.values()) if (w.adopt_id == id) w.adopt_id = null
 }
 
 // remote listener transitions; returned warnings are for the caller to log
@@ -143,6 +161,7 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
   const warning = index.byName.has(wrapper.name)
     ? 'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
     : undefined
+  invalidateAdopters(index, wrapper.id) // see invalidateAdopters
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
   return { warning, applied: true }
@@ -157,6 +176,7 @@ export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper):
     // NOTE: the old name's byName entry is deliberately retained (pointing at the stale
     // wrapper) so the older name keeps working locally until reload, as before
     warning = `remote-modified hidden item has new name ${wrapper.name}; older name ${existing.name} will still work locally until reload`
+  invalidateAdopters(index, wrapper.id) // covers rename too: a rename arrives as a modify
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
   return { warning, applied: true }
@@ -272,11 +292,9 @@ export function removeHidden(index: HiddenIndex, id: string): { removed?: Hidden
   // the record is gone server-side, so the session's judgement about it no longer applies: a
   // document later created under the same id is a new record and must be able to enter
   index.quarantined.delete(id)
-  // an ADOPTION in flight toward this id has lost its target. clearing the pointer here is what
-  // makes the next attempt re-choose instead of resurrecting a removed document — the adopting
-  // wrapper is not `byId.get(id)` (an adoption target is absent from byId until finalization), so
-  // nothing below would have touched it, and a generation that inherited the pointer would adopt
-  for (const w of index.byId.values()) if (w.adopt_id == id) w.adopt_id = null
+  // an ADOPTION in flight toward this id has lost its target: it must re-choose rather than
+  // resurrect a removed document (see invalidateAdopters, which every such transition now shares)
+  invalidateAdopters(index, id)
   const wrapper = index.byId.get(id)
   if (!wrapper) return {}
   index.byId.delete(wrapper.id)

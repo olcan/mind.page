@@ -11,6 +11,7 @@ import {
   applyRemoteRemoved,
   removeHidden,
   finalizeAdoption,
+  invalidateAdopters,
   type HiddenIndex,
   type HiddenWrapper,
 } from '../../src/hidden.js'
@@ -278,4 +279,70 @@ test('quarantine survives an index adapter that is rebuilt on every call (as pro
   // new record, and the session's judgement about the old one no longer applies
   removeHidden(index(), 'b2')
   expect(isQuarantined(index(), 'b2')).toBe(false)
+})
+
+
+// round-34 stage 1: an adoption's merge is only sound against the document state it saw, so every
+// transition that replaces that document must invalidate it (see invalidateAdopters)
+
+const adopting = (idx: HiddenIndex, target: HiddenWrapper, local: any) => {
+  // a pending create that claimed the name, then found `target` and merged its state underneath
+  const pending: HiddenWrapper = { id: 'temp1', name: target.name, item: local, pending_create: true, adopt_id: null }
+  idx.byId.set('temp1', pending)
+  idx.byName.set(target.name, pending)
+  // the real merge is _.defaultsDeep(pending.item, found.item), which MUTATES pending.item
+  const merge = (p: HiddenWrapper, f: HiddenWrapper) => {
+    for (const k of Object.keys(f.item)) if (!(k in p.item)) p.item[k] = f.item[k]
+  }
+  expect(registerHidden(idx, target, merge)).toBe('adopted')
+  expect(pending.adopt_id).toBe(target.id)
+  return pending
+}
+
+test('a same-id replacement of the adoption target invalidates the adoption', async () => {
+  // THE SCHEDULE FROM REVIEW ROUND 34: v1 is adopted and merged; v2 replaces it same-id/same-name
+  // and fully applies before the write retries. defaultsDeep will not overwrite the keys v1 already
+  // filled in, so a retry that kept its pointer would settle v1's values over v2's, silently
+  for (const [label, apply] of [
+    ['modify', (idx: HiddenIndex) => applyRemoteModified(idx, wrapper('a1', 'name', { x: 'v2' }))],
+    ['add', (idx: HiddenIndex) => applyRemoteAdded(idx, wrapper('a1', 'name', { x: 'v2' }))],
+    ['remove', (idx: HiddenIndex) => removeHidden(idx, 'a1')],
+    ['re-registration', (idx: HiddenIndex) => registerHidden(idx, wrapper('a1', 'name', { x: 'v2' }), () => {})],
+  ] as const) {
+    const idx = index()
+    const pending = adopting(idx, wrapper('a1', 'name', { x: 'v1' }), { mine: 1 })
+    expect(pending.item, `${label}: merged v1`).toEqual({ mine: 1, x: 'v1' })
+    apply(idx)
+    expect(pending.adopt_id, `${label} invalidates the adoption`).toBe(null)
+  }
+})
+
+test('a rename of the adoption target invalidates it too', async () => {
+  // a rename arrives as a modify carrying a different name: the adopter chose this document for a
+  // name it no longer holds
+  const idx = index()
+  const pending = adopting(idx, wrapper('a1', 'name', { x: 'v1' }), { mine: 1 })
+  applyRemoteModified(idx, wrapper('a1', 'renamed', { x: 'v1' }))
+  expect(pending.adopt_id).toBe(null)
+})
+
+test('an unrelated document does not invalidate an adoption', async () => {
+  const idx = index()
+  const pending = adopting(idx, wrapper('a1', 'name', { x: 'v1' }), { mine: 1 })
+  applyRemoteModified(idx, wrapper('b2', 'other', { y: 1 }))
+  removeHidden(idx, 'b2')
+  expect(pending.adopt_id, 'still adopting its own target').toBe('a1')
+})
+
+test('invalidateAdopters finds adopters that are absent from byId as targets', async () => {
+  // an adoption target is NOT byId.get(id) -- it is absent until finalization -- so the scan is
+  // over adopt_id pointers, not over the id being transitioned
+  const idx = index()
+  const one: HiddenWrapper = { id: 't1', name: 'n1', item: {}, pending_create: true, adopt_id: 'srv' }
+  const two: HiddenWrapper = { id: 't2', name: 'n2', item: {}, pending_create: true, adopt_id: 'other' }
+  idx.byId.set('t1', one)
+  idx.byId.set('t2', two)
+  expect(idx.byId.has('srv'), 'the target is not in the index').toBe(false)
+  invalidateAdopters(idx, 'srv')
+  expect([one.adopt_id, two.adopt_id]).toEqual([null, 'other'])
 })

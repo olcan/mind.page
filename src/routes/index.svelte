@@ -6613,7 +6613,10 @@
       const owner = wrapper.name.replace(/^global_store_/, '')
       if (ownerExists(owner)) {
         console.warn('registering startup-orphaned hidden item whose owner arrived', wrapper.name, wrapper.id)
-        registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
+        // mergeAdoptedStore, like the other registerHidden call sites: a bare defaultsDeep merges
+        // the found state into the pending wrapper but never syncs the OWNER's in-memory
+        // global_store, which the comment above already claims happens here
+        registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
         const local = tempIdFromSavedId.get(owner) ?? owner
         if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
         continue
