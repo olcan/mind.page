@@ -23,65 +23,79 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
   test.setTimeout(45_000)
   const diagnostics: string[] = []
   page.on('pageerror', error => diagnostics.push(`pageerror ${error}`))
-  // only OUR OWN server's failures: the external aborts below are deliberate and expected
+  // our own server's failures, AND external scripts/stylesheets: the parser-blocking cdn tags are
+  // the leading suspect for the hang this instruments, so recording only local failures would have
+  // missed it. the deliberate image/media/font aborts below stay out of it
   page.on('requestfailed', request => {
-    if (/localhost|127\.0\.0\.1/.test(request.url()))
-      diagnostics.push(`requestfailed ${request.url()} ${request.failure()?.errorText ?? ''}`)
+    const type = request.resourceType()
+    if (/localhost|127\.0\.0\.1/.test(request.url()) || type == 'script' || type == 'stylesheet')
+      diagnostics.push(`requestfailed ${type} ${request.url()} ${request.failure()?.errorText ?? ''}`)
   })
+  const started = new Set<string>()
+  page.on('request', request => {
+    const type = request.resourceType()
+    if (type == 'script' || type == 'stylesheet') started.add(request.url())
+  })
+  page.on('requestfinished', request => started.delete(request.url()))
   // external content references (e.g. images) stay deterministic offline; scripts and styles from
   // the app shell (mathjax, c3, ... from cdns, see app.html) are still allowed
   await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, route =>
-    ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue()
+    ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue(),
   )
-  await test.step('open the shared page', async () => {
-    await page.goto('/?shared=markdown_e2e/markdown')
-    await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 })
-  })
-  await test.step('the app becomes ready', () => waitForApp(page))
-  expect(await page.evaluate(() => window.__items[0].id)).toBe('md-markdown') // the root item heads the page
-  await expect(page.locator('mark.label[title="#markdown/extended"]')).toBeVisible() // labels shown (shared.labels)
-  await expect(page.locator('mark.label[title="#markdown"]')).toBeHidden() // except the root item, whose label heads the page
-  // items follow the tag order in the root item's text
-  expect(await page.evaluate(() => window.__items.slice(0, 3).map(item => item.id))).toEqual([
-    'md-markdown',
-    'md-markdown-headings',
-    'md-markdown-paragraphs',
-  ])
-  // ##fragment links scroll to the heading without navigating (no history entry, url unchanged)
-  const scrollY = () => page.evaluate(() => Math.round(window.scrollY + document.body.scrollTop))
-  const before = await scrollY()
-  await page.locator('#item-md-markdown-extended a[href="#heading-2"]').click()
-  await expect.poll(scrollY).not.toBe(before)
-  expect(await page.evaluate(() => location.hash)).toBe('')
-  const ids = await page.evaluate(() =>
-    window
-      ._items()
-      .map(item => item.id)
-      .sort()
-  )
-  expect(ids).toEqual(FIXTURES.map(slug => `md-${slug}`).sort()) // seeded ids are md-<file slug>
-  // focusing an item (e.g. clicking its label) shows it alone; navigating to the root item is the
-  // main page again, not a lone-item view (there is no mindbox on shared pages, so navigate by hash)
-  await page.evaluate(() => void (location.hash = '#markdown/extended'))
-  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(1)
-  // only the focused item's first heading is hidden (the header shows it as the page title);
-  // further headings render, including the first of other levels (:first-of-type would hide them)
-  await page.evaluate(() => void (location.hash = '#markdown/headings'))
-  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(1)
-  await expect(page.locator('#item-md-markdown-headings h1')).toBeHidden()
-  for (const h of ['h2', 'h3', 'h4', 'h5', 'h6'])
-    await expect(page.locator(`#item-md-markdown-headings ${h}`)).toBeVisible()
-  await page.evaluate(() => void (location.hash = '#markdown'))
-  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(FIXTURES.length)
-  for (const slug of FIXTURES)
-    await test.step(`render ${slug}`, async () => {
-      const html = await renderedHtml(page, `md-${slug}`)
-      expect.soft(html, slug).not.toBeNull()
-      if (html != null) expect.soft(normalize(html), slug).toMatchSnapshot(`${slug}.html`)
+  try {
+    await test.step('open the shared page', async () => {
+      await page.goto('/?shared=markdown_e2e/markdown')
+      await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 })
     })
-  // attached unconditionally: when this test next hangs, the report carries what the page saw
-  await testInfo.attach('page diagnostics', {
-    body: diagnostics.join('\n') || '(no page errors or local request failures)',
-    contentType: 'text/plain',
-  })
+    await test.step('the app becomes ready', () => waitForApp(page))
+    expect(await page.evaluate(() => window.__items[0].id)).toBe('md-markdown') // the root item heads the page
+    await expect(page.locator('mark.label[title="#markdown/extended"]')).toBeVisible() // labels shown (shared.labels)
+    await expect(page.locator('mark.label[title="#markdown"]')).toBeHidden() // except the root item, whose label heads the page
+    // items follow the tag order in the root item's text
+    expect(await page.evaluate(() => window.__items.slice(0, 3).map(item => item.id))).toEqual([
+      'md-markdown',
+      'md-markdown-headings',
+      'md-markdown-paragraphs',
+    ])
+    // ##fragment links scroll to the heading without navigating (no history entry, url unchanged)
+    const scrollY = () => page.evaluate(() => Math.round(window.scrollY + document.body.scrollTop))
+    const before = await scrollY()
+    await page.locator('#item-md-markdown-extended a[href="#heading-2"]').click()
+    await expect.poll(scrollY).not.toBe(before)
+    expect(await page.evaluate(() => location.hash)).toBe('')
+    const ids = await page.evaluate(() =>
+      window
+        ._items()
+        .map(item => item.id)
+        .sort(),
+    )
+    expect(ids).toEqual(FIXTURES.map(slug => `md-${slug}`).sort()) // seeded ids are md-<file slug>
+    // focusing an item (e.g. clicking its label) shows it alone; navigating to the root item is the
+    // main page again, not a lone-item view (there is no mindbox on shared pages, so navigate by hash)
+    await page.evaluate(() => void (location.hash = '#markdown/extended'))
+    await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(1)
+    // only the focused item's first heading is hidden (the header shows it as the page title);
+    // further headings render, including the first of other levels (:first-of-type would hide them)
+    await page.evaluate(() => void (location.hash = '#markdown/headings'))
+    await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(1)
+    await expect(page.locator('#item-md-markdown-headings h1')).toBeHidden()
+    for (const h of ['h2', 'h3', 'h4', 'h5', 'h6'])
+      await expect(page.locator(`#item-md-markdown-headings ${h}`)).toBeVisible()
+    await page.evaluate(() => void (location.hash = '#markdown'))
+    await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(FIXTURES.length)
+    for (const slug of FIXTURES)
+      await test.step(`render ${slug}`, async () => {
+        const html = await renderedHtml(page, `md-${slug}`)
+        expect.soft(html, slug).not.toBeNull()
+        if (html != null) expect.soft(normalize(html), slug).toMatchSnapshot(`${slug}.html`)
+      })
+  } finally {
+    // in `finally`, because a TIMEOUT in any step above is the exact incident this exists to
+    // explain — attaching afterwards meant the diagnostics vanished on the only run that needed them
+    for (const url of started) diagnostics.push(`still pending ${url}`)
+    await testInfo.attach('page diagnostics', {
+      body: diagnostics.join('\n') || '(no page errors, request failures or pending scripts)',
+      contentType: 'text/plain',
+    })
+  }
 })

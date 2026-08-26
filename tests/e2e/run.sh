@@ -4,8 +4,14 @@
 # `playwright test` (e.g. --update-snapshots).
 # The build is not optional: this is the authoritative gate, and without it browser tests exercise
 # whatever `build/` happened to contain — a stale bundle silently "passed" a round of client-side
-# changes it never contained. Use `npx playwright test` directly for a quick loop against an
-# existing build.
+# changes it never contained.
+#
+# QUICK LOOP: there is no way to reuse a server or a build and stay honest — reuseExistingServer is
+# false and a bare `npx playwright test` is outside the emulator environment. The smallest
+# NON-AUTHORITATIVE loop is this script with the build skipped:
+#     SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts --no-deps
+# It still starts fresh emulators, seeds, and serves the build already in `build/`. Never report a
+# SKIP_BUILD run as the gate.
 #
 # TARGETED ITERATION: naming a write spec still runs the whole chromium project first, because the
 # write project DEPENDS on it — `run.sh tests/e2e/personal.spec.ts` selects 55 tests, not the 14 in
@@ -24,5 +30,6 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 [ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first" # see deploy_mind_page.sh
-npm run build # always: browser tests must exercise the sources in this working tree
+# SKIP_BUILD is the quick loop above and is NOT the gate: it serves whatever `build/` holds
+[ -n "${SKIP_BUILD:-}" ] || npm run build # browser tests must exercise the sources in this tree
 firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test $*"

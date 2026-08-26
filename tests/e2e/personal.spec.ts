@@ -95,7 +95,10 @@ test('a slow first connection does not reset the account to empty', async ({ pag
   await withSecret(page)
   // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
   // and are released explicitly, so the stall lasts exactly as long as the assertions need and
-  // never 8s more. `finally` releases them however the test ends
+  // never 8s more. `finally` releases them however the test ends.
+  // `waiting` resolves on the app's OWN decision to keep waiting (init_log in index.svelte), which
+  // is the milestone this test is actually about — an arbitrary firestore request arriving, plus a
+  // sleep, proved neither that the cached snapshot reached the decision nor that it was refused
   let blocked = true
   const held: Array<() => void> = []
   const release = () => {
@@ -103,8 +106,16 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     for (const resume of held.splice(0)) resume()
   }
   await page.route(/:8080\/google\.firestore/, route => {
-    if (!blocked) return void route.continue()
-    held.push(() => route.continue())
+    const resume = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
+    if (!blocked) return resume()
+    // DELAYED, not frozen. holding indefinitely is not the same as being slow: the sdk abandons a
+    // channel held that long and does not recover when it is finally resumed, so the test failed
+    // for a reason unrelated to what it asserts. the milestone below normally releases long before
+    const timer = setTimeout(resume, 8_000)
+    held.push(() => {
+      clearTimeout(timer)
+      resume()
+    })
   })
   try {
     // sign in without waiting for initialization (as signIn in helpers, which polls past it)
@@ -117,9 +128,13 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     }, token)
     // the reload into the signed-in app clears the pending flag before initializing
     await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-    // a real milestone rather than a guess: the app has ISSUED its listen and we are holding it
+    // NO positive milestone exists for THIS case, and review's suggested one does not fire here:
+    // with the channel stalled and an EMPTY cache the sdk emits no first snapshot at all, so the
+    // app never reaches the `wait_for_server` decision that logs. the state under test is exactly
+    // "nothing has arrived and nothing was invented", which only a quiet window can evidence.
+    // waiting for the listen to be held first makes the window mean something
     await expect.poll(() => held.length).toBeGreaterThan(0)
-    await page.waitForTimeout(1_500) // a quiet window is still the only proof it does not initialize
+    await page.waitForTimeout(1_500)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
     release()
@@ -194,18 +209,37 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
   await page.goto('/')
   // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
   // and are released explicitly, so the stall lasts exactly as long as the assertions need and
-  // never 8s more. `finally` releases them however the test ends
+  // never 8s more. `finally` releases them however the test ends.
+  // `waiting` resolves on the app's OWN decision to keep waiting (init_log in index.svelte), which
+  // is the milestone this test is actually about — an arbitrary firestore request arriving, plus a
+  // sleep, proved neither that the cached snapshot reached the decision nor that it was refused
   let blocked = true
   const held: Array<() => void> = []
   const release = () => {
     blocked = false
     for (const resume of held.splice(0)) resume()
   }
+  // COUNTED, not awaited as a one-shot: the signed-out page makes this same decision before we
+  // sign in, so a bare waitForEvent resolves on the wrong page's log. what this test is about is
+  // the decision the SIGNED-IN app makes, so the count is sampled after sign-in and must grow
+  let waited = 0
+  page.on('console', message => {
+    if (message.text().includes('ignoring first snapshot from cache (waiting for server)')) waited++
+  })
   await page.route(/:8080\/google\.firestore/, route => {
-    if (!blocked) return void route.continue()
-    held.push(() => route.continue())
+    const resume = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
+    if (!blocked) return resume()
+    // DELAYED, not frozen. holding indefinitely is not the same as being slow: the sdk abandons a
+    // channel held that long and does not recover when it is finally resumed, so the test failed
+    // for a reason unrelated to what it asserts. the milestone below normally releases long before
+    const timer = setTimeout(resume, 8_000)
+    held.push(() => {
+      clearTimeout(timer)
+      resume()
+    })
   })
   try {
+    const before = waited // whatever the signed-out page already decided does not count
     const token = await customToken(ALICE)
     await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
     await page.evaluate(token => {
@@ -214,8 +248,7 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
       void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
     }, token)
     await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-    await expect.poll(() => held.length).toBeGreaterThan(0) // the listen is issued and held
-    await page.waitForTimeout(1_500) // quiet window: the partial cache must not initialize either
+    await expect.poll(() => waited, { timeout: 60_000 }).toBeGreaterThan(before)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
     release()

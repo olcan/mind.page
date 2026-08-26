@@ -39,6 +39,10 @@ test('the app waits for the cdn scripts even when they are slow', async ({ page 
   })
   const loaded = loadAnonymous(page)
   await expect.poll(() => reached, { timeout: 30_000 }).toBe(true) // the parser reached the script
+  // WHILE it is held, the app below it must not have booted. releasing as soon as the request is
+  // observed asserted nothing: the test would pass even if startup were reordered, as long as it
+  // had not yet won a few-millisecond race
+  await expect.poll(() => page.evaluate(() => Boolean(window._items)), { timeout: 5_000, intervals: [250] }).toBe(false)
   release()
   await loaded
   expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
@@ -89,7 +93,7 @@ test('charts carry real data and geometry (semantic checks the masked goldens ca
             [...series.classList].find((c: string) => c.startsWith('c3-target-')),
             [...series.querySelectorAll('.c3-bar, .c3-circle')].map((shape: any) => shape.__data__?.value),
           ])
-          .filter(([, values]: any) => values.length)
+          .filter(([, values]: any) => values.length),
       ),
       bars: [...chart.querySelectorAll('.c3-bar')].map((barpath: any) => {
         const box = barpath.getBBox()
@@ -97,7 +101,7 @@ test('charts carry real data and geometry (semantic checks the masked goldens ca
       }),
       line_paths: [...chart.querySelectorAll('.c3-chart-line path.c3-line')].map((path: any) => path.getAttribute('d')),
       tick_labels: [...chart.querySelectorAll('.c3-axis-y .tick text')].map((tick: any) => tick.textContent),
-    }))
+    })),
   )
   for (const chart of [bar, line]) {
     expect(chart.width).toBeGreaterThan(100)

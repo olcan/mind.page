@@ -3,7 +3,9 @@
 # production build on http://localhost:3100 (its own origin, so storage, cache and sign-in state
 # stay apart from sapper dev on 3000; requires a prior `sapper build`), until Ctrl-C.
 # Open http://localhost:3100/ to browse the seeded account, or run playwright against it
-# with `npx playwright test --ui` (or --headed) in another terminal; the tests reuse the server.
+# NOTE this server is for LOOKING at the seeded accounts, not for running the suite against. The
+# tests do NOT reuse it: playwright.config.ts sets reuseExistingServer:false (a stale bundle once
+# passed a whole round that way), and a second shell is outside this emulator environment anyway.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 [ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"

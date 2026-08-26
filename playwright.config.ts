@@ -7,7 +7,10 @@ const WRITE_SPECS = /(admin|editor|personal)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
-  workers: 1,
+  // two workers TOTAL, with every project capped to one of its own (testProject.workers). the
+  // lanes below are what may overlap; nothing inside a lane ever does. an earlier round claimed
+  // playwright had no per-project cap — it does, and that claim was simply wrong
+  workers: 2,
   fullyParallel: false,
   timeout: 120_000,
   expect: { timeout: 30_000 },
@@ -19,16 +22,43 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   // unit tests (tests/unit) run in the playwright node process, no browser or app instance; then
-  // read-only tests (server, rules, rendering goldens); then write tests (admin installs, the
-  // editor, a personal account), which change the seeded accounts
+  // read-only tests (server, rules, rendering goldens); then the write lanes, which change the
+  // seeded accounts.
+  // the write lanes are SPLIT by what they actually share: admin installs items that the editor
+  // then edits, so that stays an explicit dependency chain, while `personal` touches only its own
+  // account (alice_e2e) and runs BESIDE it. each lane is capped to one worker of its own, so the
+  // read lane stays serial (server tests mutate anonymous/prerender data the render tests inspect)
   projects: [
     { name: 'unit', testDir: 'tests/unit' },
-    { name: 'chromium', testDir: 'tests/e2e', testIgnore: WRITE_SPECS, use: { ...devices['Desktop Chrome'] } },
     {
-      name: 'write',
+      name: 'chromium',
       testDir: 'tests/e2e',
-      testMatch: WRITE_SPECS,
+      testIgnore: WRITE_SPECS,
+      workers: 1,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'admin',
+      testDir: 'tests/e2e',
+      testMatch: /admin\.spec\.ts/,
       dependencies: ['chromium'],
+      workers: 1,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'editor',
+      testDir: 'tests/e2e',
+      testMatch: /editor\.spec\.ts/,
+      dependencies: ['admin'], // the editor acts on what admin installed
+      workers: 1,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'personal',
+      testDir: 'tests/e2e',
+      testMatch: /personal\.spec\.ts/,
+      dependencies: ['chromium'], // independent of the admin/editor chain
+      workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
   ],
