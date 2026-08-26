@@ -1801,6 +1801,14 @@
     })
   }
 
+  // THE WIDTH THE CURRENT LAYOUT WAS COMPUTED AT, owned by updateItemLayout because that is what
+  // invalidates it. It used to be checkLayout's private memo of the last width it OBSERVED, which
+  // wedged the page whenever a layout ran from another trigger (onItemResized/tryLayout, a _resize
+  // handler) while checkLayout was inside its 250ms scroll/resize suppression: a 1200 -> 900 -> 1200
+  // round trip that fits in one window left columnCount at 1 with the memo still reading 1200, so
+  // every later check said "width-same" and nothing ever relaid out. Diagnosed from the decision
+  // trace below; see issues/MindPage Column Layout Stalls After Growing Back.md
+  let lastDocumentWidth = 0
   let layoutCount = 0 // exposed as window.__layoutCount for tests
   function updateItemLayout() {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
@@ -1817,6 +1825,7 @@
     const documentWidth = getDocumentWidth()
     const minColumnWidth = 500 // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
+    lastDocumentWidth = documentWidth // whoever triggered this layout, the memo now matches it
     let target = null
     lastLayoutTime = Date.now()
     layoutCount++
@@ -7258,7 +7267,6 @@
       }
 
       // visual viewport resize/scroll handlers ...
-      let lastDocumentWidth = 0
       let lastWindowHeight = 0
       let lastFocusElem = null // element that had focus on last recorded width/height
       function checkLayout() {
@@ -7298,7 +7306,8 @@
           traceLayout('width-same', { documentWidth, lastDocumentWidth, innerWidth })
         }
 
-        lastDocumentWidth = documentWidth
+        // NO stamp here: the memo belongs to updateItemLayout (see above). stamping an observed
+        // width without laying out at it is exactly what lost the excursion
         lastWindowHeight = outerHeight
         lastFocusElem = document.activeElement
 

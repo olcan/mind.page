@@ -52,41 +52,42 @@ async function expectConsistentColumns(page: Page) {
 // the FIRST column's width. The recreated column div must be re-sized promptly after a reflow (the
 // post-flush re-apply in updateItemLayout, not an eventual later layout pass): renders started
 // right after a reflow measure against these widths, and charts skip rendering at zero width.
-// QUARANTINED (2026-08-26), and not because this test is wrong. Roughly five times now the grow
-// back to 1200 has left the page at ONE column until the 15s poll expires. Every occurrence has
-// been this test inside a FULL gate; 29 round trips in a dedicated loop settled in 400-500ms every
-// time, including under a concurrent gate. Only this test performs 1200 -> 900 -> 1200, so the
-// merge EXPOSES the sequence rather than causing it.
-// The skip is ENVIRONMENT-GATED rather than a static fixme, so `LAYOUT_DIAGNOSTIC=1 tests/e2e/run.sh`
-// executes exactly this test inside exactly the gate where it fails, with the checkLayout decision
-// trace turned on. Normal gates report it as one named skip.
+// THE 1200 -> 900 -> 1200 ROUND TRIP IS THE POINT OF THIS TEST. It was quarantined for one round
+// after roughly five stalls, all of it inside a full gate; the cause is now understood and fixed
+// (checkLayout's width memo moved to updateItemLayout, which is what invalidates it — see
+// lastDocumentWidth in index.svelte and the issue doc). Both viewport changes fit inside one 250ms
+// resize-suppression window, a layout ran from another trigger meanwhile, and checkLayout then
+// compared the grown-back width against its own stale observation of the same number.
+// `LAYOUT_DIAGNOSTIC=1 tests/e2e/run.sh` re-arms the decision trace that diagnosed it; ordinary
+// gates run the same assertions with no instrumentation.
 // See issues/MindPage Column Layout Stalls After Growing Back.md
 const DIAGNOSTIC = !!process.env.LAYOUT_DIAGNOSTIC
 test('column layout follows viewport width, keeping items unique, ordered and correctly sized', async ({
   page,
 }, testInfo) => {
-  test.skip(!DIAGNOSTIC, 'quarantined: intermittent grow-back stall; run with LAYOUT_DIAGNOSTIC=1')
   // scalar-only tracing inside checkLayout (see traceLayout in index.svelte), plus a test-side
   // heartbeat that separates main-thread starvation from a layout decision that ran and declined.
   // reading layout properties from here while reproducing would perturb the scheduling under test,
   // so nothing is polled from the page except the column count the assertions already need
-  await page.addInitScript(() => {
-    ;(globalThis as any).__layoutTraceOn = true
-    ;(globalThis as any).__beats = []
-    setInterval(() => {
-      const beats = (globalThis as any).__beats
-      if (beats.length >= 500) beats.shift()
-      beats.push(Math.round(performance.now()))
-    }, 100)
-    try {
-      new PerformanceObserver(list => {
-        const long = ((globalThis as any).__longTasks ??= [])
-        for (const entry of list.getEntries()) long.push({ t: Math.round(entry.startTime), ms: Math.round(entry.duration) })
-      }).observe({ entryTypes: ['longtask'] })
-    } catch {
-      // longtask is not observable everywhere; the heartbeat gaps still show starvation
-    }
-  })
+  if (DIAGNOSTIC)
+    await page.addInitScript(() => {
+      ;(globalThis as any).__layoutTraceOn = true
+      ;(globalThis as any).__beats = []
+      setInterval(() => {
+        const beats = (globalThis as any).__beats
+        if (beats.length >= 500) beats.shift()
+        beats.push(Math.round(performance.now()))
+      }, 100)
+      try {
+        new PerformanceObserver(list => {
+          const long = ((globalThis as any).__longTasks ??= [])
+          for (const entry of list.getEntries())
+            long.push({ t: Math.round(entry.startTime), ms: Math.round(entry.duration) })
+        }).observe({ entryTypes: ['longtask'] })
+      } catch {
+        // longtask is not observable everywhere; the heartbeat gaps still show starvation
+      }
+    })
   const attachTrace = async (label: string) => {
     const dump = await page
       .evaluate(() => ({
