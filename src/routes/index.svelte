@@ -7310,7 +7310,21 @@
 
       let firstSnapshot = true
       let snapshotApply = Promise.resolve() // serializes remote-change application across snapshots
-      snapshotFrontier = () => snapshotApply // everything delivered so far, applied (see the deps)
+      let hiddenFrontier = Promise.resolve() // ... and their hidden applications, which are detached
+      // FULLY APPLIED, and SETTLE-ONLY. three things were wrong with returning snapshotApply:
+      // - firestore resolves a write's promise before emitting its acknowledgement listener
+      //   events, and the observer is dispatched on a timer, so the echo's callback may not have
+      //   ENTERED yet. one timer turn lets a queued observer run first. this is a deliberate
+      //   dependency on the installed sdk's scheduling, not a guarantee it documents
+      // - the apply task returning does not mean the hidden applications landed (see hiddenFrontier)
+      // - snapshotApply can REJECT, and a rejected application must never turn a committed
+      //   firestore write into a failed one. errors here belong to the listener's own logging and
+      //   authority revocation
+      snapshotFrontier = async () => {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        await snapshotApply.catch(() => {})
+        await hiddenFrontier.catch(() => {})
+      }
       function initFirebaseRealtime() {
         if (!user) return // need user.uid
 
@@ -7781,8 +7795,11 @@
                       continue
                     }
                     // a RENAME must also join the in-flight write on the OLD name, which could
-                    // otherwise complete and write the old name back
-                    names = [hiddenItems.get(doc.id)?.name, wrapper.name]
+                    // otherwise complete and write the old name back. nameForDocument, not
+                    // hiddenItems: a document being ADOPTED is absent from byId until finalization,
+                    // so reading byId directly missed the adopter's chain and let the rename apply
+                    // and release outside it (removal already routes this way)
+                    names = [hiddenPersistence.nameForDocument(doc.id), wrapper.name]
                   }
                   // receipt-time intent: a create/adopt decision must see this record even though
                   // its application is queued — possibly behind that very create
@@ -7854,10 +7871,18 @@
               // release this revision's reserved authority slot once every hidden transition it
               // queued has landed: the settlement itself runs on the authority chain, in receipt
               // order, so a later revision cannot grant ahead of these transitions
-              void Promise.all(hiddenApplied).then(
+              const landed = Promise.all(hiddenApplied)
+              void landed.then(
                 () => settleApplied({ failed: hiddenApplyFailed, hiddenChanged: !!hiddenApplied.length }),
                 () => settleApplied({ failed: true, hiddenChanged: true })
               )
+              // a snapshot is NOT fully applied when its apply task returns: the hidden
+              // applications above were pushed and awaited detached, and applyRemote acquires
+              // multiple names RECURSIVELY, so a second name is not even reserved until the first
+              // chain reaches it. settlement must cross THIS, not merely the apply task
+              hiddenFrontier = hiddenFrontier.then(async () => {
+                await landed.catch(() => {}) // settle-only: a failed application is the listener's business
+              })
               if (applied.length) {
                 const summary =
                   `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +

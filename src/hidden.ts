@@ -272,6 +272,11 @@ export function removeHidden(index: HiddenIndex, id: string): { removed?: Hidden
   // the record is gone server-side, so the session's judgement about it no longer applies: a
   // document later created under the same id is a new record and must be able to enter
   index.quarantined.delete(id)
+  // an ADOPTION in flight toward this id has lost its target. clearing the pointer here is what
+  // makes the next attempt re-choose instead of resurrecting a removed document — the adopting
+  // wrapper is not `byId.get(id)` (an adoption target is absent from byId until finalization), so
+  // nothing below would have touched it, and a generation that inherited the pointer would adopt
+  for (const w of index.byId.values()) if (w.adopt_id == id) w.adopt_id = null
   const wrapper = index.byId.get(id)
   if (!wrapper) return {}
   index.byId.delete(wrapper.id)

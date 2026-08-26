@@ -85,8 +85,12 @@ const payload = (wrapper: HiddenWrapper): HiddenDocData => ({
 
 const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(String(e?.message ?? e))
 
-// a phrase prompt the user dismissed: an expected outcome, not a failure to report back to them
-const isCancellation = (e: any) => e?.cancelled === true || /cancel/i.test(String(e?.message ?? e))
+// a phrase prompt the user dismissed: an expected outcome, not a failure to report back to them.
+// matched EXACTLY, never by a /cancel/i substring — that swallowed unrelated real errors whose
+// message merely contains the word ("operation cancelled by server"), recreating the invisible
+// owes() state the failure hook exists to end
+const CANCELLED_PHRASE = 'secret phrase cancelled' // the message the production prompt rejects with
+const isCancellation = (e: any) => e?.cancelled === true || String(e?.message ?? e) == CANCELLED_PHRASE
 
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
@@ -169,6 +173,18 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (!best || compareIds(w.id, best.id) < 0) best = w
     }
     return best
+  }
+
+  // a value that CHANGES if a document is removed, renamed, replaced under the same id, or has a
+  // new delivery outstanding. an ADOPTION target is deliberately absent from the index until
+  // finalization, so "is it still the record we would choose" can never answer this; the payload
+  // was built from what we believed the document to be, and that belief is what must still hold.
+  // a receipt (newest delivery) wins; otherwise the live object, whose IDENTITY changes when an
+  // application replaces it. a spurious mismatch only costs one requeue — issuing wrongly does not
+  function targetStamp(id: string): unknown {
+    const receipt = receipts.get(id)
+    if (receipt) return receipt.wrapper ? `receipt:${receipt.token}` : 'removed'
+    return deps.index().byId.get(id) ?? 'absent'
   }
 
   // the minimum-id record a create could adopt instead of creating alongside it
@@ -289,14 +305,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // rejection recovery stays attached but detached from the chain
       if (wrapper.adopt_id) {
         const adoptId = wrapper.adopt_id
+        const stamp = targetStamp(adoptId) // what we believe the target is, before we build for it
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
-        // a STRICTLY LOWER id appearing during that encryption makes this target noncanonical,
-        // and issuing anyway is exactly how the newest state was stranded on a middle record.
-        // note the adoption target itself is deliberately NOT in the index until finalization, so
-        // the test is "has something better arrived", not "is the target still what we would pick"
+        // TWO conditions, and "strictly lower" alone was only the first: a lower id arriving makes
+        // this target noncanonical, and a change to the target ITSELF (removed, renamed, replaced
+        // under the same id) makes the payload we just built wrong for it — it would resurrect a
+        // removed document, undo a rename, or erase a field that arrived while we encrypted
         const better = findSurvivor(wrapper)
-        if (better && compareIds(better.id, adoptId) < 0) {
+        if ((better && compareIds(better.id, adoptId) < 0) || targetStamp(adoptId) !== stamp) {
           wrapper.adopt_id = null // re-choose on the retry, which reconfirms against the server
           return false
         }
@@ -315,8 +332,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     } catch (e) {
       // a STALE generation must not mutate the index on its way out either: the current one owns
       // the wrapper now, and finalizing or removing it here is the same class of stale world
-      // mutation the generation checks above exist to prevent
-      if (!current()) throw e
+      // mutation the generation checks above exist to prevent. it returns ABANDONMENT rather than
+      // rethrowing, so the outer catch does not log a failure for work already known to be obsolete
+      if (!current()) return true
       if (wrapper.adopt_id) {
         // the document exists: settle onto it so the next save UPDATES it — deleting the
         // wrapper would send the next save down the create path and duplicate it
@@ -353,12 +371,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     } catch (e) {
       const now = current()
       if (now) now.phase = 'failed' // retryable: a later save schedules it again
+      // an intentional phrase cancellation is an expected outcome: neither reported to the user
+      // nor logged as an error. everything else is a terminal BUILD failure (secret, confirmation,
+      // encryption) and is just as invisible as a terminal WRITE failure was — owes() stays true,
+      // the saving mirror clears, and owner notifications stay suppressed
+      if (isCancellation(e)) return
       console.error(`persisting hidden item '${name}' failed:`, e)
-      // a terminal BUILD failure (secret, confirmation, encryption) is just as invisible as a
-      // terminal WRITE failure was: owes() stays true, the saving mirror clears and owner
-      // notifications stay suppressed. an intentional phrase cancellation is expected and is not
-      // reported as a failure
-      if (now && !isCancellation(e)) deps.notifyFailure(name, e)
+      if (now) deps.notifyFailure(name, e)
     }
   }
 

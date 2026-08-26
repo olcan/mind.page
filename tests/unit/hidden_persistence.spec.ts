@@ -1036,43 +1036,130 @@ function gatedHarness() {
       return encrypted
     },
   })
+  // every requested gate must EXIST: `pending.shift()?.()` silently turned a missing encryption
+  // into a successful no-op, so a drain count proved nothing about how many builds happened
+  // waits until an encryption is actually OUTSTANDING. a requeued attempt reaches its next
+  // encryption through the chain and a confirmation, so this can take several turns — but it must
+  // happen, and asserting that is what stopped these tests from silently skipping the very window
+  // they claim to interrupt (`pending.shift()?.()` turned a missing gate into a passing no-op)
+  const awaitGate = async (what: string) => {
+    for (let turn = 0; turn < 30 && !pending.length; turn++) await flush()
+    expect(pending.length, `no encryption was outstanding for: ${what}`).toBeGreaterThan(0)
+  }
+  const releaseGate = async () => {
+    pending.shift()!()
+    await flush()
+  }
   const drain = async (times: number) => {
     for (let i = 0; i < times; i++) {
-      pending.shift()?.()
-      await flush()
+      await awaitGate(`gate ${i + 1} of ${times}`)
+      await releaseGate()
     }
   }
-  return { ...h, controller, pending, drain }
+  return { ...h, controller, pending, drain, awaitGate, releaseGate }
 }
 
 test('a lower id arriving during an ADOPTION encryption retargets, instead of writing the middle record', async () => {
   // round-20 finding 1: only the ordinary update branch looped. create and adoption issued after
   // an unchecked encryption, so this schedule wrote `update b2` while canonical state became a1
-  const { idx, calls, controller, pending, drain } = gatedHarness()
+  const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
   controller.save('n', { D: 1 })
-  await flush() // fresh create, its encryption held
-  expect(pending).toHaveLength(1)
+  await awaitGate('the fresh create')
   void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
-  await drain(1) // b2 applies, the attempt requeues, and the retry adopts b2
-  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } }) // still lower, mid-encryption
-  await drain(3)
+  await releaseGate() // b2 applies, the attempt requeues, and the retry adopts b2
+  await awaitGate('the adopted payload for b2')
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } }) // still lower, MID-encryption
+  await releaseGate()
+  await drain(1)
   expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // never a duplicate document
   const updates = calls.filter(c => c.op == 'update')
   expect(updates.map(u => u.id)).toEqual(['a1']) // the record canonical NOW, never the middle one
   expect(itemOf(updates[0].text).D).toBe(1) // carrying the local state
 })
 
-test('a record removed during an adoption encryption is not written', async () => {
-  // the same recheck covers disappearance: the adoption target moving out from under the write
-  // must abandon the attempt rather than update an id the controller already knows moved
-  const { idx, calls, controller, drain } = gatedHarness()
+// round-21 finding 1: the previous version of this test never removed anything — it added a lower
+// id, duplicating the test above, while its title and comment claimed a removal schedule. these are
+// the three ways the ADOPTION TARGET ITSELF can change under a payload already built for it, and
+// all three previously issued that stale payload
+const TARGET_CHANGES: {
+  what: string
+  arrive: (controller: any, idx: HiddenIndex) => Promise<unknown>
+  expect?: (updates: Call[]) => void
+}[] = [
+  {
+    what: 'removed',
+    arrive: (controller: any, idx: HiddenIndex) => arriveRemoval(controller, idx, 'b2'),
+    // issuing would RESURRECT a document the server says is gone
+  },
+  {
+    what: 'renamed',
+    arrive: (controller: any, idx: HiddenIndex) => arrive(controller, idx, { id: 'b2', name: 'm', item: { B: 1 } }),
+    // issuing would write a payload naming it 'n', undoing the rename
+  },
+  {
+    what: 'replaced under the same id',
+    arrive: (controller: any, idx: HiddenIndex) =>
+      arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1, E: 1 } }),
+    // b2 is still the RIGHT target here — what must not happen is issuing the already-built
+    // { D, B }, which would erase the E that arrived. so the retry rebuilds for it instead
+    expect: (updates: Call[]) => {
+      const written = updates.filter(u => u.id == 'b2')
+      expect(written).toHaveLength(1)
+      expect(itemOf(written[0].text)).toEqual({ D: 1, B: 1, E: 1 }) // E survives
+    },
+  },
+]
+for (const { what, arrive: deliver, expect: check } of TARGET_CHANGES)
+  test(`an adoption target ${what} during its encryption is not written`, async () => {
+    const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
+    controller.save('n', { D: 1 })
+    await awaitGate('the fresh create')
+    void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
+    await releaseGate() // b2 applies, the attempt requeues, and the retry adopts b2
+    await awaitGate('the adopted payload for b2') // the window this test is actually about
+    void deliver(controller, idx) // the target changes WHILE its adopted payload encrypts
+    await releaseGate()
+    await drain(1) // whatever the retry legitimately chooses instead
+    const updates = calls.filter(c => c.op == 'update')
+    if (check) check(updates)
+    else expect(updates.map(u => u.id), 'the stale target is never written').not.toContain('b2')
+  })
+
+test('a superseded generation does not leave an adoption pointing at a removed document', async () => {
+  // round-21 finding 1: generation 1 is encrypting an adoption when the target is removed and
+  // generation 2 supersedes it. generation 1 must exit without finalizing, and generation 2 must
+  // not inherit an adopt_id for a document that no longer exists
+  const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
   controller.save('n', { D: 1 })
-  await flush()
+  await awaitGate('the fresh create')
   void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
-  await drain(1) // adopting b2, its encryption held
-  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } })
-  await drain(3)
+  await releaseGate()
+  await awaitGate('the adopted payload for b2') // generation 1 is encrypting its adoption
+  void arriveRemoval(controller, idx, 'b2')
+  controller.save('n', { D: 2 }) // supersedes generation 1
+  await releaseGate()
+  await drain(1)
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('b2')
+  const created = calls.filter(c => c.op == 'create')
+  expect(created).toHaveLength(1) // the removed target is not adopted; a fresh document is created
+  expect(itemOf(created[0].text)).toEqual({ D: 2 }) // carrying the CURRENT generation's state
+})
+
+test('an error whose message merely contains "cancel" is still reported', async () => {
+  // round-21 finding 3: /cancel/i matched real failures such as "operation cancelled by server",
+  // suppressing them and recreating the invisible owes() state the hook exists to end
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmIndex: async () => {
+      throw new Error('operation cancelled by server')
+    },
+    notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
+  })
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(failures).toEqual(['n: operation cancelled by server'])
 })
 
 test('a terminal BUILD failure is reported, not only a terminal write failure', async () => {
