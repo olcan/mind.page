@@ -12,7 +12,14 @@ import { chromium } from '@playwright/test'
 
 const HMR_PORT = process.env.HMR_PORT ?? '24777' // clear of the default, in case a dev server runs
 const PROBE = 'src/components/Modal.svelte' // watched component used to drive a real hmr update
-const SENTINEL = '\n<!-- dev smoke probe -->\n'
+// the edit must COMPILE TO SOMETHING. this previously appended an html comment, which svelte strips
+// — the compiled component was byte-for-byte identical, so vite logged an ssr-side page reload and
+// the client correctly received nothing. the test then reported hmr as broken for two rounds. a
+// data attribute on the always-rendered root is compiled AND visible in the dom, so the assertion
+// can be the dom change itself rather than a log line
+const PROBE_ANCHOR = '<div class="background"'
+const PROBE_EDIT = '<div data-dev-smoke="1" class="background"'
+const PROBE_MARK = '[data-dev-smoke="1"]'
 
 // detached: the dev server is npm -> shell -> vite; killing the process GROUP reaches them all
 const dev = spawn('npm', ['run', 'dev'], {
@@ -46,13 +53,13 @@ function withTimeout(promise, ms) {
 function cleanup() {
   cleaning ??= (async () => {
     if (probe_original != null) {
-      // restore only if the probe holds exactly the original plus the sentinel: anything else
-      // means a concurrent edit landed during the probe window and must not be overwritten
+      // restore only if the probe holds exactly the edited original: anything else means a
+      // concurrent edit landed during the probe window and must not be overwritten
       try {
         const current = readFileSync(PROBE, 'utf8')
-        if (current == probe_original + SENTINEL) writeFileSync(PROBE, probe_original)
+        if (current == probe_original.replace(PROBE_ANCHOR, PROBE_EDIT)) writeFileSync(PROBE, probe_original)
         else if (current != probe_original) {
-          console.error(`NOT restoring ${PROBE}: it changed during the probe window (remove the sentinel manually)`)
+          console.error(`NOT restoring ${PROBE}: it changed during the probe window (undo it manually)`)
           process.exitCode = 1 // the tracked file is left dirty: this run must not report success
         }
       } catch (e) {
@@ -137,27 +144,25 @@ try {
     await new Promise(resolve => setTimeout(resolve, 500))
   if (!logs.some(log => log.includes('[vite] connected'))) throw new Error(`hmr websocket did not connect:\n${out}`)
 
-  // touch the probe and require BROWSER-side evidence, scoped to events after the mutation: a
-  // hot-update console log naming the probe, or a full page reload (the server-side vite log only
-  // proves the watcher ran, not that this browser received anything; it stays as diagnostics)
-  const log_offset = logs.length
-  const loads_before = page_loads
+  // edit the probe and require BROWSER-side evidence: the edited DOM, in THIS page, without a
+  // navigation. a log line only says vite spoke; the attribute says the running component changed
   probe_original = readFileSync(PROBE, 'utf8')
-  writeFileSync(PROBE, probe_original + SENTINEL)
-  const probe_name = PROBE.split('/').pop()
+  if (!probe_original.includes(PROBE_ANCHOR)) throw new Error(`probe anchor not found in ${PROBE}`)
+  const loads_before = page_loads
+  writeFileSync(PROBE, probe_original.replace(PROBE_ANCHOR, PROBE_EDIT))
   let updated = false
-  for (let i = 0; i < 30 && !updated; i++) {
+  for (let i = 0; i < 40 && !updated; i++) {
     await new Promise(resolve => setTimeout(resolve, 500))
-    updated =
-      logs.slice(log_offset).some(log => /\[vite\]/.test(log) && log.includes(probe_name)) || page_loads > loads_before
+    updated = await page.evaluate(mark => !!document.querySelector(mark), PROBE_MARK).catch(() => false)
   }
-  if (!updated) throw new Error(`file change did not reach the client (server log tail):\n${out.slice(-2000)}`)
+  if (!updated) throw new Error(`the edited component never reached this client (server log tail):\n${out.slice(-2000)}`)
+  if (page_loads > loads_before) console.log('note: the client took a full page reload rather than a hot update')
   await page.waitForTimeout(2000)
   // recheck after the settle: a reload can surface late errors
   const vite_errors = out.match(/(TypeError|ReferenceError|Internal server error)[^\n]*/g) ?? []
   if (errors.length || vite_errors.length)
     throw new Error(`dev smoke failed:\n${[...errors, ...vite_errors].join('\n')}`)
-  console.log('dev smoke passed: page booted, hmr connected, file change reached this client')
+  console.log('dev smoke passed: page booted, hmr connected, an edited component reached this client')
 } catch (e) {
   console.error(String(e?.message ?? e))
   process.exitCode = 1
