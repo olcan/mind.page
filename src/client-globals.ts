@@ -8,6 +8,7 @@ window['_'] = _
 
 // import/expose firebase on window
 import { firebaseConfig } from '../firebase-config.js' // ~0
+import { SHARED_HOST } from './host.js'
 import { initializeApp, onLog } from 'firebase/app' // ~10K
 const firebase = initializeApp(firebaseConfig)
 firebase['onLog'] = onLog // for use in index.svelte
@@ -24,10 +25,9 @@ import { initializeFirestore, memoryLocalCache, persistentLocalCache, persistent
 // so anything persisted there is readable by the next owner's code. the app persists nothing
 // else there (see itemStore in index.svelte), and firestore's own IndexedDB cache was the last
 // thing it left behind. shared pages are read-only anyway, so the offline benefit is small
-const SHARED_PAGE_HOST = 'shared.mind.page'
 initializeFirestore(firebase, {
   localCache:
-    location.hostname == SHARED_PAGE_HOST
+    location.hostname == SHARED_HOST
       ? memoryLocalCache()
       : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })

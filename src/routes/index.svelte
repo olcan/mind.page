@@ -7405,9 +7405,11 @@
                       // older or equal revision: a redelivery, or the echo of our own write —
                       // never allowed to overwrite what we hold (this single rule replaces the
                       // whole own-write provenance system)
-                      const { warning } = applyRemoteAdded(hiddenIndex(), wrapper)
+                      const { warning, applied } = applyRemoteAdded(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      // an IGNORED delivery (a quarantined duplicate) must not drive downstream
+                      // effects either — those reach checkFocus and the owner's store
+                      if (applied) hiddenItemChangedRemotely(wrapper.name, change.type)
                       return
                     }
                     // NOTE: remote add is similar to onEditorDone without js, saving, etc
@@ -7481,9 +7483,9 @@
                     if (savedItem.hidden) {
                       const wrapper = parseHiddenWrapper(doc.id, savedItem.text)
                       if (!wrapper) return // quarantined
-                      const { warning } = applyRemoteModified(hiddenIndex(), wrapper)
+                      const { warning, applied } = applyRemoteModified(hiddenIndex(), wrapper)
                       if (warning) console.warn(warning)
-                      hiddenItemChangedRemotely(wrapper.name, change.type)
+                      if (applied) hiddenItemChangedRemotely(wrapper.name, change.type) // see above
                       return
                     }
                     // NOTE: remote modify is similar to item.write without saving
@@ -7779,7 +7781,18 @@
                         }
                       )
                       .then(
-                        () => healHiddenDirty(doc.id, seenDirtySeq), // heals only ITS OWN generation
+                        () => {
+                          healHiddenDirty(doc.id, seenDirtySeq) // heals only ITS OWN generation
+                          // released HERE, inside the success handler, and only if this is still
+                          // the latest receipt. chaining a second .then after a rejection handler
+                          // released it on failure too, because the handler returns normally and
+                          // turns the rejection into a fulfilled promise — the comment said
+                          // "success only" while the control flow did the opposite. application
+                          // can fail on arbitrary item code (it reaches onFocus and from there
+                          // owner listeners), and a failed application must keep its receipt or
+                          // survivor selection forgets a record it was told about
+                          hiddenPersistence.releaseRemote(doc.id, receipt)
+                        },
                         e => {
                           console.error('could not apply remote change:', doc.id, e)
                           hiddenApplyFailed = true
@@ -7787,12 +7800,6 @@
                           revokeThisRevision('hidden change could not be applied') // as soon as known
                         }
                       )
-                      // released only on SUCCESS, and only if this is still the latest receipt.
-                      // a `.finally` released it after a FAILED application too, leaving the
-                      // index stale with nothing recorded to protect survivor selection — and
-                      // application can fail on arbitrary item code, since applying a change
-                      // reaches onFocus and from there owner listeners
-                      .then(() => hiddenPersistence.releaseRemote(doc.id, receipt))
                   )
                   continue
                 }

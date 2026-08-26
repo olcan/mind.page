@@ -37,7 +37,9 @@ export default defineConfig({
     // to mean running on cloud functions and then does not listen
     command: 'env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs',
     url: 'http://localhost:3100/server_id',
-    reuseExistingServer: true,
+    // never reuse: a server started against an older build would serve it to the whole run,
+    // which is how a stale bundle passed a round of client-side changes (see tests/e2e/run.sh)
+    reuseExistingServer: false,
     timeout: 30_000,
     stdout: 'pipe',
     stderr: 'pipe',

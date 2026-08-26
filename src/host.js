@@ -45,3 +45,15 @@ export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '
   if (uid && uid == owner) return null // the owner's own page
   return `https://${SHARED_HOST}${path}${search}${hash}`
 }
+
+// true for any loopback remote address, in every form node reports one: IPv4 127.0.0.0/8 (not
+// just 127.0.0.1), IPv6 ::1, and IPv4-mapped IPv6. used to gate the development-only proxy, so
+// an exact string check would both miss valid loopback callers and be easy to get subtly wrong
+export function isLoopbackAddress(address) {
+  if (!address) return false
+  const addr = String(address).replace(/^::ffff:/, '') // IPv4-mapped IPv6
+  if (addr == '::1') return true
+  const v4 = addr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!v4) return false
+  return v4.slice(1).every(n => Number(n) <= 255) && Number(v4[1]) == 127
+}

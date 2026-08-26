@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir } from '../host.js'
+import { canonicalizeHost, getHostDir, isLoopbackAddress } from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -76,9 +76,9 @@ scoped.use(
   // callers — local dev and the e2e stack — keep the CORS bypass
   (req, res, next) => {
     if (!/^\/proxy\//.test(req.url ?? '')) return next()
-    const address = req.socket?.remoteAddress ?? ''
-    const local = dev || address == '127.0.0.1' || address == '::1' || address == '::ffff:127.0.0.1'
-    if (local) return next()
+    // LOOPBACK ONLY, and `dev` is deliberately NOT an alternative: the dev server binds the
+    // wildcard address, so allowing it would authorize every caller on the LAN
+    if (isLoopbackAddress(req.socket?.remoteAddress)) return next()
     res.status(403).type('text/plain').send('proxy is not available')
   },
 
@@ -120,7 +120,7 @@ scoped.use(
       // error: (error, req, res, target) => console.error(error),
     },
     followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
-    ws: true, // proxy websockets also
+    ws: true, // proxy websockets also (gated by guardProxyUpgrades, see below)
     // logger: console,
   }),
 
@@ -321,4 +321,17 @@ app.use(paths.filter(path => path != '/'), scoped)
 app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverflow.com/a/14631683
 
  // for use as handler in functions.ts
+// WebSocket upgrades never pass through the express stack: the proxy attaches its own listener
+// to the http server, so the loopback gate above cannot see them and `/proxy/ws://...` was
+// reachable from anywhere. install this on every server that serves this app, BEFORE anything
+// else can attach an upgrade listener, so a non-loopback upgrade dies on the socket
+export function guardProxyUpgrades(server) {
+  server.prependListener('upgrade', (req, socket) => {
+    if (!/^\/proxy\//.test(req.url ?? '')) return
+    if (isLoopbackAddress(socket.remoteAddress)) return
+    socket.destroy() // no response: an upgrade has no status code to refuse with
+  })
+  return server
+}
+
 export { app as middleware, server_id }

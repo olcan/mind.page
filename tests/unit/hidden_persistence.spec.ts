@@ -681,23 +681,37 @@ test('readonly mode mutates the index but never writes', async () => {
   expect(calls).toEqual([])
 })
 
-test('a receipt survives a FAILED application and is superseded by a newer one', async () => {
-  // round-16 finding 5: release ran in `.finally`, so a failed application dropped the receipt
-  // that was protecting survivor selection. application can fail on arbitrary item code, since
-  // applying a change reaches onFocus and from there owner listeners
-  const { idx, controller } = harness()
-  const token = controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 1 } }, 'srv1', false)
-  await controller.applyRemote(['n'], () => {
-    throw new Error('item code threw during application')
-  }).catch(() => {})
-  // the application failed, so the receipt must NOT be released ...
-  controller.releaseRemote('srv1', token) // (production only calls this on success; prove the token guard)
-  // ... and a newer receipt for the same document supersedes the older token
-  const newer = controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 2 } }, 'srv1', false)
-  controller.releaseRemote('srv1', token) // stale token: must not delete the newer receipt
-  expect(newer).not.toBe(token)
-  // a create for the name still sees the received record and adopts rather than duplicating
+test('a failed application keeps its receipt, so the next create still sees the record', async () => {
+  // round-17 finding 2: production chained `.then(success, error).then(release)`, and the error
+  // handler returns normally — so a FAILED application released the receipt anyway. the index is
+  // then stale AND survivor selection has forgotten the record, which is how a duplicate create
+  // happens. application can fail on arbitrary item code (it reaches onFocus and owner listeners)
+  const { idx, calls, controller } = harness()
+  controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 1 } }, 'srv1', false)
+  await controller
+    .applyRemote(['n'], () => {
+      throw new Error('item code threw during application')
+    })
+    .catch(() => {}) // production logs this; the receipt must NOT be released
   controller.save('n', { mine: 1 })
   await flush()
-  expect(idx.byName.get('n')?.adopt_id ?? idx.byName.get('n')?.id).toBe('srv1')
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // no duplicate
+  const holder = idx.byName.get('n')!
+  expect(holder.adopt_id ?? holder.id).toBe('srv1') // the remembered record was adopted
+})
+
+test('a stale receipt token cannot release a newer receipt', async () => {
+  // receipts carry a token so an older application settling cannot discard a newer receipt that
+  // a pending create still needs to see
+  const { idx, calls, controller } = harness()
+  const stale = controller.noteRemote({ id: 'srv1', name: 'n', item: { v: 1 } }, 'srv1', false)
+  const current = controller.noteRemote({ id: 'srv2', name: 'n', item: { v: 2 } }, 'srv2', false)
+  expect(current).not.toBe(stale)
+  controller.releaseRemote('srv2', stale) // wrong token for this document: ignored
+  // the newer receipt still steers the create to adopt rather than duplicate
+  controller.save('n', { mine: 1 })
+  await flush()
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0)
+  const holder = idx.byName.get('n')!
+  expect(holder.adopt_id ?? holder.id).toBe('srv1') // minimum id among the received records
 })

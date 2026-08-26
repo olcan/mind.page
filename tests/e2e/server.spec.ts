@@ -369,6 +369,56 @@ test.describe('localhost-only dev routes', () => {
   })
 })
 
+test('the proxy refuses a non-loopback WebSocket upgrade but still serves loopback', async () => {
+  // round-17 finding 1: upgrades are handled by the proxy's own server-level listener and never
+  // reach the express gate, so /proxy/ws://... was reachable from any address even in production
+  // mode. the guard is installed with prependListener on the http server (see guardProxyUpgrades)
+  const http = await import('http')
+  const os = await import('os')
+  const lan = Object.values(os.networkInterfaces())
+    .flat()
+    .find(i => i && i.family == 'IPv4' && !i.internal)?.address
+  let upgrades = 0
+  const backend = http.createServer((_req, res) => res.end('ok'))
+  backend.on('upgrade', (_req, socket) => {
+    upgrades++
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+  })
+  await new Promise<void>(resolve => backend.listen(3121, '127.0.0.1', () => resolve()))
+  // the proxy attaches its upgrade listener lazily, on the first HTTP request it handles
+  await new Promise<void>(resolve =>
+    http
+      .get({ host: '127.0.0.1', port: 3100, path: '/proxy/http://127.0.0.1:3121/x' }, res => {
+        res.resume()
+        res.on('end', () => resolve())
+      })
+      .on('error', () => resolve())
+  )
+  const upgrade = (host: string) =>
+    new Promise<string>(resolve => {
+      const req = http.request({
+        host,
+        port: 3100,
+        path: '/proxy/ws://127.0.0.1:3121/socket',
+        headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
+      })
+      req.on('upgrade', () => resolve('upgraded'))
+      req.on('error', e => resolve(`refused:${(e as any).code}`))
+      req.on('response', res => resolve(`http:${res.statusCode}`))
+      req.end()
+      setTimeout(() => resolve('timeout'), 5_000)
+    })
+  try {
+    expect(await upgrade('127.0.0.1'), 'loopback keeps websocket proxying').toBe('upgraded')
+    expect(upgrades, 'the backend saw the loopback upgrade').toBe(1)
+    test.skip(!lan, 'no non-loopback address available on this host')
+    expect(await upgrade(lan!), 'a non-loopback upgrade is killed at the socket').toMatch(/^refused:/)
+    expect(upgrades, 'the backend never saw the non-loopback upgrade').toBe(1)
+  } finally {
+    backend.close()
+  }
+})
+
 test('the generic proxy is refused for non-local callers', async ({ request }) => {
   // the proxy returns an arbitrary backend's body and content type under OUR origin. deployed,
   // that made it an attacker-controlled same-origin document (script with access to the

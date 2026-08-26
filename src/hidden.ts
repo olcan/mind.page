@@ -135,18 +135,21 @@ export function registerHidden(
 }
 
 // remote listener transitions; returned warnings are for the caller to log
-export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
-  if (isQuarantined(index, wrapper.id)) return {} // judged redundant this session (see quarantineNonCanonical)
+export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string; applied?: boolean } {
+  // an ignored delivery reports applied:false so the caller can skip the downstream effects too —
+  // returning a bare {} let a quarantined duplicate still drive checkFocus and copy an older
+  // canonical store over newer unsaved owner state
+  if (isQuarantined(index, wrapper.id)) return { applied: false }
   const warning = index.byName.has(wrapper.name)
     ? 'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
     : undefined
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
-  return { warning }
+  return { warning, applied: true }
 }
 
-export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
-  if (isQuarantined(index, wrapper.id)) return {} // a redelivery must not reinstate it
+export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string; applied?: boolean } {
+  if (isQuarantined(index, wrapper.id)) return { applied: false } // a redelivery must not reinstate it
   let warning: string | undefined
   const existing = index.byId.get(wrapper.id)
   if (!existing) warning = `remote-modified hidden item missing locally ${wrapper.id}`
@@ -156,7 +159,7 @@ export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper):
     warning = `remote-modified hidden item has new name ${wrapper.name}; older name ${existing.name} will still work locally until reload`
   index.byId.set(wrapper.id, wrapper)
   indexByName(index, wrapper)
-  return { warning }
+  return { warning, applied: true }
 }
 
 export function applyRemoteRemoved(index: HiddenIndex, id: string): { removed?: HiddenWrapper } {
