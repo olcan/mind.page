@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // e2e tests run against local firebase emulators (see tests/e2e/run.sh) and the production build
-// served by node __sapper__/build; tests share one app instance and one emulator dataset, so they
-// run serially
+// served by `node server.mjs`. lanes that share mutable state are serialized by dependency and by
+// a one-worker cap per project; independent lanes overlap (see the projects below)
 const WRITE_SPECS = /(admin|editor|personal)\.spec\.ts/
 
 export default defineConfig({
@@ -49,7 +49,7 @@ export default defineConfig({
       name: 'editor',
       testDir: 'tests/e2e',
       testMatch: /editor\.spec\.ts/,
-      dependencies: ['admin'], // the editor acts on what admin installed
+      dependencies: ['admin'], // ORDERING: both mutate the shared anonymous account
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
@@ -57,7 +57,10 @@ export default defineConfig({
       name: 'personal',
       testDir: 'tests/e2e',
       testMatch: /personal\.spec\.ts/,
-      dependencies: ['chromium'], // independent of the admin/editor chain
+      dependencies: ['chromium'],
+      // REQUIRED, not a scheduling accident: personal changes alice_e2e's display name, and the
+      // read lane asserts `/user/<alice>` is 'Alice (custom)'. removing this dependency to recover
+      // ~10s of bubble made that test fail with 'Alice Test' — the lanes are not independent
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },

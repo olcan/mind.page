@@ -127,7 +127,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // change, and a write that was built before it arrived must not issue. it is deliberately
   // INVISIBLE to canonical resolution — nothing is known about it yet, so treating it as a record
   // or as a removal would both be wrong
-  type Receipt = { token: number; wrapper?: HiddenWrapper; pending?: boolean }
+  // a pending entry carries the promise that settles when it is decoded (superseded by a real
+  // receipt) or released. it is a BARRIER, not a marker: comparing a stamp before and after an
+  // encryption cannot see a change that was already in flight when the build started, and that
+  // stalled-decrypt window is exactly where a stale full-state write got out
+  type Receipt = { token: number; wrapper?: HiddenWrapper; pending?: { decoded: Promise<void>; done: () => void } }
   const receipts = new Map<string, Receipt>()
   let receiptSeq = 0
 
@@ -190,6 +194,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // any change that has ENTERED the listener and is still being decoded. nothing is known about it
   // yet, so a fresh create cannot rule out that it is a same-name record
   const hasPendingReceipts = () => [...receipts.values()].some(receipt => receipt.pending)
+
+  // WAIT for the document's in-flight decode, rather than sampling around it. resolves immediately
+  // when nothing is pending for it
+  const awaitPending = (id: string) => receipts.get(id)?.pending?.decoded ?? Promise.resolve()
+
+  // a fresh create must wait for EVERY undecoded change: their names are unknown, so any of them
+  // could be the same-name record that makes this create a duplicate
+  const awaitAllPending = async () => {
+    for (let turn = 0; turn < 50 && hasPendingReceipts(); turn++)
+      await Promise.all([...receipts.values()].map(receipt => receipt.pending?.decoded ?? Promise.resolve()))
+  }
 
   // a value that CHANGES if a document is removed, renamed, replaced under the same id, or has a
   // new delivery outstanding. an ADOPTION target is deliberately absent from the index until
@@ -294,6 +309,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const stamp = targetStamp(holder.id) // what we believe the target is, before we build for it
     const data = await deps.encryptState(payload({ ...holder, item: state }))
     if (!current()) return true
+    await awaitPending(holder.id) // a change already decoding for this target must land first
+    if (!current()) return true
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
     if (canonicalHolder(name) !== holder || targetStamp(holder.id) !== stamp) return false
@@ -332,6 +349,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const stamp = targetStamp(adoptId) // what we believe the target is, before we build for it
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
+        await awaitPending(adoptId)
+        if (!current()) return true
         // TWO conditions, and "strictly lower" alone was only the first: a lower id arriving makes
         // this target noncanonical, and a change to the target ITSELF (removed, renamed, replaced
         // under the same id) makes the payload we just built wrong for it — it would resurrect a
@@ -346,6 +365,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       }
       const id = deps.newDocId()
       const data = await deps.encryptState(payload(wrapper))
+      if (!current()) return true
+      await awaitAllPending() // every undecoded change could be the same-name record
       if (!current()) return true
       // a same-name record RECEIVED during that encryption is a record we already know about, and
       // creating alongside it is a duplicate we cause ourselves. (one another writer commits after
@@ -497,7 +518,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // record whose application is still queued; keeping entries for the page lifetime let a
     // QUARANTINED duplicate be re-adopted by the next same-name create
     releaseRemote(id: string, token: number) {
-      if (receipts.get(id)?.token == token) receipts.delete(id)
+      const receipt = receipts.get(id)
+      if (receipt?.token != token) return
+      receipt.pending?.done() // anything waiting on its decode is released with it
+      receipts.delete(id)
     },
 
     // records what was received for a document and returns the token to release it with. a
@@ -505,6 +529,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // supersedes it
     noteRemote(wrapper: HiddenWrapper | undefined, id: string, removed: boolean) {
       const token = ++receiptSeq
+      receipts.get(id)?.pending?.done() // decoded: whatever was waiting for this can proceed
       receipts.set(id, { token, wrapper: removed ? undefined : wrapper })
       return token
     },
@@ -518,7 +543,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // was not. release it once the change has been noted properly (or has proved irrelevant)
     noteRemotePending(id: string) {
       const token = ++receiptSeq
-      receipts.set(id, { token, pending: true })
+      let done!: () => void
+      const decoded = new Promise<void>(resolve => (done = resolve))
+      receipts.set(id, { token, pending: { decoded, done } })
       return token
     },
 

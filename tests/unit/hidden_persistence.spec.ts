@@ -1267,18 +1267,39 @@ test('a change that has ENTERED the listener but not yet decrypted still stops a
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
 })
 
-test('a pending entry receipt is invisible to canonical resolution', async () => {
-  // it says only "something is arriving", so treating it as a record or as a removal would both be
-  // wrong: the name must still resolve to the record actually in the index
-  const { idx, calls, controller, drain } = gatedHarness()
+test('a target with an undecoded change in flight is WAITED for, not written through', async () => {
+  // round-23 finding 1: this test previously asserted the opposite — that a save proceeds straight
+  // past a pending entry — which is exactly the unsafe schedule. a receipt that already exists when
+  // the build starts reads the same before and after encryption, so a stamp comparison cannot see
+  // it; the pending entry has to be a BARRIER
+  const { idx, calls, controller } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
-  controller.noteRemotePending('d1')
+  const entering = controller.noteRemotePending('d1') // a change is decoding for our target
   controller.save('n', { v: 'D' })
-  await drain(1)
-  const updates = calls.filter(c => c.op == 'update')
-  expect(updates.map(u => u.id)).toEqual(['d1']) // still d1, not a fresh create
+  for (let turn = 0; turn < 10; turn++) await flush()
+  expect(calls.filter(c => c.op == 'update'), 'nothing is written while the target is undecoded').toHaveLength(0)
+  // it decodes into a removal: the write must not land on the removed document
+  void arriveRemoval(controller, idx, 'd1')
+  controller.releaseRemote('d1', entering)
+  for (let turn = 0; turn < 20; turn++) await flush()
+  expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
+})
+
+test('a pending entry does not make the name resolve as absent', async () => {
+  // it says only "something is arriving": treating it as a record or as a removal would both be
+  // wrong, so canonical resolution ignores it and the name still resolves to the live record
+  const { idx, calls, controller } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  const entering = controller.noteRemotePending('d1')
+  controller.save('n', { v: 'D' })
+  await flush()
+  controller.releaseRemote('d1', entering) // decoded, nothing changed
+  for (let turn = 0; turn < 10; turn++) await flush()
+  expect(calls.filter(c => c.op == 'create'), 'never a fresh create alongside the live record').toHaveLength(0)
 })
 
 test('settlement does not reconcile the owner when its own echo failed to apply', async () => {

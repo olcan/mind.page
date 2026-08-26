@@ -7707,7 +7707,31 @@
                 .docChanges()
                 .some(change => !!change.doc.data().hidden || hiddenItems.has(change.doc.id)),
             })
+            // ENTRY receipts, taken SYNCHRONOUSLY for the whole snapshot before anything is
+            // queued: a write already encrypting for one of these documents must not issue while a
+            // change for it is in flight. taking them inside the per-change loop left every later
+            // change in this snapshot — and all of the next one, behind snapshotApply — unmarked
+            // while a slow decrypt ran. they are invisible to canonical resolution and are released
+            // (or superseded by the real receipt) as each change is handled
+            const entryReceipts = new Map()
+            for (const change of snapshot.docChanges())
+              if (
+                !!change.doc.data().hidden ||
+                hiddenItems.has(change.doc.id) ||
+                hiddenPersistence.nameForDocument(change.doc.id)
+              )
+                entryReceipts.set(change.doc.id, hiddenPersistence.noteRemotePending(change.doc.id))
             const applyTask = async () => {
+              // GUARANTEED release: writes await these markers, so any path that leaves one behind
+              // blocks that document's saves for the rest of the session. the per-change finally
+              // below releases them as they are handled; this covers every early return
+              try {
+                await applyChanges()
+              } finally {
+                for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
+              }
+            }
+            const applyChanges = async () => {
               await initialization
               if (!initialized) {
                 // initialization failed, we should be signing out ...
@@ -7731,17 +7755,7 @@
               for (let change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
-                // ENTRY receipt, before anything is decrypted: a write already encrypting for this
-                // document must not issue while a change for it is in flight here. it is released
-                // in the finally below, superseded by the real receipt when there is one, and is
-                // invisible to canonical resolution (see noteRemotePending)
-                // nameForDocument, not just hiddenItems: a document being ADOPTED is absent from
-                // byId until finalization, so a hidden-to-visible change for one would otherwise
-                // enter with no receipt at all and let the stale adoption turn it hidden again
-                const entering =
-                  couldBeHidden || hiddenItems.has(doc.id) || hiddenPersistence.nameForDocument(doc.id)
-                    ? hiddenPersistence.noteRemotePending(doc.id)
-                    : null
+                const entering = entryReceipts.get(doc.id) ?? null
                 try {
                 // a change that cannot be decrypted is logged and skipped: it must not break the
                 // chain for later snapshots (destructive reconciliation stays init-gated)

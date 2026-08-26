@@ -178,7 +178,9 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     // app never reaches the `wait_for_server` decision that logs. the state under test is exactly
     // "nothing has arrived and nothing was invented", which only a quiet window can evidence.
     // waiting for the listen to be held first makes the window mean something
-    await expect.poll(() => channel.activeAt(channel.epoch)).toBeGreaterThan(0)
+    // FROZEN epoch: polling channel.epoch would follow an unexpected later navigation
+    const epoch = channel.epoch
+    await expect.poll(() => channel.activeAt(epoch)).toBeGreaterThan(0)
     await page.waitForTimeout(1_500)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
@@ -264,9 +266,12 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
       void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
     }, token)
     await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-    // EXACTLY this navigation's decision: >= would also accept one from a later reload
+    // EXACTLY this navigation's decision: >= would also accept one from a later reload. and the
+    // hold must be REAL — if the route pattern ever stops matching, the cached snapshot still logs
+    // wait_for_server and this test would pass having stalled nothing
     const epoch = cacheWait.epoch
     await expect.poll(() => cacheWait.decided, { timeout: 60_000 }).toBe(epoch)
+    expect(channel.activeAt(epoch), 'the firestore channel is actually held for this navigation').toBeGreaterThan(0)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
     channel.release()

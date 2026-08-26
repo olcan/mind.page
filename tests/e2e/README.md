@@ -52,7 +52,7 @@ the seeded accounts. `admin` installs items that `editor` then edits, so `editor
 iterate on one spec without dragging its dependency closure along (naming `editor.spec.ts` selects
 55 tests otherwise, rather than its own 10).
 
-- `server.spec.ts` - `server.ts` over http (no browser): the ssr shell and the session fields it
+- `server.spec.ts` - `server.mjs` over http (no browser): the ssr shell and the session fields it
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their
   manifests, host-dependent icons and titles, `/server_id`, `/user/<uid>`, the webhook endpoints
   (stored documents checked through firebase-admin), the cors proxy against a local backend, and the
