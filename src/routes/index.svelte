@@ -3286,6 +3286,12 @@
   let deferredRemoteSeq = 0
   const deferRemoteChange = id => deferredRemoteChanges.set(id, ++deferredRemoteSeq)
   let applyRemoteChangeRef = null // set by the items listener (applyRemoteChange is closure-scoped)
+  // the items listener's remote-application frontier, exposed the same way. a hidden write's
+  // acknowledgement crosses it before it resolves to the persistence controller: settlement
+  // reconciles the owner from the APPLIED index, so an ack that overtook a delivered-but-not-yet
+  // decrypted echo reconciled the owner from state that echo was about to replace — and then
+  // cleared owes(), letting the echo through as a spurious "changed remotely"
+  let snapshotFrontier = () => Promise.resolve()
 
   // true while anything local is still going to write this item: an in-flight write, a queued
   // save task, or a save in progress. replaying under any of these loses the later intent —
@@ -7304,6 +7310,7 @@
 
       let firstSnapshot = true
       let snapshotApply = Promise.resolve() // serializes remote-change application across snapshots
+      snapshotFrontier = () => snapshotApply // everything delivered so far, applied (see the deps)
       function initFirebaseRealtime() {
         if (!user) return // need user.uid
 
@@ -8642,9 +8649,15 @@
     // lower it, no rule enforces the increment, and equal revisions carry no order. ordering
     // comes from firestore itself, which delivers a document's changes in commit order; the
     // controller only has to recognize the echoes of writes it issued
-    updateDoc: (id, data) => updateDoc(doc(getFirestore(firebase), 'items', id), data),
+    updateDoc: async (id, data) => {
+      await updateDoc(doc(getFirestore(firebase), 'items', id), data)
+      await snapshotFrontier() // settle BEHIND everything already delivered (see snapshotFrontier)
+    },
     // the plaintext user field is required for creates (see firestore rules); updates keep it
-    createDoc: (id, data) => setDoc(doc(getFirestore(firebase), 'items', id), { ...data, user: user.uid }),
+    createDoc: async (id, data) => {
+      await setDoc(doc(getFirestore(firebase), 'items', id), { ...data, user: user.uid })
+      await snapshotFrontier()
+    },
     newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
     adopt: mergeAdoptedStore,
     invalidateAuthority: reason => revokeHiddenAuthority(reason),

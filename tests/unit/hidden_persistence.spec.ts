@@ -585,8 +585,14 @@ test('a remote change applied after our write is issued does not leave the clien
   encrypting.resolve()
   await flush()
   await applyingB
-  expect(idx.byId.get('d1')!.item).toEqual({ v: 'B' }) // B applied after C was issued
-  expect(itemOf(calls.find(c => c.op == 'update')!.text)).toEqual({ v: 'C' }) // the server has C
+  // round-20 finding 1 changed the ORDER here, and the change is an improvement: the receipt for B
+  // makes our target move mid-build, so the attempt is requeued BEHIND B's application instead of
+  // rebuilding while holding the chain. our write therefore lands after B applies, and the record
+  // carries C rather than sitting at B. this test previously asserted the intermediate { v: 'B' }
+  expect(idx.byId.get('d1')!.item).toEqual({ v: 'C' })
+  const update = calls.find(c => c.op == 'update')!
+  expect(update.id).toBe('d1')
+  expect(itemOf(update.text)).toEqual({ v: 'C' }) // the server has C
   // C's own delivery now arrives. hidden deliveries are never skipped (see isOwnPendingChange
   // in index.svelte), so it applies and the client catches up to the server
   await arrive(controller, idx, { id: 'd1', name: 'n', item: { v: 'C' } })
@@ -1014,4 +1020,139 @@ test('the secret is acquired before any payload is encrypted', async () => {
   secret.resolve()
   await flush()
   expect(order).toEqual(['acquire', 'encrypt'])
+})
+
+// a gated encryption that records each call, so a schedule can release them one at a time
+function gatedHarness() {
+  const pending: Array<() => void> = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const drain = async (times: number) => {
+    for (let i = 0; i < times; i++) {
+      pending.shift()?.()
+      await flush()
+    }
+  }
+  return { ...h, controller, pending, drain }
+}
+
+test('a lower id arriving during an ADOPTION encryption retargets, instead of writing the middle record', async () => {
+  // round-20 finding 1: only the ordinary update branch looped. create and adoption issued after
+  // an unchecked encryption, so this schedule wrote `update b2` while canonical state became a1
+  const { idx, calls, controller, pending, drain } = gatedHarness()
+  controller.save('n', { D: 1 })
+  await flush() // fresh create, its encryption held
+  expect(pending).toHaveLength(1)
+  void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
+  await drain(1) // b2 applies, the attempt requeues, and the retry adopts b2
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } }) // still lower, mid-encryption
+  await drain(3)
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // never a duplicate document
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates.map(u => u.id)).toEqual(['a1']) // the record canonical NOW, never the middle one
+  expect(itemOf(updates[0].text).D).toBe(1) // carrying the local state
+})
+
+test('a record removed during an adoption encryption is not written', async () => {
+  // the same recheck covers disappearance: the adoption target moving out from under the write
+  // must abandon the attempt rather than update an id the controller already knows moved
+  const { idx, calls, controller, drain } = gatedHarness()
+  controller.save('n', { D: 1 })
+  await flush()
+  void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
+  await drain(1) // adopting b2, its encryption held
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } })
+  await drain(3)
+  expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('b2')
+})
+
+test('a terminal BUILD failure is reported, not only a terminal write failure', async () => {
+  // round-20 finding 3: notifyFailure covered the asynchronous write rejection only. a rejecting
+  // confirmIndex produced no write, left owes() true, cleared the saving mirror and suppressed
+  // owner notifications indefinitely — with nothing but a console line to show for it
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmIndex: async () => {
+      throw new Error('index unavailable')
+    },
+    notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
+  })
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(failures).toEqual(['n: index unavailable'])
+  expect(controller.owes('n')).toBe(true) // retained and retryable
+})
+
+test('a cancelled phrase prompt is not reported as a failure', async () => {
+  // dismissing the prompt is an expected outcome, not something to alert the user about
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => {
+      throw Object.assign(new Error('cancelled by user'), { cancelled: true })
+    },
+    notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
+  })
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(failures).toEqual([])
+  expect(controller.owes('n')).toBe(true) // still owed, so a later save retries it
+})
+
+test('settlement follows the write dependency, so an ack behind the frontier reconciles from the echo', async () => {
+  // round-20 finding 2: settlement waited behind transitions already noted, but production does not
+  // note a transition until its snapshot is decrypted. a fast ack therefore crossed the app's own
+  // echo, reconciled the owner from the state that echo was about to replace, and cleared owes() —
+  // so the echo then arrived as a spurious "changed remotely". the fix is in the write dependency,
+  // which now awaits the application frontier before resolving (see snapshotFrontier in
+  // index.svelte); this pins the controller half of that contract
+  const reconciled: any[] = []
+  const ack = deferred<void>()
+  const pending: Array<() => void> = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
+      await ack.promise // production awaits the snapshot frontier at exactly this point
+    },
+    reconcileOwner: name => void reconciled.push(idx.byName.get(name)?.item),
+  })
+  const live: HiddenWrapper = { id: 'z9', name: 'n', item: { v: 'A' } }
+  idx.byId.set('z9', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'D' })
+  await flush()
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { v: 'B' } }) // lower id: the target moves
+  pending.shift()!()
+  await flush() // requeued behind a1's application
+  pending.shift()?.()
+  await flush() // rebuilt for a1 and issued
+  expect(calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['a1'])
+  expect(controller.owes('n')).toBe(true) // unsettled while the acknowledgement is outstanding
+  await arrive(controller, idx, { id: 'a1', name: 'n', item: { v: 'D' } }) // our own echo, applied
+  ack.resolve()
+  await flush()
+  expect(reconciled).toEqual([{ v: 'D' }]) // in step with the echo, never rolled back to B
+  expect(controller.owes('n')).toBe(false)
 })

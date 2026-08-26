@@ -85,6 +85,9 @@ const payload = (wrapper: HiddenWrapper): HiddenDocData => ({
 
 const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(String(e?.message ?? e))
 
+// a phrase prompt the user dismissed: an expected outcome, not a failure to report back to them
+const isCancellation = (e: any) => e?.cancelled === true || /cancel/i.test(String(e?.message ?? e))
+
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
 
@@ -221,80 +224,55 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return true
   }
 
-  // persists whatever the name currently owes, on whichever record holds it
-  async function persistOwed(name: string) {
-    const op = owed.get(name)
-    if (!op || op.phase == 'building') return
-    op.phase = 'building'
-    const generation = op.generation
+  // ONE attempt for `generation`: resolve the target, build, recheck, issue. returns false when
+  // the target MOVED while building, and the caller then requeues behind the remote applications
+  // that moved it. an inner loop was the obvious alternative and is worse: it re-encrypts while
+  // holding the chain, starving the very receipts it is waiting for, and its "each retarget takes
+  // a lower id" termination argument is false — a removal or rename can retarget upward or to
+  // absence, and receipts can oscillate. safety here rests on receipts eventually going quiet,
+  // and the requeue gives them their turn
+  async function attemptWrite(name: string, generation: number): Promise<boolean> {
     const current = () => currentOwed(name, generation)
-    // builds the payload for a target WITHOUT mutating it unless it is live in the index: a
-    // record that has only been received is about to be applied, and writing our state into that
-    // object would make its own application carry our change instead of what arrived
-    const build = async (target: HiddenWrapper, state: any) => {
-      // landing on a record this generation has not written merges under the intent: it may hold
-      // fields the owner never saw (a retained duplicate, a newly registered lower id)
-      const merged = { ...target, item: { ...(target.item ?? {}) } }
-      deps.adopt({ ...merged, item: state }, merged)
-      if (deps.index().byId.get(target.id) === target) target.item = state // live: keep in step
-      return { data: await deps.encryptState(payload({ ...target, item: state })), id: target.id }
+    const state = current()?.state
+    if (!current()) return true // superseded: nothing owed by this generation any more
+    let holder = canonicalHolder(name)
+    if (!holder) {
+      // nothing holds the name (never created, or removed while we were building): re-enter the
+      // confirmed-create resolution rather than writing to whatever we had before
+      holder = { name, item: state, id: deps.newTempId(), saving: null, pending_create: true, adopt_id: null }
+      const index = deps.index()
+      index.byId.set(holder.id, holder)
+      index.byName.set(name, holder)
     }
-    try {
-      // the phrase is acquired BEFORE any payload is resolved, and single-flighted by the
-      // dependency: encryptState must not prompt, because a prompt inside the loop below could
-      // register a lower-id record between the last resolution and the write
-      await deps.acquireSecret()
-      if (!current()) return
-      // ONE stable loop for updates, creates and adoptions: resolve the holder, merge, encrypt,
-      // then resolve AGAIN — issuing only when the answer did not move. a single recheck closed
-      // only the first retarget: a receipt arriving during the REBUILD stranded the write on a
-      // record that was no longer canonical, and a holder REMOVED during the build fell through
-      // a truthy-only condition and updated the removed id. this terminates because each retarget
-      // takes the minimum id of a finite set, so continuing requires new receipts to keep arriving
-      for (;;) {
-        const state = current()?.state
-        if (!current()) return
-        let holder = canonicalHolder(name)
-        if (!holder) {
-          // no holder at all (never created, or removed while we were building): re-enter the
-          // confirmed-create resolution rather than writing to whatever we had before
-          holder = {
-            name,
-            item: state,
-            id: deps.newTempId(),
-            saving: null,
-            pending_create: true,
-            adopt_id: null,
-          }
-          const index = deps.index()
-          index.byId.set(holder.id, holder)
-          index.byName.set(name, holder)
-        }
-        if (holder.pending_create || holder.adopt_id) {
-          holder.item = state
-          await persistCreate(holder, generation)
-          return
-        }
-        const built = await build(holder, state)
-        if (!current()) return
-        if (canonicalHolder(name) === holder) return void issueWrite(name, generation, built.id, built.data, false)
-      }
-    } catch (e) {
-      const now = current()
-      if (now) now.phase = 'failed' // retryable: a later save schedules it again
-      console.error(`persisting hidden item '${name}' failed:`, e)
+    if (holder.pending_create || holder.adopt_id) {
+      holder.item = state
+      return await attemptCreate(holder, generation)
     }
+    // build the payload for a target WITHOUT mutating it unless it is live in the index: a record
+    // that has only been received is about to be applied, and writing our state into that object
+    // would make its own application carry our change instead of what arrived
+    const merged = { ...holder, item: { ...(holder.item ?? {}) } }
+    deps.adopt({ ...merged, item: state }, merged) // may hold fields the owner never saw
+    if (deps.index().byId.get(holder.id) === holder) holder.item = state // live: keep in step
+    const data = await deps.encryptState(payload({ ...holder, item: state }))
+    if (!current()) return true
+    if (canonicalHolder(name) !== holder) return false // moved while building: requeue, do not write
+    issueWrite(name, generation, holder.id, data, false)
+    return true
   }
 
-  async function persistCreate(wrapper: HiddenWrapper, generation: number) {
+  // the create/adoption half of the SAME resolve-build-recheck shape. every branch ends at one
+  // recheck immediately before issuing: the target it encrypted for must still be the target it
+  // would choose now, or the attempt is abandoned and requeued
+  async function attemptCreate(wrapper: HiddenWrapper, generation: number): Promise<boolean> {
     const name = wrapper.name
     const current = () => currentOwed(name, generation)
     try {
-      // the pending name is passed so the caller can register THAT name inline (the adoption
-      // decision) while routing every other name through its own chain (see confirmIndex)
-      if (!wrapper.adopt_id) await deps.confirmIndex(name) // rejects to fail the create
-      if (!current()) return // superseded during confirmation: the newer generation redoes this
       if (!wrapper.adopt_id) {
+        // the pending name is passed so the caller can register THAT name inline (the adoption
+        // decision) while routing every other name through its own chain (see confirmIndex)
+        await deps.confirmIndex(name) // rejects to fail the create
+        if (!current()) return true // superseded: the newer generation redoes this
         // a same-name record can already be known locally even when confirmation was a no-op
         // (an authoritative index with a retained duplicate, or a remote arrival mid-create):
         // adopt the minimum-id survivor instead of creating alongside it
@@ -311,31 +289,34 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // rejection recovery stays attached but detached from the chain
       if (wrapper.adopt_id) {
         const adoptId = wrapper.adopt_id
-        const adopted = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
-        if (!current()) return
-        if (issueWrite(name, generation, adoptId, adopted, false)) finalizeAdoption(deps.index(), wrapper)
-        return
+        const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
+        if (!current()) return true
+        // a STRICTLY LOWER id appearing during that encryption makes this target noncanonical,
+        // and issuing anyway is exactly how the newest state was stranded on a middle record.
+        // note the adoption target itself is deliberately NOT in the index until finalization, so
+        // the test is "has something better arrived", not "is the target still what we would pick"
+        const better = findSurvivor(wrapper)
+        if (better && compareIds(better.id, adoptId) < 0) {
+          wrapper.adopt_id = null // re-choose on the retry, which reconfirms against the server
+          return false
+        }
+        if (issueWrite(name, generation, adoptId, data, false)) finalizeAdoption(deps.index(), wrapper)
+        return true
       }
       const id = deps.newDocId()
-      const created = await deps.encryptState(payload(wrapper))
-      if (!current()) return
-      // one more look immediately before issuing: a same-name record can have been RECEIVED
-      // during that encryption, and creating alongside a survivor we already know about is a
-      // duplicate we cause ourselves. (a record another writer commits after this point is a
-      // genuine race that no client read can close without server-side uniqueness)
-      const late = findSurvivor(wrapper)
-      if (late) {
-        wrapper.adopt_id = late.id
-        deps.adopt(wrapper, late)
-        const merged = await deps.encryptState(payload(wrapper))
-        if (!current()) return
-        if (issueWrite(name, generation, late.id, merged, false)) finalizeAdoption(deps.index(), wrapper)
-        return
-      }
-      // issued and released: the id is already allocated, so nothing downstream needs to wait
-      // for the server (see the note above)
-      if (issueWrite(name, generation, id, created, true)) finalizeCreate(deps.index(), wrapper, id)
+      const data = await deps.encryptState(payload(wrapper))
+      if (!current()) return true
+      // a same-name record RECEIVED during that encryption is a record we already know about, and
+      // creating alongside it is a duplicate we cause ourselves. (one another writer commits after
+      // this point is a genuine race no client read closes without server-side uniqueness)
+      if (findSurvivor(wrapper)) return false // requeue: the retry adopts it instead
+      if (issueWrite(name, generation, id, data, true)) finalizeCreate(deps.index(), wrapper, id)
+      return true
     } catch (e) {
+      // a STALE generation must not mutate the index on its way out either: the current one owns
+      // the wrapper now, and finalizing or removing it here is the same class of stale world
+      // mutation the generation checks above exist to prevent
+      if (!current()) throw e
       if (wrapper.adopt_id) {
         // the document exists: settle onto it so the next save UPDATES it — deleting the
         // wrapper would send the next save down the create path and duplicate it
@@ -346,6 +327,38 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         removeHidden(deps.index(), wrapper.id)
       }
       throw e // persistOwed marks the record failed (and therefore retryable)
+    }
+  }
+
+  // persists whatever the name currently owes, on whichever record holds it
+  async function persistOwed(name: string) {
+    const op = owed.get(name)
+    if (!op || op.phase == 'building') return
+    op.phase = 'building'
+    const generation = op.generation
+    const current = () => currentOwed(name, generation)
+    try {
+      // the phrase is acquired BEFORE any payload is resolved, and single-flighted by the
+      // dependency: encryptState must not prompt, because a prompt between the last resolution
+      // and the write could register a lower-id record
+      await deps.acquireSecret()
+      if (!current()) return
+      if (await attemptWrite(name, generation)) return
+      // the target moved. requeue at the BACK of the chain so the receipts that moved it apply
+      // first — retrying here would hold the chain and re-encrypt against a view that cannot change
+      const now = current()
+      if (!now) return
+      now.phase = 'queued'
+      void enqueue(name, undefined, () => persistOwed(name))
+    } catch (e) {
+      const now = current()
+      if (now) now.phase = 'failed' // retryable: a later save schedules it again
+      console.error(`persisting hidden item '${name}' failed:`, e)
+      // a terminal BUILD failure (secret, confirmation, encryption) is just as invisible as a
+      // terminal WRITE failure was: owes() stays true, the saving mirror clears and owner
+      // notifications stay suppressed. an intentional phrase cancellation is expected and is not
+      // reported as a failure
+      if (now && !isCancellation(e)) deps.notifyFailure(name, e)
     }
   }
 
