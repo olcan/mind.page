@@ -19,7 +19,7 @@ import {
 // duplicate names, invalid classification at initialization, pending-create adoption, and the
 // remote add/modify/remove transitions
 
-const index = (): HiddenIndex => ({ byId: new Map(), byName: new Map() })
+const index = (): HiddenIndex => ({ byId: new Map(), byName: new Map(), quarantined: new Set<string>() })
 const doc = (id: string, name: string, item: any = {}) => ({ id, text: JSON.stringify({ name, item }) })
 const wrapper = (id: string, name: string, item: any = {}): HiddenWrapper => ({ id, name, item })
 const opts = { anonymous: false, checkOrphans: true, existingIds: new Set(['x']) }
@@ -175,7 +175,7 @@ test('a failed fresh create with a retained remote duplicate promotes it instead
 })
 
 test('current-state invalidity: non-canonical duplicates and ownerless canonical stores, transitional wrappers skipped', () => {
-  const index = { byId: new Map(), byName: new Map() }
+  const index = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
   const canonical = { id: 'a1', name: 'global_store_x', item: {} }
   const duplicate = { id: 'b2', name: 'global_store_x', item: {} } // retained, not the holder
   const orphan = { id: 'c3', name: 'global_store_gone', item: {} } // canonical but owner missing
@@ -207,14 +207,14 @@ test('canonical selection is code-unit ordered, so mixed-case ids agree everywhe
   // record could be adopted while another was retained as the canonical holder
   expect(compareIds('B1', 'a1') < 0).toBe(true) // code-unit: uppercase first
   expect('B1'.localeCompare('a1') < 0).toBe(false) // locale: the opposite
-  const index = { byId: new Map(), byName: new Map() }
+  const index = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
   const upper = { id: 'B1', name: 'n', item: {} }
   const lower = { id: 'a1', name: 'n', item: {} }
   // arriving in either order, the SAME record wins the name
   applyRemoteAdded(index, lower)
   applyRemoteAdded(index, upper)
   expect(index.byName.get('n')).toBe(upper)
-  const reversed = { byId: new Map(), byName: new Map() }
+  const reversed = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
   applyRemoteAdded(reversed, upper)
   applyRemoteAdded(reversed, lower)
   expect(reversed.byName.get('n')).toBe(upper)
@@ -224,7 +224,7 @@ test('quarantining a duplicate stops it being promoted when the canonical record
   // the non-destructive replacement for deleting duplicates: a retained duplicate is the only
   // way a name resurrects old state, so it is dropped from the PROMOTABLE index instead of the
   // server (see quarantineNonCanonical)
-  const index = { byId: new Map(), byName: new Map() }
+  const index = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
   const canonical = { id: 'a1', name: 'n', item: { current: true } }
   const duplicate = { id: 'b2', name: 'n', item: { ancient: true } }
   index.byId.set('a1', canonical)
@@ -244,25 +244,38 @@ test('quarantining a duplicate stops it being promoted when the canonical record
   expect(index.byId.get('c3')).toBe(solo)
 })
 
-test('a quarantined duplicate cannot be re-registered or adopted for the rest of the session', () => {
-  // round-15 finding 5: quarantine only deleted the wrapper from byId, so a confirmation query
-  // or a redelivery re-registered the same record — and a pending create then ADOPTED it,
-  // merging the old state back into a store the user had emptied
-  const index: any = { byId: new Map(), byName: new Map() }
+test('quarantine survives an index adapter that is rebuilt on every call (as production is)', () => {
+  // the production adapter is `() => ({ byId, byName, quarantined })` — a NEW object each call.
+  // quarantine state attached lazily to that object was discarded immediately, so the whole
+  // mechanism silently did nothing; the earlier test passed only because it reused one object
+  const byId = new Map<string, any>()
+  const byName = new Map<string, any>()
+  const quarantined = new Set<string>()
+  const index = () => ({ byId, byName, quarantined }) // rebuilt per call, exactly like production
   const canonical = { id: 'a1', name: 'n', item: { current: true } }
   const duplicate = { id: 'b2', name: 'n', item: { ancient: true } }
-  index.byId.set('a1', canonical)
-  index.byId.set('b2', duplicate)
-  index.byName.set('n', canonical)
-  quarantineNonCanonical(index, [{ wrapper: duplicate, reason: 'duplicate' }])
-  expect(isQuarantined(index, 'b2')).toBe(true)
-  // the canonical record goes away and the name is claimed by a fresh pending create
-  removeHidden(index, 'a1')
+  byId.set('a1', canonical)
+  byId.set('b2', duplicate)
+  byName.set('n', canonical)
+  quarantineNonCanonical(index(), [{ wrapper: duplicate, reason: 'duplicate' }])
+  expect(isQuarantined(index(), 'b2')).toBe(true) // ... through a DIFFERENT adapter object
+
+  // a redelivery of the quarantined record must not reinstate it, directly or by promotion
+  applyRemoteModified(index(), { id: 'b2', name: 'n', item: { ancient: true } })
+  applyRemoteAdded(index(), { id: 'b2', name: 'n', item: { ancient: true } })
+  expect(index().byId.has('b2')).toBe(false)
+  removeHidden(index(), 'a1') // the canonical record goes away
+  expect(index().byName.get('n')).toBeUndefined() // no promotion of the quarantined duplicate
+
+  // a pending create for the name must not adopt it either
   const pending = { id: 'temp1', name: 'n', item: {}, pending_create: true }
-  index.byId.set('temp1', pending)
-  index.byName.set('n', pending)
-  // a confirmation returns the quarantined record: it must neither register nor be adopted
-  expect(registerHidden(index, { id: 'b2', name: 'n', item: { ancient: true } }, () => {})).toBe('quarantined')
-  expect(pending.item).toEqual({}) // no merge of the old state
-  expect(index.byId.has('b2')).toBe(false)
+  byId.set('temp1', pending)
+  byName.set('n', pending)
+  expect(registerHidden(index(), { id: 'b2', name: 'n', item: { ancient: true } }, () => {})).toBe('quarantined')
+  expect(pending.item).toEqual({})
+
+  // but a genuine server REMOVAL of that document releases it: an id created again later is a
+  // new record, and the session's judgement about the old one no longer applies
+  removeHidden(index(), 'b2')
+  expect(isQuarantined(index(), 'b2')).toBe(false)
 })

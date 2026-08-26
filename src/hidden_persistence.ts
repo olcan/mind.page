@@ -77,7 +77,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // into it instead of issuing an identical write. keyed on the wrapper, not just the name: if
   // the record was replaced in between, the queued task will be dropped by stillCurrent and the
   // new state must get a task of its own rather than coalescing into a doomed one
-  const pendingSaves = new Map<string, HiddenWrapper>()
+  const pendingSaves = new Set<string>()
+  // the latest state each name should end at, independent of any wrapper object (see save)
+  const intents = new Map<string, any>()
   // document ids whose not-found recovery is already under way. every issued update installs its
   // own rejection handler, so two offline updates to a document deleted remotely both reject and
   // both used to start a recovery — the second ran against the already-settled wrapper, could not
@@ -166,6 +168,33 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           .catch(err => void console.error('hidden item create failed:', err))
           .finally(() => recovering.delete(adoptId))
       )
+    })
+  }
+
+  // claims a name with a pending wrapper and persists it (confirm -> adopt or create)
+  function createForName(name: string, item: any) {
+    // create: the wrapper claims the name immediately (pending), and the persisted document
+    // is either an adoption of an existing one (found during the phrase prompt, the server
+    // confirmation, or already known locally) or a fresh create
+    const wrapper: HiddenWrapper = {
+      name,
+      item,
+      id: deps.newTempId(),
+      saving: null,
+      pending_create: true,
+      adopt_id: null,
+    }
+    const index = deps.index()
+    index.byId.set(wrapper.id, wrapper)
+    index.byName.set(name, wrapper)
+    if (deps.readonly()) return
+    enqueue(name, wrapper, async () => {
+      try {
+        await persistCreate(wrapper)
+      } catch (e) {
+        console.error('hidden item create failed:', e)
+        throw e
+      }
     })
   }
 
@@ -259,87 +288,61 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // EXECUTES, so it always carries the latest full state — including adoption merges and
     // later save() calls — and a failed earlier write is superseded rather than retried
     save(name: string, item: any) {
+      // the intent belongs to the NAME, not to a wrapper object. a queued save used to hold the
+      // wrapper it was created for and DROP itself if that wrapper had been replaced meanwhile —
+      // silently losing the newest thing the user did, because a remote delivery had landed in
+      // between. the task resolves the name's current holder when it runs instead, so being
+      // overtaken costs nothing
+      intents.set(name, item)
       const index = deps.index()
       const existing = index.byName.get(name)
-      if (existing) {
-        existing.item = item
-        if (deps.readonly()) return
-        if (pendingSaves.get(name) === existing) return // a queued save will pick this state up
-        pendingSaves.set(name, existing)
-        enqueue(name, existing, async () => {
-          if (pendingSaves.get(name) === existing) pendingSaves.delete(name) // payload fixed from here
-          // re-resolve the target at execution, and AGAIN after the encryption await: the index
-          // can move underneath a queued save (a remote replacement, a failed create's cleanup),
-          // and writing through a wrapper that is no longer current would resurrect stale state.
-          // dropping is the explicit remote-wins outcome, logged so it is observable
-          if (!stillCurrent(name, existing)) {
-            console.warn(`dropping hidden save for '${name}': wrapper removed or replaced while queued`)
-            return
-          }
-          let data
-          const state = payload(existing)
-          try {
-            data = await deps.encryptState(state)
-          } catch (e) {
-            console.error('hidden item update failed:', e)
-            return
-          }
-          if (!stillCurrent(name, existing)) {
-            console.warn(`dropping hidden save for '${name}': wrapper removed or replaced during encryption`)
-            return
-          }
-          // ISSUE the write and let the chain continue. awaiting the acknowledgement is what
-          // broke offline durability: updateDoc reaches the SDK's durable queue immediately, but
-          // its promise stays pending until the server accepts — so a second offline save waited
-          // behind the first forever and vanished on reload while the first survived. the SDK's
-          // queue preserves issue order, which is the ordering this chain was reconstructing by
-          // hand. what still belongs on the chain is building the payload (encryption can prompt)
-          const target = existing.id // the id THIS write goes to; recovery is keyed on it
-          deps
-            .updateDoc(target, data)
-            .catch(e => {
-              if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
-              // the document was removed server-side: recover as a create-like transition, on
-              // this name's chain rather than inline (we are outside it by now). the check is on
-              // the TARGET this write actually used — a later rejection for the same target, or
-              // one arriving after the wrapper already moved on, must not start a second recovery
-              if (recovering.has(target) || existing.id != target) return
-              if (!stillCurrent(name, existing)) return
-              recovering.add(target)
-              deps.invalidateAuthority(`hidden update target ${existing.id} not found`)
-              existing.pending_create = true
-              existing.adopt_id = null
-              enqueue(name, existing, () =>
-                persistCreate(existing)
-                  .catch(err => void console.error('hidden item create failed:', err))
-                  .finally(() => recovering.delete(target))
-              )
-            })
-        })
+      if (!existing) {
+        // no record for this name yet: claim it synchronously with a pending wrapper (readers of
+        // the index and `saving_global_store` see it immediately) and persist it
+        createForName(name, item)
         return
       }
-
-      // create: the wrapper claims the name immediately (pending), and the persisted document
-      // is either an adoption of an existing one (found during the phrase prompt, the server
-      // confirmation, or already known locally) or a fresh create
-      const wrapper: HiddenWrapper = {
-        name,
-        item,
-        id: deps.newTempId(),
-        saving: null,
-        pending_create: true,
-        adopt_id: null,
-      }
-      index.byId.set(wrapper.id, wrapper)
-      index.byName.set(name, wrapper)
+      existing.item = item
       if (deps.readonly()) return
-      enqueue(name, wrapper, async () => {
+      if (pendingSaves.has(name)) return // a queued task will pick up the latest intent
+      pendingSaves.add(name)
+      enqueue(name, existing, async () => {
+        pendingSaves.delete(name) // from here the payload is fixed; a later save queues its own
+        const state = intents.get(name)
+        if (state === undefined) return
+        const holder = deps.index().byName.get(name)
+        if (!holder) return void createForName(name, state) // the record went away: create anew
+        if (holder.pending_create) return // a create for this name is already in flight with it
+        holder.item = state // the resolved target carries the latest intent
+        let data
         try {
-          await persistCreate(wrapper)
+          data = await deps.encryptState(payload(holder))
         } catch (e) {
-          console.error('hidden item create failed:', e)
-          throw e
+          return void console.error('hidden item update failed:', e)
         }
+        // resolve once more: the holder can change during encryption, and the intent follows the
+        // NAME rather than the object it started with
+        const current = deps.index().byName.get(name)
+        if (!current || current.pending_create) return
+        if (current !== holder) current.item = state
+        const target = current.id // the id THIS write goes to; recovery is keyed on it
+        deps.updateDoc(target, data).catch(e => {
+          if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
+          // removed server-side: recover as a create-like transition on this name's chain, keyed
+          // on the TARGET this write used so a second rejection cannot start a second recovery
+          if (recovering.has(target)) return
+          const holderNow = deps.index().byName.get(name)
+          if (!holderNow || holderNow.id != target) return // a later delivery already decided this name
+          deps.invalidateAuthority(`hidden update target ${target} not found`)
+          recovering.add(target)
+          holderNow.pending_create = true
+          holderNow.adopt_id = null
+          enqueue(name, holderNow, () =>
+            persistCreate(holderNow)
+              .catch(err => void console.error('hidden item create failed:', err))
+              .finally(() => recovering.delete(target))
+          )
+        })
       })
     },
 
@@ -378,16 +381,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // not acknowledged yet. firestore delivers a document's changes in commit order, so anything
     // else is genuinely newer state and must be applied — including another tab's write that
     // arrives while our own is still pending, which the old blanket in-flight skip lost
-    // true when a save for this name is QUEUED and has not built its payload yet. that save will
-    // supersede whatever the server currently holds, so a delivery arriving now would only be
-    // rolled back by it — this is the one case where a delivery must be skipped.
-    // everything else applies, INCLUDING the echo of our own write: firestore delivers a
-    // document's changes in commit order, so an echo is simply the newest server state. skipping
-    // it was the bug — a remote B applied after our C was issued left the client at B while the
-    // server ended at C, with no later delivery to correct it
-    hasPendingSave(name: string) {
-      return pendingSaves.has(name)
-    },
 
     // releases a receipt entry once its application has settled. the inbox exists only so a
     // create/adopt decision can see a record whose application is still queued; keeping entries

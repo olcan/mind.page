@@ -6377,7 +6377,12 @@
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
   let hiddenItems
   // the two maps as one index for the extracted transitions (see src/hidden.ts)
-  const hiddenIndex = () => ({ byId: hiddenItems, byName: hiddenItemsByName })
+  // NOTE: this rebuilds the adapter object on every call, so the index must own NO state of its
+  // own — anything attached lazily to the returned object is discarded immediately. session
+  // quarantine lives here for exactly that reason (it silently did nothing when it was attached
+  // to the temporary), and is reset with the maps in initialize
+  let hiddenQuarantined = new Set<string>()
+  const hiddenIndex = () => ({ byId: hiddenItems, byName: hiddenItemsByName, quarantined: hiddenQuarantined })
   // whether the hidden-item index is confirmed against the server: on a fixed page the shared
   // query cannot see the account's hidden documents, so until the dedicated hidden query has a
   // SERVER answer, uniquely keyed hidden creates must re-confirm first (see saveHiddenItem) or a
@@ -6676,6 +6681,7 @@
     })
     hiddenItems = new Map()
     hiddenItemsByName = new Map()
+    hiddenQuarantined = new Set<string>()
     hiddenItemsInvalid = []
     // index transitions are extracted and table-tested (see buildHiddenIndex in src/hidden.ts):
     // ascending-id order resolves duplicate names to the minimum id, and orphan classification
@@ -7326,13 +7332,13 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            // a delivery is skipped ONLY when a queued save will supersede it. everything else
-            // applies, including the echo of our own write: firestore delivers a document's
-            // changes in commit order, so an echo is simply the newest server state, and
-            // skipping it left the client behind whenever a remote change had been applied
-            // between our write being issued and its echo arriving
-            const name = hiddenItems.get(doc.id)?.name ?? parseHiddenWrapper(doc.id, savedItem.text)?.name
-            return !!name && hiddenPersistence.hasPendingSave(name)
+            // hidden deliveries are NEVER skipped. every delivered state is applied, and a
+            // queued save re-resolves the name's current holder when it runs (see save in
+            // hidden_persistence.ts), so being overtaken costs nothing and the user's latest
+            // intent still lands. the previous skip predicate could not see server-confirmed
+            // changes at all (it was consulted only for pending writes) and matched by NAME, so
+            // it also hid genuinely different documents
+            return false
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
           const index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
@@ -7762,9 +7768,12 @@
                           revokeThisRevision('hidden change could not be applied') // as soon as known
                         }
                       )
-                      // the receipt covered only the window before this applied; releasing by
-                      // TOKEN means a newer receipt for the same document is never discarded
-                      .finally(() => hiddenPersistence.releaseRemote(doc.id, receipt))
+                      // released only on SUCCESS, and only if this is still the latest receipt.
+                      // a `.finally` released it after a FAILED application too, leaving the
+                      // index stale with nothing recorded to protect survivor selection — and
+                      // application can fail on arbitrary item code, since applying a change
+                      // reaches onFocus and from there owner listeners
+                      .then(() => hiddenPersistence.releaseRemote(doc.id, receipt))
                   )
                   continue
                 }
@@ -8593,8 +8602,10 @@
         if (!hidden_item.hidden || !hidden_item.text) continue
         const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
         if (wrapper?.name != pendingName) continue // not this caller's question
-        registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
-        return // the minimum-id match is the answer
+        // a quarantined record is not an answer: keep looking, or a stale duplicate sorting
+        // before an eligible record would make the caller create alongside a live one
+        if (registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore) == 'quarantined') continue
+        return // the minimum-id ELIGIBLE match is the answer
       }
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
@@ -8633,8 +8644,14 @@
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
         return
       }
+      // every delivery is applied now, INCLUDING the echo of this tab's own write (see
+      // isOwnPendingChange). so "changed remotely" is decided by the STATE, not by the delivery:
+      // an echo that carries what the item already holds changes nothing and must not fire the
+      // callback, or a handler that reacts to remote changes by saving would trigger itself
+      const applied = hiddenItemsByName.get(name)?.item
+      if (_.isEqual(item(id).global_store ?? {}, applied ?? {})) return // nothing actually changed
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);
-      item(id).global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item) || {} // sync global_store on item
+      item(id).global_store = _.cloneDeep(applied) || {} // sync global_store on item
 
       // invoke _on_global_store_change(id, true) on all listener (or self) items
       // NOTE: "deletions" of hidden item correspond to a change to empty store {}

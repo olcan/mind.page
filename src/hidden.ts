@@ -27,8 +27,11 @@ export type HiddenIndex = {
   // documents quarantined THIS SESSION as non-canonical duplicates (see quarantineNonCanonical).
   // nothing on the server marks them, so this lasts only as long as the page: it exists so a
   // record already judged redundant cannot come back through registration, a redelivery or an
-  // adoption and resurrect the state it holds
-  quarantined?: Set<string>
+  // adoption and resurrect the state it holds.
+  // REQUIRED, deliberately: the production adapter rebuilds this object on every call, and when
+  // this was optional the set was attached lazily to that temporary and discarded — quarantine
+  // silently did nothing. an adapter that cannot forget the field cannot repeat that
+  quarantined: Set<string>
 }
 
 export type InvalidHidden = {
@@ -134,6 +137,7 @@ export function registerHidden(
 
 // remote listener transitions; returned warnings are for the caller to log
 export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
+  if (isQuarantined(index, wrapper.id)) return {} // judged redundant this session (see quarantineNonCanonical)
   const warning = index.byName.has(wrapper.name)
     ? 'remote-added hidden item exists locally; conflicts are resolved arbitrarily based on firebase id order'
     : undefined
@@ -143,6 +147,7 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
 }
 
 export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string } {
+  if (isQuarantined(index, wrapper.id)) return {} // a redelivery must not reinstate it
   let warning: string | undefined
   const existing = index.byId.get(wrapper.id)
   if (!existing) warning = `remote-modified hidden item missing locally ${wrapper.id}`
@@ -227,11 +232,11 @@ export function quarantineNonCanonical(
     if (index.byId.get(wrapper.id) === wrapper) index.byId.delete(wrapper.id)
     // remembered, so the record cannot be re-indexed by a confirmation or redelivery and then
     // adopted — which would merge its old state back into a store the user has since emptied
-    ;(index.quarantined ??= new Set()).add(wrapper.id)
+    index.quarantined.add(wrapper.id)
   }
 }
 
-export const isQuarantined = (index: HiddenIndex, id: string) => index.quarantined?.has(id) ?? false
+export const isQuarantined = (index: HiddenIndex, id: string) => index.quarantined.has(id)
 
 // settles a pending create's ADOPTION (its document was found to exist, see saveHiddenItem in
 // index.svelte): re-keys the wrapper to the persistent id, clears the pending claim, then
@@ -262,6 +267,9 @@ export function finalizeCreate(index: HiddenIndex, wrapper: HiddenWrapper, id: s
 
 // removes a wrapper by id and reassigns its name to the minimum-id duplicate, if any
 export function removeHidden(index: HiddenIndex, id: string): { removed?: HiddenWrapper } {
+  // the record is gone server-side, so the session's judgement about it no longer applies: a
+  // document later created under the same id is a new record and must be able to enter
+  index.quarantined.delete(id)
   const wrapper = index.byId.get(id)
   if (!wrapper) return {}
   index.byId.delete(wrapper.id)

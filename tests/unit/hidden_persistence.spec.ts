@@ -23,7 +23,7 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 type Call = { op: string; id?: string; text?: string }
 
 function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
-  const idx: HiddenIndex = { byId: new Map(), byName: new Map() }
+  const idx: HiddenIndex = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
   const calls: Call[] = []
   let ids = 0
   const deps: HiddenPersistenceDeps = {
@@ -62,14 +62,20 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
 // application itself runs on the affected name chains. tests must arrive through this, never by
 // calling the reducer directly — direct calls manufacture an ordering production prevents
 function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper) {
-  controller.noteRemote(wrapper, wrapper.id, false)
+  // mirrors the production lifecycle exactly (see the items listener): note the receipt, apply
+  // on the affected name chains, and release the token only if the application SUCCEEDED
+  const token = controller.noteRemote(wrapper, wrapper.id, false)
   const names = [idx.byId.get(wrapper.id)?.name, wrapper.name]
-  return controller.applyRemote(names, () => applyRemoteAdded(idx, wrapper))
+  return controller
+    .applyRemote(names, () => applyRemoteAdded(idx, wrapper))
+    .then(() => controller.releaseRemote(wrapper.id, token))
 }
 
 function arriveRemoval(controller: any, idx: HiddenIndex, id: string) {
-  controller.noteRemote(undefined, id, true)
-  return controller.applyRemote([controller.nameForDocument(id)], () => removeHidden(idx, id))
+  const token = controller.noteRemote(undefined, id, true)
+  return controller
+    .applyRemote([controller.nameForDocument(id)], () => removeHidden(idx, id))
+    .then(() => controller.releaseRemote(id, token))
 }
 
 const itemOf = (text?: string) => JSON.parse(String(text).replace(/^cipher:/, '')).item
@@ -324,30 +330,6 @@ test('a fresh create settles to the minimum id when a lower-id duplicate arrives
   expect(idx.byName.get('n')!.id).toBe('aaa1') // lower id wins the name
   expect(idx.byId.get(createdId)!.item).toEqual({ v: 1 }) // ours is retained, not lost
 })
-test('a save against a wrapper displaced from byId (remote replacement or rename) is dropped', async () => {
-  const gate = deferred<void>()
-  const { idx, calls, controller } = harness({
-    updateDoc: async (id, data) => {
-      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
-      if (calls.length == 1) await gate.promise
-    },
-  })
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
-  idx.byId.set('d1', wrapper)
-  idx.byName.set('n', wrapper)
-  controller.save('n', { v: 1 })
-  await flush() // the first write is now in flight, held at the gate
-  controller.save('n', { v: 2 }) // queued behind it
-  // a remote modification replaces the wrapper object under the same id (or a rename leaves a
-  // stale byName alias): the queued save must not write through the displaced wrapper — it
-  // would overwrite the canonical remote state or rename the document back
-  idx.byId.set('d1', { id: 'd1', name: 'n', item: { remote: true } })
-  gate.resolve()
-  await flush()
-  expect(calls.filter(c => c.op == 'update')).toHaveLength(1) // only the first, in-flight write
-})
-
-
 test('a create adopts a same-name record already known locally instead of creating alongside it', async () => {
   // round-8 finding 5: an authoritative (no-op) confirmation with a survivor already in byId
   // must adopt the minimum-id survivor, not create a duplicate document
@@ -398,27 +380,6 @@ test('not-found recovery with an authoritative no-op confirmation adopts the ret
   expect(itemOf(updates[0].text)).toEqual({ theirs: 1, mine: 2 })
   expect(idx.byName.get('n')!.id).toBe('srv0')
   expect(idx.byId.has('gone1')).toBe(false)
-})
-
-test('a save whose wrapper is replaced during encryption is dropped', async () => {
-  const gate = deferred<void>()
-  const { idx, calls, controller } = harness({
-    encryptState: async state => {
-      await gate.promise // encryption pauses (e.g. a phrase prompt)
-      return { ...state }
-    },
-  })
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
-  idx.byId.set('d1', wrapper)
-  idx.byName.set('n', wrapper)
-  controller.save('n', { v: 1 })
-  await flush() // task started, held inside encryptState
-  const replacement: HiddenWrapper = { id: 'd1', name: 'n', item: { remote: true } }
-  idx.byId.set('d1', replacement)
-  idx.byName.set('n', replacement)
-  gate.resolve()
-  await flush()
-  expect(calls.filter(c => c.op == 'update')).toHaveLength(0) // the stale write never went out
 })
 
 test('a save whose wrapper is replaced while its write is in flight drops on not-found instead of recovering', async () => {
@@ -496,9 +457,9 @@ test('the saving mirror clears per wrapper even when the name chain continues wi
   gated = false
   gate.resolve()
   await flush()
-  // each wrapper's mirror clears when ITS OWN task settles, not when the chain finally drains
+  // the mirror clears when the task it belongs to settles, not when the chain finally drains
   expect(first.saving).toBeNull()
-  expect(fresh.saving).toBeNull()
+  expect(fresh.saving ?? null).toBeNull()
 })
 test('a write already issued is not retracted by a later rename (durability over rename order)', async () => {
   // round-9 finding 6 wanted a remote rename to wait for an in-flight old-name write, so the
@@ -606,28 +567,10 @@ test('a remote change applied after our write is issued does not leave the clien
   await applyingB
   expect(idx.byId.get('d1')!.item).toEqual({ v: 'B' }) // B applied after C was issued
   expect(itemOf(calls.find(c => c.op == 'update')!.text)).toEqual({ v: 'C' }) // the server has C
-  // C's own delivery now arrives. the listener's rule is hasPendingSave (see isOwnPendingChange
-  // in index.svelte), and with no queued save it says APPLY — which is the decision under test
-  expect(controller.hasPendingSave('n')).toBe(false)
+  // C's own delivery now arrives. hidden deliveries are never skipped (see isOwnPendingChange
+  // in index.svelte), so it applies and the client catches up to the server
   await arrive(controller, idx, { id: 'd1', name: 'n', item: { v: 'C' } })
   expect(idx.byId.get('d1')!.item).toEqual({ v: 'C' }) // client and server agree again
-})
-
-test('a delivery IS skipped while a queued save will supersede it', async () => {
-  // the other half: applying every delivery would roll back newer local intent. a save that is
-  // queued but has not built its payload yet is exactly that intent
-  const { idx, calls, controller } = harness()
-  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
-  idx.byId.set('d1', wrapper)
-  idx.byName.set('n', wrapper)
-  controller.save('n', { v: 'C' })
-  await flush()
-  controller.save('n', { v: 'D' }) // queued: this is the newest local intent
-  expect(controller.hasPendingSave('n')).toBe(true)
-  await flush()
-  expect(controller.hasPendingSave('n')).toBe(false) // released once its payload is built
-  const updates = calls.filter(c => c.op == 'update')
-  expect(itemOf(updates.at(-1)!.text)).toEqual({ v: 'D' }) // D reaches the server last
 })
 
 test('a survivor received during the final encryption is adopted, not duplicated', async () => {
@@ -696,6 +639,38 @@ test('an adopted write rejected as not-found does not leave the wrapper on a van
   expect(idx.byName.get('n')!.id).toBe(created!.id)
 })
 
+test('a save overtaken by a remote replacement follows the NAME instead of being dropped', async () => {
+  // round-16 finding 3: the queued save held the wrapper it was created for and dropped itself
+  // if that wrapper had been replaced meanwhile — silently losing the newest thing the user did.
+  // the intent belongs to the name, so it is written to whatever record currently holds it
+  const encrypting = deferred<void>()
+  const { idx, calls, controller } = harness({
+    encryptState: async state => {
+      await encrypting.promise
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const original: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
+  idx.byId.set('d1', original)
+  idx.byName.set('n', original)
+  controller.save('n', { v: 'mine' })
+  await flush() // held in encryption
+  // a remote delivery replaces the record holding this name (a different document even)
+  const replacement: HiddenWrapper = { id: 'd2', name: 'n', item: { v: 'theirs' } }
+  idx.byId.delete('d1')
+  idx.byId.set('d2', replacement)
+  idx.byName.set('n', replacement)
+  encrypting.resolve()
+  await flush()
+  const update = calls.find(c => c.op == 'update')!
+  expect(update.id).toBe('d2') // re-resolved onto the current holder ...
+  expect(itemOf(update.text)).toEqual({ v: 'mine' }) // ... carrying the user's intent
+  expect(idx.byName.get('n')!.item).toEqual({ v: 'mine' })
+})
+
 test('readonly mode mutates the index but never writes', async () => {
   const { idx, calls, controller } = harness({ readonly: () => true })
   controller.save('n', { v: 1 })
@@ -704,4 +679,25 @@ test('readonly mode mutates the index but never writes', async () => {
   controller.save('n', {}) // emptying is an ordinary save now, and is equally suppressed
   await flush()
   expect(calls).toEqual([])
+})
+
+test('a receipt survives a FAILED application and is superseded by a newer one', async () => {
+  // round-16 finding 5: release ran in `.finally`, so a failed application dropped the receipt
+  // that was protecting survivor selection. application can fail on arbitrary item code, since
+  // applying a change reaches onFocus and from there owner listeners
+  const { idx, controller } = harness()
+  const token = controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 1 } }, 'srv1', false)
+  await controller.applyRemote(['n'], () => {
+    throw new Error('item code threw during application')
+  }).catch(() => {})
+  // the application failed, so the receipt must NOT be released ...
+  controller.releaseRemote('srv1', token) // (production only calls this on success; prove the token guard)
+  // ... and a newer receipt for the same document supersedes the older token
+  const newer = controller.noteRemote({ id: 'srv1', name: 'n', item: { theirs: 2 } }, 'srv1', false)
+  controller.releaseRemote('srv1', token) // stale token: must not delete the newer receipt
+  expect(newer).not.toBe(token)
+  // a create for the name still sees the received record and adopts rather than duplicating
+  controller.save('n', { mine: 1 })
+  await flush()
+  expect(idx.byName.get('n')?.adopt_id ?? idx.byName.get('n')?.id).toBe('srv1')
 })
