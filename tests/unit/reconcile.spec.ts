@@ -201,47 +201,47 @@ test('a THROWING live delivery leaves the marker for reconciliation', async () =
 })
 
 
-// round-34 finding 1: a PARTIAL application makes the equality witness lie
 
-test('a partial application that then throws does not let the retry false-succeed', async () => {
-  // PRODUCTION-SHAPED (round 35): the fake mirrors the real modify path — it installs the server
-  // attribute in BOTH live and saved fields, decides the conditional callback from the witness, and
-  // throws inside that callback. round 34's version threw before mutating anything and round 35's
-  // review caught that counting outer entries proves nothing: the retry can re-enter the outer
-  // application, see attr "unchanged" on the live field, and skip the exact callback that failed
+test('a later step throwing does not rerun an already-successful attribute hook on retry', async () => {
+  // THE REAL RETRY BOUNDARY (round 36, replacing two earlier shapes that each proved the wrong
+  // thing). production's application: install the server attribute in live and saved fields,
+  // decide the hook from LIVE attr, run the hook inside a non-throwing boundary, then run later
+  // steps (itemTextChanged / onEditorChange) that CAN throw. the witness restore covers the
+  // equality branch; deciding the hook from live attr is what keeps a SUCCEEDED hook from running
+  // twice — user hooks need not be idempotent
   const live: any = { attr: { color: 'old' } }
   const server = { text: 'server', time: 2, attr: { color: 'new' } }
-  let applications = 0
-  let attrCallbacks = 0
+  let hookRuns = 0
+  let laterRuns = 0
   const { deps, item, deferrals } = harness({
     readFromServer: async () => ({ exists: true, data: { ...server, attr: { ...server.attr } } }),
     applyRemote: (_type, _id, savedItem) =>
       applyRestoringWitness(() => {
-        applications++
-        // the branch decision reads the WITNESS, as production now does (round 35): live attr is
-        // already the server value on the retry, so deciding from it skips the failed callback
-        const attr_modified = JSON.stringify(item.savedAttr) != JSON.stringify(savedItem.attr)
-        item.savedText = savedItem.text // the early copies, exactly as production orders them
+        // the hook decision reads LIVE attr, as production does: on the retry it is already the
+        // server value, which correctly means the hook phase was entered on the first attempt
+        const attr_modified = JSON.stringify(live.attr) != JSON.stringify(savedItem.attr)
+        item.savedText = savedItem.text
         item.savedTime = savedItem.time
         live.attr = savedItem.attr
         item.savedAttr = savedItem.attr
-        if (attr_modified) {
-          attrCallbacks++
-          if (attrCallbacks == 1) throw new Error('downstream failed') // _on_attr_change throws
-        }
+        if (attr_modified) hookRuns++ // non-throwing in production (itemAttrChanged catches)
+        laterRuns++
+        if (laterRuns == 1) throw new Error('itemTextChanged failed') // a LATER step throws once
       }, item),
   })
   item.savedAttr = { color: 'old' }
   expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
   expect(deferrals.get('d1'), 'the marker survives').toBe(1)
-  expect(item.savedAttr, 'the witness is restored, not left claiming the server state').toEqual({ color: 'old' })
+  expect(hookRuns, 'the hook ran once').toBe(1)
+  // the witness was restored — WITHOUT it the retry would settle on a false equality and the
+  // failed later step would never rerun
+  expect(item.savedAttr).toEqual({ color: 'old' })
 
   expect(await reconcileDeferred(deps, item, 1)).toBe(true)
-  expect(attrCallbacks, 'the CONDITIONAL EFFECT reran — the thing round 34 only pretended to prove').toBe(2)
-  expect(applications).toBe(2)
+  expect(laterRuns, 'the failed later step reran').toBe(2)
+  expect(hookRuns, 'the SUCCEEDED hook did not run twice').toBe(1)
   expect(deferrals.has('d1'), 'terminal only after a full application').toBe(false)
 })
-
 test('applyRestoringWitness leaves the witness alone when application succeeds', async () => {
   const item: ReconcileItem = { savedId: 'd1', savedText: 'local', savedTime: 1, savedAttr: null }
   applyRestoringWitness(() => {

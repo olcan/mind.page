@@ -6586,13 +6586,16 @@
       const owner = wrapper.name.replace(/^global_store_/, '')
       if (ownerExists(owner)) {
         console.warn('registering startup-orphaned hidden item whose owner arrived', wrapper.name, wrapper.id)
-        // merge-only callback: the owner sync happens UNIVERSALLY on the next line, for every
-        // registration outcome ('added'/'exists' included, where no merge callback runs), by
-        // reading whatever record holds the name after registration. passing mergeAdoptedStore
-        // here would sync the owner twice on the 'adopted' branch (round 35)
-        registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
-        const local = tempIdFromSavedId.get(owner) ?? owner
-        if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
+        // the CONTROLLER's merge, like every registration path: a bare defaultsDeep bypasses the
+        // baseline rebase and keeps the projection's identity, which defeats the selection CAS
+        // (round 36). the manual owner sync below covers only the NON-adopted outcomes — for
+        // 'adopted' mergeAdoptedStore has already published the projection, and syncing again from
+        // byName was the round-35 double sync
+        const outcome = registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
+        if (outcome != 'adopted') {
+          const local = tempIdFromSavedId.get(owner) ?? owner
+          if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
+        }
         continue
       }
       retained.push(entry) // still ownerless: reported and left alone
@@ -7560,11 +7563,13 @@
                     let item = items[index]
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
-                    // against the WITNESS (savedAttr), not live attr: applyRestoringWitness
-                    // restores saved* on a throw, so a retry recomputes this decision from the
-                    // restored value and reruns the exact callback that failed. live attr is
-                    // already the server value by then, which made the retry skip it (round 35)
-                    const attr_modified = !_.isEqual(item.savedAttr, savedItem.attr)
+                    // LIVE attr, deliberately (round 36 reversed round 35 here): itemAttrChanged
+                    // is genuinely non-throwing per listener now, so an exception that reaches
+                    // reconciliation comes from LATER work — and live attr saying "unchanged" then
+                    // correctly means the hook phase was already entered. deciding from the
+                    // restored witness instead would rerun a SUCCEEDED hook on retry, and user
+                    // hooks need not be idempotent
+                    const attr_modified = !_.isEqual(item.attr, savedItem.attr)
                     item.attr = savedItem.attr
                     item.savedAttr = _.cloneDeep(savedItem.attr)
                     // update mutable ux properties from item.attr
@@ -8903,11 +8908,13 @@
     // invoke _on_attr_change(id, remote) on all listener (or self) items
     items.forEach(item => {
       if (!item.listen && item.id != id) return // must be listener or self
-      if (!itemDefinesFunction(item, '_on_attr_change')) return
-      // SYNC throws are caught per item too: the .catch below only covers rejections, so one
-      // item's synchronous throw aborted the remaining listeners AND, on the reconcile path,
-      // escaped into the application — whose retry then skipped this callback entirely (round 35)
+      // GENUINELY non-throwing per listener, itemDefinesFunction included (round 36): the .catch
+      // covers only rejections, so any synchronous throw aborted the remaining listeners and
+      // escaped into the caller. with this boundary, an exception reaching reconciliation can only
+      // come from LATER work — which is what lets the retry decide from live attributes (the hook
+      // phase was entered) instead of a restored witness that would rerun a SUCCEEDED hook
       try {
+        if (!itemDefinesFunction(item, '_on_attr_change')) return
         Promise.resolve(
           _item(item.id).eval(`_on_attr_change('${id}', ${remote})`, {
             trigger: item.listen ? 'listen' : 'change',

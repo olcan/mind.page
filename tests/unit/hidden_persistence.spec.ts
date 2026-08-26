@@ -1453,25 +1453,47 @@ test('baseline, derived wrapper and owner are distinct identities', async () => 
   expect(pending.item.mine).toBe(1)
 })
 
-test('mergeAdopted REBASES: a second adoption after invalidation carries v2, never v1', async () => {
-  // defaultsDeep never overwrites a filled-in key, so merging into the old projection would keep
-  // v1 forever. the rebase from the immutable baseline is what discards it. the secret gate holds
-  // the attempt so the name stays OWED and PENDING across both merges — the only state in which
-  // registration paths adopt (registerHidden requires pending_create), so a settled-wrapper
-  // version of this schedule would be unreal
-  const secret = deferred<void>()
+test('a same-id replacement DURING encryption never issues v1: payload, wrapper and owner all carry v2', async () => {
+  // THE ABA SCHEDULE (round 36): a v1 adoption is encrypting when registerHidden receives a
+  // same-id same-name replacement carrying v2 — entry invalidation clears the adopter and the
+  // adopted branch immediately re-points it at the SAME id, with the controller rebasing to v2.
+  // the pointer string and the (absent-from-byId) target stamp both look unchanged to the resumed
+  // v1 attempt, so only the PROJECTION IDENTITY — mergeAdopted assigns a fresh object — can refuse
+  // its already-encrypted v1 payload. and the refusal must clear nothing: the selection is v2's
+  const gate = deferred<void>()
+  let gated = false
+  const published: any[] = []
   const h = harness()
-  const { idx } = h
-  const controller = createHiddenPersistence({ ...h.deps, acquireSecret: () => secret.promise })
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
+    confirmIndex: async name => {
+      if (!idx.byId.has('a1'))
+        registerHidden(idx, { id: 'a1', name, item: { shared: 'v1' } }, (p, f) => controller.mergeAdopted(p, f))
+    },
+    encryptState: async state => {
+      if (!gated) {
+        gated = true
+        await gate.promise // hold the v1 attempt inside encryption
+      }
+      return { cipher: 'cipher:' + state.text } // the harness default shape (see itemOf)
+    },
+  })
   controller.save('n', { mine: 1 })
-  await flush()
+  for (let i = 0; i < 4; i++) await flush() // reach the encryption gate with the v1 projection
   const pending = idx.byName.get('n')!
-  controller.mergeAdopted(pending, { id: 'a1', name: 'n', item: { shared: 'v1' } })
-  expect(pending.item).toEqual({ mine: 1, shared: 'v1' })
-  // the target is replaced; invalidation cleared the selection, and the fresh selection re-merges
-  controller.mergeAdopted(pending, { id: 'a1', name: 'n', item: { shared: 'v2' } })
-  expect(pending.item, 'v2 won: the projection was rebased, not compounded').toEqual({ mine: 1, shared: 'v2' })
-  secret.resolve()
+  expect(pending.adopt_id).toBe('a1')
+  // the replacement arrives while the v1 attempt encrypts: same id, same name, v2
+  registerHidden(idx, { id: 'a1', name: 'n', item: { shared: 'v2' } }, (p, f) => controller.mergeAdopted(p, f))
+  expect(pending.adopt_id, 'freshly re-adopted to the same id').toBe('a1')
+  gate.resolve()
+  for (let i = 0; i < 10; i++) await flush()
+  const written = calls.filter(c => c.op == 'update' || c.op == 'create')
+  expect(written.length, 'the write happened').toBeGreaterThan(0)
+  for (const w of written) expect(itemOf(w.text).shared, 'no issued payload carries v1').toBe('v2')
+  expect(pending.item.shared, 'the finalized wrapper carries v2').toBe('v2')
+  expect(published.at(-1)!.shared, 'the last owner publication carries v2').toBe('v2')
 })
 
 
@@ -1482,11 +1504,20 @@ test('the baseline is cloned at save time: later caller mutations never reach a 
   const h = harness()
   const { calls } = h
   const controller = createHiddenPersistence(h.deps)
-  const live: any = { mine: 1 }
+  // nested values the earlier structural clone ALIASED (round 36): a Date freezes to the string
+  // JSON will persist, and a legal own __proto__ key survives as a data property
+  const when = new Date('2026-01-02T03:04:05.000Z')
+  const live: any = { mine: 1, nested: { when }, ['__proto__']: { legal: true } }
   controller.save('n', live)
   live.mine = 'mutated after save'
+  when.setFullYear(1999) // mutating the aliased Date must not reach the queued write
   for (let i = 0; i < 6; i++) await flush()
-  expect(itemOf(calls.find(c => c.op == 'create')!.text)).toEqual({ mine: 1 })
+  const created = itemOf(calls.find(c => c.op == 'create')!.text)
+  expect(created.mine).toBe(1)
+  expect(created.nested.when, 'the Date froze at save time').toBe('2026-01-02T03:04:05.000Z')
+  expect(Object.getOwnPropertyDescriptor(created, '__proto__')?.value, 'own __proto__ is data, not setter').toEqual({
+    legal: true,
+  })
 
   // the SUPERSEDE site: a second save while the first generation is still owed reassigns
   // localIntent rather than creating a new owed record

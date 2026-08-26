@@ -88,17 +88,17 @@ export type HiddenPersistenceDeps = {
   readonly: () => boolean
 }
 
-// DEEP CLONE for the JSON-ish state bag. plain objects and arrays are copied; anything else passes
-// through by reference, which matches how this state is persisted (payload -> encryptState -> JSON)
-// and cannot throw the way structuredClone does on a function
+// JSON-NORMALIZING deep clone: the state is persisted as JSON (payload -> encryptState -> JSON),
+// so cloning THROUGH JSON freezes exactly the representation that will be written — a nested Date
+// becomes its serialized string now rather than aliasing a mutable object, and a legal own
+// `__proto__` key survives (JSON.parse creates it as a data property; assignment into a fresh
+// object would have invoked the prototype setter). the earlier structural walk aliased Dates,
+// null-prototype and custom objects, which contradicted the "deep clone per generation" contract
+// (round 36). a value JSON cannot represent at all (undefined, a bare function) passes through —
+// persistence would drop it identically
 function cloneState<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(cloneState) as unknown as T
-  if (value && typeof value == 'object' && Object.getPrototypeOf(value) === Object.prototype) {
-    const out: Record<string, any> = {}
-    for (const key of Object.keys(value as Record<string, any>)) out[key] = cloneState((value as any)[key])
-    return out as unknown as T
-  }
-  return value
+  const json = JSON.stringify(value)
+  return json === undefined ? value : JSON.parse(json)
 }
 
 // a document snapshot of the wrapper's current state (name + item only)
@@ -406,27 +406,26 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // rejection recovery stays attached but detached from the chain
       if (wrapper.adopt_id) {
         const adoptId = wrapper.adopt_id
+        // the SELECTION is the pointer AND the derived projection object: a same-id invalidation
+        // followed by immediate same-id re-adoption restores the pointer string, and the target —
+        // absent from byId until finalization — keeps stamp `absent` on both sides, so neither
+        // notices. mergeAdopted rebases by assigning a FRESH object, so projection identity is the
+        // selection version (round 36): a re-adoption while we encrypt changes it, and the stale
+        // attempt must not issue its already-encrypted old payload against the newer selection
+        const projection = wrapper.item
         const stamp = targetStamp(adoptId) // what we believe the target is, before we build for it
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
         if (isPending(adoptId)) return false // refuse, do not await (see the ordinary path)
-        // THREE conditions. "strictly lower" was only the first: a lower id arriving makes this
-        // target noncanonical, and a change to the target ITSELF (removed, renamed, replaced under
-        // the same id) makes the payload we just built wrong for it. the POINTER equality is the
-        // third and is not implied by the stamp: invalidateAdopters can clear or a re-adoption can
-        // re-point adopt_id while we encrypt, and for a target absent from byId (adoption targets
-        // are, until finalization) the stamp reads `absent` before and after — so a stale attempt
-        // would issue against a cleared selection and finalizeAdoption would consume a pointer that
-        // is no longer the one it captured
+        // a NEWER selection (pointer moved or projection rebased): refuse and clear NOTHING — the
+        // selection belongs to whoever made it, and the retry re-merges from the current state
+        if (wrapper.adopt_id !== adoptId || wrapper.item !== projection) return false
+        // our own selection is stale against the WORLD: a lower id arriving makes this target
+        // noncanonical, and a change to the target itself (removed, renamed, replaced under the
+        // same id) makes the payload we just built wrong for it. clear our selection and re-choose
         const better = findSurvivor(wrapper)
-        if (
-          wrapper.adopt_id !== adoptId ||
-          (better && compareIds(better.id, adoptId) < 0) ||
-          targetStamp(adoptId) !== stamp
-        ) {
-          // only OUR OWN still-current selection is cleared: a newer selection belongs to whoever
-          // made it, and clearing it here would be the stale-clears-newer bug in the other direction
-          if (wrapper.adopt_id === adoptId) wrapper.adopt_id = null // re-choose on the retry
+        if ((better && compareIds(better.id, adoptId) < 0) || targetStamp(adoptId) !== stamp) {
+          wrapper.adopt_id = null // ours, still current — see the identity check above
           return false
         }
         if (issueWrite(name, generation, adoptId, data, false)) finalizeAdoption(deps.index(), wrapper)
