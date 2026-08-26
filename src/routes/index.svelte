@@ -3347,54 +3347,26 @@
     setTimeout(() => void attempt(), 0)
   }
 
-  // returns true when the deferral reached a TERMINAL outcome (applied, proven equal, or no
-  // longer ours to settle) and false when it should be retried. the marker is cleared only on a
-  // terminal outcome, and local intent, its VERSION and the marker generation are all rechecked
-  // after every await: a save that starts while the read is in flight builds its payload from live
-  // item state, so applying the response over it would persist the rollback.
-  // the version is what makes that check complete. `hasLocalIntent` samples the PRESENT, so a save
-  // that both started and finished inside the read window left no trace in it — and the response,
-  // read before that save landed, was applied over the user's completed edit and then persisted by
-  // the next save. that was the one remaining destructive case in this file
-  async function reconcileDeferredRemoteChange(item, generation) {
-    const id = item?.savedId
-    if (!id || deferredRemoteChanges.get(id) !== generation) return true // superseded or gone
-    if (hasLocalIntent(item)) return true // more local intent queued: reconcile when IT settles
-    const seenSaveSeq = item.saveSeq ?? 0
-    const stale = () =>
-      deferredRemoteChanges.get(id) !== generation || hasLocalIntent(item) || (item.saveSeq ?? 0) !== seenSaveSeq
-    const settle = result => {
-      if (deferredRemoteChanges.get(id) === generation) deferredRemoteChanges.delete(id)
-      return result
-    }
-    try {
-      const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
-      if (stale()) return true // a newer deferral or new local intent owns this document now
-      const meta = { id, metadata: { hasPendingWrites: false } }
-      if (!snapshot.exists()) {
-        settle(true)
-        applyRemoteChangeRef?.({ type: 'removed' }, meta, { hidden: false, text: '' })
-        return true
-      }
-      const savedItem = await decryptItem(Object.assign(snapshot.data(), { id }))
-      if (stale()) return true
-      if (savedItem.hidden) return settle(true) // not an ordinary item any more
-      // the server already holds our state: nothing was lost, and applying would be a no-op
-      if (
-        savedItem.text == item.savedText &&
-        savedItem.time == item.savedTime &&
-        _.isEqual(savedItem.attr, item.savedAttr)
-      )
-        return settle(true)
-      settle(true)
-      applyRemoteChangeRef?.({ type: 'modified' }, meta, savedItem)
-      return true
-    } catch (e) {
-      // transient read/decrypt failure: the marker stays, the caller retries
-      console.error('could not reconcile deferred remote change (will retry):', id, e)
-      return false
-    }
-  }
+  // the decision itself lives in src/reconcile.ts, table-tested there; this binds it to the
+  // component's state. the scheduling loop above is timer plumbing over it
+  const reconcileDeferredRemoteChange = (item, generation) =>
+    reconcileDeferred(
+      {
+        readFromServer: async id => {
+          const snapshot = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+          return { exists: snapshot.exists(), data: snapshot.exists() ? snapshot.data() : undefined }
+        },
+        decryptItem,
+        applyRemote: (type, id, savedItem) =>
+          applyRemoteChangeRef?.({ type }, { id, metadata: { hasPendingWrites: false } }, savedItem),
+        hasLocalIntent,
+        deferredGeneration: id => deferredRemoteChanges.get(id),
+        clearDeferral: id => deferredRemoteChanges.delete(id),
+      },
+      item,
+      generation
+    )
+
   function itemDeps(index, deps = [], missing_deps = undefined) {
     let item = items[index]
     if (deps.includes(item.id)) return deps
@@ -6277,6 +6249,7 @@
     decryptBytesWithSecret,
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, sharedOriginRedirect } from '../host.js'
+  import { reconcileDeferred } from '../reconcile'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
