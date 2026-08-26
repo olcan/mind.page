@@ -6663,8 +6663,8 @@
         const run = await new Promise(resolve =>
           _modal(
             `This shared page includes code written by its owner, which would run with full ` +
-              `access to your MindPage account in this browser — your items, your sign-in and ` +
-              `your encryption secret. Run the owner's code?`,
+              `access to your MindPage account — your items, your sign-in and your encryption ` +
+              `secret. Run the owner's code?`,
             {
               confirm: 'Run Code',
               cancel: 'View Only',
