@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
 import {
   applyRemoteAdded,
+  invalidateAdopters,
   registerHidden,
   removeHidden,
   type HiddenIndex,
@@ -56,6 +57,7 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     echoApplied: () => true,
     confirmIndex: async _name => void calls.push({ op: 'confirm' }),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
+    syncOwner: () => {}, // owner publication is index.svelte's side; schedules assert via calls
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
     newTempId: () => 'temp' + ++ids,
     readonly: () => false,
@@ -664,7 +666,13 @@ test('an adopted write rejected as not-found does not leave the wrapper on a van
   expect(calls.filter(c => c.op == 'invalidate')).not.toHaveLength(0) // authority revoked
   const created = calls.find(c => c.op == 'create')
   expect(created).toBeTruthy() // the state reached a real document
-  expect(itemOf(created!.text)).toEqual({ theirs: 1, mine: 1 }) // ... carrying the merged state
+  // ... carrying the UNMERGED baseline. round 15 pinned the merged state here; round 35 changed
+  // the contract deliberately: the adopted document is GONE from the server, invalidation left no
+  // survivor, and resurrecting its state into a fresh document is exactly what adopter
+  // invalidation exists to prevent — stale adopted defaults left visible would be legitimized as
+  // new local intent by the next real save. the owner is republished the baseline for the same
+  // reason (deps.syncOwner in the fresh-create reset)
+  expect(itemOf(created!.text)).toEqual({ mine: 1 })
   expect(idx.byName.get('n')!.id).toBe(created!.id)
 })
 
@@ -1346,3 +1354,150 @@ test('settlement does not reconcile the owner when its own echo failed to apply'
   expect(reconciled, 'the owner already holds what was written').toEqual([])
 })
 
+
+
+test('an adoption invalidated DURING encryption neither issues nor finalizes against the stale pointer', async () => {
+  // round-35 stage-1a guard 2. targetStamp is not the pointer's CAS: for a target absent from byId
+  // (adoption targets are, until finalization) the stamp reads `absent` before and after, so only
+  // the captured-pointer equality can notice invalidateAdopters clearing the selection while the
+  // attempt was inside encryptState
+  const gate = deferred<void>()
+  const h = harness()
+  const { idx, calls } = h
+  let wrapperRef: HiddenWrapper | undefined
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    // register the target ONCE: a later confirm must not re-offer it, or the retry would freshly
+    // and legitimately re-adopt and the schedule could no longer tell stale from fresh
+    confirmIndex: async name => {
+      if (wrapperRef) return
+      registerHidden(idx, { id: 'target1', name, item: { theirs: 1 } }, (p, f) => {
+        wrapperRef = p
+        Object.assign(p.item, { ...f.item, ...p.item })
+      })
+    },
+    encryptState: async state => {
+      await gate.promise // hold the attempt inside encryption
+      return { cipher: JSON.stringify(state) }
+    },
+  })
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 4; i++) await flush() // reach the encryption gate with adopt_id = target1
+  expect(wrapperRef?.adopt_id).toBe('target1')
+  invalidateAdopters(idx, 'target1') // the selection is cleared while we encrypt
+  gate.resolve()
+  for (let i = 0; i < 8; i++) await flush()
+  expect(
+    calls.filter(c => c.op == 'update' && c.id == 'target1'),
+    'no stale write against the cleared selection'
+  ).toHaveLength(0)
+  // the retry re-chose with the selection gone: a FRESH create under a new id, not a resurrection
+  const created = calls.find(c => c.op == 'create')
+  expect(created).toBeTruthy()
+  expect(created!.id).not.toBe('target1')
+})
+
+
+// ROUND-35 STAGE 1B: baseline / derived projection / owner as three distinct identities
+
+test('adoption while acquireSecret is pending reaches payload, wrapper and owner; the baseline stays unmerged', async () => {
+  // the schedule that FAILED under the first stage-1b attempt: fixed-page phrase validation
+  // registers and adopts BEFORE the secret is published, so the merge lands while persistOwed is
+  // still waiting on acquireSecret. the old code then reset the projection from the baseline on
+  // attempt entry, and the merge was encrypted away
+  const secret = deferred<void>()
+  const published: any[] = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: () => secret.promise,
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
+  })
+  const saved = { mine: 1 }
+  controller.save('n', saved)
+  await flush()
+  // registration runs while the secret gate holds the attempt: the controller's own merge rebases
+  // from the baseline and publishes the projection
+  const pending = idx.byName.get('n')!
+  controller.mergeAdopted(pending, { id: 'doc1', name: 'n', item: { pre: 1 } })
+  pending.adopt_id = 'doc1'
+  secret.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  const written = calls.find(c => c.op == 'update' && c.id == 'doc1')
+  expect(written, 'the adopted document was updated, not duplicated').toBeTruthy()
+  expect(itemOf(written!.text), 'payload carries the merge').toEqual({ mine: 1, pre: 1 })
+  expect(published.at(-1), 'the owner was published the projection').toEqual({ mine: 1, pre: 1 })
+  expect(saved, 'the caller object was never touched').toEqual({ mine: 1 })
+})
+
+test('baseline, derived wrapper and owner are distinct identities', async () => {
+  const published: any[] = []
+  const h = harness()
+  const { idx } = h
+  const secret2 = deferred<void>()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: () => secret2.promise, // hold the attempt so the wrapper stays pending
+    syncOwner: (_name, state) => void published.push(state),
+  })
+  const saved = { mine: 1 }
+  controller.save('n', saved)
+  await flush()
+  const pending = idx.byName.get('n')!
+  controller.mergeAdopted(pending, { id: 'doc1', name: 'n', item: { pre: 1 } })
+  expect(pending.item, 'projection').toEqual({ mine: 1, pre: 1 })
+  expect(pending.item, 'projection is not the caller object').not.toBe(saved)
+  expect(published[0], 'owner state is not the projection object').not.toBe(pending.item)
+  saved.mine = 99 // mutating the caller object reaches neither
+  expect(pending.item.mine).toBe(1)
+})
+
+test('mergeAdopted REBASES: a second adoption after invalidation carries v2, never v1', async () => {
+  // defaultsDeep never overwrites a filled-in key, so merging into the old projection would keep
+  // v1 forever. the rebase from the immutable baseline is what discards it. the secret gate holds
+  // the attempt so the name stays OWED and PENDING across both merges — the only state in which
+  // registration paths adopt (registerHidden requires pending_create), so a settled-wrapper
+  // version of this schedule would be unreal
+  const secret = deferred<void>()
+  const h = harness()
+  const { idx } = h
+  const controller = createHiddenPersistence({ ...h.deps, acquireSecret: () => secret.promise })
+  controller.save('n', { mine: 1 })
+  await flush()
+  const pending = idx.byName.get('n')!
+  controller.mergeAdopted(pending, { id: 'a1', name: 'n', item: { shared: 'v1' } })
+  expect(pending.item).toEqual({ mine: 1, shared: 'v1' })
+  // the target is replaced; invalidation cleared the selection, and the fresh selection re-merges
+  controller.mergeAdopted(pending, { id: 'a1', name: 'n', item: { shared: 'v2' } })
+  expect(pending.item, 'v2 won: the projection was rebased, not compounded').toEqual({ mine: 1, shared: 'v2' })
+  secret.resolve()
+})
+
+
+test('the baseline is cloned at save time: later caller mutations never reach a queued write', async () => {
+  // both owed sites clone (creation and supersede): sharing the caller's object would let an owner
+  // that keeps mutating its global_store change what an already-queued write persists, and adoption
+  // rebases would rebase onto a moving target
+  const h = harness()
+  const { calls } = h
+  const controller = createHiddenPersistence(h.deps)
+  const live: any = { mine: 1 }
+  controller.save('n', live)
+  live.mine = 'mutated after save'
+  for (let i = 0; i < 6; i++) await flush()
+  expect(itemOf(calls.find(c => c.op == 'create')!.text)).toEqual({ mine: 1 })
+
+  // the SUPERSEDE site: a second save while the first generation is still owed reassigns
+  // localIntent rather than creating a new owed record
+  calls.length = 0
+  const third: any = { mine: 3 }
+  const fourth: any = { mine: 4 }
+  controller.save('n', third)
+  controller.save('n', fourth) // supersedes before the first attempt runs
+  fourth.mine = 'mutated after the superseding save'
+  for (let i = 0; i < 8; i++) await flush()
+  const written = calls.filter(c => c.op == 'create' || c.op == 'update')
+  expect(written.length).toBeGreaterThan(0)
+  expect(itemOf(written.at(-1)!.text)).toEqual({ mine: 4 })
+})

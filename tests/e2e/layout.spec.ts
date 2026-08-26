@@ -52,68 +52,21 @@ async function expectConsistentColumns(page: Page) {
 // the FIRST column's width. The recreated column div must be re-sized promptly after a reflow (the
 // post-flush re-apply in updateItemLayout, not an eventual later layout pass): renders started
 // right after a reflow measure against these widths, and charts skip rendering at zero width.
-// THE 1200 -> 900 -> 1200 ROUND TRIP IS THE POINT OF THIS TEST. It was quarantined for one round
-// after roughly five stalls, all of it inside a full gate; the cause is now understood and fixed
-// (checkLayout's width memo moved to updateItemLayout, which is what invalidates it — see
-// lastDocumentWidth in index.svelte and the issue doc). Both viewport changes fit inside one 250ms
-// resize-suppression window, a layout ran from another trigger meanwhile, and checkLayout then
-// compared the grown-back width against its own stale observation of the same number.
-// `LAYOUT_DIAGNOSTIC=1 tests/e2e/run.sh` re-arms the decision trace that diagnosed it; ordinary
-// gates run the same assertions with no instrumentation.
+// THE 1200 -> 900 -> 1200 ROUND TRIP IS THE POINT OF THIS TEST: it once stalled at one column when
+// both viewport changes fit inside checkLayout's 250ms resize suppression while another trigger
+// laid out at 900 — checkLayout's private observed-width memo then said "width-same" forever. the
+// memo now belongs to updateItemLayout, stamped after the layout core succeeds. the diagnostic
+// tracing that established this is deleted (its postmortem survives in the issue doc); this round
+// trip is the durable regression test.
 // See issues/MindPage Column Layout Stalls After Growing Back.md
-const DIAGNOSTIC = !!process.env.LAYOUT_DIAGNOSTIC
 test('column layout follows viewport width, keeping items unique, ordered and correctly sized', async ({
   page,
-}, testInfo) => {
-  // scalar-only tracing inside checkLayout (see traceLayout in index.svelte), plus a test-side
-  // heartbeat that separates main-thread starvation from a layout decision that ran and declined.
-  // reading layout properties from here while reproducing would perturb the scheduling under test,
-  // so nothing is polled from the page except the column count the assertions already need
-  if (DIAGNOSTIC)
-    await page.addInitScript(() => {
-      ;(globalThis as any).__layoutTraceOn = true
-      ;(globalThis as any).__beats = []
-      setInterval(() => {
-        const beats = (globalThis as any).__beats
-        if (beats.length >= 500) beats.shift()
-        beats.push(Math.round(performance.now()))
-      }, 100)
-      try {
-        new PerformanceObserver(list => {
-          const long = ((globalThis as any).__longTasks ??= [])
-          for (const entry of list.getEntries())
-            long.push({ t: Math.round(entry.startTime), ms: Math.round(entry.duration) })
-        }).observe({ entryTypes: ['longtask'] })
-      } catch {
-        // longtask is not observable everywhere; the heartbeat gaps still show starvation
-      }
-    })
-  const attachTrace = async (label: string) => {
-    const dump = await page
-      .evaluate(() => ({
-        trace: (window as any).__layoutTrace ?? [],
-        beats: (globalThis as any).__beats ?? [],
-        longTasks: (globalThis as any).__longTasks ?? [],
-        columns: document.querySelectorAll('.column:not(.hidden)').length,
-        innerWidth,
-        clientWidth: document.documentElement.clientWidth,
-        layoutCount: (window as any).__layoutCount,
-      }))
-      .catch(e => ({ error: String(e) }))
-    await testInfo.attach(label, { body: JSON.stringify(dump, null, 2), contentType: 'application/json' })
-  }
-  // one attachment per transition, so a failure carries the trace of the transition that stalled
-  const settle = async (count: number, label: string) => {
-    try {
-      await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
-    } finally {
-      if (DIAGNOSTIC) await attachTrace(label)
-    }
-  }
+}) => {
+  const settle = (count: number) => expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
 
   await page.setViewportSize({ width: 1200, height: 900 }) // floor(1200 / 500) = 2 columns
   await loadAnonymous(page)
-  await settle(2, 'fresh-1200')
+  await settle(2)
   const ids = await expectConsistentColumns(page)
   expect(ids.length).toBeGreaterThan(2)
   const fresh = await widths(page)
@@ -127,7 +80,7 @@ test('column layout follows viewport width, keeping items unique, ordered and co
     [900, 1],
   ] as const) {
     await page.setViewportSize({ width, height: 900 })
-    await settle(count, `resize-${width}`)
+    await settle(count)
     expect(await expectConsistentColumns(page)).toEqual(ids) // same visible set, reordered never
     await expect.poll(async () => (await widths(page)).hidden, { timeout: 2_000 }).toBe((await widths(page)).first)
     const sizes = await widths(page)

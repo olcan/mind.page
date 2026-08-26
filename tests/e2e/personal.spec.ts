@@ -396,8 +396,9 @@ test('a foreign shared page is served from the isolated origin, which clears app
     }, SHARED_LOCAL_HOST)
 
     await withSecret(page)
+    // no waitForApp: loadUser already proves the signed-in uid, and this page is navigated away
+    // from immediately — only persisted auth and secret matter here (round 35)
     await loadUser(page, ALICE)
-    await waitForApp(page)
     expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
 
     await page.goto('/?shared=crawl_e2e/trap')
@@ -574,8 +575,9 @@ test('a save from the owner\'s own shared page updates its store rather than dup
   // origin), on their own shared page, with NO stored secret — so the save itself raises the prompt
   const saveFromOwnSharedPage = async () => {
     await withSecret(page)
+    // no waitForApp: loadUser already waits for the reloaded app's init and expected uid, and this
+    // page is navigated away from immediately — only persisted auth and secret matter (round 35)
     await loadUser(page, ALICE)
-    await waitForApp(page)
     await page.evaluate(() => localStorage.removeItem('mindpage_secret')) // a device without it
     await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
     await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 }) // fixed-page welcome

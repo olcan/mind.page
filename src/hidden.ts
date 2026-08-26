@@ -117,6 +117,11 @@ export function registerHidden(
   mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => void
 ): 'adopted' | 'exists' | 'added' | 'quarantined' {
   if (isQuarantined(index, wrapper.id)) return 'quarantined' // judged redundant this session
+  // BEFORE any branch: re-registration under a NEW name takes the 'added' or 'adopted' branch, and
+  // an invalidation only inside 'exists' would leave a pending wrapper adopted to this id under the
+  // OLD name, free to write that stale merge back (round 35). the id's state is being replaced no
+  // matter which branch follows
+  invalidateAdopters(index, wrapper.id)
   const existing = index.byName.get(wrapper.name)
   if (existing) {
     if (existing.pending_create && !existing.adopt_id) {
@@ -125,7 +130,6 @@ export function registerHidden(
       return 'adopted'
     }
     // retain the record; the name keeps its minimum-id (or pending) holder
-    invalidateAdopters(index, wrapper.id) // this replaces the state an adopter merged from
     index.byId.set(wrapper.id, wrapper)
     indexByName(index, wrapper)
     return 'exists'

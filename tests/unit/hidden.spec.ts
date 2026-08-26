@@ -307,7 +307,6 @@ test('a same-id replacement of the adoption target invalidates the adoption', as
     ['modify', (idx: HiddenIndex) => applyRemoteModified(idx, wrapper('a1', 'name', { x: 'v2' }))],
     ['add', (idx: HiddenIndex) => applyRemoteAdded(idx, wrapper('a1', 'name', { x: 'v2' }))],
     ['remove', (idx: HiddenIndex) => removeHidden(idx, 'a1')],
-    ['re-registration', (idx: HiddenIndex) => registerHidden(idx, wrapper('a1', 'name', { x: 'v2' }), () => {})],
   ] as const) {
     const idx = index()
     const pending = adopting(idx, wrapper('a1', 'name', { x: 'v1' }), { mine: 1 })
@@ -315,6 +314,48 @@ test('a same-id replacement of the adoption target invalidates the adoption', as
     apply(idx)
     expect(pending.adopt_id, `${label} invalidates the adoption`).toBe(null)
   }
+})
+
+test('a same-name re-registration invalidates the old adoption and FRESHLY re-adopts', async () => {
+  // round 35: invalidation runs at ENTRY, before any branch, so the pending wrapper's cleared
+  // adopt_id makes it eligible to adopt again — the stale merge is discarded in favor of a fresh
+  // one against the arriving state. (the fresh merge REBASES from unmerged local intent in stage
+  // 1b; the reducer's half is invalidate-then-readopt with the merge callback invoked again)
+  const idx = index()
+  let merges = 0
+  const pending: HiddenWrapper = { id: 'temp1', name: 'name', item: { mine: 1 }, pending_create: true, adopt_id: null }
+  idx.byId.set('temp1', pending)
+  idx.byName.set('name', pending)
+  const merge = () => void merges++
+  expect(registerHidden(idx, wrapper('a1', 'name', { x: 'v1' }), merge)).toBe('adopted')
+  expect([pending.adopt_id, merges]).toEqual(['a1', 1])
+  expect(registerHidden(idx, wrapper('a1', 'name', { x: 'v2' }), merge)).toBe('adopted')
+  expect(pending.adopt_id, 'freshly re-adopted').toBe('a1')
+  expect(merges, 'the merge ran AGAIN, against the arriving state').toBe(2)
+})
+
+test('re-registration under a NEW name still invalidates an adoption held under the old name', async () => {
+  // the round-35 hole: re-registration of d1 under name B finds no byName[B], takes the 'added'
+  // branch, and a branch-local invalidation would never run — leaving the old adopter free to
+  // write name A's stale merge back to d1
+  const idx = index()
+  const pending: HiddenWrapper = { id: 'temp1', name: 'A', item: { mine: 1 }, pending_create: true, adopt_id: null }
+  idx.byId.set('temp1', pending)
+  idx.byName.set('A', pending)
+  expect(registerHidden(idx, wrapper('d1', 'A', { x: 1 }), (p, f) => Object.assign(p.item, { ...f.item, ...p.item }))).toBe('adopted')
+  expect(pending.adopt_id).toBe('d1')
+  // d1 arrives again under name B: the 'added' branch (no byName[B]) must still invalidate
+  expect(registerHidden(idx, wrapper('d1', 'B', { x: 2 }), () => {})).toBe('added')
+  expect(pending.adopt_id, "the old-name adopter cannot keep writing d1").toBe(null)
+
+  // ... and the 'adopted' branch analogue: d1 re-registers under name C that ANOTHER pending owns
+  const other: HiddenWrapper = { id: 'temp2', name: 'C', item: {}, pending_create: true, adopt_id: null }
+  idx.byId.set('temp2', other)
+  idx.byName.set('C', other)
+  pending.adopt_id = 'd1' // re-arm the stale pointer
+  expect(registerHidden(idx, wrapper('d1', 'C', { y: 1 }), () => {})).toBe('adopted')
+  expect(other.adopt_id, 'the C-name pending adopts the arrival').toBe('d1')
+  expect(pending.adopt_id, 'the stale A-name adopter is invalidated by the same entry').toBe(null)
 })
 
 test('a rename of the adoption target invalidates it too', async () => {

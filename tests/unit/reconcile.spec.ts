@@ -204,27 +204,41 @@ test('a THROWING live delivery leaves the marker for reconciliation', async () =
 // round-34 finding 1: a PARTIAL application makes the equality witness lie
 
 test('a partial application that then throws does not let the retry false-succeed', async () => {
-  // production copies savedText/savedTime/savedAttr into the item BEFORE running fallible
-  // downstream work. without the restore, the retry compares the already-copied witness against the
-  // same server copy, takes the equality branch, and clears the marker having replayed nothing
-  const server = { text: 'server', time: 2, attr: null }
-  let attempts = 0
+  // PRODUCTION-SHAPED (round 35): the fake mirrors the real modify path — it installs the server
+  // attribute in BOTH live and saved fields, decides the conditional callback from the witness, and
+  // throws inside that callback. round 34's version threw before mutating anything and round 35's
+  // review caught that counting outer entries proves nothing: the retry can re-enter the outer
+  // application, see attr "unchanged" on the live field, and skip the exact callback that failed
+  const live: any = { attr: { color: 'old' } }
+  const server = { text: 'server', time: 2, attr: { color: 'new' } }
+  let applications = 0
+  let attrCallbacks = 0
   const { deps, item, deferrals } = harness({
-    readFromServer: async () => ({ exists: true, data: { ...server } }),
+    readFromServer: async () => ({ exists: true, data: { ...server, attr: { ...server.attr } } }),
     applyRemote: (_type, _id, savedItem) =>
       applyRestoringWitness(() => {
-        attempts++
-        item.savedText = savedItem.text // the early copy
+        applications++
+        // the branch decision reads the WITNESS, as production now does (round 35): live attr is
+        // already the server value on the retry, so deciding from it skips the failed callback
+        const attr_modified = JSON.stringify(item.savedAttr) != JSON.stringify(savedItem.attr)
+        item.savedText = savedItem.text // the early copies, exactly as production orders them
         item.savedTime = savedItem.time
-        if (attempts == 1) throw new Error('downstream failed')
+        live.attr = savedItem.attr
+        item.savedAttr = savedItem.attr
+        if (attr_modified) {
+          attrCallbacks++
+          if (attrCallbacks == 1) throw new Error('downstream failed') // _on_attr_change throws
+        }
       }, item),
   })
+  item.savedAttr = { color: 'old' }
   expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
   expect(deferrals.get('d1'), 'the marker survives').toBe(1)
-  expect(item.savedText, 'the witness is restored, not left claiming the server state').toBe('local')
+  expect(item.savedAttr, 'the witness is restored, not left claiming the server state').toEqual({ color: 'old' })
 
   expect(await reconcileDeferred(deps, item, 1)).toBe(true)
-  expect(attempts, 'the retry APPLIED again rather than settling on a false equality').toBe(2)
+  expect(attrCallbacks, 'the CONDITIONAL EFFECT reran — the thing round 34 only pretended to prove').toBe(2)
+  expect(applications).toBe(2)
   expect(deferrals.has('d1'), 'terminal only after a full application').toBe(false)
 })
 

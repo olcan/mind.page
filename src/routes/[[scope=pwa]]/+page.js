@@ -17,17 +17,17 @@ export async function load({ data }) {
     // same-origin tabs mutually trust each other. the next clean navigation removes the residue.
     // this runs FIRST in the browser branch, and is the earliest app code on the page
     if (isSharedOrigin(location.hostname)) {
-      // INDEPENDENT try blocks: both are best-effort, and a throw from the first (private mode,
-      // blocked cookies) must not skip the second
-      for (const [name, store] of [
-        ['localStorage', localStorage],
-        ['sessionStorage', sessionStorage],
-      ]) {
-        try {
-          store.clear()
-        } catch (e) {
-          console.warn(`could not scrub shared-origin ${name}:`, e)
-        }
+      // INDEPENDENT try blocks — literally: the storage GETTERS themselves can throw a
+      // SecurityError, so building an array of both stores first would abort before either try
+      try {
+        localStorage.clear()
+      } catch (e) {
+        console.warn('could not scrub shared-origin localStorage:', e)
+      }
+      try {
+        sessionStorage.clear()
+      } catch (e) {
+        console.warn('could not scrub shared-origin sessionStorage:', e)
       }
     }
     // drop the injected crawler content (see hooks.server.js) before the app renders

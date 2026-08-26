@@ -322,7 +322,6 @@
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
-    Object.defineProperty(window, '__layoutTrace', { get: () => layoutTrace }) // see traceLayout
     // hidden-index authority (see settleHiddenAuthority), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
@@ -1776,30 +1775,6 @@
   let lastLayoutTime = 0
   let showDotted = false
   const separatorHeight = 80
-
-  // TEMPORARY DIAGNOSTIC for the column-layout stall (see the tracked issue of the same name and
-  // tests/e2e/layout.spec.ts). when the grow-back poll fails it only knows "still one column"; the
-  // ring below says WHICH branch of checkLayout kept it there. scalar state only — reading layout
-  // properties from the test while reproducing perturbs the very scheduling under investigation.
-  // OFF unless a test sets window.__layoutTraceOn before startup, so the cost is one property read
-  const layoutTrace = []
-  let scrollEvents = 0
-  let resizeEvents = 0
-  function traceLayout(decision, extra = {}) {
-    if (!globalThis.__layoutTraceOn) return
-    if (layoutTrace.length >= 500) layoutTrace.shift()
-    layoutTrace.push({
-      t: Math.round(performance.now()),
-      decision,
-      scrollAge: Date.now() - lastScrollTime,
-      resizeAge: Date.now() - lastResizeTime,
-      scrollEvents,
-      resizeEvents,
-      layoutCount,
-      columnCount,
-      ...extra,
-    })
-  }
 
   // THE WIDTH THE CURRENT LAYOUT WAS COMPUTED AT, owned by updateItemLayout because that is what
   // invalidates it. It used to be checkLayout's private memo of the last width it OBSERVED, which
@@ -5957,7 +5932,6 @@
     // we also ignore scroll events (for focusing) during initial render (while rendered=false)
     // does not appear to be possible to shift-focus-on-scroll on macos
     if (rendered && Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
-    scrollEvents++ // see traceLayout
     lastScrollTime = Date.now()
     if (!historyUpdatePending) {
       historyUpdatePending = true
@@ -5971,7 +5945,6 @@
 
   let lastResizeTime = 0
   function onResize() {
-    resizeEvents++ // see traceLayout
     lastResizeTime = Date.now()
   }
 
@@ -6613,10 +6586,11 @@
       const owner = wrapper.name.replace(/^global_store_/, '')
       if (ownerExists(owner)) {
         console.warn('registering startup-orphaned hidden item whose owner arrived', wrapper.name, wrapper.id)
-        // mergeAdoptedStore, like the other registerHidden call sites: a bare defaultsDeep merges
-        // the found state into the pending wrapper but never syncs the OWNER's in-memory
-        // global_store, which the comment above already claims happens here
-        registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
+        // merge-only callback: the owner sync happens UNIVERSALLY on the next line, for every
+        // registration outcome ('added'/'exists' included, where no merge callback runs), by
+        // reading whatever record holds the name after registration. passing mergeAdoptedStore
+        // here would sync the owner twice on the 'adopted' branch (round 35)
+        registerHidden(hiddenIndex(), wrapper, (pending, found) => _.defaultsDeep(pending.item, found.item))
         const local = tempIdFromSavedId.get(owner) ?? owner
         if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
         continue
@@ -7294,8 +7268,8 @@
         // (otherwise e.g. tapping of tags with editor focused will scroll back up)
         if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur()
 
-        if (Date.now() - lastScrollTime < 250) return traceLayout('scroll', { lastDocumentWidth }) // during scroll
-        if (Date.now() - lastResizeTime < 250) return traceLayout('resize', { lastDocumentWidth }) // during resize
+        if (Date.now() - lastScrollTime < 250) return // during scroll
+        if (Date.now() - lastResizeTime < 250) return // during resize
 
         const isSameNode = (e1, e2) => e1 == e2 || (e1 && e2 && e1.isSameNode(e2))
 
@@ -7318,9 +7292,6 @@
           updateItemLayout()
           // resize of all elements w/ _resize attribute (and property)
           document.querySelectorAll('[_resize]').forEach(elem => elem['_resize']())
-          traceLayout('layout', { documentWidth, lastDocumentWidth, innerWidth })
-        } else {
-          traceLayout('width-same', { documentWidth, lastDocumentWidth, innerWidth })
         }
 
         // NO stamp here: the memo belongs to updateItemLayout (see above). stamping an observed
@@ -7552,6 +7523,11 @@
                       false /* keep_time */,
                       true /* remote */
                     )
+                    // ACCEPTED LIMITATION (round 35): a throw BELOW this splice leaves no current
+                    // row, so reconciliation's scheduler has nothing to retry from and the marker
+                    // strands — the remaining downstream effects complete only on reload. the
+                    // fallible item-code hook (itemTextChanged) deliberately runs ABOVE the splice,
+                    // so what follows is index bookkeeping that does not run user code
                     items.splice(index, 1)
                     if (index < hideIndex) hideIndex-- // back up hide index
                     // update indices as needed by onEditorChange
@@ -7584,7 +7560,11 @@
                     let item = items[index]
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
-                    const attr_modified = !_.isEqual(item.attr, savedItem.attr)
+                    // against the WITNESS (savedAttr), not live attr: applyRestoringWitness
+                    // restores saved* on a throw, so a retry recomputes this decision from the
+                    // restored value and reruns the exact callback that failed. live attr is
+                    // already the server value by then, which made the retry skip it (round 35)
+                    const attr_modified = !_.isEqual(item.savedAttr, savedItem.attr)
                     item.attr = savedItem.attr
                     item.savedAttr = _.cloneDeep(savedItem.attr)
                     // update mutable ux properties from item.attr
@@ -7985,13 +7965,14 @@
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
                   // log it and continue with the remaining changes.
-                  // KNOWN LIMITATION, stated rather than half-fixed: a live delivery with no
-                  // EXISTING deferral that throws here is dropped permanently — nothing redelivers
-                  // it. supersedingApplier only preserves a marker that already exists, and
-                  // applyRestoringWitness only protects reconciliation's own retry. Creating a
-                  // repair marker here would need an application the scheduler can replay from
-                  // nothing, which is the ingress coordinator's job (see notes/design/
-                  // mind_page_hidden_ingress_coordinator.md), not a second mechanism beside it
+                  // ACCEPTED LIMITATION of ordinary (non-hidden) ingress: a live delivery with no
+                  // EXISTING deferral that throws here is dropped until reload. nothing redelivers
+                  // it — supersedingApplier only preserves a marker that already exists, and
+                  // applyRestoringWitness only protects reconciliation's own retry. the hidden
+                  // ingress coordinator will NOT repair this either: its design explicitly excludes
+                  // plaintext documents that never touch hidden state. recorded as a residual in
+                  // plans/mind_page_next_steps; a replay-from-nothing marker for ordinary items
+                  // would be a second state machine and is deliberately not built
                   console.error('could not apply remote change:', doc.id, e)
                 }
                 } finally {
@@ -8726,18 +8707,12 @@
     lastFocusedElem?.blur()
   }
 
-  // registers a hidden item loaded after initialization (e.g. by the phrase validation on a fixed
-  // page); existing registrations win, as in initialize
-  // merges an adopted document's state under the pending wrapper's changes AND syncs the
-  // owner item's in-memory global_store: owners save fresh full-state clones (see
-  // save_global_store), so a merge the owner never sees would be erased by its next save
-  function mergeAdoptedStore(pending, found) {
-    _.defaultsDeep(pending.item, found.item)
-    const owner = pending.name.match(/^global_store_(.+)$/)?.[1]
-    if (!owner) return
-    const local = tempIdFromSavedId.get(owner) ?? owner
-    if (_exists(local)) item(local).global_store = _.cloneDeep(pending.item)
-  }
+  // the adoption merge for registration paths, OWNED BY THE CONTROLLER (round 35): it rebases the
+  // projection from the immutable local-intent baseline when the name owes one, merges the found
+  // state underneath, and publishes the exact result to the owner as a clone. registration paths
+  // must not merge into a possibly stale projection themselves — defaultsDeep never overwrites a
+  // filled-in key, so that kept a replaced document's values
+  const mergeAdoptedStore = (pending, found) => hiddenPersistence.mergeAdopted(pending, found)
 
   // parses one hidden document into a wrapper, QUARANTINING anything unusable (unparseable text
   // or a missing/non-string name) exactly as initialization does: an invalid record is reported
@@ -8818,7 +8793,14 @@
       await snapshotFrontier()
     },
     newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
-    adopt: mergeAdoptedStore,
+    // MERGE ONLY (see the dep's docstring): rebase and owner publication live in the controller
+    adopt: (pending, found) => _.defaultsDeep(pending.item, found.item),
+    syncOwner: (name, state) => {
+      const owner = name.match(/^global_store_(.+)$/)?.[1]
+      if (!owner) return
+      const local = tempIdFromSavedId.get(owner) ?? owner
+      if (_exists(local)) item(local).global_store = _.cloneDeep(state)
+    },
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: async pendingName => {
       // answers ONE question for ONE caller: does a record for `pendingName` already exist
@@ -8922,13 +8904,20 @@
     items.forEach(item => {
       if (!item.listen && item.id != id) return // must be listener or self
       if (!itemDefinesFunction(item, '_on_attr_change')) return
-      Promise.resolve(
-        _item(item.id).eval(`_on_attr_change('${id}', ${remote})`, {
-          trigger: item.listen ? 'listen' : 'change',
-          async: item.deepasync, // run async if item is async or has async deps
-          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-        })
-      ).catch(e => {}) // already logged
+      // SYNC throws are caught per item too: the .catch below only covers rejections, so one
+      // item's synchronous throw aborted the remaining listeners AND, on the reconcile path,
+      // escaped into the application — whose retry then skipped this callback entirely (round 35)
+      try {
+        Promise.resolve(
+          _item(item.id).eval(`_on_attr_change('${id}', ${remote})`, {
+            trigger: item.listen ? 'listen' : 'change',
+            async: item.deepasync, // run async if item is async or has async deps
+            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          })
+        ).catch(e => {}) // already logged
+      } catch (e) {
+        console.error(`_on_attr_change failed for item ${item.id}:`, e)
+      }
     })
   }
 

@@ -38,4 +38,8 @@ if [ -n "${SKIP_BUILD:-}" ]; then
 else
   npm run build # browser tests must exercise the sources in this tree
 fi
-firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test $*"
+# the inner command is parsed by ANOTHER shell, so each argument is %q-quoted: bare $* loses
+# argument boundaries and quoting (a --grep 'a|b' would become a shell pipeline there)
+playwright_args=''
+[ $# -gt 0 ] && printf -v playwright_args ' %q' "$@"
+firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test$playwright_args"

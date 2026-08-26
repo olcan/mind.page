@@ -54,10 +54,15 @@ export type HiddenPersistenceDeps = {
   // adopt the pending wrapper); resolves immediately when the index is authoritative, rejects
   // to FAIL the create (a partial index must never lead to a duplicate document)
   confirmIndex: (pendingName: string) => Promise<void>
-  // merges an adopted document's state under a pending wrapper's changes AND propagates the
-  // merged state back to whatever owns it (e.g. the owner item's in-memory global_store): the
-  // owner saves fresh full-state snapshots, so a merge it never sees is erased on its next save
+  // MERGE ONLY: merges the found document's state under the pending wrapper's changes, in place
+  // (production: _.defaultsDeep(pending.item, found.item)). rebasing the wrapper first and
+  // publishing the result to the owner are the CONTROLLER's job (see mergeAdopted): keeping merge
+  // mechanics here and ownership there is what lets every registration path share one contract
   adopt: (pending: HiddenWrapper, found: HiddenWrapper) => void
+  // publishes an EXACT state to whatever owns a name (the owner item's in-memory global_store),
+  // as a clone, never an alias. the owner saves fresh full-state snapshots, so a merge it never
+  // sees is erased on its next save — this is how it sees one
+  syncOwner: (name: string, state: any) => void
   // synchronizes whatever owns a name's state (the owner item's in-memory global_store) with the
   // record that now holds it. called once when a generation SETTLES, ON THE NAME'S CHAIN: while a
   // name owes a change, deliveries deliberately do not touch the owner (they would roll it back
@@ -81,6 +86,19 @@ export type HiddenPersistenceDeps = {
   invalidateAuthority: (reason: string) => void
   newTempId: () => string
   readonly: () => boolean
+}
+
+// DEEP CLONE for the JSON-ish state bag. plain objects and arrays are copied; anything else passes
+// through by reference, which matches how this state is persisted (payload -> encryptState -> JSON)
+// and cannot throw the way structuredClone does on a function
+function cloneState<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(cloneState) as unknown as T
+  if (value && typeof value == 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, any> = {}
+    for (const key of Object.keys(value as Record<string, any>)) out[key] = cloneState((value as any)[key])
+    return out as unknown as T
+  }
+  return value
 }
 
 // a document snapshot of the wrapper's current state (name + item only)
@@ -114,7 +132,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   //   it looked like "a task is already queued" and the work sat forever
   // - the record survives issuance, so `owes()` still classifies the echoes of that write
   type Phase = 'queued' | 'building' | 'issued' | 'failed'
-  type Owed = { generation: number; state: any; phase: Phase }
+  // localIntent is ONE DEEP CLONE of what the caller saved, per generation, and is never mutated
+  // by adoption: every merge rebases from a fresh clone of it (see mergeAdopted). the pending
+  // wrapper's `item` is the mutable DERIVED projection built over it; the owner's global_store is
+  // a published clone of that projection — three distinct identities (round 35)
+  type Owed = { generation: number; localIntent: any; phase: Phase }
   const owed = new Map<string, Owed>()
   let generationSeq = 0
 
@@ -137,6 +159,18 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   type Receipt = { token: number; wrapper?: HiddenWrapper; pending?: boolean }
   const receipts = new Map<string, Receipt>()
   let receiptSeq = 0
+
+  // adopts `found` under `pending`: REBASES the projection from a clone of the immutable local
+  // intent when this name owes one, merges the found state underneath, and publishes the exact
+  // result to the owner. rebasing here — at selection time, not at the next write attempt — is
+  // what makes an invalidate-then-readopt discard the stale merge: defaultsDeep never overwrites a
+  // filled-in key, so merging into an old projection would keep the replaced document's values
+  function mergeAdopted(pending: HiddenWrapper, found: HiddenWrapper) {
+    const op = owed.get(pending.name)
+    if (op) pending.item = cloneState(op.localIntent)
+    deps.adopt(pending, found)
+    deps.syncOwner(pending.name, cloneState(pending.item)) // a CLONE: no adapter may alias the projection
+  }
 
   // true while `generation` is still the record the name owes
   const currentOwed = (name: string, generation: number) =>
@@ -284,8 +318,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // behind the application that moved the target, which it is not
   async function attemptWrite(name: string, generation: number): Promise<boolean> {
     const current = () => currentOwed(name, generation)
-    const state = current()?.state
     if (!current()) return true // superseded: nothing owed by this generation any more
+    // PER-ATTEMPT WORKING COPY of the immutable baseline: merges below must not touch it
+    const state = cloneState(current()!.localIntent)
     let holder = canonicalHolder(name)
     if (!holder) {
       // nothing holds the name (never created, or removed while we were building): re-enter the
@@ -296,7 +331,18 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       index.byName.set(name, holder)
     }
     if (holder.pending_create || holder.adopt_id) {
-      holder.item = state
+      // a VALID adoption keeps its merged projection: the merge may have already run while
+      // acquireSecret was pending (fixed-page phrase validation registers before publishing the
+      // secret), and resetting from the baseline here erased it — attemptCreate then skipped the
+      // merge (adopt_id set), encrypted the reset baseline, and finalization copied it back over
+      // the owner (round 35). only a FRESH create rebuilds from the unmerged baseline, and it
+      // PUBLISHES that baseline to the owner too: leaving stale adopted defaults visible would let
+      // a later real save legitimize them as new local intent — resurrecting state whose document
+      // is gone, which is what adopter invalidation exists to prevent
+      if (!holder.adopt_id) {
+        holder.item = state
+        deps.syncOwner(name, cloneState(state))
+      }
       return await attemptCreate(holder, generation)
     }
     // check BEFORE the expensive work as well as after it: a refusal discovered only at the end
@@ -307,7 +353,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // that has only been received is about to be applied, and writing our state into that object
     // would make its own application carry our change instead of what arrived
     const merged = { ...holder, item: { ...(holder.item ?? {}) } }
+    // deps.adopt DIRECTLY, not mergeAdopted: the merge must land in `state` itself (adopt mutates
+    // its first argument's item in place), because the payload below is built from `state`.
+    // mergeAdopted's rebase would swap in a fresh object and the merge would be discarded with the
+    // temp wrapper. the rebase is moot here anyway — `state` IS a fresh clone of the baseline —
+    // and the owner publication follows explicitly
     deps.adopt({ ...merged, item: state }, merged) // may hold fields the owner never saw
+    deps.syncOwner(name, cloneState(state))
     if (deps.index().byId.get(holder.id) === holder) holder.item = state // live: keep in step
     const stamp = targetStamp(holder.id) // what we believe the target is, before we build for it
     const data = await deps.encryptState(payload({ ...holder, item: state }))
@@ -344,7 +396,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const survivor = findSurvivor(wrapper)
         if (survivor) {
           wrapper.adopt_id = survivor.id
-          deps.adopt(wrapper, survivor)
+          mergeAdopted(wrapper, survivor) // rebases from the baseline and publishes to the owner
         }
       }
       // NOTE: both branches below finalize once the write is ISSUED to the SDK, not once the
@@ -358,13 +410,23 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
         if (isPending(adoptId)) return false // refuse, do not await (see the ordinary path)
-        // TWO conditions, and "strictly lower" alone was only the first: a lower id arriving makes
-        // this target noncanonical, and a change to the target ITSELF (removed, renamed, replaced
-        // under the same id) makes the payload we just built wrong for it — it would resurrect a
-        // removed document, undo a rename, or erase a field that arrived while we encrypted
+        // THREE conditions. "strictly lower" was only the first: a lower id arriving makes this
+        // target noncanonical, and a change to the target ITSELF (removed, renamed, replaced under
+        // the same id) makes the payload we just built wrong for it. the POINTER equality is the
+        // third and is not implied by the stamp: invalidateAdopters can clear or a re-adoption can
+        // re-point adopt_id while we encrypt, and for a target absent from byId (adoption targets
+        // are, until finalization) the stamp reads `absent` before and after — so a stale attempt
+        // would issue against a cleared selection and finalizeAdoption would consume a pointer that
+        // is no longer the one it captured
         const better = findSurvivor(wrapper)
-        if ((better && compareIds(better.id, adoptId) < 0) || targetStamp(adoptId) !== stamp) {
-          wrapper.adopt_id = null // re-choose on the retry, which reconfirms against the server
+        if (
+          wrapper.adopt_id !== adoptId ||
+          (better && compareIds(better.id, adoptId) < 0) ||
+          targetStamp(adoptId) !== stamp
+        ) {
+          // only OUR OWN still-current selection is cleared: a newer selection belongs to whoever
+          // made it, and clearing it here would be the stale-clears-newer bug in the other direction
+          if (wrapper.adopt_id === adoptId) wrapper.adopt_id = null // re-choose on the retry
           return false
         }
         if (issueWrite(name, generation, adoptId, data, false)) finalizeAdoption(deps.index(), wrapper)
@@ -444,6 +506,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   }
 
   return {
+    // the adoption merge for REGISTRATION paths (fixed-page phrase validation, post-init
+    // arrivals): rebases from this name's immutable local intent when one is owed, merges, and
+    // publishes to the owner — one contract for every path that adopts (round 35)
+    mergeAdopted,
+
     // replaces (or creates) the hidden item for the name with the given state. the wrapper's
     // state is updated immediately; the document payload is serialized when the queued task
     // EXECUTES, so it always carries the latest full state — including adoption merges and
@@ -480,14 +547,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (deps.readonly()) return // the index is updated; nothing is persisted
       const op = owed.get(name)
       if (op) {
-        op.state = item // supersede: whatever is queued or in flight now owes this state
+        // CLONE: the baseline must stay immutable under later caller mutations and adoption merges
+        op.localIntent = cloneState(item) // supersede: this is what the name owes now
         op.generation = ++generationSeq
         // a record that is QUEUED already has a task coming. one that is building, issued or
         // failed does not — and treating those as "already queued" is how failed work sat idle
         // forever, and how a save after issuance was never written
         if (op.phase == 'queued') return
         op.phase = 'queued'
-      } else owed.set(name, { generation: ++generationSeq, state: item, phase: 'queued' })
+      } else owed.set(name, { generation: ++generationSeq, localIntent: cloneState(item), phase: 'queued' })
       void enqueue(name, holder, () => persistOwed(name))
     },
 
