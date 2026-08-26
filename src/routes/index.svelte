@@ -653,7 +653,7 @@
       // until item is saved, we can only initialize and return in-memory store
       if (!_item.savedId) return (_item.local_store ??= {})
       const key = 'mindpage_item_store_' + _item.savedId
-      _item.local_store ??= JSON.parse(localStorage.getItem(key)) || {}
+      _item.local_store ??= JSON.parse(itemStore.get(key)) || {}
       return _item.local_store
     }
 
@@ -672,10 +672,10 @@
             return
           }
           const key = 'mindpage_item_store_' + __item.savedId
-          const modified = !_.isEqual(__item.local_store, JSON.parse(localStorage.getItem(key)) || {})
+          const modified = !_.isEqual(__item.local_store, JSON.parse(itemStore.get(key)) || {})
           if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
-          if (_.isEmpty(__item.local_store)) localStorage.removeItem(key)
-          else if (modified) localStorage.setItem(key, JSON.stringify(__item.local_store))
+          if (_.isEmpty(__item.local_store)) itemStore.remove(key)
+          else if (modified) itemStore.set(key, JSON.stringify(__item.local_store))
 
           // if modified, invoke _on_local_store_change(id) on all listener (or self) items
           if (modified) {
@@ -1700,6 +1700,19 @@
     if (cachediv && document.querySelector('.column:not(.hidden)'))
       cachediv.style.width = (document.querySelector('.column:not(.hidden)') as HTMLElement).offsetWidth + 'px'
   }
+
+  // ITEM STORAGE on the isolated shared origin is memory-only. every owner's page runs on that
+  // one origin, so anything an earlier page persisted there is readable by the next owner's
+  // code — the origin protects account state, it is not a boundary between owners. keeping item
+  // storage in memory means there is simply nothing of one owner's for another to read, without
+  // needing an origin per owner
+  const itemStorePersists = isClient && hostname != SHARED_HOST
+  const itemStore = {
+    get: key => (itemStorePersists ? localStorage.getItem(key) : (memoryItemStore.get(key) ?? null)),
+    set: (key, value) => (itemStorePersists ? localStorage.setItem(key, value) : void memoryItemStore.set(key, value)),
+    remove: key => (itemStorePersists ? localStorage.removeItem(key) : void memoryItemStore.delete(key)),
+  }
+  const memoryItemStore = new Map()
 
   function scrollTo(y) {
     // NOTE: we have to add (innerHeight * visualViewport.scale - document.body.offsetHeight) on ios
@@ -4465,7 +4478,9 @@
               if (!repo) repo = 'mind.items'
               if (!branch) branch = 'master'
               if (!owner) owner = 'olcan'
-              if (!token) token = localStorage.getItem('mindpage_github_token') // try localStorage
+              // NOT read on the isolated shared origin: a github token stored there by one
+              // owner's page would be readable by the next owner's code (see itemStore)
+              if (!token && hostname != SHARED_HOST) token = localStorage.getItem('mindpage_github_token')
               if (!token) token = null // no token, use unauthenticated client
               if (!path) return alert(`usage: ${cmd} path [repo branch owner token]`)
               // drop optional leading slash in paths for consistency
@@ -4528,7 +4543,7 @@
                       input: '',
                       password: false,
                     })
-                    if (token) localStorage.setItem('mindpage_github_token', token)
+                    if (token && hostname != SHARED_HOST) localStorage.setItem('mindpage_github_token', token)
                     // else token = null // no token, use unauthenticated client
                     else return // cancelled
                   }
@@ -7099,23 +7114,14 @@
             if (admin) {
               useAnonymousAccount()
             } else {
-              // set up server-side session cookie
-              // maximum max-age seems to be 7 days for Safari & we refresh daily
-              // store user's ID token as a __session cookie to send to server for preload
-              // __session is the only cookie allowed by firebase for efficient caching
-              // (see https://stackoverflow.com/a/44935288)
-              const sessionCookieMaxAge = 7 * 24 * 60 * 60 // 7 days
-              function updateSessionCookie() {
-                user
-                  .getIdToken(false /*force refresh*/)
-                  .then(token => {
-                    // console.debug("updating session cookie, max-age ", sessionCookieMaxAge);
-                    document.cookie = '__session=' + token + ';max-age=' + sessionCookieMaxAge
-                  })
-                  .catch(console.error)
-              }
-              updateSessionCookie()
-              setInterval(updateSessionCookie, 1000 * 24 * 60 * 60)
+              // tell the server this load is signed in, so it skips the anonymous server render
+              // (see pageContent). that is ALL the server does with it — it never verifies or
+              // uses the value — so the cookie carries a flag, not a credential. it used to hold
+              // the full firebase ID token for 7 days in a javascript-readable cookie, refreshed
+              // daily, purely to be tested for non-emptiness. `__session` is the only cookie
+              // firebase hosting forwards (see https://stackoverflow.com/a/44935288), so the
+              // name stays even though the value no longer means anything
+              document.cookie = `__session=1;max-age=${7 * 24 * 60 * 60};path=/;samesite=lax`
             }
           }
 
