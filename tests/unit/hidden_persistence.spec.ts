@@ -681,6 +681,87 @@ test('a save overtaken by a remote replacement follows the NAME instead of being
   expect(idx.byName.get('n')!.item).toEqual({ v: 'mine' })
 })
 
+test('a received lower-id record is written to, not stranded on the one that is applied', async () => {
+  // round-18 finding 2: canonicalHolder scanned only APPLIED records, so a lower-id document
+  // whose delivery was still queued was invisible. the write went to the higher-id record, the
+  // lower-id one then became canonical, and the user's state was stranded on a noncanonical
+  // document. delivered through arrive(), which is how production queues it
+  const encrypting = deferred<void>()
+  const { idx, calls, controller } = harness({
+    encryptState: async state => {
+      await encrypting.promise
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const high: HiddenWrapper = { id: 'z9', name: 'n', item: { v: 'A' } }
+  idx.byId.set('z9', high)
+  idx.byName.set('n', high)
+  controller.save('n', { v: 'D' })
+  await flush() // held in encryption, holding the name's chain
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { v: 'B' } }) // lower id, queued behind
+  encrypting.resolve()
+  await flush()
+  await flush()
+  const update = calls.find(c => c.op == 'update')!
+  expect(update.id, 'the write targets the lower-id record that is about to be canonical').toBe('a1')
+  expect(itemOf(update.text)).toMatchObject({ v: 'D' })
+})
+
+test('a stale not-found rejection cannot resurrect the state it carried', async () => {
+  // round-18 finding 3: the detached rejection installed a new owed record containing ITS state,
+  // with no generation check — so an older write's failure replaced a newer save that was still
+  // building, and the newer state was never written
+  const first = deferred<void>()
+  const { idx, calls, controller } = harness({
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
+      if (calls.filter(c => c.op == 'update').length == 1) {
+        await first.promise
+        const e: any = new Error('missing')
+        e.code = 'not-found'
+        throw e
+      }
+    },
+  })
+  const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', wrapper)
+  idx.byName.set('n', wrapper)
+  controller.save('n', { v: 'C' })
+  await flush() // C issued, its rejection still pending
+  controller.save('n', { v: 'D' }) // newer generation
+  await flush()
+  first.resolve() // C now fails, carrying its own older state
+  await flush()
+  await flush()
+  const written = calls.filter(c => c.op == 'update' || c.op == 'create')
+  expect(itemOf(written.at(-1)!.text), 'the newest state survives the older rejection').toMatchObject({ v: 'D' })
+})
+
+test('a build that fails is retried by the next save, not left idle forever', async () => {
+  // round-18 finding 4: a failed build left the record with no task and no running flag, and the
+  // next save read it as "already queued" and returned — so the work sat idle for the page's life
+  let failConfirm = true
+  const { calls, controller } = harness({
+    confirmIndex: async () => {
+      calls.push({ op: 'confirm' })
+      if (failConfirm) throw new Error('server unavailable')
+    },
+  })
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // the create failed
+  failConfirm = false
+  controller.save('n', { v: 2 }) // the literal next save
+  await flush()
+  await flush()
+  const created = calls.find(c => c.op == 'create')
+  expect(created, 'the retry actually happened').toBeTruthy()
+  expect(itemOf(created!.text)).toMatchObject({ v: 2 })
+})
+
 test('readonly mode mutates the index but never writes', async () => {
   const { idx, calls, controller } = harness({ readonly: () => true })
   controller.save('n', { v: 1 })
@@ -715,9 +796,10 @@ test('a stale receipt token cannot release a newer receipt', async () => {
   // a pending create still needs to see
   const { idx, calls, controller } = harness()
   const stale = controller.noteRemote({ id: 'srv1', name: 'n', item: { v: 1 } }, 'srv1', false)
-  const current = controller.noteRemote({ id: 'srv2', name: 'n', item: { v: 2 } }, 'srv2', false)
+  // the SAME document: releasing srv2 with srv1's token proves only that ids differ
+  const current = controller.noteRemote({ id: 'srv1', name: 'n', item: { v: 2 } }, 'srv1', false)
   expect(current).not.toBe(stale)
-  controller.releaseRemote('srv2', stale) // wrong token for this document: ignored
+  controller.releaseRemote('srv1', stale) // stale token for THIS document: ignored
   // the newer receipt still steers the create to adopt rather than duplicate
   controller.save('n', { mine: 1 })
   await flush()

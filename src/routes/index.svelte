@@ -8608,6 +8608,22 @@
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
+    // acquired BEFORE a payload is built, so a phrase prompt (which can register hidden
+    // documents, introducing a lower-id record) cannot invalidate a target chosen before it
+    acquireSecret: async () => {
+      if (!secret && !anonymous) await getSecretPhrase()
+    },
+    // while a name owes a change, deliveries do not touch the owner's copy (see owes()); this
+    // puts it back in step once the change settles, so the owner cannot be left behind
+    reconcileOwner: name => {
+      const owner = name.match(/^global_store_(.+)$/)?.[1]
+      if (!owner) return
+      const local = tempIdFromSavedId.get(owner) ?? owner
+      if (!_exists(local)) return
+      const applied = hiddenItemsByName.get(name)?.item
+      if (applied && !_.isEqual(item(local).global_store ?? {}, applied))
+        item(local).global_store = _.cloneDeep(applied)
+    },
     // an ordinary queued update. no revision field and no compare-and-set: firestore transactions
     // fail outright offline (they never reach the durable queue), and an advisory client-written
     // revision has the costs of a protocol with none of its guarantees — an offline client can

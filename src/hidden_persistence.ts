@@ -33,6 +33,11 @@ export type HiddenPersistenceDeps = {
   // encryptItem/getSecretPhrase in index.svelte), during which a fixed-page validation can
   // register the account's hidden items and ADOPT a pending create
   encryptState: (state: HiddenDocData) => Promise<Record<string, any>>
+  // acquires the session secret if it is not already held, PROMPTING if necessary. separating
+  // this from encryptState means the payload is resolved and encrypted against a target chosen
+  // AFTER any prompt, rather than one chosen before it and invalidated by what the prompt
+  // registered (see persistOwed). optional: harnesses without a prompt can omit it
+  acquireSecret?: () => Promise<void>
   // an ordinary firestore update. it reaches the SDK's durable, ordered mutation queue as soon
   // as it is called; the promise resolves only when the server acknowledges, which offline can
   // be much later (or never, until reconnect) — so the controller must not wait on it to decide
@@ -49,6 +54,11 @@ export type HiddenPersistenceDeps = {
   // merged state back to whatever owns it (e.g. the owner item's in-memory global_store): the
   // owner saves fresh full-state snapshots, so a merge it never sees is erased on its next save
   adopt: (pending: HiddenWrapper, found: HiddenWrapper) => void
+  // synchronizes whatever owns a name's state (the owner item's in-memory global_store) with the
+  // record that now holds it. called once when a generation SETTLES: while a name owes a change,
+  // deliveries deliberately do not touch the owner (they would roll it back into a handler that
+  // saves), so something has to put it back in step when the change lands
+  reconcileOwner?: (name: string) => void
   // revokes hidden-index authority (see settleHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
@@ -76,7 +86,16 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // given attempt is still the latest, so a stale rejection or a late recovery cannot act, and
   // the record is cleared only when the generation it persisted is still current — which also
   // stops the old intent map from growing for the page lifetime
-  type Owed = { generation: number; state: any; running: boolean; writtenTo?: string }
+  // ONE record per name describing the whole operation, not just its build window:
+  // - `generation` advances on every save; any detached callback compares its captured
+  //   generation and returns if the record has moved on, so a stale rejection cannot resurrect
+  //   an older state over a newer one
+  // - `phase` distinguishes work that is queued, being built, issued (waiting on the server) and
+  //   idle after a failure. an idle record is retryable: a later save schedules it, where before
+  //   it looked like "a task is already queued" and the work sat forever
+  // - the record survives issuance, so `owes()` still classifies the echoes of that write
+  type Phase = 'queued' | 'building' | 'issued' | 'failed'
+  type Owed = { generation: number; state: any; phase: Phase; targetId?: string }
   const owed = new Map<string, Owed>()
   let generationSeq = 0
 
@@ -112,51 +131,97 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return next
   }
 
-  // the record that legitimately holds a name RIGHT NOW: live in byId under that exact name,
-  // minimum id, never quarantined. byName alone is not that: a remote rename deliberately leaves
-  // the old name pointing at a wrapper no longer in byId, and writing through that alias renames
-  // the live document back and overwrites its state
-  function canonicalHolder(name: string): HiddenWrapper | undefined {
+  // the EFFECTIVE view of a name's records: live `byId` entries overlaid with the latest receipt
+  // per document, with removal receipts taken out. every path uses it — update, create and
+  // adoption — because a record that has been RECEIVED but whose application is still queued is
+  // just as real as an applied one, and ignoring it is how a write lands on a document that is
+  // about to stop being canonical, or how a create duplicates a record already in hand
+  function effectiveRecords(name: string): HiddenWrapper[] {
     const index = deps.index()
+    const byId = new Map<string, HiddenWrapper>()
+    for (const w of index.byId.values()) if (w.name == name) byId.set(w.id, w)
+    for (const [id, receipt] of receipts) {
+      if (!receipt.wrapper) byId.delete(id) // its removal was received
+      else if (receipt.wrapper.name == name) byId.set(id, receipt.wrapper) // receipts REPLACE
+      else byId.delete(id) // received under a different name (a rename): no longer ours
+    }
+    return [...byId.values()].filter(w => !isQuarantined(index, w.id))
+  }
+
+  // the record that holds the name right now: the eligible minimum id, or a create in flight
+  function canonicalHolder(name: string): HiddenWrapper | undefined {
     let best: HiddenWrapper | undefined
-    for (const w of index.byId.values()) {
-      if (w.name != name || isQuarantined(index, w.id)) continue
+    for (const w of effectiveRecords(name)) {
       if (w.pending_create || w.adopt_id) return w // a create for this name owns it
       if (!best || compareIds(w.id, best.id) < 0) best = w
     }
     return best
   }
 
-  // the minimum-id same-name record a create could adopt instead of creating alongside: live
-  // records plus ones RECEIVED but not yet applied, since serialization must not hide a record
-  // the client already knows about from the create that would duplicate it
+  // the minimum-id record a create could adopt instead of creating alongside it
   function findSurvivor(index: HiddenIndex, wrapper: HiddenWrapper): HiddenWrapper | undefined {
     let survivor: HiddenWrapper | undefined
-    const consider = (w: HiddenWrapper) => {
-      if (w === wrapper || w.name != wrapper.name) return
-      if (w.pending_create || w.adopt_id || isQuarantined(index, w.id)) return
+    for (const w of effectiveRecords(wrapper.name)) {
+      if (w === wrapper || w.pending_create || w.adopt_id) continue
       if (!survivor || compareIds(w.id, survivor.id) < 0) survivor = w
     }
-    for (const w of index.byId.values()) consider(w)
-    for (const { wrapper: w } of receipts.values()) if (w && !index.byId.has(w.id)) consider(w)
+    void index
     return survivor
   }
 
-  // persists whatever the name currently owes, whoever holds it. ONE routine for initial saves
-  // and for both ordinary and adopted not-found recovery, so the recovery paths cannot disagree
-  // with the write path about which record a name should end up on. it re-resolves the holder
-  // after every await, because the intent belongs to the name and follows it
+  // issues one write and attaches a GENERATION-GATED settlement: a detached rejection that
+  // arrives after the record has advanced does nothing, so it can neither resurrect an older
+  // state nor cancel a newer one. used by ordinary updates, adoptions and creates alike, so the
+  // rejection policy exists once instead of being duplicated and drifting
+  function issueWrite(name: string, generation: number, id: string, data: Record<string, any>, create: boolean) {
+    const op = owed.get(name)
+    if (op?.generation == generation) {
+      op.phase = 'issued'
+      op.targetId = id
+    }
+    const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
+    write.then(
+      () => {
+        const current = owed.get(name)
+        if (current?.generation != generation) return // superseded: a newer generation owns the name
+        owed.delete(name) // settled, and still the latest
+        deps.reconcileOwner?.(name) // one explicit repair, now that notifications are unblocked
+      },
+      e => {
+        const current = owed.get(name)
+        if (current?.generation != generation) return // superseded: this outcome no longer matters
+        if (!isNotFound(e)) {
+          // a settled permission/validation error, not offline retry (firestore keeps those
+          // pending). leave the record IDLE and observable rather than clearing it
+          current.phase = 'failed'
+          return void console.error(`hidden write for '${name}' failed:`, e)
+        }
+        deps.invalidateAuthority(`hidden write target ${id} not found`)
+        const index = deps.index()
+        if (index.byId.get(id)) removeHidden(index, id) // it does not exist server-side
+        current.phase = 'queued'
+        current.targetId = undefined
+        void enqueue(name, undefined, () => persistOwed(name))
+      }
+    )
+  }
+
+  // persists whatever the name currently owes, on whichever record holds it
   async function persistOwed(name: string) {
     const op = owed.get(name)
-    if (!op || op.running) return
-    op.running = true
+    if (!op || op.phase == 'building') return
+    op.phase = 'building'
     const generation = op.generation
-    const stillOwed = () => owed.get(name)?.generation == generation
+    const current = () => (owed.get(name)?.generation == generation ? owed.get(name) : undefined)
     try {
+      // the phrase is acquired BEFORE the payload is resolved: encryptState may prompt, and
+      // registration during that prompt can introduce a lower-id record. resolving and merging
+      // first, then encrypting against a target chosen before the prompt, wrote the merged state
+      // to one record using ciphertext built from another
+      await deps.acquireSecret?.()
+      if (!current()) return
       let holder = canonicalHolder(name)
       if (!holder) {
-        // nothing holds the name any more (a removal landed): claim it again and confirm, which
-        // adopts a surviving server record if there is one
         holder = { name, item: op.state, id: deps.newTempId(), saving: null, pending_create: true, adopt_id: null }
         const index = deps.index()
         index.byId.set(holder.id, holder)
@@ -164,63 +229,39 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       }
       if (holder.pending_create || holder.adopt_id) {
         holder.item = op.state
-        await persistCreate(holder)
-        if (stillOwed()) owed.delete(name)
+        await persistCreate(holder, generation)
         return
       }
-      // landing on a record this intent has not written before is an ADOPTION: the record may
-      // hold fields the owner never saw (a retained duplicate, or the survivor a vanished target
-      // was replaced by), and overwriting them is the fresh-clone loss again. merging under the
-      // intent is exactly what the create path does when it adopts
-      if (op.writtenTo != holder.id) {
-        deps.adopt({ ...holder, item: op.state }, holder)
-        holder.item = op.state
+      // build the payload for a target WITHOUT mutating it unless it is live in the index: a
+      // record that has only been received is about to be applied, and writing our state into
+      // that object would make its own application carry our change instead of what arrived
+      const build = async (target: HiddenWrapper) => {
+        // landing on a record this generation has not written merges under the intent: it may
+        // hold fields the owner never saw (a retained duplicate, a newly registered lower id)
+        const merged = { ...target, item: { ...(target.item ?? {}) } }
+        deps.adopt({ ...merged, item: op.state }, merged)
+        if (deps.index().byId.get(target.id) === target) target.item = op.state // live: keep in step
+        return { data: await deps.encryptState(payload({ ...target, item: op.state })), id: target.id }
       }
-      holder.item = op.state
-      const data = await deps.encryptState(payload(holder))
-      if (!stillOwed()) return // a newer save superseded this one while encrypting
-      holder = canonicalHolder(name) ?? holder
-      holder.item = op.state
-      const target = holder.id
-      op.writtenTo = target
-      deps.updateDoc(target, data).catch(e => {
-        if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
-        // the document is gone. the name still owes this state, so re-run for the NAME rather
-        // than inspecting the wrapper this write started from: a delivery may have replaced or
-        // removed it in the meantime, and the intent outlives whichever record held it
-        deps.invalidateAuthority(`hidden write target ${target} not found`)
-        const index = deps.index()
-        if (index.byId.get(target)) removeHidden(index, target) // it does not exist server-side
-        owed.set(name, { generation: ++generationSeq, state: op.state, running: false }) // supersede
-        void enqueue(name, undefined, () => persistOwed(name))
-      })
-      if (stillOwed()) owed.delete(name)
+      let built = await build(holder)
+      if (!current()) return
+      // resolve once more against the overlaid view; if the target CHANGED (registration during
+      // a prompt can introduce a lower id), rebuild for it rather than reusing ciphertext made
+      // for the previous one
+      const resolved = canonicalHolder(name)
+      if (resolved && resolved !== holder && !resolved.pending_create && !resolved.adopt_id) {
+        built = await build(resolved)
+        if (!current()) return
+      }
+      issueWrite(name, generation, built.id, built.data, false)
     } catch (e) {
+      const now = current()
+      if (now) now.phase = 'failed' // retryable: a later save schedules it again
       console.error(`persisting hidden item '${name}' failed:`, e)
-    } finally {
-      const op_now = owed.get(name)
-      if (op_now) op_now.running = false
     }
   }
 
-  // issues a write for a create/adoption and routes its not-found through the same name-level
-  // recovery the ordinary path uses: the record is gone, so the name is owed its state again
-  function issueForName(name: string, id: string, data: Record<string, any>, state: any, create: boolean) {
-    const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
-    write.catch(e => {
-      if (!isNotFound(e)) return void console.error(`hidden item ${create ? 'create' : 'adoption'} failed:`, e)
-      deps.invalidateAuthority(`hidden write target ${id} vanished`)
-      const index = deps.index()
-      if (index.byId.get(id)) removeHidden(index, id)
-      // ALWAYS supersede: the rejection can arrive while the attempt that caused it is still in
-      // flight, and re-using that record would leave the recovery blocked behind its own
-      // running flag — the recovery would then be dropped when the original attempt finished
-      owed.set(name, { generation: ++generationSeq, state, running: false })
-      void enqueue(name, undefined, () => persistOwed(name))
-    })
-  }
-
-  async function persistCreate(wrapper: HiddenWrapper) {
+  async function persistCreate(wrapper: HiddenWrapper, generation: number) {
     try {
       await deps.encryptState(payload(wrapper)) // may prompt; adoption can happen meanwhile
       // the pending name is passed so the caller can register THAT name inline (the adoption
@@ -245,7 +286,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const state = payload(wrapper) // merged state (see deps.adopt)
         const adoptId = wrapper.adopt_id
         const adopted = await deps.encryptState(state)
-        issueForName(wrapper.name, adoptId, adopted, wrapper.item, false)
+        issueWrite(wrapper.name, generation, adoptId, adopted, false)
         finalizeAdoption(deps.index(), wrapper)
       } else {
         const state = payload(wrapper)
@@ -260,13 +301,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           wrapper.adopt_id = late.id
           deps.adopt(wrapper, late)
           const merged = await deps.encryptState(payload(wrapper))
-          issueForName(wrapper.name, late.id, merged, wrapper.item, false)
+          issueWrite(wrapper.name, generation, late.id, merged, false)
           finalizeAdoption(deps.index(), wrapper)
           return
         }
         // issued and released: the id is already allocated, so nothing downstream needs to wait
         // for the server (see the note above)
-        issueForName(wrapper.name, id, created, wrapper.item, true)
+        issueWrite(wrapper.name, generation, id, created, true)
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
@@ -297,8 +338,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // record what the name now OWES and let one routine persist it. the intent belongs to the
       // NAME: it is not attached to a wrapper (a delivery can replace or remove that record and
       // the user's change must still land), and it is re-resolved after every await
+      // the claim is made against the APPLIED index: a record that has only been RECEIVED is not
+      // in byName, and treating it as the holder here would leave the name with no local entry
+      // at all. choosing the write TARGET is a different question, answered at persist time by
+      // the receipt-overlaid resolver
       const index = deps.index()
-      let holder = canonicalHolder(name) ?? index.byName.get(name)
+      let holder = index.byName.get(name)
       if (!holder) {
         // claim the name SYNCHRONOUSLY: readers of the index (and saving_global_store) must see
         // the store the moment it is saved, not when its task happens to run
@@ -310,10 +355,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (deps.readonly()) return // the index is updated; nothing is persisted
       const op = owed.get(name)
       if (op) {
-        op.state = item // supersede: a queued attempt picks up the latest state
+        op.state = item // supersede: whatever is queued or in flight now owes this state
         op.generation = ++generationSeq
-        if (!op.running) return // its task has not built a payload yet
-      } else owed.set(name, { generation: ++generationSeq, state: item, running: false })
+        // a record that is QUEUED already has a task coming. one that is building, issued or
+        // failed does not — and treating those as "already queued" is how failed work sat idle
+        // forever, and how a save after issuance was never written
+        if (op.phase == 'queued') return
+        op.phase = 'queued'
+      } else owed.set(name, { generation: ++generationSeq, state: item, phase: 'queued' })
       void enqueue(name, holder, () => persistOwed(name))
     },
 
