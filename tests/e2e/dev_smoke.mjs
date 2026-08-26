@@ -144,11 +144,24 @@ try {
     await new Promise(resolve => setTimeout(resolve, 500))
   if (!logs.some(log => log.includes('[vite] connected'))) throw new Error(`hmr websocket did not connect:\n${out}`)
 
-  // edit the probe and require BROWSER-side evidence: the edited DOM, in THIS page, without a
-  // navigation. a log line only says vite spoke; the attribute says the running component changed
+  // edit the probe and require BROWSER-side evidence: the edited DOM in this page. a log line only
+  // says vite spoke, and the marker alone is not enough either — the edited file stays on disk, so
+  // the marker appearing after a reload says nothing on its own. proving it ABSENT first is what
+  // makes its appearance mean the edit propagated.
+  // the propagation MECHANISM is recorded, not asserted: for this component vite decides a full
+  // page reload ('(ssr) page reload <file>' in its log) rather than a hot replacement, because the
+  // module is in the ssr graph. that is vite's own decision and the dev loop works either way, so
+  // this test is about the change ARRIVING. it deliberately does not claim "without navigation" —
+  // an earlier version did while accepting a reload, which is the same class of overclaim that
+  // made this smoke report a nonexistent hmr break for two rounds
   probe_original = readFileSync(PROBE, 'utf8')
   if (!probe_original.includes(PROBE_ANCHOR)) throw new Error(`probe anchor not found in ${PROBE}`)
-  const loads_before = page_loads
+  if (await page.evaluate(mark => !!document.querySelector(mark), PROBE_MARK))
+    throw new Error(`${PROBE_MARK} was already present before the edit: the probe proves nothing`)
+  let navigations = 0
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) navigations++
+  })
   writeFileSync(PROBE, probe_original.replace(PROBE_ANCHOR, PROBE_EDIT))
   let updated = false
   for (let i = 0; i < 40 && !updated; i++) {
@@ -156,7 +169,7 @@ try {
     updated = await page.evaluate(mark => !!document.querySelector(mark), PROBE_MARK).catch(() => false)
   }
   if (!updated) throw new Error(`the edited component never reached this client (server log tail):\n${out.slice(-2000)}`)
-  if (page_loads > loads_before) console.log('note: the client took a full page reload rather than a hot update')
+  console.log(navigations ? `note: propagated by full page reload (${navigations} navigations)` : 'note: hot replacement, no navigation')
   await page.waitForTimeout(2000)
   // recheck after the settle: a reload can surface late errors
   const vite_errors = out.match(/(TypeError|ReferenceError|Internal server error)[^\n]*/g) ?? []

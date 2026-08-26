@@ -95,7 +95,11 @@ test('a new device must enter the phrase; a wrong one can only sign out', async 
 // the old `held.length` a lie that a test then waited on
 function holdFirestore(page: Page) {
   let blocked = true
-  const held = new Set<() => void>()
+  let epoch = 0
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) epoch++
+  })
+  const held = new Map<() => void, number>() // entry -> the navigation epoch that requested it
   const install = () =>
     page.route(/:8080\/google\.firestore/, route => {
       const go = () => void route.continue().catch(() => {}) // the sign-in reload kills routes
@@ -110,26 +114,34 @@ function holdFirestore(page: Page) {
         held.delete(entry)
         go()
       }
-      held.add(entry)
+      held.set(entry, epoch)
     })
   return {
     install,
+    get epoch() {
+      return epoch
+    },
     release: () => {
       blocked = false
-      for (const entry of [...held]) entry()
+      for (const entry of [...held.keys()]) entry()
     },
-    get active() {
-      return held.size
-    },
+    // requests still held FOR A GIVEN NAVIGATION. counting all of them let a request from the
+    // signed-out page, retained until its 8s timer, satisfy an assertion about the signed-in one
+    activeAt: (at: number) => [...held.values()].filter(held => held == at).length,
   }
 }
 
 // counts the app's own "keep waiting for the server" decision PER PAGE LOAD, so a late log from
 // the signed-out navigation cannot satisfy an assertion about the signed-in one
 function watchCacheWait(page: Page) {
+  // NAVIGATION COMMIT, not `load`: the app clears mindpage_signin_pending before its own load
+  // event, so a load-counted epoch tagged the signed-in page's decision with the signed-out page's
+  // number and a late decision from the old page could satisfy the assertion
   let epoch = 0
   let decided = -1
-  page.on('load', () => epoch++)
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) epoch++
+  })
   page.on('console', message => {
     if (message.text().includes('ignoring first snapshot from cache (waiting for server)')) decided = epoch
   })
@@ -166,7 +178,7 @@ test('a slow first connection does not reset the account to empty', async ({ pag
     // app never reaches the `wait_for_server` decision that logs. the state under test is exactly
     // "nothing has arrived and nothing was invented", which only a quiet window can evidence.
     // waiting for the listen to be held first makes the window mean something
-    await expect.poll(() => channel.active).toBeGreaterThan(0)
+    await expect.poll(() => channel.activeAt(channel.epoch)).toBeGreaterThan(0)
     await page.waitForTimeout(1_500)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
@@ -252,9 +264,9 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
       void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
     }, token)
     await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-    // the decision must belong to THIS (signed-in) navigation, not the signed-out one before it
+    // EXACTLY this navigation's decision: >= would also accept one from a later reload
     const epoch = cacheWait.epoch
-    await expect.poll(() => cacheWait.decided, { timeout: 60_000 }).toBeGreaterThanOrEqual(epoch)
+    await expect.poll(() => cacheWait.decided, { timeout: 60_000 }).toBe(epoch)
     expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
     expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
     channel.release()

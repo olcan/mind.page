@@ -251,11 +251,22 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
       const id = await savedId(page, '#e2e_xtab')
       return (await firestore().collection('items').doc(id!).get()).data()?.text ?? null
     }
-    for (const tab of [page, other])
-      await expect
-        .poll(async () => (await itemText(tab, '#e2e_xtab')) == (await serverText()), { timeout: 30_000 })
-        .toBe(true)
-    expect(await serverText()).toMatch(/overlap [AB]/)
+    // ONE joint sample: tab A, tab B and the server read together and required to agree in the
+    // SAME observation. polling them separately let A match server revision A, then B match a later
+    // revision B, with A never rechecked — two tabs that were never simultaneously in step
+    await expect
+      .poll(
+        async () => {
+          const [a, b, server] = await Promise.all([
+            itemText(page, '#e2e_xtab'),
+            itemText(other, '#e2e_xtab'),
+            serverText(),
+          ])
+          return a == server && b == server ? server : null
+        },
+        { timeout: 30_000 }
+      )
+      .toMatch(/overlap [AB]/)
     // a fresh context (no shared cache, no local state) sees exactly the same document
     const fresh = await page.context().browser()!.newContext()
     try {
