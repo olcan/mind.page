@@ -7713,14 +7713,13 @@
             // change in this snapshot — and all of the next one, behind snapshotApply — unmarked
             // while a slow decrypt ran. they are invisible to canonical resolution and are released
             // (or superseded by the real receipt) as each change is handled
+            // EVERY changed document, not a predicate. classification cannot become less relevant
+            // because a later callback arrived: a hidden delivery that is itself only pending is
+            // absent from hiddenItems and invisible to nameForDocument, so a following
+            // hidden-to-visible change for the same id would have been marked as irrelevant
             const entryReceipts = new Map()
             for (const change of snapshot.docChanges())
-              if (
-                !!change.doc.data().hidden ||
-                hiddenItems.has(change.doc.id) ||
-                hiddenPersistence.nameForDocument(change.doc.id)
-              )
-                entryReceipts.set(change.doc.id, hiddenPersistence.noteRemotePending(change.doc.id))
+              entryReceipts.set(change.doc.id, hiddenPersistence.noteRemotePending(change.doc.id))
             const applyTask = async () => {
               // GUARANTEED release: writes await these markers, so any path that leaves one behind
               // blocks that document's saves for the rest of the session. the per-change finally
@@ -7785,7 +7784,11 @@
                 if (!savedItem.hidden && hiddenItems.has(doc.id) && change.type != 'removed') {
                   const stale = hiddenItems.get(doc.id)
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
-                  await hiddenPersistence
+                  // ENQUEUED, NOT AWAITED. this application goes on the name's chain, which a
+                  // local write for that same name may own — and that write refuses to issue while
+                  // this document's entry marker stands. awaiting here made the listener wait for
+                  // the writer while the writer waited for the listener
+                  void hiddenPersistence
                     .applyRemote([stale?.name], () => removeHidden(hiddenIndex(), doc.id))
                     .catch(e => console.error('could not drop stale hidden representation:', doc.id, e))
                   hiddenCleanupPending = true

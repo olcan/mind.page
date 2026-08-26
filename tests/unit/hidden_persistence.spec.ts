@@ -1057,7 +1057,16 @@ function gatedHarness() {
       await releaseGate()
     }
   }
-  return { ...h, controller, pending, drain, awaitGate, releaseGate }
+  // releases gates until no further encryption is requested: for schedules whose exact number of
+  // build attempts is the thing under test rather than a constant to hard-code
+  const drainAll = async () => {
+    for (let round = 0; round < 20; round++) {
+      for (let turn = 0; turn < 6 && !pending.length; turn++) await flush()
+      if (!pending.length) return
+      await releaseGate()
+    }
+  }
+  return { ...h, controller, pending, drain, awaitGate, releaseGate, drainAll }
 }
 
 test('a lower id arriving during an ADOPTION encryption retargets, instead of writing the middle record', async () => {
@@ -1267,39 +1276,47 @@ test('a change that has ENTERED the listener but not yet decrypted still stops a
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
 })
 
-test('a target with an undecoded change in flight is WAITED for, not written through', async () => {
-  // round-23 finding 1: this test previously asserted the opposite — that a save proceeds straight
-  // past a pending entry — which is exactly the unsafe schedule. a receipt that already exists when
-  // the build starts reads the same before and after encryption, so a stamp comparison cannot see
-  // it; the pending entry has to be a BARRIER
-  const { idx, calls, controller } = gatedHarness()
+test('a target with an undecoded delivery is REFUSED, and writes once it decodes', async () => {
+  // round-23 finding 1: a stamp read before and after an encryption cannot see a delivery that was
+  // already in flight when the build started, so a stalled decrypt let a stale full-state write out.
+  // round-24: the first fix AWAITED the delivery, which deadlocks — a hidden-to-visible delivery
+  // awaits applyRemote on the very name chain the writer owns. so the attempt is REFUSED and
+  // requeued instead, which fails closed and leaves the chain free for that application to run.
+  // this test releases its encryption gate: the previous version did not, so it passed on the
+  // implementation it was meant to distinguish
+  const { idx, calls, controller, awaitGate, releaseGate, drainAll } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
-  const entering = controller.noteRemotePending('d1') // a change is decoding for our target
+  const entering = controller.noteRemotePending('d1') // a delivery for our target is decoding
   controller.save('n', { v: 'D' })
-  for (let turn = 0; turn < 10; turn++) await flush()
-  expect(calls.filter(c => c.op == 'update'), 'nothing is written while the target is undecoded').toHaveLength(0)
-  // it decodes into a removal: the write must not land on the removed document
-  void arriveRemoval(controller, idx, 'd1')
-  controller.releaseRemote('d1', entering)
-  for (let turn = 0; turn < 20; turn++) await flush()
-  expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
+  await awaitGate('the first attempt')
+  await releaseGate() // it builds, then REFUSES because the delivery is still undecoded
+  for (let turn = 0; turn < 6; turn++) await flush()
+  expect(calls.filter(c => c.op == 'update'), 'nothing written while the delivery is undecoded').toHaveLength(0)
+  expect(controller.owes('n'), 'the change is still owed').toBe(true)
+  controller.releaseRemote('d1', entering) // decoded, and nothing about the record changed
+  await drainAll()
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates.map(u => u.id)).toEqual(['d1']) // exactly one write, to the same document
+  expect(itemOf(updates[0].text)).toEqual({ v: 'D' }) // carrying the latest state
+  expect(controller.owes('n')).toBe(false)
 })
 
-test('a pending entry does not make the name resolve as absent', async () => {
-  // it says only "something is arriving": treating it as a record or as a removal would both be
-  // wrong, so canonical resolution ignores it and the name still resolves to the live record
-  const { idx, calls, controller } = gatedHarness()
+test('a delivery that decodes into a removal is not written through by the retry', async () => {
+  const { idx, calls, controller, awaitGate, releaseGate, drainAll } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
   const entering = controller.noteRemotePending('d1')
   controller.save('n', { v: 'D' })
-  await flush()
-  controller.releaseRemote('d1', entering) // decoded, nothing changed
-  for (let turn = 0; turn < 10; turn++) await flush()
-  expect(calls.filter(c => c.op == 'create'), 'never a fresh create alongside the live record').toHaveLength(0)
+  await awaitGate('the first attempt')
+  await releaseGate()
+  void arriveRemoval(controller, idx, 'd1') // what the delivery turned out to be
+  controller.releaseRemote('d1', entering)
+  await drainAll()
+  expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
+  expect(calls.filter(c => c.op == 'create'), 'it re-enters create resolution').toHaveLength(1)
 })
 
 test('settlement does not reconcile the owner when its own echo failed to apply', async () => {
