@@ -52,6 +52,13 @@ paths.push('/b/')
 // default global-scope standalone-display prefix
 paths.push('/')
 
+// the request's ORIGINAL host. behind firebase hosting the `host` header is the function's own
+// host, so the forwarded header is what identifies the site the visitor asked for — every
+// host-dependent decision must use this one derivation (a guard that read `host` directly simply
+// never matched in production)
+const requestHost = req =>
+  canonicalizeHost(req.headers['x-forwarded-host'] || req.headers['host'] || req.headers[':authority'] || 'localhost')
+
 const scoped = express.Router()
 scoped.use(
 
@@ -63,7 +70,7 @@ scoped.use(
   // SHARED_HOST in src/host.js)
   (req, res, next) => {
     if (!/^\/proxy\//.test(req.url ?? '')) return next()
-    if (canonicalizeHost(req.headers.host ?? '') != SHARED_HOST) return next()
+    if (requestHost(req) != SHARED_HOST) return next()
     res.status(403).type('text/plain').send('proxy is not available on this host')
   },
 
@@ -126,7 +133,7 @@ scoped.use(
     const hostport = req.headers['x-forwarded-host'] || req.headers['host'] || req.headers[':authority'] || 'localhost'
     const hostname_orig = hostport.replace(/:\d+$/, '')
     // note globalThis.hostname is used in index.svelte on server side
-    const hostname = (globalThis.hostname = canonicalizeHost(hostport))
+    const hostname = (globalThis.hostname = requestHost(req))
     const hostdir = getHostDir(hostname)
     // serve /manifest.json from any path (to allow scoping in manifest)
     if (req.path.endsWith('/manifest.json')) {
