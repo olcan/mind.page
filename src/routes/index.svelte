@@ -8609,9 +8609,21 @@
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
     // acquired BEFORE a payload is built, so a phrase prompt (which can register hidden
-    // documents, introducing a lower-id record) cannot invalidate a target chosen before it
+    // documents, introducing a lower-id record) cannot invalidate a target chosen before it.
+    // this is the SAME single-flight acquisition the encryption path uses (see encrypt): the
+    // in-flight promise is published into `secret` first, so two name chains arriving together
+    // join one prompt instead of raising two independent account fetches
     acquireSecret: async () => {
-      if (!secret && !anonymous) await getSecretPhrase()
+      if (anonymous) return
+      if (!secret) secret = getSecretPhrase(true /* new_phrase */)
+      secret = await Promise.resolve(secret)
+    },
+    // a settled permission/validation failure means the change is NOT saved, while `owes()` is a
+    // boolean and `wrapper.saving` has already cleared — so without this the only trace was a
+    // console line, with owner notifications suppressed indefinitely behind the retained record
+    notifyFailure: (name, error) => {
+      const owner = name.match(/^global_store_(.+)$/)?.[1] ?? name
+      _modal_alert(`Could not save hidden state for ${owner}: ${(error as any)?.message ?? error}`)
     },
     // while a name owes a change, deliveries do not touch the owner's copy (see owes()); this
     // puts it back in step once the change settles, so the owner cannot be left behind

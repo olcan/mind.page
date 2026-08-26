@@ -47,6 +47,12 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
       calls.push({ op: 'create', id, text: data.cipher ?? data.text })
     },
     newDocId: () => 'doc' + ++ids,
+    // required in production (correctness depends on them); harnesses that do not exercise the
+    // prompt, the owner or the failure surface supply no-ops, and the tests that DO exercise
+    // them override here rather than relying on an optional hook being absent
+    acquireSecret: async () => {},
+    reconcileOwner: () => {},
+    notifyFailure: () => {},
     confirmIndex: async _name => void calls.push({ op: 'confirm' }),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
@@ -313,10 +319,13 @@ test('a save queued across an adoption still persists the merged state (adopted 
   confirm.resolve()
   await flush()
   const updates = calls.filter(c => c.op == 'update')
-  expect(updates).toHaveLength(2)
-  // both writes carry the adoption-merged state: payloads serialize at execution, after the merge
+  // ONE write, by the generation that is still current. this test previously asserted two: the
+  // superseded generation resumed after its confirmation await and issued as well. round 19
+  // finding 2 is exactly that — the generation must be rechecked after every persistCreate await,
+  // so obsolete work neither writes nor finalizes. what the test is really for is unchanged: the
+  // write that DOES go out carries the adoption merge, since payloads serialize at execution
+  expect(updates).toHaveLength(1)
   expect(itemOf(updates[0].text)).toEqual({ theirs: 1, mine: 2 })
-  expect(itemOf(updates[1].text)).toEqual({ theirs: 1, mine: 2 })
 })
 
 test('a fresh create settles to the minimum id when a lower-id duplicate arrives right after it', async () => {
@@ -595,7 +604,10 @@ test('a survivor received during the final encryption is adopted, not duplicated
   const controller = createHiddenPersistence({
     ...h.deps,
     encryptState: async state => {
-      if (++encryptions == 2) await second.promise // hold the FINAL encryption of the create
+      // the create's ONLY encryption before the late-survivor check (round 19 deleted the
+      // preliminary one, whose sole purpose was to trigger the phrase prompt that acquireSecret
+      // now owns), so holding the first opens the window the survivor arrives in
+      if (++encryptions == 1) await second.promise
       const encrypted: any = state
       encrypted.cipher = 'cipher:' + state.text
       encrypted.text = null
@@ -806,4 +818,200 @@ test('a stale receipt token cannot release a newer receipt', async () => {
   expect(calls.filter(c => c.op == 'create')).toHaveLength(0)
   const holder = idx.byName.get('n')!
   expect(holder.adopt_id ?? holder.id).toBe('srv1') // minimum id among the received records
+})
+
+test('a receipt arriving during the REBUILD retargets again, instead of stranding the write', async () => {
+  // round-19 finding 1: the code resolved once, rebuilt once, then issued WITHOUT resolving
+  // again. a second lower-id record received during that rebuild left the write on the middle
+  // record while the newly canonical one kept the stale state
+  const pending: Array<() => void> = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const start: HiddenWrapper = { id: 'z9', name: 'n', item: { A: 1 } }
+  idx.byId.set('z9', start)
+  idx.byName.set('n', start)
+  controller.save('n', { D: 1 })
+  await flush() // building for z9, first encryption held
+  void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
+  pending.shift()!() // released: re-resolves to b2 and rebuilds for it
+  await flush()
+  void arrive(controller, idx, { id: 'a1', name: 'n', item: { A1: 1 } }) // still lower, mid-rebuild
+  pending.shift()!()
+  await flush()
+  pending.shift()?.() // the rebuild for a1
+  await flush()
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates).toHaveLength(1)
+  expect(updates[0].id).toBe('a1') // the record canonical NOW, not the middle one
+  expect(itemOf(updates[0].text).D).toBe(1)
+})
+
+test('a holder removed during its encryption is not updated', async () => {
+  // round-19 finding 1: `canonicalHolder()` returns undefined when the selected holder is
+  // removed mid-build, and the truthy-only recheck fell through and updated the removed id.
+  // durability then depended on a later NOT_FOUND callback and the tab living long enough
+  const pending: Array<() => void> = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const start: HiddenWrapper = { id: 'z9', name: 'n', item: { A: 1 } }
+  idx.byId.set('z9', start)
+  idx.byName.set('n', start)
+  controller.save('n', { D: 1 })
+  await flush()
+  void arriveRemoval(controller, idx, 'z9')
+  pending.shift()!()
+  await flush()
+  pending.shift()?.() // the create the loop re-entered
+  await flush()
+  expect(calls.filter(c => c.op == 'update')).toHaveLength(0) // never the removed document
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(1) // re-entered create resolution
+})
+
+test('a superseded generation neither issues its create nor finalizes the wrapper', async () => {
+  // round-19 finding 2: generation checks gated the detached CALLBACKS only. stale work still
+  // called createDoc and still finalized the index transition, so an obsolete create could land
+  // after the newer state had been written
+  const pending: Array<() => void> = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  controller.save('n', { C: 1 })
+  await flush() // the create's encryption is held
+  expect(pending).toHaveLength(1)
+  controller.save('n', { D: 1 }) // supersedes it
+  pending.shift()!() // release the stale generation
+  await flush()
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // it must not write
+  pending.shift()!() // the current generation's create
+  await flush()
+  const creates = calls.filter(c => c.op == 'create')
+  expect(creates).toHaveLength(1)
+  expect(itemOf(creates[0].text)).toEqual({ D: 1 })
+  expect(idx.byName.get('n')!.id).toBe(creates[0].id) // finalized once, by the generation that wrote
+})
+
+test('settlement reconciles the owner behind an already-received transition, not ahead of it', async () => {
+  // round-19 finding 3: settlement ran straight off the acknowledgement, outside the name chain.
+  // reconciliation reads the APPLIED index, so an ack that beat a queued application put the
+  // owner back in step with state that delivery was about to replace, then cleared owes()
+  const order: string[] = []
+  const pending: Array<() => void> = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await new Promise<void>(resolve => pending.push(resolve))
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+    reconcileOwner: name => void order.push('reconcile ' + name),
+  })
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 1 })
+  await flush() // building: the chain is busy, so an arrival now QUEUES behind it
+  const remote: HiddenWrapper = { id: 'd2', name: 'n', item: { remote: 1 } } // higher id: no retarget
+  const token = controller.noteRemote(remote, 'd2', false)
+  const arrival = controller
+    .applyRemote(['n'], () => {
+      order.push('remote applied')
+      applyRemoteAdded(idx, remote)
+    })
+    .then(() => controller.releaseRemote('d2', token))
+  pending.shift()!()
+  await flush()
+  await arrival
+  await flush()
+  expect(calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
+  expect(order).toEqual(['remote applied', 'reconcile n'])
+  expect(controller.owes('n')).toBe(false) // cleared only once settlement ran on the chain
+})
+
+test('a terminal write failure is reported to the failure hook and stays retryable', async () => {
+  // round-19 finding 3: the `failed` phase was private. owes() is a boolean and wrapper.saving
+  // has already settled, so a settled permission error left owner notifications suppressed with
+  // nothing but a console line to show for it
+  const failures: string[] = []
+  const h = harness()
+  const { idx } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async () => {
+      throw Object.assign(new Error('permission denied'), { code: 'permission-denied' })
+    },
+    notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
+  })
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(failures).toEqual(['n: permission denied'])
+  expect(controller.owes('n')).toBe(true) // retained, and a later save retries it
+})
+
+test('the secret is acquired before any payload is encrypted', async () => {
+  // round-19 finding 4: encryption must not prompt, which only holds if acquisition completes
+  // first. the loop that re-resolves the target depends on it — a prompt inside the loop could
+  // register a lower-id record between the last resolution and the write
+  const order: string[] = []
+  const secret = deferred<void>()
+  const h = harness()
+  const { idx } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => {
+      order.push('acquire')
+      await secret.promise
+    },
+    encryptState: async state => {
+      order.push('encrypt')
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      return encrypted
+    },
+  })
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: {} }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 1 })
+  await flush()
+  expect(order).toEqual(['acquire']) // nothing encrypted while the phrase is outstanding
+  secret.resolve()
+  await flush()
+  expect(order).toEqual(['acquire', 'encrypt'])
 })
