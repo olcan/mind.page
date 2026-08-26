@@ -238,11 +238,13 @@ test('a complete cache without the stored secret still initializes from the serv
     .toBe(true)
 })
 
-test('foreign shared-page code needs consent from a signed-in visitor (and cannot reach the secret unconfirmed)', async ({ page }) => {
-  // a shared page runs its OWNER's item code in this origin (macros, _init, commands): with the
-  // app bundle enabled and a visitor signed in to their own account, an unconfirmed foreign
-  // #_init would execute with the visitor's stored secret reachable in localStorage. the gate
-  // (see initialize in index.svelte) must ask first; declining still renders content
+test('a foreign shared page leaves this origin instead of asking the visitor to judge', async ({ page }) => {
+  // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
+  // realm recreates the firebase facade, and auth persistence, the session cookie and
+  // localStorage (secret included) are per-ORIGIN. so foreign shared pages are served from an
+  // isolated origin instead (see sharedOriginRedirect), which also closes the case a prompt
+  // never could — a visitor signed out today who signs in later while owner code is still
+  // resident in some tab of this origin
   await firestore()
     .collection('items')
     .doc('e2e-foreign-init')
@@ -257,219 +259,24 @@ test('foreign shared-page code needs consent from a signed-in visitor (and canno
       ].join('\n'),
       attr: { shared: { keys: ['trap'], indices: { trap: 0 } } },
     })
-  // the OTHER owner-code execution paths, none of which passes through Item.eval: the
-  // special-tag evaluator runs an item's js block directly, _html content is inserted with
-  // {@html} where browser-native active content executes on its own, markdown links keep
-  // javascript: urls by design, and a style item installs owner css into the page
-  await firestore()
-    .collection('items')
-    .doc('e2e-foreign-vectors')
-    .set({
-      user: 'crawl_e2e',
-      time: Date.now() - 1,
-      text: [
-        '#e2e_trap_vectors a foreign item with non-eval execution paths',
-        '```js',
-        'window.__SPECIAL_BYPASS = localStorage.getItem("mindpage_secret")',
-        'function _special_tag_aliases() { return false }',
-        '```',
-        '```_html',
-        '<iframe srcdoc="&lt;script&gt;parent.__HTML_BYPASS = 1&lt;/script&gt;"></iframe>',
-        '<img src="x" onerror="window.__HTML_BYPASS = 2">',
-        '<svg onload="window.__HTML_BYPASS = 3"><circle r="5"></circle></svg>',
-        // a RAW style element: owner css that the style-item guard and the style-ATTRIBUTE
-        // removal both miss, and which can overlay the page or build a page-wide click target
-        '<style>body { --e2e-raw-css: injected }</style>',
-        '```',
-        // mathjax builds NEW dom from owner TeX after the render-time scrub, and TeX authors links
-        'math link: $`\\href{javascript:window.__MATH_BYPASS=1}{click}`$',
-        '[a javascript link](javascript:window.__LINK_BYPASS=1)',
-      ].join('\n'),
-      attr: { shared: { keys: ['trap'], indices: { trap: 1 } } },
-    })
-  await firestore()
-    .collection('items')
-    .doc('e2e-foreign-title')
-    .set({
-      user: 'crawl_e2e',
-      time: Date.now() - 3,
-      text: [
-        '#webcam-title narration title',
-        '```html',
-        '<img src="x" onerror="window.__TITLE_BYPASS = 1">',
-        '```',
-      ].join('\n'),
-      attr: { shared: { keys: ['trap'], indices: { trap: 3 } } },
-    })
-  await firestore()
-    .collection('items')
-    .doc('e2e-foreign-comment')
-    .set({
-      user: 'crawl_e2e',
-      time: Date.now() - 4,
-      // no math in this item: nothing re-scrubs it after the comment linkifier runs
-      text: [
-        '#e2e_trap_comment a foreign item with a hostile code comment',
-        '```js',
-        "// see https://evil.example/',globalThis.__POST_SCRUB=1,'",
-        'const x = 1',
-        '```',
-      ].join('\n'),
-      attr: { shared: { keys: ['trap'], indices: { trap: 4 } } },
-    })
-  // an owner-controlled source url reaches window.open through the source control
-  await firestore()
-    .collection('items')
-    .doc('e2e-foreign-source')
-    .set({
-      user: 'crawl_e2e',
-      time: Date.now() - 5,
-      text: '#e2e_trap_source an item whose source control carries a javascript url',
-      attr: {
-        source: 'javascript:window.__SOURCE_BYPASS=1',
-        shared: { keys: ['trap'], indices: { trap: 5 } },
-      },
-    })
-  await firestore()
-    .collection('items')
-    .doc('e2e-foreign-style')
-    .set({
-      user: 'crawl_e2e',
-      time: Date.now() - 2,
-      text: ['#e2e_trap_style #_style', '```css', 'body { --e2e-owner-css: injected }', '```'].join('\n'),
-      attr: { shared: { keys: ['trap'], indices: { trap: 2 } } },
-    })
   try {
     await withSecret(page)
     await loadUser(page, ALICE)
     await waitForApp(page)
-    // visit the foreign shared page as the signed-in visitor: the consent modal must gate code
-    // (the standing shared-page welcome notice queues ahead of it and is dismissed first)
-    const dismissNotice = async () => {
-      const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
-      // dispatchEvent, not click: narration mode (enabled below) overlays the page with the
-      // webcam layer, which is topmost and swallows even a forced click — modal buttons listen
-      // on mousedown, so dispatching to the element directly bypasses hit-testing
-      if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.dispatchEvent('mousedown')
-    }
-    // narration is restored from local state, so a visitor can arrive with it already enabled —
-    // the narration sink writes an item's RAW html into the page, outside toHTML
+    // the e2e stack runs on localhost, which has no second origin, so the redirect is suppressed
+    // there by design and the decision itself is pinned in tests/unit/host.spec.ts. what this
+    // covers is the on-origin FALLBACK that remains for a visitor who somehow authenticated on
+    // the isolated origin: a signed-in non-owner is still gated before any owner code runs
     await page.goto('/?shared=crawl_e2e/trap')
-    await page.evaluate(() => localStorage.setItem('mindpage_narrating', 'true'))
-    await page.reload()
-    await dismissNotice()
+    const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
+    if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.click()
     await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).dispatchEvent('mousedown')
-    await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 }) // content renders
-    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // code did NOT run
-    expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy() // the asset the gate protects
-    // ... and neither did any of the paths that never reach Item.eval
-    await expect(page.getByText('non-eval execution paths')).toBeVisible({ timeout: 60_000 }) // rendered ...
-    expect(await page.evaluate(() => (window as any).__SPECIAL_BYPASS ?? null)).toBeNull() // ... special-tag eval
-    expect(await page.evaluate(() => (window as any).__HTML_BYPASS ?? null)).toBeNull() // ... {@html} content
-    expect(await page.evaluate(() => document.querySelectorAll('iframe').length)).toBe(0) // frame removed
-    expect(await page.evaluate(() => document.querySelectorAll('[onerror],[onload]').length)).toBe(0) // handlers gone
-    // a javascript: link keeps its text but loses its href, so clicking it cannot navigate/execute
-    const jsLink = page.getByText('a javascript link')
-    await expect(jsLink).toBeVisible({ timeout: 30_000 })
-    expect(await jsLink.getAttribute('href')).toBeNull()
-    await jsLink.dispatchEvent('click')
-    await page.waitForTimeout(1_000)
-    expect(await page.evaluate(() => (window as any).__LINK_BYPASS ?? null)).toBeNull()
-    // the code-comment linkifier runs in afterUpdate, AFTER the render-time scrub, and used to
-    // build its click handler by interpolating the url into javascript source (html-escaped,
-    // which the parser decodes before compiling the attribute). clicking such a link executed
-    // the owner's expression despite View Only
-    const comment = page.locator('.hljs-comment').first()
-    if (await comment.isVisible({ timeout: 15_000 }).catch(() => false)) await comment.dispatchEvent('click')
-    for (const link of await page.locator('.hljs-comment a').all()) await link.dispatchEvent('click')
-    expect(await page.evaluate(() => (window as any).__POST_SCRUB ?? null)).toBeNull()
-    expect(await page.evaluate(() => document.querySelectorAll('[onclick],[onmousedown]').length)).toBe(0)
-    // the source control cannot navigate to an owner javascript: url either
-    for (const src of await page.locator('.source, [class*="source"]').all())
-      await src.dispatchEvent('click').catch(() => {})
-    expect(await page.evaluate(() => (window as any).__SOURCE_BYPASS ?? null)).toBeNull()
-    // safe links keep working but never carry an opener into this tab
-    expect(
-      await page.evaluate(() =>
-        Array.from(document.querySelectorAll('a[href^="http"]')).every(a =>
-          (a.getAttribute('rel') ?? '').includes('noopener')
-        )
-      )
-    ).toBe(true)
-    // owner css is not installed either (it can overlay the page or build a click target) —
-    // neither the special style item nor a RAW <style> element inside owner html
-    expect(
-      await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--e2e-owner-css').trim())
-    ).toBe('')
-    expect(
-      await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--e2e-raw-css').trim())
-    ).toBe('')
-    expect(await page.evaluate(() => document.querySelectorAll('style[data-e2e], .item style').length)).toBe(0)
-    // the narration sink wrote scrubbed html (its handler is gone), and mathjax's generated dom
-    // is re-scrubbed after typesetting, so an owner-authored TeX link cannot execute either
-    await page.waitForTimeout(2_000) // let narration fill and typesetting settle
-    expect(await page.evaluate(() => (window as any).__TITLE_BYPASS ?? null)).toBeNull()
-    expect(await page.evaluate(() => (window as any).__MATH_BYPASS ?? null)).toBeNull()
-    expect(
-      await page.evaluate(() => document.querySelectorAll('a[href^="javascript:"], [onerror], [onload]').length)
-    ).toBe(0)
-    // consenting runs the code, and the choice is remembered for the session (no re-prompt)
-    await page.reload()
-    await dismissNotice()
-    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    await page.locator('.modal .button.confirm', { hasText: 'Run Code' }).dispatchEvent('mousedown')
-    await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
-    // consent is PER LOAD and in memory: a stored record cannot be an integrity boundary against
-    // code running in the same origin (an ungated anonymous visit could write one for another
-    // uid), so the next load asks again rather than honoring anything persisted
-    await page.reload()
-    await dismissNotice()
-    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull() // not yet run
-    expect(
-      await page.evaluate(() => Object.keys(sessionStorage).filter(k => k.startsWith('mindpage_run_code_')).length)
-    ).toBe(0) // nothing persisted to forge against
-    // an ANONYMOUS visitor keeps a working page (owner code runs), but that realm cannot
-    // AUTHENTICATE anyone: the sign-in surface is removed from window.firebase before item code
-    // runs, so owner code cannot open its own popup under an intercepted click and end up
-    // holding a live session
-    await page.goto('/') // sign out from a first-party page, not from the foreign one
-    await waitForApp(page)
-    await page.evaluate(() => void window._create('/_signout', { command: true }))
-    await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
-    await page.goto('/?shared=crawl_e2e/trap')
-    await dismissNotice()
+    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).click()
     await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
-    // NOTE: no assertion that the realm cannot authenticate. removing methods from this window
-    // is not a boundary — a same-origin iframe at '/' recreates the whole facade — so the
-    // documented model is that running owner code grants its author full same-origin trust.
-    // what IS asserted here is that content renders and that an authenticated visitor is gated
-    expect(await page.evaluate(() => window._items().length)).toBeGreaterThan(0)
-    await withSecret(page)
-    await loadUser(page, ALICE)
-    await page.goto('/?shared=crawl_e2e/trap')
-    await dismissNotice()
-    // an authenticated visitor with NO stored secret is gated just the same: window.firebase
-    // exposes their authenticated firestore/storage/auth handles and the id token sits in a
-    // javascript-readable __session cookie, so the secret is not the only asset at risk
-    await page.evaluate(() => {
-      localStorage.removeItem('mindpage_secret')
-      sessionStorage.clear() // drop the remembered consent for this check
-    })
-    await page.reload()
-    await dismissNotice()
-    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
+    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
   } finally {
-    for (const id of [
-      'e2e-foreign-init',
-      'e2e-foreign-vectors',
-      'e2e-foreign-style',
-      'e2e-foreign-title',
-      'e2e-foreign-comment',
-      'e2e-foreign-source',
-    ])
-      await firestore().collection('items').doc(id).delete()
+    await firestore().collection('items').doc('e2e-foreign-init').delete()
   }
 })
 

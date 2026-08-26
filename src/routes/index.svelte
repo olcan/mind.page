@@ -6258,6 +6258,7 @@
     decryptWithSecret,
     decryptBytesWithSecret,
   } from '../crypto'
+  import { SHARED_HOST, sharedOriginRedirect } from '../host.js'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6634,47 +6635,47 @@
     revokeHiddenAuthority()
     hiddenDirtyIds = new Map() // initialization rebuilds the index from scratch
 
-    // consent gate for foreign code (see foreignCodeBlocked above): a shared page runs its
-    // OWNER's code in this origin, which is dangerous for ANY authenticated visitor who is not
-    // the owner — window.firebase exposes their authenticated firestore/storage/auth handles and
-    // the id token sits in a javascript-readable __session cookie, so a stored encryption secret
-    // is only the most valuable of several assets at risk. the decision is therefore based on
-    // the VALIDATED firebase principal, never on local-storage metadata, and consent is
-    // remembered per visitor+owner for the browser session (an owner-only key would carry one
-    // visitor's consent into the next account signed in on this device)
+    // OTHER PEOPLE'S shared pages are served from an isolated origin (see SHARED_HOST). a shared
+    // page runs its owner's code, and no in-origin measure can contain that: any same-origin
+    // realm — an iframe at '/', a window opened under an intercepted click — recreates the whole
+    // firebase facade, and auth persistence, the session cookie and localStorage (secret
+    // included) are shared across the origin. so instead of asking the visitor to weigh a risk
+    // they cannot evaluate, the page is moved somewhere the risk does not exist. this also
+    // closes the case a prompt never could: a visitor who is signed out TODAY and signs in later
+    // on this origin, while owner code is still resident in some tab of it
+    const redirect = sharedOriginRedirect({
+      host: hostname,
+      shared: url_params?.shared,
+      uid: getAuth(firebase)?.currentUser?.uid,
+      path: location.pathname,
+      search: location.search,
+      hash: location.hash,
+    })
+    if (redirect) {
+      location.replace(redirect)
+      return // nothing else initializes; the page is leaving
+    }
+    // still reachable ON the shared origin itself if a visitor somehow authenticated there
+    // (nothing offers it, but the check must not depend on that): consent per load, in memory
     foreignCodeBlocked = false
-    if (fixed && sharer) {
-      const principal = getAuth(firebase)?.currentUser ?? null
-      // an ANONYMOUS visitor is not gated: they have no session and no stored key, so there is
-      // nothing here to expose, and shared pages stay usable for the audience they are shared
-      // with. the cost is documented rather than papered over — see the trust-model note below:
-      // if such a visitor later signs in ON THIS ORIGIN, owner code that ran here can reach that
-      // session. an AUTHENTICATED visitor is gated, because their session already exists
-      const gated = principal ? principal.uid != sharer : false
-      if (gated) {
-        // consent is asked once PER LOAD and kept in memory only. a stored record cannot be an
-        // integrity boundary here: any owner code that ever ran in this origin — including on an
-        // ungated ANONYMOUS visit — can write the storage key for another uid and have it
-        // honored later. per-load consent costs one prompt per visit and cannot be forged ahead
-        // of time
-        if (!foreignCodeConsented) {
-          const run = await new Promise(resolve =>
-            _modal(
-              `This shared page includes code written by its owner, which would run with access ` +
-                `to this browser's MindPage data — including the secret for your own account. ` +
-                `Run the owner's code?`,
-              {
-                confirm: 'Run Code',
-                cancel: 'View Only',
-                background: 'cancel',
-                onConfirm: () => resolve(true),
-                onCancel: () => resolve(false),
-              }
-            )
+    if (fixed && sharer && getAuth(firebase)?.currentUser?.uid && getAuth(firebase).currentUser.uid != sharer) {
+      if (!foreignCodeConsented) {
+        const run = await new Promise(resolve =>
+          _modal(
+            `This shared page includes code written by its owner, which would run with full ` +
+              `access to your MindPage account in this browser — your items, your sign-in and ` +
+              `your encryption secret. Run the owner's code?`,
+            {
+              confirm: 'Run Code',
+              cancel: 'View Only',
+              background: 'cancel',
+              onConfirm: () => resolve(true),
+              onCancel: () => resolve(false),
+            }
           )
-          foreignCodeBlocked = !run
-          if (run) foreignCodeConsented = true
-        }
+        )
+        foreignCodeBlocked = !run
+        if (run) foreignCodeConsented = true
       }
     }
     // read by the renderer to make owner html inert (see toHTML in Item.svelte)

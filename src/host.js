@@ -11,5 +11,33 @@ export function canonicalizeHost(host) {
 // url scheme regex from https://stackoverflow.com/a/190405
 // we are fairly restrictive on the tail (last character) by default, disallowing common punctuation
 export function getHostDir(host) {
+  // NOTE: the isolated shared-page origin (see SHARED_HOST) deliberately falls through to
+  // 'other'. its icons then differ from the account domains', so a foreign shared page is
+  // visibly not the tab where you are signed in — a small cue that costs nothing
   return ['mind.page', 'mindbox.io', 'olcan.com'].includes(host) ? host : 'other'
+}
+
+// ISOLATED ORIGIN for other people's shared pages. a shared page runs its OWNER's code, and the
+// only real boundary against that code is the origin itself: firebase auth persistence, the
+// session cookie, localStorage (including the encryption secret) and indexeddb are all
+// per-origin, so owner code loaded here can reach none of them. see redirectToSharedOrigin in
+// index.svelte — this is what replaced asking the visitor to make the judgement call
+export const SHARED_HOST = 'shared.mind.page'
+
+// decides whether a shared page must be served from the isolated origin instead of here, and
+// returns the url to move to (or null to stay). kept pure and separate because it is a security
+// control: everything it needs is passed in, so it can be tested directly.
+// - only shared pages move, and only SOMEONE ELSE'S: the owner's own shared page stays on their
+//   domain, where it is theirs to write to
+// - never when already on the isolated origin (that would loop), and never on localhost, which
+//   has no second origin
+// - an UNKNOWN visitor moves. erring that way costs a redirect to a working page; erring the
+//   other way runs a stranger's code beside a live session
+export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '', hash = '' }) {
+  if (!shared) return null // not a shared page
+  const owner = shared.match(/^(\w+)\//)?.pop()
+  if (!owner) return null // '?shared=<key>' has no owner prefix: the visitor's own page
+  if (host == SHARED_HOST || canonicalizeHost(host) == 'localhost') return null
+  if (uid && uid == owner) return null // the owner's own page
+  return `https://${SHARED_HOST}${path}${search}${hash}`
 }
