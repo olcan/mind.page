@@ -74,6 +74,26 @@ scoped.use(
     res.status(403).type('text/plain').send('proxy is not available on this host')
   },
 
+  // strip the header that would let a proxied script widen service-worker scope, at the EXPRESS
+  // layer rather than through the proxy's own response event: this does not depend on the proxy
+  // library's version or on how it handles followed redirects, and a header we never emit cannot
+  // be re-added by a backend
+  (req, res, next) => {
+    if (!/^\/proxy\//.test(req.url ?? '')) return next()
+    const setHeader = res.setHeader.bind(res)
+    res.setHeader = (name, value) =>
+      String(name).toLowerCase() == 'service-worker-allowed' ? res : setHeader(name, value)
+    const writeHead = res.writeHead.bind(res)
+    res.writeHead = function (status, ...rest) {
+      const headers = rest.find(a => a && typeof a == 'object')
+      if (headers)
+        for (const k of Object.keys(headers)) if (k.toLowerCase() == 'service-worker-allowed') delete headers[k]
+      res.removeHeader?.('service-worker-allowed')
+      return writeHead(status, ...rest)
+    }
+    next()
+  },
+
   // set up generic http proxy, see https://github.com/chimurai/http-proxy-middleware
   // backend protocol://host:port is extracted from first path segment, as in /proxy/<backend>/<path>
   // redirects are followed instead of exposed to server for robust CORS bypass
@@ -106,9 +126,7 @@ scoped.use(
         // console.debug(proxyReq.headers)
       },
       proxyRes: proxyRes => {
-        // never let a proxied response widen service-worker scope: with this header a backend we
-        // do not control could register at '/' and take over the origin. the proxy exists for
-        // CORS bypass, which does not need it
+        // belt and braces alongside the express-layer strip above
         delete proxyRes.headers['service-worker-allowed']
       },
       // error: (error, req, res, target) => console.error(error),
