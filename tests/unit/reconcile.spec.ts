@@ -233,9 +233,13 @@ test('a later step throwing does not rerun an already-successful attribute hook 
   expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
   expect(deferrals.get('d1'), 'the marker survives').toBe(1)
   expect(hookRuns, 'the hook ran once').toBe(1)
-  // the witness was restored — WITHOUT it the retry would settle on a false equality and the
-  // failed later step would never rerun
-  expect(item.savedAttr).toEqual({ color: 'old' })
+  // the WHOLE three-field witness was restored (round 37): savedAttr alone already forces the
+  // retry, so asserting only it would stay green if text or time stopped being restored
+  expect([item.savedText, item.savedTime, item.savedAttr], 'all three fields restored').toEqual([
+    'local',
+    1,
+    { color: 'old' },
+  ])
 
   expect(await reconcileDeferred(deps, item, 1)).toBe(true)
   expect(laterRuns, 'the failed later step reran').toBe(2)

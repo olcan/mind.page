@@ -88,17 +88,17 @@ export type HiddenPersistenceDeps = {
   readonly: () => boolean
 }
 
-// JSON-NORMALIZING deep clone: the state is persisted as JSON (payload -> encryptState -> JSON),
-// so cloning THROUGH JSON freezes exactly the representation that will be written — a nested Date
-// becomes its serialized string now rather than aliasing a mutable object, and a legal own
-// `__proto__` key survives (JSON.parse creates it as a data property; assignment into a fresh
-// object would have invoked the prototype setter). the earlier structural walk aliased Dates,
-// null-prototype and custom objects, which contradicted the "deep clone per generation" contract
-// (round 36). a value JSON cannot represent at all (undefined, a bare function) passes through —
-// persistence would drop it identically
+// JSON-NORMALIZING deep clone, in the payload's STRUCTURAL POSITION: the state is persisted as
+// JSON under the `item` key (payload -> encryptState -> JSON), and JSON.stringify passes the key
+// to toJSON — so a legal key-sensitive toJSON must see 'item' here exactly as it will at write
+// time, and serializing at the root froze the wrong representation (round 37). wrapping also maps
+// a top-level undefined or function to the omitted-item representation instead of retaining the
+// mutable reference the root fallback leaked. a nested Date freezes to its serialized string, and
+// a legal own `__proto__` key survives as a data property (JSON.parse never invokes the setter).
+// throws on state JSON cannot serialize (BigInt, a throwing toJSON) — save() normalizes FIRST and
+// routes that through notifyFailure before anything is mutated
 function cloneState<T>(value: T): T {
-  const json = JSON.stringify(value)
-  return json === undefined ? value : JSON.parse(json)
+  return JSON.parse(JSON.stringify({ item: value })).item
 }
 
 // a document snapshot of the wrapper's current state (name + item only)
@@ -515,6 +515,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // EXECUTES, so it always carries the latest full state — including adoption merges and
     // later save() calls — and a failed earlier write is superseded rather than retried
     save(name: string, item: any) {
+      // NORMALIZE FIRST, before any index or owed mutation: cloneState freezes the JSON
+      // representation that will be persisted, and state JSON cannot serialize (a BigInt, a
+      // throwing toJSON) must fail through the same user-visible hook as a settled write failure —
+      // not synchronously out of save() after the index was already mutated (round 37)
+      let intent: any
+      try {
+        intent = cloneState(item)
+      } catch (e) {
+        console.error(`hidden save for '${name}' rejected: state is not JSON-serializable:`, e)
+        return void deps.notifyFailure(name, e)
+      }
       // record what the name now OWES and let one routine persist it. the intent belongs to the
       // NAME: it is not attached to a wrapper (a delivery can replace or remove that record and
       // the user's change must still land), and it is re-resolved after every await.
@@ -547,14 +558,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       const op = owed.get(name)
       if (op) {
         // CLONE: the baseline must stay immutable under later caller mutations and adoption merges
-        op.localIntent = cloneState(item) // supersede: this is what the name owes now
+        op.localIntent = intent // supersede: this is what the name owes now
         op.generation = ++generationSeq
         // a record that is QUEUED already has a task coming. one that is building, issued or
         // failed does not — and treating those as "already queued" is how failed work sat idle
         // forever, and how a save after issuance was never written
         if (op.phase == 'queued') return
         op.phase = 'queued'
-      } else owed.set(name, { generation: ++generationSeq, localIntent: cloneState(item), phase: 'queued' })
+      } else owed.set(name, { generation: ++generationSeq, localIntent: intent, phase: 'queued' })
       void enqueue(name, holder, () => persistOwed(name))
     },
 

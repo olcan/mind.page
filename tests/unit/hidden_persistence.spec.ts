@@ -1417,11 +1417,12 @@ test('adoption while acquireSecret is pending reaches payload, wrapper and owner
   const saved = { mine: 1 }
   controller.save('n', saved)
   await flush()
-  // registration runs while the secret gate holds the attempt: the controller's own merge rebases
-  // from the baseline and publishes the projection
+  // registration runs while the secret gate holds the attempt, through the REAL path (round 37):
+  // registerHidden's adopted branch sets the pointer and invokes the controller merge, in
+  // production's pointer-then-merge order
   const pending = idx.byName.get('n')!
-  controller.mergeAdopted(pending, { id: 'doc1', name: 'n', item: { pre: 1 } })
-  pending.adopt_id = 'doc1'
+  registerHidden(idx, { id: 'doc1', name: 'n', item: { pre: 1 } }, (p, f) => controller.mergeAdopted(p, f))
+  expect(pending.adopt_id).toBe('doc1')
   secret.resolve()
   for (let i = 0; i < 6; i++) await flush()
   const written = calls.find(c => c.op == 'update' && c.id == 'doc1')
@@ -1489,10 +1490,16 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
   expect(pending.adopt_id, 'freshly re-adopted to the same id').toBe('a1')
   gate.resolve()
   for (let i = 0; i < 10; i++) await flush()
+  // EXACT (round 37): one or more all-v2 writes would still allow duplicate v2 updates or a fresh
+  // v2 create under a wrong id — which is precisely the scheduling question this test pins: the
+  // stale attempt's refuse-without-clearing requeues the SOLE continuation, so exactly one write
   const written = calls.filter(c => c.op == 'update' || c.op == 'create')
-  expect(written.length, 'the write happened').toBeGreaterThan(0)
-  for (const w of written) expect(itemOf(w.text).shared, 'no issued payload carries v1').toBe('v2')
+  expect(
+    written.map(w => ({ op: w.op, id: w.id, shared: itemOf(w.text).shared })),
+    'exactly one update, to a1, carrying v2 — no duplicate, no create'
+  ).toEqual([{ op: 'update', id: 'a1', shared: 'v2' }])
   expect(pending.item.shared, 'the finalized wrapper carries v2').toBe('v2')
+  expect(idx.byName.get('n')!.id, 'the final index holder is a1').toBe('a1')
   expect(published.at(-1)!.shared, 'the last owner publication carries v2').toBe('v2')
 })
 
@@ -1518,6 +1525,14 @@ test('the baseline is cloned at save time: later caller mutations never reach a 
   expect(Object.getOwnPropertyDescriptor(created, '__proto__')?.value, 'own __proto__ is data, not setter').toEqual({
     legal: true,
   })
+  // a KEY-SENSITIVE toJSON on the STATE ITSELF must see the key the payload will pass it — 'item',
+  // not the JSON root's '' (round 37). nested objects see their own property name either way, so
+  // only the top level distinguishes the positional clone from the root clone
+  calls.length = 0
+  controller.save('n2', { toJSON: (key: string) => ({ sawKey: key }) } as any)
+  for (let i = 0; i < 6; i++) await flush()
+  const second = itemOf(calls.find(c => c.op == 'create')!.text)
+  expect(second.sawKey, "toJSON saw the payload position 'item', not the JSON root ''").toBe('item')
 
   // the SUPERSEDE site: a second save while the first generation is still owed reassigns
   // localIntent rather than creating a new owed record
@@ -1531,4 +1546,24 @@ test('the baseline is cloned at save time: later caller mutations never reach a 
   const written = calls.filter(c => c.op == 'create' || c.op == 'update')
   expect(written.length).toBeGreaterThan(0)
   expect(itemOf(written.at(-1)!.text)).toEqual({ mine: 4 })
+})
+
+
+test('non-JSON state fails through notifyFailure at save time, mutating nothing', async () => {
+  // round-37 contract choice: normalization moved from the asynchronous build path to save() entry,
+  // so its failure must reach the same user-visible hook as a settled write failure — and must
+  // reach it BEFORE any index or owed mutation, or the failed save would leave a claimed name
+  const failures: string[] = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    notifyFailure: name => void failures.push(name),
+  })
+  controller.save('n', { bad: BigInt(1) })
+  for (let i = 0; i < 4; i++) await flush()
+  expect(failures, 'the user-visible hook fired').toEqual(['n'])
+  expect(idx.byName.has('n'), 'no claimed name').toBe(false)
+  expect(controller.owes('n'), 'nothing owed').toBe(false)
+  expect(calls.filter(c => c.op == 'create' || c.op == 'update')).toHaveLength(0)
 })
