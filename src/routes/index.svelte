@@ -3292,6 +3292,10 @@
   // decrypted echo reconciled the owner from state that echo was about to replace — and then
   // cleared owes(), letting the echo through as a spurious "changed remotely"
   let snapshotFrontier = () => Promise.resolve()
+  // the outcome of the LATEST hidden application per document. settlement reconciles the owner
+  // only from an index that actually took this write's echo (see echoApplied in the controller);
+  // absent means nothing has failed for it
+  const hiddenApplyOk = new Map()
 
   // true while anything local is still going to write this item: an in-flight write, a queued
   // save task, or a save in progress. replaying under any of these loses the later intent —
@@ -7727,6 +7731,18 @@
               for (let change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
+                // ENTRY receipt, before anything is decrypted: a write already encrypting for this
+                // document must not issue while a change for it is in flight here. it is released
+                // in the finally below, superseded by the real receipt when there is one, and is
+                // invisible to canonical resolution (see noteRemotePending)
+                // nameForDocument, not just hiddenItems: a document being ADOPTED is absent from
+                // byId until finalization, so a hidden-to-visible change for one would otherwise
+                // enter with no receipt at all and let the stale adoption turn it hidden again
+                const entering =
+                  couldBeHidden || hiddenItems.has(doc.id) || hiddenPersistence.nameForDocument(doc.id)
+                    ? hiddenPersistence.noteRemotePending(doc.id)
+                    : null
+                try {
                 // a change that cannot be decrypted is logged and skipped: it must not break the
                 // chain for later snapshots (destructive reconciliation stays init-gated)
                 let savedItem = await decryptItem(doc.data()).catch(e => {
@@ -7819,6 +7835,7 @@
                       )
                       .then(
                         () => {
+                          hiddenApplyOk.set(doc.id, true)
                           healHiddenDirty(doc.id, seenDirtySeq) // heals only ITS OWN generation
                           // released HERE, inside the success handler, and only if this is still
                           // the latest receipt. chaining a second .then after a rejection handler
@@ -7831,6 +7848,7 @@
                           hiddenPersistence.releaseRemote(doc.id, receipt)
                         },
                         e => {
+                          hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this
                           console.error('could not apply remote change:', doc.id, e)
                           hiddenApplyFailed = true
                           markHiddenDirty(doc.id)
@@ -7866,6 +7884,12 @@
                   // one failed application must not poison the chain for every later snapshot:
                   // log it and continue with the remaining changes
                   console.error('could not apply remote change:', doc.id, e)
+                }
+                } finally {
+                  // the entry receipt has done its job: either a real receipt superseded it (in
+                  // which case this release is a no-op, since the token no longer matches) or the
+                  // change turned out not to concern the hidden index
+                  if (entering != null) hiddenPersistence.releaseRemote(doc.id, entering)
                 }
               }
               // release this revision's reserved authority slot once every hidden transition it
@@ -8653,6 +8677,7 @@
     // a settled permission/validation failure means the change is NOT saved, while `owes()` is a
     // boolean and `wrapper.saving` has already cleared — so without this the only trace was a
     // console line, with owner notifications suppressed indefinitely behind the retained record
+    echoApplied: id => hiddenApplyOk.get(id) !== false,
     notifyFailure: (name, error) => {
       const owner = name.match(/^global_store_(.+)$/)?.[1] ?? name
       _modal_alert(`Could not save hidden state for ${owner}: ${(error as any)?.message ?? error}`)

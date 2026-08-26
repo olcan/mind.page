@@ -68,6 +68,12 @@ export type HiddenPersistenceDeps = {
   // and `wrapper.saving` has already settled, so without this hook the only trace was a console
   // line while owner notifications stayed suppressed indefinitely
   notifyFailure: (name: string, error: unknown) => void
+  // whether the latest hidden application for this document SUCCEEDED. the write barrier is
+  // settle-only by design (an unrelated listener failure must never turn a committed firestore
+  // write into a failed one), but that also swallowed the outcome of THIS write's own echo: on a
+  // failed application the controller took its success path and reconciled the owner from an index
+  // that may still hold the pre-write state, rolling the owner back with no later echo guaranteed
+  echoApplied: (id: string) => boolean
   // revokes hidden-index authority (see settleHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
@@ -116,7 +122,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // removed and later recreated stayed invisible to survivor selection forever.
   // each receipt carries a token; a release only takes effect if it is still the latest, so an
   // older application settling cannot discard a newer receipt that a pending create still needs
-  type Receipt = { token: number; wrapper?: HiddenWrapper }
+  // `pending` marks a change the listener has RECEIVED but not yet decrypted. it exists only to
+  // move the target stamp: a document being decoded right now is a document that may be about to
+  // change, and a write that was built before it arrived must not issue. it is deliberately
+  // INVISIBLE to canonical resolution — nothing is known about it yet, so treating it as a record
+  // or as a removal would both be wrong
+  type Receipt = { token: number; wrapper?: HiddenWrapper; pending?: boolean }
   const receipts = new Map<string, Receipt>()
   let receiptSeq = 0
 
@@ -156,6 +167,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const byId = new Map<string, HiddenWrapper>()
     for (const w of index.byId.values()) if (w.name == name) byId.set(w.id, w)
     for (const [id, receipt] of receipts) {
+      if (receipt.pending) continue // received, not yet decoded: says nothing about the record yet
       if (!receipt.wrapper)
         byId.delete(id) // its removal was received
       else if (receipt.wrapper.name == name)
@@ -175,6 +187,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return best
   }
 
+  // any change that has ENTERED the listener and is still being decoded. nothing is known about it
+  // yet, so a fresh create cannot rule out that it is a same-name record
+  const hasPendingReceipts = () => [...receipts.values()].some(receipt => receipt.pending)
+
   // a value that CHANGES if a document is removed, renamed, replaced under the same id, or has a
   // new delivery outstanding. an ADOPTION target is deliberately absent from the index until
   // finalization, so "is it still the record we would choose" can never answer this; the payload
@@ -183,7 +199,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // application replaces it. a spurious mismatch only costs one requeue — issuing wrongly does not
   function targetStamp(id: string): unknown {
     const receipt = receipts.get(id)
-    if (receipt) return receipt.wrapper ? `receipt:${receipt.token}` : 'removed'
+    if (receipt) return `receipt:${receipt.token}` // pending, present or removed: all are CHANGES
     return deps.index().byId.get(id) ?? 'absent'
   }
 
@@ -216,8 +232,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // `owes()`, letting that delivery through as if nothing were outstanding
         void enqueue(name, undefined, async () => {
           if (!currentOwed(name, generation)) return
-          owed.delete(name) // settled, and still the latest
-          deps.reconcileOwner(name) // one explicit repair, now that notifications are unblocked
+          owed.delete(name) // settled, and still the latest: the write IS committed
+          // ... but only reconcile from an index that actually took this write's echo. when the
+          // application FAILED the index may still hold the pre-write state, and the owner already
+          // holds what we wrote — reconciling would roll it back, with no later echo guaranteed.
+          // authority revocation and the dirty marking drive the repair instead
+          if (deps.echoApplied(id)) deps.reconcileOwner(name)
+          else console.warn(`hidden echo for '${name}' (${id}) did not apply; owner left as written`)
         })
       },
       e => {
@@ -270,9 +291,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const merged = { ...holder, item: { ...(holder.item ?? {}) } }
     deps.adopt({ ...merged, item: state }, merged) // may hold fields the owner never saw
     if (deps.index().byId.get(holder.id) === holder) holder.item = state // live: keep in step
+    const stamp = targetStamp(holder.id) // what we believe the target is, before we build for it
     const data = await deps.encryptState(payload({ ...holder, item: state }))
     if (!current()) return true
-    if (canonicalHolder(name) !== holder) return false // moved while building: requeue, do not write
+    // moved, or CHANGED under us — including a change that has entered the listener and is still
+    // decrypting, which the stamp sees and canonical resolution deliberately does not
+    if (canonicalHolder(name) !== holder || targetStamp(holder.id) !== stamp) return false
     issueWrite(name, generation, holder.id, data, false)
     return true
   }
@@ -325,8 +349,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (!current()) return true
       // a same-name record RECEIVED during that encryption is a record we already know about, and
       // creating alongside it is a duplicate we cause ourselves. (one another writer commits after
-      // this point is a genuine race no client read closes without server-side uniqueness)
-      if (findSurvivor(wrapper)) return false // requeue: the retry adopts it instead
+      // this point is a genuine race no client read closes without server-side uniqueness.)
+      // a change still DECODING could also be one, and nothing is known about it yet — so a fresh
+      // create waits rather than risk the duplicate. deliberately broad: it can requeue for a
+      // change that turns out to be unrelated, and a duplicate document is the worse outcome
+      if (findSurvivor(wrapper) || hasPendingReceipts()) return false // requeue: the retry adopts it
       if (issueWrite(name, generation, id, data, true)) finalizeCreate(deps.index(), wrapper, id)
       return true
     } catch (e) {
@@ -479,6 +506,19 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     noteRemote(wrapper: HiddenWrapper | undefined, id: string, removed: boolean) {
       const token = ++receiptSeq
       receipts.set(id, { token, wrapper: removed ? undefined : wrapper })
+      return token
+    },
+
+    // records that a change for this document has ENTERED the listener, before anything is known
+    // about it. production cannot call noteRemote until after decryptItem, and every controller
+    // branch can finish encrypting and issue synchronously in that window — so a removal, rename
+    // or same-id replacement already inside the listener left the target stamp unchanged and a
+    // stale write went out. this moves the stamp at ENTRY instead, at the cost of an occasional
+    // extra requeue for a change that turns out not to concern us. a requeue is safe; the write
+    // was not. release it once the change has been noted properly (or has proved irrelevant)
+    noteRemotePending(id: string) {
+      const token = ++receiptSeq
+      receipts.set(id, { token, pending: true })
       return token
     },
 

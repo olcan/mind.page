@@ -53,6 +53,7 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     acquireSecret: async () => {},
     reconcileOwner: () => {},
     notifyFailure: () => {},
+    echoApplied: () => true,
     confirmIndex: async _name => void calls.push({ op: 'confirm' }),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
@@ -1242,4 +1243,64 @@ test('settlement follows the write dependency, so an ack behind the frontier rec
   await flush()
   expect(reconciled).toEqual([{ v: 'D' }]) // in step with the echo, never rolled back to B
   expect(controller.owes('n')).toBe(false)
+})
+
+test('a change that has ENTERED the listener but not yet decrypted still stops a stale write', async () => {
+  // round-22 finding 1: production cannot call noteRemote until after decryptItem, and every
+  // controller branch can finish encrypting and issue synchronously in that window — so a removal,
+  // rename or same-id replacement already inside the listener left the stamp unchanged and the
+  // stale write went out. the receipt now exists from listener ENTRY
+  const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'D' })
+  await awaitGate('the update for d1')
+  // the listener has entered for d1 and is still decrypting: nothing is known about the change yet
+  const entering = controller.noteRemotePending('d1')
+  await releaseGate()
+  expect(calls.filter(c => c.op == 'update'), 'no write while a change for the target is in flight').toHaveLength(0)
+  // the change turns out to be a removal; the real receipt supersedes the pending one
+  void arriveRemoval(controller, idx, 'd1')
+  controller.releaseRemote('d1', entering)
+  await drain(1)
+  expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
+})
+
+test('a pending entry receipt is invisible to canonical resolution', async () => {
+  // it says only "something is arriving", so treating it as a record or as a removal would both be
+  // wrong: the name must still resolve to the record actually in the index
+  const { idx, calls, controller, drain } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.noteRemotePending('d1')
+  controller.save('n', { v: 'D' })
+  await drain(1)
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates.map(u => u.id)).toEqual(['d1']) // still d1, not a fresh create
+})
+
+test('settlement does not reconcile the owner when its own echo failed to apply', async () => {
+  // round-22 finding 2: the write barrier is settle-only on purpose — an unrelated listener failure
+  // must never turn a committed firestore write into a failed one — but that also swallowed the
+  // outcome of THIS write's echo. the controller then took its success path and reconciled from an
+  // index that may still hold the pre-write state, rolling the owner back with no later echo
+  // guaranteed. the write is still committed, so `owes()` clears either way
+  const reconciled: string[] = []
+  const h = harness()
+  const { idx } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    echoApplied: () => false, // this document's application failed
+    reconcileOwner: name => void reconciled.push(name),
+  })
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'D' })
+  await flush()
+  await flush()
+  expect(controller.owes('n')).toBe(false) // committed: the record is not held open
+  expect(reconciled, 'the owner already holds what was written').toEqual([])
 })
