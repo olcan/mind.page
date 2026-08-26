@@ -6390,12 +6390,25 @@
   function setSessionMarker() {
     document.cookie = `__session=1;max-age=${SESSION_COOKIE_MAX_AGE};path=/;samesite=lax`
   }
+  // every scope prefix the server serves (see `paths` in src/server/app.mjs): the numbered pwa
+  // scopes AND the display-only ones. a cookie written without Path defaults to the directory of
+  // the page that set it, so an old build left one at whichever of these the user happened to be
+  // on — and a clear at the wrong path silently misses it
+  const SESSION_COOKIE_SCOPES = [
+    ...Array.from({ length: 10 }, (_, i) => ['', 'f', 's', 'm', 'b'].map(s => `/${i}${s}`)).flat(),
+    '/f',
+    '/s',
+    '/m',
+    '/b',
+  ]
   function clearSessionMarker() {
     document.cookie = '__session=;max-age=0;path=/;samesite=lax'
-    // legacy cookies written without Path by earlier builds, at every pwa scope prefix
-    for (let i = 0; i < 10; i++)
-      for (const suffix of ['', 'f', 's', 'm', 'b'])
-        document.cookie = `__session=;max-age=0;path=/${i}${suffix}/;samesite=lax`
+    // both path spellings: browsers treat /2 and /2/ as different cookie paths, and old builds
+    // could have produced either depending on the page's directory
+    for (const scope of SESSION_COOKIE_SCOPES) {
+      document.cookie = `__session=;max-age=0;path=${scope};samesite=lax`
+      document.cookie = `__session=;max-age=0;path=${scope}/;samesite=lax`
+    }
     document.cookie = '__session=;max-age=0' // and one with no path at all, as they were written
   }
 
@@ -8674,6 +8687,11 @@
       // isOwnPendingChange). so "changed remotely" is decided by the STATE, not by the delivery:
       // an echo that carries what the item already holds changes nothing and must not fire the
       // callback, or a handler that reacts to remote changes by saving would trigger itself
+      // a NEWER local change for this name is still queued: the delivery has been applied to the
+      // index, but copying it onto the owner and announcing it as a remote change would roll the
+      // owner backwards — and a handler that reacts by saving would then persist that older
+      // state over the queued one. the owner is synchronized when the queued change executes
+      if (hiddenPersistence.owes(name)) return
       const applied = hiddenItemsByName.get(name)?.item
       if (_.isEqual(item(id).global_store ?? {}, applied ?? {})) return // nothing actually changed
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);

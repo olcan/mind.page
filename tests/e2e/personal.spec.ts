@@ -526,6 +526,34 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2', '_e2e_probe3']) // nothing lost across the shared-page saves
 })
 
+test('signing out clears legacy session cookies at every scope, not just the root', async ({ page, context }) => {
+  // round-17 finding 7: old builds wrote __session with no Path, so it landed at the directory
+  // of whatever scoped page set it (/2/, /f/, ...) — carrying a full firebase ID token. a root
+  // clear cannot remove those, and a test that reads document.cookie from / cannot even SEE
+  // them, so the previous assertion passed while the credentials remained
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const origin = new URL(page.url()).origin
+  // seed cookies exactly as old builds left them: a token value, at scoped paths, both spellings
+  // NOTE: domain+path explicitly — deriving from a url takes the DIRECTORY of that url, so
+  // several seeds would collapse onto '/' and the test would prove nothing
+  const domain = new URL(origin).hostname
+  const legacy = ['/2', '/2/', '/2f/', '/f/', '/b/']
+  await context.addCookies(
+    legacy.map(path => ({ name: '__session', value: 'eyJhbGciOiJSUzI1NiJ9.legacy.token', domain, path }))
+  )
+  // NOTE: cookies() with a URL returns only what would be SENT to that url — scoped cookies are
+  // invisible from '/', which is exactly why the previous assertion could not see them
+  const sessionCookies = async () => (await context.cookies()).filter(c => c.name == '__session')
+  expect((await sessionCookies()).length, 'seeded at several scopes').toBeGreaterThan(1)
+  await page.evaluate(() => void window._create('/_signout', { command: true }))
+  await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
+  // inspected across the whole context, not through one document: nothing may survive
+  const remaining = await sessionCookies()
+  expect(remaining, `left behind: ${JSON.stringify(remaining.map(c => c.path))}`).toEqual([])
+})
+
 test('signing out clears the secret, the session and the local cache', async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)

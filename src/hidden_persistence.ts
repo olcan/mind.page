@@ -317,6 +317,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       void enqueue(name, holder, () => persistOwed(name))
     },
 
+    // true when this name still owes the server a local change. used for NOTIFICATION, never to
+    // skip application: a delivery still lands in the index, but the owner's copy and its
+    // "changed remotely" callback must not be driven backwards while a newer local generation is
+    // still queued — a handler that reacts by saving would otherwise persist the older state
+    owes(name: string) {
+      return owed.has(name)
+    },
+
     // applies a remote transition (add/modify/remove) for the name ON ITS CHAIN, so it can
     // never interleave with an in-flight write for the same name; with no queued work it runs
     // immediately. returns a promise that settles when the transition has applied — the caller
