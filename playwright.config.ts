@@ -35,7 +35,10 @@ export default defineConfig({
   webServer: {
     // note FIREBASE_CONFIG (set by firebase emulators:exec) must be removed, since server.ts takes it
     // to mean running on cloud functions and then does not listen
-    command: 'env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 NODE_ENV=production node server.mjs',
+    // CONTENT_CACHE_MS pins the crawler-content ttl (see $lib/server/content.js). the production
+    // default is 60s, so the frozen-render test polled through a cache whose age depended on what
+    // ran before it: 9.6s in one run, but up to ~60s if earlier tests get faster or reorder
+    command: 'env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=3100 CONTENT_CACHE_MS=100 NODE_ENV=production node server.mjs',
     url: 'http://localhost:3100/server_id',
     // never reuse: a server started against an older build would serve it to the whole run,
     // which is how a stale bundle passed a round of client-side changes (see tests/e2e/run.sh)

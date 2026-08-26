@@ -15,15 +15,29 @@ const FIXTURES = readdirSync(resolve(fileURLToPath(new URL('.', import.meta.url)
   .map(file => basename(file, '.md'))
   .sort()
 
-test('the markdown corpus renders as before', async ({ page }) => {
+test('the markdown corpus renders as before', async ({ page }, testInfo) => {
+  // this test took 3.7s in a healthy run and once timed out at the 120s default, whose trace was
+  // then overwritten by later runs — so its cause could not be established. a FOCUSED timeout
+  // fails it fast and near the step that hung, and the diagnostics below are attached to the
+  // report either way. deliberately NOT a retry and NOT a longer timeout: both hide the fault
+  test.setTimeout(45_000)
+  const diagnostics: string[] = []
+  page.on('pageerror', error => diagnostics.push(`pageerror ${error}`))
+  // only OUR OWN server's failures: the external aborts below are deliberate and expected
+  page.on('requestfailed', request => {
+    if (/localhost|127\.0\.0\.1/.test(request.url()))
+      diagnostics.push(`requestfailed ${request.url()} ${request.failure()?.errorText ?? ''}`)
+  })
   // external content references (e.g. images) stay deterministic offline; scripts and styles from
   // the app shell (mathjax, c3, ... from cdns, see app.html) are still allowed
   await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, route =>
     ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue()
   )
-  await page.goto('/?shared=markdown_e2e/markdown')
-  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 60_000 })
-  await waitForApp(page)
+  await test.step('open the shared page', async () => {
+    await page.goto('/?shared=markdown_e2e/markdown')
+    await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 })
+  })
+  await test.step('the app becomes ready', () => waitForApp(page))
   expect(await page.evaluate(() => window.__items[0].id)).toBe('md-markdown') // the root item heads the page
   await expect(page.locator('mark.label[title="#markdown/extended"]')).toBeVisible() // labels shown (shared.labels)
   await expect(page.locator('mark.label[title="#markdown"]')).toBeHidden() // except the root item, whose label heads the page
@@ -59,9 +73,15 @@ test('the markdown corpus renders as before', async ({ page }) => {
     await expect(page.locator(`#item-md-markdown-headings ${h}`)).toBeVisible()
   await page.evaluate(() => void (location.hash = '#markdown'))
   await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(FIXTURES.length)
-  for (const slug of FIXTURES) {
-    const html = await renderedHtml(page, `md-${slug}`)
-    expect.soft(html, slug).not.toBeNull()
-    if (html != null) expect.soft(normalize(html), slug).toMatchSnapshot(`${slug}.html`)
-  }
+  for (const slug of FIXTURES)
+    await test.step(`render ${slug}`, async () => {
+      const html = await renderedHtml(page, `md-${slug}`)
+      expect.soft(html, slug).not.toBeNull()
+      if (html != null) expect.soft(normalize(html), slug).toMatchSnapshot(`${slug}.html`)
+    })
+  // attached unconditionally: when this test next hangs, the report carries what the page saw
+  await testInfo.attach('page diagnostics', {
+    body: diagnostics.join('\n') || '(no page errors or local request failures)',
+    contentType: 'text/plain',
+  })
 })

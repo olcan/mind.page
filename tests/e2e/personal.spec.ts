@@ -54,9 +54,7 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
   // a server-served first revision grants hidden-index authority once its application settles
   // (the receipt-time grant used to be reset by initialize(), leaving server-first loads
   // unauthoritative forever)
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
-    .toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 }).toBe(true)
   // reloading with the stored secret decrypts without prompting
   await page.reload()
   await waitForApp(page)
@@ -68,9 +66,7 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
   // metadata-only snapshot that can arrive WHILE initialization runs: the queued settlement
   // must await initialization and still grant (round 8: it was discarded, leaving warm-cache
   // loads unauthoritative until the next data change)
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
-    .toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 }).toBe(true)
 })
 
 test('a new device must enter the phrase; a wrong one can only sign out', async ({ page }) => {
@@ -81,7 +77,7 @@ test('a new device must enter the phrase; a wrong one can only sign out', async 
   // signed out: back to the anonymous account as a read-only visitor, credentials cleared
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   expect(
-    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')])
+    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')]),
   ).toEqual([null, null])
   // the right phrase decrypts the account
   await loadUser(page, ALICE)
@@ -97,33 +93,48 @@ test('a slow first connection does not reset the account to empty', async ({ pag
   // cache snapshot must not initialize the account (which would create a welcome item and, on a
   // device without the secret, prompt for a NEW phrase over the existing items)
   await withSecret(page)
+  // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
+  // and are released explicitly, so the stall lasts exactly as long as the assertions need and
+  // never 8s more. `finally` releases them however the test ends
   let blocked = true
-  await page.route(/:8080\/google\.firestore/, route =>
-    blocked ? void setTimeout(() => route.continue(), 8_000) : route.continue()
-  )
-  // sign in without waiting for initialization (as signIn in helpers, which polls past it)
-  const token = await customToken(ALICE)
-  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
-  await page.evaluate(token => {
-    sessionStorage.setItem('mindpage_signin_pending', '1')
-    document.cookie = '__session=signin_pending;max-age=600'
-    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
-  }, token)
-  // the reload into the signed-in app clears the pending flag before initializing
-  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-  await page.waitForTimeout(4_000) // while the channel stalls, the app must keep waiting
-  expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
-  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
-  blocked = false
-  await expect
-    .poll(() => page.evaluate(() => window._init_time > 0 && window._readonly === false).catch(() => false), {
-      timeout: 90_000,
-    })
-    .toBe(true)
-  await waitForApp(page)
-  const names = await page.evaluate(() => window._items().map(item => item.name))
-  expect(names).toContain('#e2e_private') // account intact, no welcome item added
-  expect(names.filter(name => name == '#e2e_private')).toHaveLength(1)
+  const held: Array<() => void> = []
+  const release = () => {
+    blocked = false
+    for (const resume of held.splice(0)) resume()
+  }
+  await page.route(/:8080\/google\.firestore/, route => {
+    if (!blocked) return void route.continue()
+    held.push(() => route.continue())
+  })
+  try {
+    // sign in without waiting for initialization (as signIn in helpers, which polls past it)
+    const token = await customToken(ALICE)
+    await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+    await page.evaluate(token => {
+      sessionStorage.setItem('mindpage_signin_pending', '1')
+      document.cookie = '__session=signin_pending;max-age=600'
+      void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+    }, token)
+    // the reload into the signed-in app clears the pending flag before initializing
+    await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+    // a real milestone rather than a guess: the app has ISSUED its listen and we are holding it
+    await expect.poll(() => held.length).toBeGreaterThan(0)
+    await page.waitForTimeout(1_500) // a quiet window is still the only proof it does not initialize
+    expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
+    expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+    release()
+    await expect
+      .poll(() => page.evaluate(() => window._init_time > 0 && window._readonly === false).catch(() => false), {
+        timeout: 90_000,
+      })
+      .toBe(true)
+    await waitForApp(page)
+    const names = await page.evaluate(() => window._items().map(item => item.name))
+    expect(names).toContain('#e2e_private') // account intact, no welcome item added
+    expect(names.filter(name => name == '#e2e_private')).toHaveLength(1)
+  } finally {
+    release() // however this test ends, no route is left held
+  }
 })
 
 test('shared items are stored in the clear and visible to anonymous visitors by key', async ({ page, browser }) => {
@@ -181,30 +192,44 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
   expect(await page.evaluate(() => window._items().length)).toBe(1)
   // sign in with the firestore channel stalled: the first snapshot comes from the partial cache
   await page.goto('/')
+  // the firestore channel is HELD, not delayed by a fixed timer: the requests pile up in `held`
+  // and are released explicitly, so the stall lasts exactly as long as the assertions need and
+  // never 8s more. `finally` releases them however the test ends
   let blocked = true
-  await page.route(/:8080\/google\.firestore/, route =>
-    blocked ? void setTimeout(() => route.continue(), 8_000) : route.continue()
-  )
-  const token = await customToken(ALICE)
-  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
-  await page.evaluate(token => {
-    sessionStorage.setItem('mindpage_signin_pending', '1')
-    document.cookie = '__session=signin_pending;max-age=600'
-    void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
-  }, token)
-  await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
-  await page.waitForTimeout(4_000) // while stalled, the app must keep waiting on the partial cache
-  expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
-  expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
-  blocked = false
-  // the server snapshot arrives with the encrypted items, which prompt for the existing phrase
-  await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
-  await waitForApp(page)
-  await expect
-    .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
-    .toContain('secret text 12345')
-  await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
-  await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
+  const held: Array<() => void> = []
+  const release = () => {
+    blocked = false
+    for (const resume of held.splice(0)) resume()
+  }
+  await page.route(/:8080\/google\.firestore/, route => {
+    if (!blocked) return void route.continue()
+    held.push(() => route.continue())
+  })
+  try {
+    const token = await customToken(ALICE)
+    await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+    await page.evaluate(token => {
+      sessionStorage.setItem('mindpage_signin_pending', '1')
+      document.cookie = '__session=signin_pending;max-age=600'
+      void window.firebase.auth.signInWithCustomToken(window.firebase.auth.getAuth(window.firebase), token)
+    }, token)
+    await page.waitForFunction(() => !sessionStorage.getItem('mindpage_signin_pending'), null, { timeout: 30_000 })
+    await expect.poll(() => held.length).toBeGreaterThan(0) // the listen is issued and held
+    await page.waitForTimeout(1_500) // quiet window: the partial cache must not initialize either
+    expect(await page.evaluate(() => window._init_time > 0)).toBe(false) // undefined until init
+    expect(await page.getByText(/Choose a .*secret phrase/).count()).toBe(0)
+    release()
+    // the server snapshot arrives with the encrypted items, which prompt for the existing phrase
+    await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
+    await waitForApp(page)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
+      .toContain('secret text 12345')
+    await page.evaluate(() => window._item('#e2e_shared')!.unshare('e2e-key')) // restore for later tests
+    await expect.poll(() => stored(page, '#e2e_shared'), { timeout: 30_000 }).toMatchObject({ text: null })
+  } finally {
+    release() // however this test ends, no route is left held
+  }
 })
 
 test('a complete cache without the stored secret still initializes from the server', async ({ page }) => {
@@ -233,9 +258,7 @@ test('a complete cache without the stored secret still initializes from the serv
     .toContain('secret text 12345')
   // the cache-initialized index is not authoritative by itself; the server's metadata-only
   // confirmation grants authority through the serialized chain
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 })
-    .toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 15_000 }).toBe(true)
 })
 
 test('the header scrolls to the top on a short column (new account)', async ({ page }) => {
@@ -254,13 +277,15 @@ test('the header scrolls to the top on a short column (new account)', async ({ p
           const header = document.querySelector('.header') as HTMLElement
           return Math.round(header.getBoundingClientRect().top)
         }),
-      { timeout: 30_000 }
+      { timeout: 30_000 },
     )
     .toBeLessThanOrEqual(1) // the header reaches the top of the viewport
   // and stays there once settled
   await page.waitForTimeout(2_000)
   expect(
-    await page.evaluate(() => Math.round((document.querySelector('.header') as HTMLElement).getBoundingClientRect().top))
+    await page.evaluate(() =>
+      Math.round((document.querySelector('.header') as HTMLElement).getBoundingClientRect().top),
+    ),
   ).toBeLessThanOrEqual(1)
 })
 
@@ -368,7 +393,9 @@ test('global-store updates and deletions reach a second tab of the same account'
   }
 })
 
-test('a corrupt hidden change revokes authority until healed, and invalid records are reported not deleted', async ({ page }) => {
+test('a corrupt hidden change revokes authority until healed, and invalid records are reported not deleted', async ({
+  page,
+}) => {
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -491,10 +518,9 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
   expect(await page.evaluate(() => window._item('#e2e_shared')!.global_store._e2e_pre ?? null)).toBe(1)
   await page.evaluate(() => void (window._item('#e2e_shared')!.global_store._e2e_probe3 = 1))
   await expect
-    .poll(
-      async () => (await storedHidden()).some(text => text.includes('_e2e_probe3') && text.includes('_e2e_pre')),
-      { timeout: 30_000 }
-    )
+    .poll(async () => (await storedHidden()).some(text => text.includes('_e2e_probe3') && text.includes('_e2e_pre')), {
+      timeout: 30_000,
+    })
     .toBe(true)
   await page.goto('/')
   await waitForApp(page)
@@ -521,8 +547,8 @@ test('a shared-page sign-in validates the phrase and warms the cache for the mai
     await page.evaluate(() =>
       Object.keys(window._item('#e2e_shared')!.global_store)
         .filter(k => k.startsWith('_e2e'))
-        .sort()
-    )
+        .sort(),
+    ),
   ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2', '_e2e_probe3']) // nothing lost across the shared-page saves
 })
 
@@ -541,7 +567,7 @@ test('signing out clears legacy session cookies at every scope, not just the roo
   const domain = new URL(origin).hostname
   const legacy = ['/2', '/2/', '/2f/', '/f/', '/b/']
   await context.addCookies(
-    legacy.map(path => ({ name: '__session', value: 'eyJhbGciOiJSUzI1NiJ9.legacy.token', domain, path }))
+    legacy.map(path => ({ name: '__session', value: 'eyJhbGciOiJSUzI1NiJ9.legacy.token', domain, path })),
   )
   // NOTE: cookies() with a URL returns only what would be SENT to that url — scoped cookies are
   // invisible from '/', which is exactly why the previous assertion could not see them
@@ -562,7 +588,7 @@ test('signing out clears the secret, the session and the local cache', async ({ 
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   expect(
-    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')])
+    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')]),
   ).toEqual([null, null])
   // the marker must be GONE after sign-out, not merely free of a token: a stale `__session=1`
   // keeps suppressing anonymous server rendering for signed-out requests

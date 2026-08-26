@@ -25,11 +25,22 @@ test('the app waits for the cdn scripts even when they are slow', async ({ page 
   // that items cannot evaluate before the globals (c3, hljs, graphviz, ...) exist
   const errors: string[] = []
   page.on('pageerror', error => errors.push(String(error)))
-  await page.route(
-    /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com/,
-    route => void setTimeout(() => route.continue(), 2_500)
-  )
-  await loadAnonymous(page)
+  // ONE representative parser-blocking global (c3) is HELD and released explicitly, rather than
+  // delaying every cdn request by a fixed 2.5s. the claim is that items cannot evaluate before
+  // the globals exist, so holding one of those globals states it directly — and the test costs
+  // the time the app actually needs instead of a constant
+  let release: () => void = () => {}
+  const held = new Promise<void>(resolve => (release = resolve))
+  let reached = false
+  await page.route(/c3@[\d.]+\/c3\.min\.js/, async route => {
+    reached = true
+    await held
+    await route.continue()
+  })
+  const loaded = loadAnonymous(page)
+  await expect.poll(() => reached, { timeout: 30_000 }).toBe(true) // the parser reached the script
+  release()
+  await loaded
   expect(errors.filter(error => /c3|hljs|graphviz|listLanguages|is not defined/.test(error))).toEqual([])
 })
 
