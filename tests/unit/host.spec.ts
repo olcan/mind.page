@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import {
   SHARED_HOST,
   getHostDir,
-  isAllowedProxyOrigin,
+  isProxyRequestAllowed,
   isLoopbackAddress,
   sharedOriginRedirect,
   // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
@@ -70,37 +70,51 @@ test('loopback detection covers every form node reports, and nothing else', () =
     expect(isLoopbackAddress(address as any), String(address)).toBe(false)
 })
 
-// round-19 finding 5: the proxy gate read only the socket address, which identifies the browser
-// PROCESS. a page on any origin can open a WebSocket to 127.0.0.1, and a WebSocket has no CORS
-// response gate, so `Origin: https://attacker.example` handshook successfully and the outbound
-// request happened. the origin is therefore part of the gate
-test('proxy origins: our own local origins are allowed, foreign and opaque ones are not', () => {
-  for (const origin of [
-    undefined, // not browser-initiated (curl, a local script): a caller that is already local
-    '',
-    'http://localhost:3100',
-    'https://localhost',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.5', // the whole loopback block, as with isLoopbackAddress
-    'http://[::1]:5173',
-    'https://local.dev', // an EXACT local dev alias
-  ])
-    expect(isAllowedProxyOrigin(origin as any), String(origin)).toBe(true)
-  for (const origin of [
-    'https://attacker.example',
-    'http://mind.page', // a DEPLOYED origin is not a local one: the proxy exists only locally
-    'https://shared.mind.page',
-    'null', // the opaque origin a sandboxed frame sends
-    'not a url',
-    'http://127.0.0.1.attacker.example', // suffix, not loopback
-    // canonicalizeHost maps `localhost.<anything>` to 'localhost' for DISPLAY. reusing it here
-    // would have let an attacker-registered domain pass, so the check is exact-match only
-    'http://localhost.attacker.example',
-    'http://localhost.localdomain',
-    'http://192.168.86.101', // canonicalizeHost calls this localhost too; it is LAN, not loopback
-    'http://local.dev.attacker.example',
-  ])
-    expect(isAllowedProxyOrigin(origin as any), String(origin)).toBe(false)
+// round-20 findings 4 and 5: `(address, origin)` was not enough. an absent Origin does NOT mean a
+// non-browser caller — browsers omit it on GET/HEAD navigations and no-cors requests, which is the
+// dangerous case — and comparing only the origin's HOSTNAME ignores scheme and port, so any page on
+// any port of an allowed name qualified. review reproduced both against the previous code
+const ALLOWED = { address: '127.0.0.1', host: 'localhost:3100', secure: false }
+test('the proxy gate reads the whole request, not an address and a hostname', () => {
+  const allow = (over: Record<string, unknown>) => isProxyRequestAllowed({ ...ALLOWED, ...over })
+  // full origin equality: scheme, host AND port
+  expect(allow({ origin: 'http://localhost:3100' }), 'exact same origin').toBe(true)
+  expect(allow({ origin: 'http://localhost:9999' }), 'port mismatch').toBe(false)
+  expect(allow({ origin: 'https://localhost:3100' }), 'scheme mismatch').toBe(false)
+  expect(allow({ origin: 'http://127.0.0.1:3100' }), 'host mismatch, both local').toBe(false)
+  expect(allow({ origin: 'https://attacker.example' }), 'foreign origin').toBe(false)
+  expect(allow({ origin: 'null' }), 'opaque origin').toBe(false)
+  expect(
+    isProxyRequestAllowed({ address: '::1', host: '[::1]:3100', secure: false, origin: 'http://[::1]:3100' }),
+    'ipv6 literal, matching'
+  ).toBe(true)
+  expect(
+    isProxyRequestAllowed({ address: '127.0.0.1', host: 'local.dev:443', secure: true, origin: 'https://local.dev:443' }),
+    'https dev alias, matching'
+  ).toBe(true)
+  // localhost.dev is advertised by the dev server (see vite.config.mts) and must not be denied
+  expect(
+    isProxyRequestAllowed({
+      address: '127.0.0.1',
+      host: 'localhost.dev:443',
+      secure: true,
+      origin: 'https://localhost.dev:443',
+    }),
+    'the advertised localhost.dev alias'
+  ).toBe(true)
+  // no Origin: fetch metadata decides, and anything but same-origin is refused
+  expect(allow({ secFetchSite: 'same-origin' }), 'same-origin navigation').toBe(true)
+  expect(allow({ secFetchSite: 'cross-site' }), 'THE reproduced exploit: cross-site, no Origin').toBe(false)
+  expect(allow({ secFetchSite: 'same-site' }), 'same-site is not same-origin').toBe(false)
+  expect(allow({ secFetchSite: 'none' }), 'user-initiated navigation').toBe(false)
+  // neither: fail CLOSED unless a local tool opts in with a header no page can set on a
+  // navigation or a no-cors request
+  expect(allow({}), 'no origin, no fetch metadata').toBe(false)
+  expect(allow({ optIn: true }), 'explicit local opt-in').toBe(true)
+  // the address and the request host are both still required to be local
+  expect(allow({ address: '10.0.0.5', origin: 'http://localhost:3100' }), 'non-loopback peer').toBe(false)
+  for (const host of ['localhost.attacker.example', 'local.dev.attacker.example', '192.168.86.101', 'mind.page'])
+    expect(allow({ host: `${host}:3100`, origin: `http://${host}:3100` }), host).toBe(false)
 })
 
 // round-19 finding 5 asked for the vite/preview wiring to be PINNED, not just asserted once by

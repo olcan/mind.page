@@ -328,19 +328,24 @@ test.describe('cors proxy', () => {
   })
   test.afterAll(() => new Promise<void>(resolve => backend.close(() => resolve())))
 
+  // these are NON-BROWSER callers (playwright's request context sends no Origin and no fetch
+  // metadata), which round-20 finding 4 makes fail closed — a browser omits Origin too, so absence
+  // is not evidence of a local tool. they opt in explicitly, exactly as a local script must
+  const local = { 'x-mindpage-local-proxy': '1' }
+
   test('forwards requests with their path, query and body', async ({ request }) => {
-    const get = await request.get(`/proxy/${origin}/echo?x=1`)
+    const get = await request.get(`/proxy/${origin}/echo?x=1`, { headers: local })
     expect(get.status()).toBe(200)
     expect(await get.json()).toMatchObject({ method: 'GET', url: '/echo?x=1' })
-    const post = await request.post(`/proxy/${origin}/echo`, { data: { a: 1 } })
+    const post = await request.post(`/proxy/${origin}/echo`, { data: { a: 1 }, headers: local })
     expect(await post.json()).toMatchObject({ method: 'POST', url: '/echo', type: 'application/json', body: '{"a":1}' })
   })
 
   test('follows backend redirects and tolerates a collapsed scheme slash', async ({ request }) => {
-    const redirected = await request.get(`/proxy/${origin}/redirect`, { maxRedirects: 0 })
+    const redirected = await request.get(`/proxy/${origin}/redirect`, { maxRedirects: 0, headers: local })
     expect(redirected.status()).toBe(200) // followed by the proxy, not by this client
     expect(await redirected.json()).toMatchObject({ url: '/echo?from=redirect' })
-    const collapsed = await request.get(`/proxy/${origin.replace('://', ':/')}/echo`)
+    const collapsed = await request.get(`/proxy/${origin.replace('://', ':/')}/echo`, { headers: local })
     expect(await collapsed.json()).toMatchObject({ url: '/echo' })
   })
 })
@@ -419,53 +424,89 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
       req.end()
     })
   try {
-    // ALLOWED: loopback, from our own origin — this is the case the personal account relies on
-    expect(await upgrade('127.0.0.1', 'http://localhost:3100'), 'same-origin loopback keeps proxying').toBe(
+    // ALLOWED: the request's OWN origin — same scheme, same host, same port. the previous version
+    // connected to 127.0.0.1 while sending Origin: http://localhost:3100 and asserted that this
+    // MISMATCH upgrades, so what it pinned was a cross-origin request being accepted
+    expect(await upgrade('127.0.0.1', 'http://127.0.0.1:3100'), 'same-origin loopback keeps proxying').toBe(
       'upgraded'
     )
     expect(seen.length, 'the backend served the allowed upgrade').toBe(1)
-    // REFUSED: loopback process, hostile page. a timeout is NOT accepted as equivalent to a
-    // refusal — it cannot distinguish "gate closed" from "still connecting"
-    expect(await upgrade('127.0.0.1', 'https://attacker.example')).toMatch(/^refused:/)
-    await new Promise(resolve => setTimeout(resolve, 1_500)) // let any outbound request land
-    expect(seen, 'the backend saw nothing from the hostile origin').toHaveLength(1)
-    test.skip(!lan, 'no non-loopback address available on this host')
-    expect(await upgrade(lan!, 'http://localhost:3100')).toMatch(/^refused:/)
+    // REFUSED, all from a loopback process: a hostile page, and two origins that differ from the
+    // request's own only by host or by port. comparing hostnames alone accepted both of the latter.
+    // a timeout is NOT accepted as equivalent to a refusal — it cannot tell "gate closed" from
+    // "still connecting"
+    expect(await upgrade('127.0.0.1', 'https://attacker.example'), 'foreign origin').toMatch(/^refused:/)
+    expect(await upgrade('127.0.0.1', 'http://localhost:3100'), 'host mismatch').toMatch(/^refused:/)
+    expect(await upgrade('127.0.0.1', 'http://127.0.0.1:9999'), 'port mismatch').toMatch(/^refused:/)
+    // a browser can omit Origin entirely (GET/HEAD navigations, no-cors): absence must fail closed
+    expect(await upgrade('127.0.0.1'), 'no origin at all').toMatch(/^refused:/)
+    if (lan) expect(await upgrade(lan, 'http://127.0.0.1:3100'), 'non-loopback caller').toMatch(/^refused:/)
+    // ONE quiet window for every rejected probe above, rather than one per probe
     await new Promise(resolve => setTimeout(resolve, 1_500))
-    expect(seen, 'the backend saw nothing from the rejected caller').toHaveLength(1)
+    expect(seen, 'the backend saw nothing from any rejected caller').toHaveLength(1)
   } finally {
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => backend.close(() => resolve()))
   }
 })
 
-test('the generic proxy is refused for a real non-loopback caller', async ({ request }) => {
-  // the previous version made two LOOPBACK requests and saw two 200s, so despite its name it
-  // never observed a refusal. the gate reads the socket's address, so the only way to test it is
-  // to connect from one
+test('the generic proxy refuses every caller that is not a same-origin local one', async () => {
+  // an earlier version made two LOOPBACK requests and saw two 200s, so despite its name it never
+  // observed a refusal. round-20 finding 4 then showed the address is not the only question: a
+  // browser omits Origin on GET/HEAD navigations and no-cors requests, and review reproduced a
+  // cross-site request with no Origin being proxied, cookie and all. a canary backend answers what
+  // actually reached it
   const http = await import('http')
   const os = await import('os')
   const lan = Object.values(os.networkInterfaces())
     .flat()
     .find(i => i && i.family == 'IPv4' && !i.internal)?.address
-  const localhost = await request.get('/proxy/http://127.0.0.1:3100/server_id')
-  expect(localhost.status(), 'loopback callers keep the CORS bypass').toBe(200)
-  test.skip(!lan, 'no non-loopback address available on this host')
-  const status = await new Promise<number>(resolve => {
-    const req = http.get(
-      // spoofed forwarding headers must not help: the gate never reads them
-      {
-        host: lan,
-        port: 3100,
-        path: '/proxy/http://127.0.0.1:3100/server_id',
-        headers: { 'x-forwarded-for': '127.0.0.1', 'x-forwarded-host': 'localhost', host: 'localhost' },
-      },
-      res => {
-        res.resume()
-        resolve(res.statusCode ?? 0)
-      }
-    )
-    req.on('error', () => resolve(0))
+  const seen: string[] = []
+  const backend = http.createServer((req, res) => {
+    seen.push(`${req.url} cookie=${req.headers.cookie ?? 'none'}`)
+    res.end('canary')
   })
-  expect(status, 'a non-loopback caller is refused, whatever it claims in headers').toBe(403)
+  await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', () => resolve()))
+  const port = (backend.address() as any).port
+  const proxied = (host: string, headers: Record<string, string>) =>
+    new Promise<number>(resolve => {
+      const req = http.get(
+        { host, port: 3100, path: `/proxy/http://127.0.0.1:${port}/probe`, headers },
+        res => {
+          res.resume()
+          resolve(res.statusCode ?? 0)
+        }
+      )
+      req.on('error', () => resolve(0))
+    })
+  try {
+    // ALLOWED: a same-origin browser request, and a local tool that opts in explicitly
+    expect(await proxied('127.0.0.1', { 'sec-fetch-site': 'same-origin' }), 'same-origin').toBe(200)
+    expect(await proxied('127.0.0.1', { 'x-mindpage-local-proxy': '1' }), 'explicit local opt-in').toBe(200)
+    expect(seen).toHaveLength(2)
+    seen.length = 0
+    // REFUSED: THE reproduced exploit — cross-site, no Origin, carrying our cookie. a top-level
+    // navigation of this shape would serve attacker html under our own local origin
+    expect(
+      await proxied('127.0.0.1', { 'sec-fetch-site': 'cross-site', cookie: '__session=victim' }),
+      'cross-site with no origin'
+    ).toBe(403)
+    expect(await proxied('127.0.0.1', { 'sec-fetch-site': 'none' }), 'user-initiated navigation').toBe(403)
+    expect(await proxied('127.0.0.1', {}), 'neither origin nor fetch metadata: fail closed').toBe(403)
+    expect(await proxied('127.0.0.1', { origin: 'https://attacker.example' }), 'foreign origin').toBe(403)
+    if (lan)
+      // spoofed forwarding headers must not help: the gate never reads them
+      expect(
+        await proxied(lan, {
+          'x-forwarded-for': '127.0.0.1',
+          'x-forwarded-host': 'localhost',
+          host: 'localhost',
+          'sec-fetch-site': 'same-origin',
+        }),
+        'a non-loopback caller, whatever it claims in headers'
+      ).toBe(403)
+    expect(seen, 'the backend saw nothing from any refused caller').toEqual([])
+  } finally {
+    await new Promise<void>(resolve => backend.close(() => resolve()))
+  }
 })

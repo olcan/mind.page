@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir, isAllowedProxyOrigin, isLoopbackAddress } from '../host.js'
+import { canonicalizeHost, getHostDir, isProxyRequestAllowed, PROXY_OPT_IN_HEADER } from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -65,9 +65,18 @@ const requestHost = req =>
 // gated, whether or not the middleware would have proxied it
 const isProxyPath = url => /^\/proxy\//.test(url ?? '')
 
-// both halves of the local-proxy gate in one place, so the http path and the upgrade path cannot
-// drift: the caller must be loopback AND, if it is a browser, on one of our own local origins
-const isProxyAllowed = (address, origin) => isLoopbackAddress(address) && isAllowedProxyOrigin(origin)
+// the local-proxy gate in ONE place, so the http path and the upgrade path cannot drift. it reads
+// the whole request (see isProxyRequestAllowed): the peer address, the request host, the origin,
+// fetch metadata and an explicit opt-in header for local tools that are not browsers
+const isProxyAllowed = (req, socket) =>
+  isProxyRequestAllowed({
+    address: (socket ?? req.socket)?.remoteAddress,
+    host: req.headers['host'],
+    origin: req.headers['origin'],
+    secFetchSite: req.headers['sec-fetch-site'],
+    optIn: req.headers[PROXY_OPT_IN_HEADER] === '1',
+    secure: Boolean((socket ?? req.socket)?.encrypted),
+  })
 
 // the local proxy is not part of the app until a LOCAL server asks for it (see enableLocalProxy).
 // the cloud function imports this module for its middleware stack and never calls that, so the
@@ -350,7 +359,7 @@ export function enableLocalProxy() {
   })
   proxyRouter.use((req, res, next) => {
     if (!isProxyPath(req.url)) return next()
-    if (isProxyAllowed(req.socket?.remoteAddress, req.headers['origin'])) return next()
+    if (isProxyAllowed(req)) return next()
     res.status(403).type('text/plain').send('proxy is not available')
   }, proxy)
 }
@@ -361,7 +370,7 @@ export function guardProxyUpgrades(server) {
     // the ORIGIN matters as much as the address here: a WebSocket has no CORS response gate, so
     // a hostile page's handshake to 127.0.0.1 completed and the outbound request happened even
     // though the page could never read the reply
-    if (!isProxyAllowed(socket.remoteAddress, req.headers['origin'])) return socket.destroy()
+    if (!isProxyAllowed(req, socket)) return socket.destroy()
     if (!proxy) return socket.destroy() // no proxy on this server: refuse, never leave it hanging
     proxy.upgrade(req, socket, head) // no optional call: a missing upgrade must fail loudly
   })

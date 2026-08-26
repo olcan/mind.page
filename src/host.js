@@ -46,36 +46,51 @@ export function sharedOriginRedirect({ host, shared, uid, path = '/', search = '
   return `https://${SHARED_HOST}${path}${search}${hash}`
 }
 
-// whether a request carrying this `Origin` may use the local proxy.
+// whether ONE request may use the local proxy.
 //
-// a loopback REMOTE ADDRESS identifies the browser process, not the page running inside it: any
-// page on any origin can open a WebSocket to 127.0.0.1, and WebSockets have no CORS response
-// gate — the handshake completes and the outbound request happens regardless of what the page is
-// allowed to read. so the address check alone let `Origin: https://attacker.example` through.
+// `(address, origin)` was not enough, and neither is any pair:
+// - a loopback REMOTE ADDRESS identifies the browser process, not the page inside it. any page on
+//   any origin can reach 127.0.0.1, and a WebSocket has no CORS response gate at all.
+// - an ABSENT `Origin` does NOT mean a non-browser caller. browsers omit it on GET/HEAD
+//   navigations and on `no-cors` requests — which is the dangerous case, since a top-level
+//   navigation would serve attacker HTML UNDER our own local origin, with access to its
+//   localStorage and IndexedDB (the encryption secret included).
+// - comparing only the origin's HOSTNAME is not a same-origin check: it ignores scheme and port,
+//   so any page on any port of an allowed name qualified.
 //
-// an ABSENT Origin is not a browser-initiated cross-origin request (curl, a local script); such a
-// caller already has local access and is not the thing this defends against. an unparseable or
-// opaque origin (the literal `null` a sandboxed frame sends) is refused.
+// so the whole request is inspected:
+// 1. the REQUEST HOST must be an approved local alias or loopback literal. exact names only —
+//    canonicalizeHost maps `localhost.<anything>` (and some LAN addresses) to 'localhost' for
+//    DISPLAY, and an attacker who registers `localhost.attacker.example` would pass that. this is
+//    also the DNS-rebinding defense.
+// 2. with an `Origin`, it must equal the request's own origin ENTIRELY — scheme, host and port.
+// 3. without one, `Sec-Fetch-Site` must say `same-origin`; `cross-site`, `same-site` and `none`
+//    are all refused.
+// 4. with neither, fail CLOSED. a local tool that is not a browser opts in with an explicit
+//    header, which a cross-origin page cannot set on a `no-cors` request or a navigation.
 //
-// NOTE this deliberately does NOT go through canonicalizeHost, which exists for DISPLAY and maps
-// `localhost.<anything>` (and some LAN addresses) to 'localhost'. that wildcard makes it unusable
-// as a security predicate: an attacker who registers `localhost.attacker.example` would pass it.
-// only an exact local name or a genuine loopback literal is accepted here.
-//
-// NOTE this does NOT isolate mutually untrusted code that is already same-origin. another owner's
-// shared page is still served from localhost in development (see sharedOriginRedirect), and code
-// running there passes this check. a javascript-level token cannot fix that; only a distinct
-// origin/port for foreign content can.
-const LOCAL_ORIGIN_HOSTS = ['localhost', 'local.dev'] // EXACT matches only, never suffixes
-export function isAllowedProxyOrigin(origin) {
-  if (!origin) return true
-  let hostname
-  try {
-    hostname = new URL(origin).hostname.replace(/^\[|\]$/g, '')
-  } catch {
-    return false // includes the opaque 'null' origin
-  }
-  return LOCAL_ORIGIN_HOSTS.includes(hostname) || isLoopbackAddress(hostname)
+// NOTE none of this isolates mutually untrusted code that is already same-origin. a foreign shared
+// page served from localhost passes every check here. only serving it from a distinct, proxy-free
+// origin does — and since cookies are not port-scoped, a different port alone is not enough.
+
+// approved local REQUEST hosts: exact names only, never suffixes. keep in step with the dev
+// server's advertised hosts (see vite.config.mts)
+const LOCAL_REQUEST_HOSTS = ['localhost', 'local.dev', 'localhost.dev']
+
+// the header a non-browser local tool sends to opt in. a cross-origin page cannot set it on a
+// navigation or a `no-cors` request, so it cannot be used to smuggle one past the gate
+export const PROXY_OPT_IN_HEADER = 'x-mindpage-local-proxy'
+
+export function isProxyRequestAllowed({ address, host, origin, secFetchSite, optIn, secure }) {
+  if (!isLoopbackAddress(address)) return false
+  if (!host) return false
+  const hostname = String(host)
+    .replace(/:\d+$/, '')
+    .replace(/^\[|\]$/g, '')
+  if (!(LOCAL_REQUEST_HOSTS.includes(hostname) || isLoopbackAddress(hostname))) return false
+  if (origin) return origin === `${secure ? 'https' : 'http'}://${host}` // full origin equality
+  if (secFetchSite) return secFetchSite === 'same-origin'
+  return optIn === true // fail closed
 }
 
 // true for any loopback remote address, in every form node reports one: IPv4 127.0.0.0/8 (not

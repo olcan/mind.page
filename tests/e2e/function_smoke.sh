@@ -26,5 +26,7 @@ firebase emulators:exec --only auth,firestore,functions,hosting '
   [ "$(cat /tmp/fn_smoke_user)" = "Alice (custom)" ] || { echo "FAIL: /user/alice_e2e body -> $(cat /tmp/fn_smoke_user)"; exit 1; }
   code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5050/user/nonexistent-uid)
   case "$code" in 4??) ;; *) echo "FAIL: /user (invalid uid) -> $code (expected a client error)"; exit 1;; esac
-  echo "function smoke passed: page, crawler content, manifest and /user served through the ssr function"
+  # the cloud stack must expose no arbitrary-target proxy at all (see proxy_canary.mjs)
+  node tests/e2e/proxy_canary.mjs 5050
+  echo "function smoke passed: page, crawler content, manifest, /user, and no cloud proxy"
 '
