@@ -129,7 +129,7 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
     isProxyRequestAllowed({ address: '127.0.0.1', host: 'local.dev:443', secure: true, origin: 'https://local.dev:443' }),
     'https dev alias, matching'
   ).toBe(true)
-  // localhost.dev is the LOCAL ISOLATED ORIGIN for foreign shared pages (see SHARED_LOCAL_HOST):
+  // shared.localhost is the LOCAL ISOLATED ORIGIN for foreign shared pages (see SHARED_LOCAL_HOST):
   // the proxy refuses it even though it is loopback and same-origin, because serving other
   // people's code there is the whole point of it
   expect(

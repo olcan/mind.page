@@ -44,9 +44,11 @@ export const SHARED_LOCAL_HOST = 'shared.localhost'
 export const isSharedOrigin = host => host == SHARED_HOST || host == SHARED_LOCAL_HOST
 
 // exact local names, plus loopback literals. exact matches only, and callers must pass the RAW
-// hostname: canonicalizeHost maps `localhost.<anything>` — including SHARED_LOCAL_HOST — to
-// 'localhost' for DISPLAY, so a canonicalized host makes this function redirect the isolated
-// origin to itself in a loop
+// hostname: canonicalizeHost collapses `local.dev`, `127.0.0.1` and `localhost.<anything>` to
+// 'localhost' for DISPLAY, so a canonicalized host has already lost the identity this decides on.
+// (SHARED_LOCAL_HOST is `shared.localhost` — a SUBDOMAIN of localhost, not `localhost.<x>` — so it
+// survives canonicalization; `localhost.dev` is the one that does not, and passing it canonicalized
+// is what made the redirect send the isolated origin to itself in a loop)
 // brackets are stripped because a browser reports an IPv6 `location.hostname` as `[::1]`, while
 // isLoopbackAddress takes the unbracketed forms node reports
 const isLocalHost = host =>

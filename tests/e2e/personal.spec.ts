@@ -357,7 +357,7 @@ test('the header scrolls to the top on a short column (new account)', async ({ p
   ).toBeLessThanOrEqual(1)
 })
 
-test('a foreign shared page is served from the isolated origin, with no storage of its own', async ({
+test('a foreign shared page is served from the isolated origin, which clears app storage residue', async ({
   page,
 }) => {
   // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
@@ -426,9 +426,11 @@ test('a foreign shared page is served from the isolated origin, with no storage 
     const own = await page.context().newPage()
     try {
       await own.goto('/')
-      await waitForApp(own)
+      // NO waitForApp here: this asserts the visitor's ORIGIN still holds their session, which the
+      // signed-in uid and the stored secret prove. waiting for every item to render (the overlay,
+      // then __rendered in chunks) would cost the whole initial render for nothing
+      await expect.poll(() => own.evaluate(() => window._user?.uid ?? null), { timeout: 90_000 }).toBe(ALICE.uid)
       expect(await own.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
-      expect(await own.evaluate(() => window._user.uid)).toBe(ALICE.uid)
     } finally {
       await own.close()
     }

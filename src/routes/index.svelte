@@ -1825,7 +1825,6 @@
     const documentWidth = getDocumentWidth()
     const minColumnWidth = 500 // minimum column width for multiple columns
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
-    lastDocumentWidth = documentWidth // whoever triggered this layout, the memo now matches it
     let target = null
     lastLayoutTime = Date.now()
     layoutCount++
@@ -1880,6 +1879,11 @@
     totalItemHeight = layout.totalItemHeight
 
     checkIfRenderingVisibleItems()
+    // THE LAYOUT CORE SUCCEEDED, so certify the width it ran at (see lastDocumentWidth). stamping
+    // it at the top -- next to columnCount, where it reads naturally -- would certify a layout that
+    // then threw, and checkLayout would report width-same forever exactly as before. everything
+    // below is scrolling, which is allowed to fail without invalidating the layout
+    lastDocumentWidth = documentWidth
 
     // as soon as header is available, scroll down to header and set flag gating page visibility.
     // the flag latches only if the scroll actually LANDED: this runs before the items have been
@@ -3350,7 +3354,11 @@
     const id = item?.savedId
     if (!id || reconcileScheduled.has(id)) return
     reconcileScheduled.add(id)
-    const attempt = async (tries = 0) => {
+    // `tries` belongs to a DEFERRAL GENERATION, not to this timer loop. a newer deferral arriving
+    // during the 2s delay is deduplicated against reconcileScheduled (this id is already in it), so
+    // without the generation the old timer would hand the NEW conflict the old, possibly exhausted,
+    // count and it would get a single attempt
+    const attempt = async (tries = 0, triesGeneration = undefined) => {
       const index = indexFromId.get(tempIdFromSavedId.get(id) ?? id)
       const current = index === undefined ? null : items[index]
       if (!current || !deferredRemoteChanges.has(id)) {
@@ -3363,6 +3371,7 @@
         return
       }
       const generation = deferredRemoteChanges.get(id)
+      if (generation !== triesGeneration) tries = 0 // a different deferral: fresh budget
       reconcileScheduled.delete(id)
       const settled = await reconcileDeferredRemoteChange(current, generation)
       // a FAILED read/decrypt leaves the marker in place: retry (bounded) rather than drop the
@@ -3371,7 +3380,7 @@
         reconcileScheduled.add(id)
         setTimeout(() => {
           reconcileScheduled.delete(id)
-          void attempt(tries + 1)
+          void attempt(tries + 1, generation)
         }, 2000)
       }
     }
@@ -3388,8 +3397,13 @@
           return { exists: snapshot.exists(), data: snapshot.exists() ? snapshot.data() : undefined }
         },
         decryptItem,
+        // through applyRestoringWitness: a partial application that copied saved* and then threw
+        // would otherwise make the RETRY's equality check settle without replaying the failure
         applyRemote: (type, id, savedItem) =>
-          applyRemoteChangeRef?.({ type }, { id, metadata: { hasPendingWrites: false } }, savedItem),
+          applyRestoringWitness(
+            () => applyRemoteChangeRef?.({ type }, { id, metadata: { hasPendingWrites: false } }, savedItem),
+            item
+          ),
         hasLocalIntent,
         deferredGeneration: id => deferredRemoteChanges.get(id),
         clearDeferral: id => deferredRemoteChanges.delete(id),
@@ -6284,7 +6298,7 @@
     decryptBytesWithSecret,
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
-  import { reconcileDeferred, supersedingApplier } from '../reconcile'
+  import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -7954,8 +7968,9 @@
                   // document is reconciled against the server once the intent settles
                   const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
                   if (local?.savedId && hasLocalIntent(local)) {
+                    // NO scheduleReconcile here: local intent is known present, so a zero-delay
+                    // attempt could only bail. the two places that CLEAR intent both schedule
                     deferRemoteChange(local.savedId)
-                    scheduleReconcile(local)
                     deferred++
                     continue
                   }
@@ -7966,7 +7981,14 @@
                   applyRemoteChangeAndSupersede(change, doc, savedItem)
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
-                  // log it and continue with the remaining changes
+                  // log it and continue with the remaining changes.
+                  // KNOWN LIMITATION, stated rather than half-fixed: a live delivery with no
+                  // EXISTING deferral that throws here is dropped permanently — nothing redelivers
+                  // it. supersedingApplier only preserves a marker that already exists, and
+                  // applyRestoringWitness only protects reconciliation's own retry. Creating a
+                  // repair marker here would need an application the scheduler can replay from
+                  // nothing, which is the ingress coordinator's job (see notes/design/
+                  // mind_page_hidden_ingress_coordinator.md), not a second mechanism beside it
                   console.error('could not apply remote change:', doc.id, e)
                 }
                 } finally {

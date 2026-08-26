@@ -58,6 +58,33 @@ export function supersedingApplier<D extends { id: string }>(
   }
 }
 
+// wraps a reconciliation's application so a THROW restores the equality witness it will be compared
+// against on retry.
+//
+// reconcileDeferred settles when the server copy equals what we already hold — savedText/savedTime/
+// savedAttr. Production copies those fields into the item EARLY and then runs fallible downstream
+// work (itemAttrChanged, itemTextChanged, onEditorChange). A partial application therefore leaves
+// the witness saying "we already hold the server state" while the downstream repair never ran: the
+// marker correctly survives, but the retry takes the equality branch and clears it without ever
+// replaying the failure. Restoring the witness makes the retry see the difference and apply again.
+//
+// LIMITATION, deliberately not papered over: this restores the witness, not the item. An
+// application that mutates live fields (or splices the row for a removal) and then throws leaves
+// those effects in place; the retry re-applies over them, which is right for a modify but cannot
+// resurrect a spliced row. A removal that throws after splicing is still dropped — reconciliation
+// has no item left to work with, and the scheduler skips ids with no current row.
+export function applyRestoringWitness(apply: () => void, item: ReconcileItem): void {
+  const { savedText, savedTime, savedAttr } = item
+  try {
+    apply()
+  } catch (e) {
+    item.savedText = savedText
+    item.savedTime = savedTime
+    item.savedAttr = savedAttr
+    throw e
+  }
+}
+
 // reconciles one deferred document against the server. returns true when it reached a TERMINAL
 // outcome (applied, proven equal, or no longer ours to settle) and false when it should be
 // retried — a transient read or decrypt failure, where the marker must stay so nothing else has

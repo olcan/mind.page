@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { reconcileDeferred, supersedingApplier, type ReconcileDeps, type ReconcileItem } from '../../src/reconcile.js'
+import {
+  applyRestoringWitness,
+  reconcileDeferred,
+  supersedingApplier,
+  type ReconcileDeps,
+  type ReconcileItem,
+} from '../../src/reconcile.js'
 
 // schedules for deferred-change reconciliation (see src/reconcile.ts). these exist as unit tests
 // because the schedule that matters CANNOT be staged from outside the browser: the app talks to
@@ -192,4 +198,41 @@ test('a THROWING live delivery leaves the marker for reconciliation', async () =
   )
   expect(() => applier('modified', { id: 'd1' }, {})).toThrow('reducer failed')
   expect(deferrals.get('d1'), 'still deferred, so it is still reconcilable').toBe(1)
+})
+
+
+// round-34 finding 1: a PARTIAL application makes the equality witness lie
+
+test('a partial application that then throws does not let the retry false-succeed', async () => {
+  // production copies savedText/savedTime/savedAttr into the item BEFORE running fallible
+  // downstream work. without the restore, the retry compares the already-copied witness against the
+  // same server copy, takes the equality branch, and clears the marker having replayed nothing
+  const server = { text: 'server', time: 2, attr: null }
+  let attempts = 0
+  const { deps, item, deferrals } = harness({
+    readFromServer: async () => ({ exists: true, data: { ...server } }),
+    applyRemote: (_type, _id, savedItem) =>
+      applyRestoringWitness(() => {
+        attempts++
+        item.savedText = savedItem.text // the early copy
+        item.savedTime = savedItem.time
+        if (attempts == 1) throw new Error('downstream failed')
+      }, item),
+  })
+  expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
+  expect(deferrals.get('d1'), 'the marker survives').toBe(1)
+  expect(item.savedText, 'the witness is restored, not left claiming the server state').toBe('local')
+
+  expect(await reconcileDeferred(deps, item, 1)).toBe(true)
+  expect(attempts, 'the retry APPLIED again rather than settling on a false equality').toBe(2)
+  expect(deferrals.has('d1'), 'terminal only after a full application').toBe(false)
+})
+
+test('applyRestoringWitness leaves the witness alone when application succeeds', async () => {
+  const item: ReconcileItem = { savedId: 'd1', savedText: 'local', savedTime: 1, savedAttr: null }
+  applyRestoringWitness(() => {
+    item.savedText = 'server'
+    item.savedTime = 2
+  }, item)
+  expect([item.savedText, item.savedTime]).toEqual(['server', 2])
 })
