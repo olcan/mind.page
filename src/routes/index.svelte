@@ -322,6 +322,7 @@
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
+    Object.defineProperty(window, '__layoutTrace', { get: () => layoutTrace }) // see traceLayout
     // hidden-index authority (see settleHiddenAuthority), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
@@ -1775,6 +1776,30 @@
   let lastLayoutTime = 0
   let showDotted = false
   const separatorHeight = 80
+
+  // TEMPORARY DIAGNOSTIC for the column-layout stall (see the tracked issue of the same name and
+  // tests/e2e/layout.spec.ts). when the grow-back poll fails it only knows "still one column"; the
+  // ring below says WHICH branch of checkLayout kept it there. scalar state only — reading layout
+  // properties from the test while reproducing perturbs the very scheduling under investigation.
+  // OFF unless a test sets window.__layoutTraceOn before startup, so the cost is one property read
+  const layoutTrace = []
+  let scrollEvents = 0
+  let resizeEvents = 0
+  function traceLayout(decision, extra = {}) {
+    if (!globalThis.__layoutTraceOn) return
+    if (layoutTrace.length >= 500) layoutTrace.shift()
+    layoutTrace.push({
+      t: Math.round(performance.now()),
+      decision,
+      scrollAge: Date.now() - lastScrollTime,
+      resizeAge: Date.now() - lastResizeTime,
+      scrollEvents,
+      resizeEvents,
+      layoutCount,
+      columnCount,
+      ...extra,
+    })
+  }
 
   let layoutCount = 0 // exposed as window.__layoutCount for tests
   function updateItemLayout() {
@@ -3306,10 +3331,11 @@
   // cannot decide this: item.time is semantic (attribute-only and keep_time saves preserve it,
   // clocks differ across devices), so neither "ours is newer" nor "theirs is newer" is sound.
   // one server read per actually-conflicted document settles what the server really holds
-  // drives reconciliation until the document's local intent has ACTUALLY settled. the settle
-  // hooks alone are not enough: the inner write's finally and onSaveDone both run INSIDE the
-  // save task, while `saveTask`/`saving` clear in that task's own finally afterwards — so a
-  // hook-only reconcile always observed intent still pending and gave up silently
+  // SCHEDULED WHERE LOCAL INTENT IS CLEARED, never by polling for it: every producer of intent
+  // (`saveTask`, `saving`, `unackedWrites`) is cleared in exactly two places — the outer finally
+  // of saveItem's task and the create path's own clearing hook — and both call this afterwards.
+  // an earlier version instead retried every 500ms until intent went away, which shared its
+  // counter with the I/O retries below and gave up on a document that was merely being edited
   const reconcileScheduled = new Set()
   function scheduleReconcile(item) {
     const id = item?.savedId
@@ -3323,12 +3349,8 @@
         return
       }
       if (hasLocalIntent(current)) {
-        if (tries > 120) {
-          // ~60s of continuous local writing: stop polling, the next settled save reschedules
-          reconcileScheduled.delete(id)
-          return
-        }
-        setTimeout(() => void attempt(tries + 1), 500)
+        // more local intent arrived after this was scheduled; whatever clears IT reschedules
+        reconcileScheduled.delete(id)
         return
       }
       const generation = deferredRemoteChanges.get(id)
@@ -4994,12 +5016,6 @@
     // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
     // if (!item.saving) itemToSave.text = ''
 
-    // VERSION the intent here TOO. this is the item CREATE path: it preallocates a document ref
-    // and setDoc()s it directly, never passing through saveItem — so versioning only there left a
-    // create that starts and finishes inside a reconcile's server read as invisible as the save
-    // case had been (see saveSeq and src/reconcile.ts)
-    item.saveSeq = (item.saveSeq ?? 0) + 1
-
     encryptItem(itemToSave)
       .then(itemToSave => {
         // the document id is PREALLOCATED and mapped to the temp id before the write is issued:
@@ -5041,6 +5057,7 @@
                 item.saving = false
                 item.savingText = null // required when saving == false
                 items = items // trigger svelte render for saving state change
+                scheduleReconcile(item) // intent cleared here too: see scheduleReconcile
               }
             })
 
@@ -5081,8 +5098,6 @@
     item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
     item.savedText = savedItem.text
     items[index] = item // trigger dom update
-    // a save task completing is also the end of local intent for this document
-    scheduleReconcile(item)
   }
 
   function onItemEscape(e) {
@@ -5307,8 +5322,9 @@
     }
     // VERSION the intent, do not merely flag it: hasLocalIntent answers "is a save in flight NOW",
     // which a save that starts and finishes inside a reconcile's server read escapes entirely (see
-    // src/reconcile.ts). every SAVE passes through here, silent or not — but item CREATION does
-    // not: it writes from onEditorDone, which bumps this too. two paths, both versioned
+    // src/reconcile.ts). item CREATION deliberately does NOT version: deferrals are keyed by
+    // savedId, which does not exist until the create's write resolves, so no reconcile can observe
+    // a create's intent at all
     item.saveSeq = (item.saveSeq ?? 0) + 1
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
@@ -5339,8 +5355,6 @@
         } finally {
           const w = item.unackedWrites.indexOf(written)
           if (w >= 0) item.unackedWrites.splice(w, 1)
-          // a change deferred behind local intent reconciles once ALL of it has settled
-          scheduleReconcile(item)
         }
 
         // also save to history ...
@@ -5356,6 +5370,9 @@
           item.saving = false
           item.savingText = null // required when saving == false
           items = items // trigger svelte render for saving state change
+          // local intent for this document ENDS HERE: a change deferred behind it reconciles now.
+          // a NEWER task means intent continues, and that task's own finally schedules instead
+          scheduleReconcile(item)
         }
       }))
 
@@ -5917,6 +5934,7 @@
     // we also ignore scroll events (for focusing) during initial render (while rendered=false)
     // does not appear to be possible to shift-focus-on-scroll on macos
     if (rendered && Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
+    scrollEvents++ // see traceLayout
     lastScrollTime = Date.now()
     if (!historyUpdatePending) {
       historyUpdatePending = true
@@ -5930,6 +5948,7 @@
 
   let lastResizeTime = 0
   function onResize() {
+    resizeEvents++ // see traceLayout
     lastResizeTime = Date.now()
   }
 
@@ -6256,7 +6275,7 @@
     decryptBytesWithSecret,
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
-  import { reconcileDeferred } from '../reconcile'
+  import { reconcileDeferred, supersedingApplier } from '../reconcile'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -7250,8 +7269,8 @@
         // (otherwise e.g. tapping of tags with editor focused will scroll back up)
         if (android && outerHeight > lastWindowHeight + 200) (document.activeElement as HTMLElement).blur()
 
-        if (Date.now() - lastScrollTime < 250) return // avoid layout during scroll
-        if (Date.now() - lastResizeTime < 250) return // avoid layout during resizing
+        if (Date.now() - lastScrollTime < 250) return traceLayout('scroll', { lastDocumentWidth }) // during scroll
+        if (Date.now() - lastResizeTime < 250) return traceLayout('resize', { lastDocumentWidth }) // during resize
 
         const isSameNode = (e1, e2) => e1 == e2 || (e1 && e2 && e1.isSameNode(e2))
 
@@ -7274,6 +7293,9 @@
           updateItemLayout()
           // resize of all elements w/ _resize attribute (and property)
           document.querySelectorAll('[_resize]').forEach(elem => elem['_resize']())
+          traceLayout('layout', { documentWidth, lastDocumentWidth, innerWidth })
+        } else {
+          traceLayout('width-same', { documentWidth, lastDocumentWidth, innerWidth })
         }
 
         lastDocumentWidth = documentWidth
@@ -7422,10 +7444,18 @@
         // applies one remote change from a snapshot; called with the decrypted item, sequentially
         // per change (see the serialized snapshot handler below); also invoked by
         // replayDeferredRemoteChange once a local write settles (hence the component-scope ref)
+        // applies a live delivery and, ONLY on success, supersedes any deferral for that document
+        // (see supersedingApplier in src/reconcile.ts, where the ordering is pinned)
+        const applyRemoteChangeAndSupersede = supersedingApplier(
+          (change, doc, savedItem) => applyRemoteChange(change, doc, savedItem),
+          deferredRemoteChanges
+        )
+
         function applyRemoteChange(change, doc, savedItem) {
-          // an applied change supersedes a deferral: a reconcile clears its OWN marker before
-          // applying and returns early when superseded, so this can only clear a current one
-          deferredRemoteChanges.delete(doc.id)
+          // the marker is cleared AFTER this returns, not here: everything below is fallible, and
+          // clearing first meant a throwing reducer left reconciliation reporting "retryable" with
+          // nothing to retry from. reconciliation clears its OWN generation through settle; a live
+          // delivery supersedes a deferral only once it has actually applied (see the wrapper below)
                   // remote changes indicate non-focus: update sessionTime and invoke onFocus
                   sessionTime = Date.now() + 1000 /* margin for small time differences */
                   onFocus() // focused = document.hasFocus()
@@ -7685,6 +7715,8 @@
               return // done with first snapshot
             }
 
+            // the PLAIN form: reconciliation clears only its own generation, through settle.
+            // superseding here would clear a NEWER deferral's marker as a side effect
             applyRemoteChangeRef = applyRemoteChange
             // handle changes in non-first snapshot, waiting for init if necessary. the APPLY TASKS
             // are serialized, but hidden applications are enqueued onto name chains and outlive the
@@ -7827,7 +7859,7 @@
                   // the inverse: a visible item became hidden, so its visible representation is
                   // removed through the ordinary path before the hidden branch indexes it
                   console.warn(`item ${doc.id} became hidden; removing its visible representation`)
-                  applyRemoteChange({ type: 'removed' }, doc, { hidden: false, text: '' })
+                  applyRemoteChangeAndSupersede({ type: 'removed' }, doc, { hidden: false, text: '' })
                 }
                 if (savedItem.hidden) {
                   const seenDirtySeq = hiddenDirtySeq // best-effort: see the note on the drop path above
@@ -7872,7 +7904,7 @@
                           // own-pending classification uses EXECUTION-time wrapper state: by the
                           // time this runs, in-flight work for the name has settled
                           if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
-                          applyRemoteChange(change, doc, savedItem)
+                          applyRemoteChangeAndSupersede(change, doc, savedItem)
                           hiddenCleanupPending = true // validity may have changed (see requestHiddenCleanup)
                         }
                       )
@@ -7922,7 +7954,7 @@
                     `${change.type} '${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})` +
                       `${doc.metadata.hasPendingWrites ? ' pending' : ''}`
                   )
-                  applyRemoteChange(change, doc, savedItem)
+                  applyRemoteChangeAndSupersede(change, doc, savedItem)
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
                   // log it and continue with the remaining changes

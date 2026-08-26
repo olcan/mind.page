@@ -47,8 +47,11 @@ export const isSharedOrigin = host => host == SHARED_HOST || host == SHARED_LOCA
 // hostname: canonicalizeHost maps `localhost.<anything>` — including SHARED_LOCAL_HOST — to
 // 'localhost' for DISPLAY, so a canonicalized host makes this function redirect the isolated
 // origin to itself in a loop
+// brackets are stripped because a browser reports an IPv6 `location.hostname` as `[::1]`, while
+// isLoopbackAddress takes the unbracketed forms node reports
 const isLocalHost = host =>
-  ['localhost', 'local.dev', 'localhost.dev', SHARED_LOCAL_HOST].includes(host) || isLoopbackAddress(host)
+  ['localhost', 'local.dev', 'localhost.dev', SHARED_LOCAL_HOST].includes(host) ||
+  isLoopbackAddress(String(host).replace(/^\[|\]$/g, ''))
 
 // decides whether a shared page must be served from the isolated origin instead of here, and
 // returns the url to move to (or null to stay). kept pure and separate because it is a security

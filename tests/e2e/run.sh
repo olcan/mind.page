@@ -33,5 +33,9 @@ cd "$(dirname "$0")/../.."
 [ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first" # see deploy_mind_page.sh
 # SKIP_BUILD is the quick loop above and is NOT the gate: it serves whatever `build/` holds
-[ -n "${SKIP_BUILD:-}" ] || npm run build # browser tests must exercise the sources in this tree
+if [ -n "${SKIP_BUILD:-}" ]; then
+  echo "WARNING: SKIP_BUILD=1 — serving the EXISTING build/; any src/ change is invisible to this run" >&2
+else
+  npm run build # browser tests must exercise the sources in this tree
+fi
 firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test $*"

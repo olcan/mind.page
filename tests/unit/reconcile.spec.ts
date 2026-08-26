@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { reconcileDeferred, type ReconcileDeps, type ReconcileItem } from '../../src/reconcile.js'
+import { reconcileDeferred, supersedingApplier, type ReconcileDeps, type ReconcileItem } from '../../src/reconcile.js'
 
 // schedules for deferred-change reconciliation (see src/reconcile.ts). these exist as unit tests
 // because the schedule that matters CANNOT be staged from outside the browser: the app talks to
@@ -165,4 +165,31 @@ test('a THROWING application stays retryable, with its marker intact', async () 
     expect(await reconcileDeferred(deps, item, 1), 'not terminal').toBe(false)
     expect(deferrals.get('d1'), 'the marker survives so the scheduler can retry').toBe(1)
   }
+})
+
+// the LIVE-delivery side of the same marker contract (see supersedingApplier)
+
+test('a live delivery supersedes the deferral only AFTER it applies', async () => {
+  const deferrals = new Map([['d1', 1]])
+  const order: string[] = []
+  const applier = supersedingApplier(
+    () => order.push('applied'),
+    { delete: id => void (order.push('cleared'), deferrals.delete(id)) }
+  )
+  applier('modified', { id: 'd1' }, {})
+  expect(order).toEqual(['applied', 'cleared'])
+  expect(deferrals.has('d1')).toBe(false)
+})
+
+test('a THROWING live delivery leaves the marker for reconciliation', async () => {
+  // clearing first dropped the change entirely: nothing redelivers a deferred remote change
+  const deferrals = new Map([['d1', 1]])
+  const applier = supersedingApplier(
+    () => {
+      throw new Error('reducer failed')
+    },
+    deferrals
+  )
+  expect(() => applier('modified', { id: 'd1' }, {})).toThrow('reducer failed')
+  expect(deferrals.get('d1'), 'still deferred, so it is still reconcilable').toBe(1)
 })

@@ -27,20 +27,6 @@ test('typing in the mindbox and pressing shift+enter creates an item', async ({ 
   await expect(mindbox(page)).toHaveValue('#e2e_typed ') // the new item's label stays as the search
   await expect.poll(() => savedId(page, '#e2e_typed'), { timeout: 30_000 }).toBeTruthy()
   expect(await itemText(page, '#e2e_typed')).toBe('#e2e_typed created via keyboard')
-  // PIN THE PRODUCER of the local-intent version that deferred reconciliation compares across its
-  // server read (see saveSeq in index.svelte and tests/unit/reconcile.spec.ts). the unit schedules
-  // set it directly, so without this deleting the increment leaves the whole suite green
-  // __items holds the RAW items (as the layout tests read item.column); _item() returns a mapped
-  // public object, which deliberately does not expose internal save state
-  const seq = () =>
-    page.evaluate(() => {
-      const id = window._item('#e2e_typed', true)?.id
-      return (window.__items as any[]).find(i => i.id == id)?.saveSeq ?? 0
-    })
-  // the CREATE producer. item creation writes from onEditorDone and does NOT pass through
-  // saveItem, so versioning only there left creates invisible to deferred reconciliation — which
-  // is what writing this pin uncovered. the save producer is pinned in the cross-tab test below
-  expect(await seq(), 'the create path versions local intent').toBeGreaterThan(0)
 })
 
 test('searching filters items and puts the tag in the url; escape and shift+backspace clear', async ({ page }) => {

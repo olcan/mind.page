@@ -23,8 +23,10 @@ production build until Ctrl-C; open <http://localhost:3100/> in a browser to bro
 anonymous account. That server is for LOOKING, not for running the suite against: the tests do not
 reuse it (`reuseExistingServer: false`, after a stale bundle once passed a whole round), and a
 second shell is outside the emulator environment anyway. To iterate, use `run.sh` with the build
-skipped: `SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts` — non-authoritative,
-since it serves whatever `build/` already holds.
+skipped: `SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts`. It is useful ONLY for edits
+that cannot reach the bundle — test files, helpers, playwright config — and is never the gate: it
+serves whatever `build/` already holds, so any `src/` change is invisible to it. Three consecutive
+"the fix does not work" conclusions once came from a stale bundle.
 
 `run.sh` runs everything under `firebase emulators:exec --only auth,firestore`, so the emulators
 start fresh and shut down after the run. The production build (`build/`, served by `server.mjs`)

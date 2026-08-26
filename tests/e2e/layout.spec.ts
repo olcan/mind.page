@@ -52,20 +52,67 @@ async function expectConsistentColumns(page: Page) {
 // the FIRST column's width. The recreated column div must be re-sized promptly after a reflow (the
 // post-flush re-apply in updateItemLayout, not an eventual later layout pass): renders started
 // right after a reflow measure against these widths, and charts skip rendering at zero width.
-// FIXME (2026-08-26): QUARANTINED, and not because this test is wrong. Roughly five times now the
-// grow back to 1200 has left the page at ONE column until the 15s poll expires. Every occurrence
-// has been this test inside a FULL gate; 29 round trips in a dedicated loop settled in 400-500ms
-// every time, including under a concurrent gate. Only this test performs 1200 -> 900 -> 1200, so
-// the merge EXPOSES the sequence rather than causing it.
-// Quarantined whole rather than split because the diagnosis is expected shortly — everything below
-// is still valid coverage and comes straight back. See
-// issues/MindPage Column Layout Stalls After Growing Back.md
-test.fixme('column layout follows viewport width, keeping items unique, ordered and correctly sized', async ({
+// QUARANTINED (2026-08-26), and not because this test is wrong. Roughly five times now the grow
+// back to 1200 has left the page at ONE column until the 15s poll expires. Every occurrence has
+// been this test inside a FULL gate; 29 round trips in a dedicated loop settled in 400-500ms every
+// time, including under a concurrent gate. Only this test performs 1200 -> 900 -> 1200, so the
+// merge EXPOSES the sequence rather than causing it.
+// The skip is ENVIRONMENT-GATED rather than a static fixme, so `LAYOUT_DIAGNOSTIC=1 tests/e2e/run.sh`
+// executes exactly this test inside exactly the gate where it fails, with the checkLayout decision
+// trace turned on. Normal gates report it as one named skip.
+// See issues/MindPage Column Layout Stalls After Growing Back.md
+const DIAGNOSTIC = !!process.env.LAYOUT_DIAGNOSTIC
+test('column layout follows viewport width, keeping items unique, ordered and correctly sized', async ({
   page,
-}) => {
+}, testInfo) => {
+  test.skip(!DIAGNOSTIC, 'quarantined: intermittent grow-back stall; run with LAYOUT_DIAGNOSTIC=1')
+  // scalar-only tracing inside checkLayout (see traceLayout in index.svelte), plus a test-side
+  // heartbeat that separates main-thread starvation from a layout decision that ran and declined.
+  // reading layout properties from here while reproducing would perturb the scheduling under test,
+  // so nothing is polled from the page except the column count the assertions already need
+  await page.addInitScript(() => {
+    ;(globalThis as any).__layoutTraceOn = true
+    ;(globalThis as any).__beats = []
+    setInterval(() => {
+      const beats = (globalThis as any).__beats
+      if (beats.length >= 500) beats.shift()
+      beats.push(Math.round(performance.now()))
+    }, 100)
+    try {
+      new PerformanceObserver(list => {
+        const long = ((globalThis as any).__longTasks ??= [])
+        for (const entry of list.getEntries()) long.push({ t: Math.round(entry.startTime), ms: Math.round(entry.duration) })
+      }).observe({ entryTypes: ['longtask'] })
+    } catch {
+      // longtask is not observable everywhere; the heartbeat gaps still show starvation
+    }
+  })
+  const attachTrace = async (label: string) => {
+    const dump = await page
+      .evaluate(() => ({
+        trace: (window as any).__layoutTrace ?? [],
+        beats: (globalThis as any).__beats ?? [],
+        longTasks: (globalThis as any).__longTasks ?? [],
+        columns: document.querySelectorAll('.column:not(.hidden)').length,
+        innerWidth,
+        clientWidth: document.documentElement.clientWidth,
+        layoutCount: (window as any).__layoutCount,
+      }))
+      .catch(e => ({ error: String(e) }))
+    await testInfo.attach(label, { body: JSON.stringify(dump, null, 2), contentType: 'application/json' })
+  }
+  // one attachment per transition, so a failure carries the trace of the transition that stalled
+  const settle = async (count: number, label: string) => {
+    try {
+      await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
+    } finally {
+      if (DIAGNOSTIC) await attachTrace(label)
+    }
+  }
+
   await page.setViewportSize({ width: 1200, height: 900 }) // floor(1200 / 500) = 2 columns
   await loadAnonymous(page)
-  await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(2)
+  await settle(2, 'fresh-1200')
   const ids = await expectConsistentColumns(page)
   expect(ids.length).toBeGreaterThan(2)
   const fresh = await widths(page)
@@ -79,7 +126,7 @@ test.fixme('column layout follows viewport width, keeping items unique, ordered 
     [900, 1],
   ] as const) {
     await page.setViewportSize({ width, height: 900 })
-    await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
+    await settle(count, `resize-${width}`)
     expect(await expectConsistentColumns(page)).toEqual(ids) // same visible set, reordered never
     await expect.poll(async () => (await widths(page)).hidden, { timeout: 2_000 }).toBe((await widths(page)).first)
     const sizes = await widths(page)

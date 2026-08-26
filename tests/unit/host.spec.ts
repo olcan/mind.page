@@ -5,6 +5,7 @@ import {
   getHostDir,
   isProxyRequestAllowed,
   isLoopbackAddress,
+  isSharedOrigin,
   sharedOriginRedirect,
   // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
 } from '../../src/host.js'
@@ -39,7 +40,7 @@ test("someone else's shared page moves on a LOCAL host too, to the local isolate
   // local hosts used to be exempt, on the grounds that there was no second origin to move to.
   // that left the one place the origin split did not apply: a stranger's code ran on the
   // developer's own origin, beside their session, with the local proxy reachable
-  for (const host of ['localhost', '127.0.0.1', 'local.dev'])
+  for (const host of ['localhost', '127.0.0.1', 'local.dev', '[::1]'])
     expect(decide({ host, protocol: 'http:', port: '3100' }), host).toBe(
       `http://${SHARED_LOCAL_HOST}:3100/?shared=alice/notes`
     )
@@ -51,6 +52,26 @@ test("someone else's shared page moves on a LOCAL host too, to the local isolate
   expect(decide({ host: SHARED_LOCAL_HOST })).toBeNull() // already isolated: no loop
   // the owner's own shared page still stays put, locally as anywhere else
   expect(decide({ host: 'localhost', uid: 'alice' })).toBeNull()
+})
+
+test('isSharedOrigin covers BOTH isolated origins, and no near miss', () => {
+  // every persistence rule keys on this one predicate (firestore cache, item store, github token,
+  // the startup storage scrub in +page.js); pairing hostname comparisons by hand is how the local
+  // origin kept persisting after the deployed one was fixed
+  for (const host of [SHARED_HOST, SHARED_LOCAL_HOST]) expect(isSharedOrigin(host), host).toBe(true)
+  for (const host of [
+    'mind.page',
+    'localhost',
+    'local.dev',
+    'olcan.com',
+    'shared.mind.page.attacker.example', // suffix, not the origin
+    'evil-shared.mind.page', // prefix, not the origin
+    'shared.localhost.attacker.example',
+    'SHARED.MIND.PAGE', // location.hostname is already lowercased; an exact match is intended
+    '',
+    undefined,
+  ])
+    expect(isSharedOrigin(host as any), String(host)).toBe(false)
 })
 
 test('a page that is not shared at all is untouched', () => {

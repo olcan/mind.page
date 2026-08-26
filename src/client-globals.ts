@@ -8,7 +8,7 @@ window['_'] = _
 
 // import/expose firebase on window
 import { firebaseConfig } from '../firebase-config.js' // ~0
-import { isSharedOrigin } from './host.js'
+import { isSharedOrigin, SHARED_LOCAL_HOST } from './host.js'
 import { initializeApp, onLog } from 'firebase/app' // ~10K
 const firebase = initializeApp(firebaseConfig)
 firebase['onLog'] = onLog // for use in index.svelte
@@ -23,9 +23,9 @@ window['firebase'] = firebase
 import { initializeFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 // BOTH isolated shared-page hosts use a MEMORY cache: every owner's page runs on that one origin,
 // so anything persisted there is readable by the next owner's code. firestore caches every
-// document a client reads, so a shared page's query would populate IndexedDB like any other — the
-// app persists nothing else there (see itemStore in index.svelte), and this was the last thing it
-// left behind. shared pages are read-only anyway, so the offline benefit is small.
+// document a client reads, so a shared page's query would populate IndexedDB like any other, and
+// IndexedDB is the one store the startup scrub in +page.js does not clear. shared pages are
+// read-only anyway, so the offline benefit is small.
 // SHARED_LOCAL_HOST belongs here for the same reason it is absent from LOCAL_REQUEST_HOSTS: it is
 // the local counterpart, and every rule naming one has to name the other
 initializeFirestore(firebase, {
@@ -41,10 +41,10 @@ import { connectAuthEmulator } from 'firebase/auth'
 import { connectFirestoreEmulator } from 'firebase/firestore'
 const EMULATOR_PORT = '3100'
 // true only for the e2e stack's own origin (see tests/e2e), never in production
-// localhost.dev is the LOCAL isolated origin foreign shared pages move to (see SHARED_LOCAL_HOST):
-// a separate origin for storage and sign-in, but the same e2e backend, so it connects too
+// SHARED_LOCAL_HOST is the isolated origin foreign shared pages move to locally: a separate origin
+// for storage and sign-in, but the same e2e backend, so it connects too
 const USING_EMULATORS =
-  ['localhost', '127.0.0.1', 'shared.localhost'].includes(location.hostname) && location.port == EMULATOR_PORT
+  ['localhost', '127.0.0.1', SHARED_LOCAL_HOST].includes(location.hostname) && location.port == EMULATOR_PORT
 if (USING_EMULATORS) {
   connectAuthEmulator(getAuth(firebase), 'http://127.0.0.1:9099', { disableWarnings: true })
   connectFirestoreEmulator(getFirestore(firebase), '127.0.0.1', 8080)

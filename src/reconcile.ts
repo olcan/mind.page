@@ -41,6 +41,23 @@ export type ReconcileDeps = {
   clearDeferral: (id: string) => void
 }
 
+// wraps the listener's application routine so a LIVE delivery supersedes a deferral for the same
+// document — but only once that application has fully succeeded. clearing the marker first meant a
+// throwing application dropped the change entirely: nothing redelivers a deferred remote change,
+// and reconciliation's own "retryable" return then had nothing left to retry from.
+//
+// reconciliation does NOT go through this: it clears only its own generation, through `settle`
+// below, so an older read cannot clear a newer deferral's marker.
+export function supersedingApplier<D extends { id: string }>(
+  apply: (change: any, doc: D, savedItem: any) => void,
+  deferrals: { delete: (id: string) => void }
+) {
+  return (change: any, doc: D, savedItem: any) => {
+    apply(change, doc, savedItem)
+    deferrals.delete(doc.id) // AFTER, never before
+  }
+}
+
 // reconciles one deferred document against the server. returns true when it reached a TERMINAL
 // outcome (applied, proven equal, or no longer ours to settle) and false when it should be
 // retried — a transient read or decrypt failure, where the marker must stay so nothing else has

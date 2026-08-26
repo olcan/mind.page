@@ -46,6 +46,11 @@ declare global {
         getAuth: (app: unknown) => unknown
         signInWithCustomToken: (auth: unknown, token: string) => Promise<unknown>
       }
+      firestore: {
+        getFirestore: (app: unknown) => unknown
+        terminate: (db: unknown) => Promise<void>
+        clearIndexedDbPersistence: (db: unknown) => Promise<void>
+      }
     }
   }
 }

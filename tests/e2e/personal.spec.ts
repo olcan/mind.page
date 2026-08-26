@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers.js'
+// @ts-expect-error host.js is plain js shared with the node server, without a declaration file
+import { SHARED_LOCAL_HOST } from '../../src/host.js'
 
 // personal account path: first sign-in (welcome item, secret phrase), encrypted items, the secret on
 // a new device, sharing by key with anonymous visitors, and sign-out
@@ -246,12 +248,23 @@ test('a partially cached account does not prompt for a new phrase', async ({ pag
     .toMatchObject({
       attr: { shared: { keys: ['e2e-key'] } },
     })
-  // cache alice's shared item by visiting her OWN shared page, which stays on the account origin
-  // (see sharedOriginRedirect). a signed-out visit would now be redirected to the isolated origin,
-  // whose cache is memory-only — so it can no longer produce a partial cache here at all. the
-  // scenario this test guards is the one that remains reachable: an owner's own shared-page visit
-  // warms the persistent cache, and a later sign-in on a device WITHOUT the stored secret must not
-  // initialize from that partial snapshot and prompt for a new phrase over encrypted items
+  // EMPTY THE CACHE THE SETUP ABOVE FILLED. sharing needs alice's whole account loaded, so without
+  // this the "partial" cache already held every document and the item count below only reflected
+  // the shared page's FILTER. clearing needs firestore terminated and no other tab of this origin
+  // open; auth lives in its own database, so alice stays signed in across it
+  expect(
+    await page.evaluate(async () => {
+      const { getFirestore, terminate, clearIndexedDbPersistence } = window.firebase.firestore
+      const db = getFirestore(window.firebase)
+      await terminate(db)
+      await clearIndexedDbPersistence(db)
+      return true
+    }),
+    'the persistent cache is cleared before the shared visit warms it'
+  ).toBe(true)
+  // the owner's OWN shared page stays on the account origin (see sharedOriginRedirect), and its
+  // query is now the only thing that repopulates the cache — one document. a signed-out visit
+  // would move to the isolated origin, whose cache is memory-only and cannot produce this at all
   await page.goto(`/?shared=${ALICE.uid}/e2e-key`)
   await waitForApp(page)
   expect(await page.evaluate(() => window._items().length)).toBe(1) // PARTIAL: the shared item only
@@ -344,15 +357,17 @@ test('the header scrolls to the top on a short column (new account)', async ({ p
   ).toBeLessThanOrEqual(1)
 })
 
-test('a foreign shared page never coexists with a session on this origin', async ({ page }) => {
+test('a foreign shared page is served from the isolated origin, with no storage of its own', async ({
+  page,
+}) => {
   // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
   // realm recreates the firebase facade, and auth persistence, the session cookie and
-  // localStorage (secret included) are per-ORIGIN. so foreign shared pages are served from an
-  // isolated origin (see sharedOriginRedirect, pinned in tests/unit/host.spec.ts), which also
-  // closes the case a prompt never could — a visitor signed out today who signs in later while
-  // owner code is still resident in a tab of this origin.
-  // localhost has no second origin, so the redirect is suppressed here and the FALLBACK applies:
-  // the session is ended rather than the visitor being asked to weigh anything
+  // localStorage (secret included) are per-ORIGIN. so foreign shared pages move to an isolated
+  // origin (see sharedOriginRedirect, whose decision table is pinned in tests/unit/host.spec.ts),
+  // which also closes the case a consent prompt never could — a visitor signed out today who signs
+  // in later while owner code is still resident in a tab of this origin.
+  // locally that origin is SHARED_LOCAL_HOST, a real second origin, so there is no fallback path
+  // and the visitor's session on localhost is untouched.
   await firestore()
     .collection('items')
     .doc('e2e-foreign-init')
@@ -368,32 +383,60 @@ test('a foreign shared page never coexists with a session on this origin', async
       attr: { shared: { keys: ['trap'], indices: { trap: 0 } } },
     })
   try {
+    // RESIDUE FROM A BUILD THAT PREDATES THE PER-KEY RULES, seeded before any app code runs. the
+    // per-key rules stop new writes but cannot reach what is already there, so the boundary is a
+    // wholesale scrub at startup (see +page.js). guarded by hostname: only the isolated origin
+    await page.addInitScript(host => {
+      if (location.hostname != host) return
+      localStorage.setItem('mindpage_secret', 'residue-from-a-previous-owner')
+      localStorage.setItem('mindpage_github_token', 'ghp_residue')
+      localStorage.setItem('mindpage_item_store_abc', '{"leaked":true}')
+      localStorage.setItem('mindpage_narrating', '{"deviceId":"leaked-camera"}')
+      sessionStorage.setItem('mindpage_signin_pending', '1')
+    }, SHARED_LOCAL_HOST)
+
     await withSecret(page)
     await loadUser(page, ALICE)
     await waitForApp(page)
     expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
+
     await page.goto('/?shared=crawl_e2e/trap')
-    // the session ends, taking the stored secret with it — no prompt, no decision. signOut()
-    // reloads, so an evaluate can land mid-navigation: that is the behavior under test, not a
-    // failure, so the polls tolerate a destroyed context and keep waiting
-    const evalOrRetry = <T>(fn: () => Promise<T>) => fn().catch(() => 'navigating' as unknown as T)
-    await expect
-      .poll(() => evalOrRetry(() => page.evaluate(() => localStorage.getItem('mindpage_secret'))), {
-        timeout: 60_000,
-      })
-      .toBeNull()
-    await expect
-      .poll(() => evalOrRetry(() => page.evaluate(() => window._user?.uid ?? null)), { timeout: 60_000 })
-      .not.toBe(ALICE.uid)
-    // ... and the page then works normally for the anonymous visitor it left behind
+    // THE EXACT ORIGIN, not merely "somewhere else": a different port would not isolate, since
+    // cookies are not port-scoped
+    await expect.poll(() => page.evaluate(() => location.origin), { timeout: 60_000 }).toBe(
+      `http://${SHARED_LOCAL_HOST}:3100`
+    )
+    expect(new URL(page.url()).search).toBe('?shared=crawl_e2e/trap') // the url survives the move
+
+    // ... and the page works normally for the anonymous visitor it is, running the owner's code
     const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
     if (await notice.isVisible({ timeout: 30_000 }).catch(() => false)) await notice.click()
     await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
     await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
+
+    // the seeded residue is gone, so the next owner's code cannot read what the last one left
+    expect(
+      await page.evaluate(() => ({
+        local: Object.keys(localStorage),
+        session: Object.keys(sessionStorage),
+      }))
+    ).toEqual({ local: [], session: [] })
+
+    // and NOTHING was taken from the visitor: their session lives on the origin they were on
+    const own = await page.context().newPage()
+    try {
+      await own.goto('/')
+      await waitForApp(own)
+      expect(await own.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
+      expect(await own.evaluate(() => window._user.uid)).toBe(ALICE.uid)
+    } finally {
+      await own.close()
+    }
   } finally {
     await firestore().collection('items').doc('e2e-foreign-init').delete()
   }
 })
+
 test('a corrupted visible document can still be removed remotely (removal applies by id)', async ({ page }) => {
   // a removed record whose decrypt fails must still apply: removal is id-driven, so the
   // fabricated placeholder must not break text-dependent paths (round 8: the logging expression
