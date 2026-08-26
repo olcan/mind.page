@@ -65,6 +65,10 @@ export const ADMIN: TestUser = {
 // a regular (personal) account; the uid must match \w+ for /user/<uid> (see server.ts)
 export const ALICE: TestUser = { uid: 'alice_e2e', displayName: 'Alice Test', email: 'alice@e2e.test' }
 
+// a user record ONLY: never signed into, so its seeded mindpageDisplayName is never overwritten by
+// the auth profile. display-name precedence is asserted against this one (see seed.mjs)
+export const PROFILE_ONLY = { uid: 'profile_e2e', displayName: 'Profile Test', custom: 'Profile (custom)' }
+
 // firebase-admin against the emulators (FIREBASE_AUTH_EMULATOR_HOST, FIRESTORE_EMULATOR_HOST are set
 // by `firebase emulators:exec`); used to mint tokens and to inspect documents behind the app
 export function admin() {

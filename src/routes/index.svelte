@@ -7783,29 +7783,23 @@
                 // each world indexes documents separately, so the old representation has to go
                 // or it lingers as a phantom — a hidden wrapper cleanup could still act on, or a
                 // visible item nothing will ever update again
-                // nameForDocument, not byId membership: an adoption target is absent from byId until
-                // finalization, so this branch was UNREACHABLE for exactly the case its comment
-                // below claimed to cover — the adopter kept its pointer and a retry could turn the
-                // now-visible record hidden again
-                const hiddenName = hiddenPersistence.nameForDocument(doc.id)
-                if (!savedItem.hidden && hiddenName && change.type != 'removed') {
-                  const stale = hiddenItems.get(doc.id)
-                  // only what this transition SAW: an older success must not clear a newer failure
+                // the hidden side is keyed by NAME, and an adoption target is absent from byId until
+                // finalization — so membership is asked of nameForDocument, not hiddenItems. the
+                // lookup scans on a miss, so it is only made for a change that could actually be
+                // this transition
+                const hiddenName =
+                  !savedItem.hidden && change.type != 'removed' ? hiddenPersistence.nameForDocument(doc.id) : undefined
+                if (hiddenName) {
+                  // heal only what this transition SAW: an older success must not clear a newer failure
                   const seenDirtySeqForDrop = hiddenDirtySeq
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
-                  // the hidden-side REMOVAL is published as a semantic receipt BEFORE the entry
-                  // marker can go away. without it the marker appears and disappears entirely
-                  // inside one encryption — live object, pending, live object again — and the
-                  // writer sees nothing changed, then issues a stale hidden update that the echo
-                  // turns hidden again. nameForDocument, not just the byId lookup: an adoption
-                  // target is absent from byId until finalization
+                  // PUBLISH the hidden-side removal before the entry marker can be released, or the
+                  // marker appears and disappears inside a single encryption and a writer sees an
+                  // unchanged target; then ENQUEUE the application rather than awaiting it, since a
+                  // local write for that name may own the chain it goes on
                   const dropped = hiddenPersistence.noteRemote(undefined, doc.id, true)
-                  // ENQUEUED, NOT AWAITED: this application goes on the name's chain, which a local
-                  // write for that name may own, and that write refuses while this document's
-                  // marker stands. awaiting here made the listener wait for the writer while the
-                  // writer waited for the listener. it is still tracked in hiddenApplied, so
-                  // authority cannot declare the revision applied while the removal is queued —
-                  // dropping it out of that set was a regression introduced with the `void`
+                  // tracked in hiddenApplied: authority must not declare the revision applied while
+                  // this removal is still queued
                   hiddenApplied.push(
                     hiddenPersistence
                       .applyRemote([hiddenName], () => removeHidden(hiddenIndex(), doc.id))

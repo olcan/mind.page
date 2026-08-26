@@ -15,7 +15,15 @@ let batch = db.batch()
 for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), data)
 // user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
 batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
-batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test', mindpageDisplayName: 'Alice (custom)' })
+batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test' })
+// custom-name PRECEDENCE is asserted against this uid, which no test ever signs into. asserting it
+// against alice_e2e coupled the read lane to the personal lane: signing in overwrites the whole
+// user document with the auth profile, erasing mindpageDisplayName, so the read lane had to wait
+// for personal to finish. the fixtures are separate now and the lanes can overlap
+batch.set(db.collection('users').doc('profile_e2e'), {
+  displayName: 'Profile Test',
+  mindpageDisplayName: 'Profile (custom)',
+})
 batch.set(db.collection('users').doc('markdown_e2e'), { displayName: 'Markdown' })
 // a shared item of another user, readable by anyone (see firestore.rules) via ?shared=crawl_e2e/public
 batch.set(db.collection('items').doc('e2e-crawl-shared'), {

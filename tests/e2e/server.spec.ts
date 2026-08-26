@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'fs'
 import { createServer, type Server } from 'http'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { ADMIN, ALICE, firestore } from './helpers.js'
+import { ADMIN, ALICE, PROFILE_ONLY, firestore } from './helpers.js'
 
 // server.ts contract over http (no browser): the ssr shell and its session fields, pwa scopes and
 // manifests, host-dependent icons, /user, webhooks, the cors proxy and the localhost-only dev routes
@@ -260,7 +260,9 @@ test('/server_id identifies the server process', async ({ request }) => {
 test.describe('/user/<uid>', () => {
   test('returns the display name, preferring the custom one', async ({ request }) => {
     expect(await (await request.get(`/user/${ADMIN.uid}`)).text()).toBe('Olcan (seeded)')
-    expect(await (await request.get(`/user/${ALICE.uid}`)).text()).toBe('Alice (custom)') // mindpageDisplayName
+    // a profile-only uid: asserting this against alice_e2e made the read lane wait for the personal
+    // lane, which signs in and overwrites her user document (see seed.mjs)
+    expect(await (await request.get(`/user/${PROFILE_ONLY.uid}`)).text()).toBe(PROFILE_ONLY.custom)
   })
 
   test('returns an empty name for unknown users and 400 for invalid paths', async ({ request }) => {

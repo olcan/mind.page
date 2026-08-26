@@ -57,10 +57,11 @@ export default defineConfig({
       name: 'personal',
       testDir: 'tests/e2e',
       testMatch: /personal\.spec\.ts/,
-      dependencies: ['chromium'],
-      // REQUIRED, not a scheduling accident: personal changes alice_e2e's display name, and the
-      // read lane asserts `/user/<alice>` is 'Alice (custom)'. removing this dependency to recover
-      // ~10s of bubble made that test fail with 'Alice Test' — the lanes are not independent
+      // NO dependency: it writes only its own account. it used to need one because the read lane
+      // asserted display-name precedence against alice_e2e, whom personal signs in as — signing in
+      // overwrites the user document and erases the seeded mindpageDisplayName. that assertion now
+      // uses a profile-only uid nothing signs into (see seed.mjs), so the lanes are genuinely
+      // independent and this one starts as soon as a worker frees up
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
