@@ -70,19 +70,16 @@ const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(Strin
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
 
-  // the WRAPPER whose save task is queued but has not built its payload yet, per name. a queued
-  // task serializes that wrapper's current state, so a second save in the same window coalesces
-  // into it instead of issuing an identical write. keyed on the wrapper, not just the name: if
-  // the record was replaced in between, the queued task will be dropped by stillCurrent and the
-  // new state must get a task of its own rather than coalescing into a doomed one
-  const pendingSaves = new Set<string>()
-  // the latest state each name should end at, independent of any wrapper object (see save)
-  const intents = new Map<string, any>()
-  // document ids whose not-found recovery is already under way. every issued update installs its
-  // own rejection handler, so two offline updates to a document deleted remotely both reject and
-  // both used to start a recovery — the second ran against the already-settled wrapper, could not
-  // see the record the first had just created, and created a duplicate
-  const recovering = new Set<string>()
+  // ONE record per name of what that name still OWES the server. it replaces three parallel
+  // pieces of state (a queued-wrapper map, an unpruned intent map, and a recovering-id set) and
+  // the wrapper-identity conditions that went with them. a generation counter says whether a
+  // given attempt is still the latest, so a stale rejection or a late recovery cannot act, and
+  // the record is cleared only when the generation it persisted is still current — which also
+  // stops the old intent map from growing for the page lifetime
+  type Owed = { generation: number; state: any; running: boolean; writtenTo?: string }
+  const owed = new Map<string, Owed>()
+  let generationSeq = 0
+
   // the LATEST receipt per document: either the record as received, or the fact of its removal.
   // one map rather than a map plus a removed-set — the two could disagree, and only the map was
   // ever released, so removed ids accumulated for the page lifetime and a document that was
@@ -115,9 +112,24 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return next
   }
 
-  // the minimum-id same-name wrapper that could hold this create's state: a retained duplicate
-  // observed at initialization, or one that arrived remotely while the create was in flight —
-  // creating alongside it would duplicate the name even though the survivor is already known
+  // the record that legitimately holds a name RIGHT NOW: live in byId under that exact name,
+  // minimum id, never quarantined. byName alone is not that: a remote rename deliberately leaves
+  // the old name pointing at a wrapper no longer in byId, and writing through that alias renames
+  // the live document back and overwrites its state
+  function canonicalHolder(name: string): HiddenWrapper | undefined {
+    const index = deps.index()
+    let best: HiddenWrapper | undefined
+    for (const w of index.byId.values()) {
+      if (w.name != name || isQuarantined(index, w.id)) continue
+      if (w.pending_create || w.adopt_id) return w // a create for this name owns it
+      if (!best || compareIds(w.id, best.id) < 0) best = w
+    }
+    return best
+  }
+
+  // the minimum-id same-name record a create could adopt instead of creating alongside: live
+  // records plus ones RECEIVED but not yet applied, since serialization must not hide a record
+  // the client already knows about from the create that would duplicate it
   function findSurvivor(index: HiddenIndex, wrapper: HiddenWrapper): HiddenWrapper | undefined {
     let survivor: HiddenWrapper | undefined
     const consider = (w: HiddenWrapper) => {
@@ -125,71 +137,86 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (w.pending_create || w.adopt_id || isQuarantined(index, w.id)) return
       if (!survivor || compareIds(w.id, survivor.id) < 0) survivor = w
     }
-    for (const w of index.byId.values()) {
-      if (receipts.get(w.id) && !receipts.get(w.id)!.wrapper) continue // its removal was received
-      consider(w)
-    }
-    // received but not yet applied: a create must see these, or it duplicates a record it knows about
+    for (const w of index.byId.values()) consider(w)
     for (const { wrapper: w } of receipts.values()) if (w && !index.byId.has(w.id)) consider(w)
     return survivor
   }
 
-  // persists a pending create: confirm (unless already adopted), adopt any already-known
-  // same-name survivor, then either update the adopted document with merged state or create a
-  // fresh one. shared by the create path and by not-found recovery (an update whose document
-  // was deleted concurrently is a create-like transition: it must confirm and adopt any
-  // surviving same-name document, never blindly create a duplicate)
-  // issues an adopted write and settles the wrapper onto that document. the write is durable in
-  // the SDK's queue from the moment it is issued, so nothing waits for the server — but if the
-  // server later says the document is GONE, the wrapper is settled on an id that does not exist
-  // and the merged state was never persisted. that is repaired by re-entering the create path
-  // for the name, which will adopt a current holder or create a fresh record
-  function issueAdoptedWrite(wrapper: HiddenWrapper, data: Record<string, any>) {
-    const adoptId = wrapper.adopt_id!
-    const name = wrapper.name
-    deps.updateDoc(adoptId, data).catch(e => {
-      if (!isNotFound(e)) return void console.error('hidden item adoption failed:', e)
-      deps.invalidateAuthority(`adopted hidden document ${adoptId} vanished`)
-      const index = deps.index()
-      // only if the wrapper is still the name's holder AND still on the vanished id: anything
-      // else means a later delivery already decided this name, and it wins
-      if (index.byName.get(name) !== wrapper || wrapper.id != adoptId) return
-      if (recovering.has(adoptId)) return
-      recovering.add(adoptId)
-      wrapper.pending_create = true
-      wrapper.adopt_id = null
-      enqueue(name, wrapper, () =>
-        persistCreate(wrapper)
-          .catch(err => void console.error('hidden item create failed:', err))
-          .finally(() => recovering.delete(adoptId))
-      )
-    })
+  // persists whatever the name currently owes, whoever holds it. ONE routine for initial saves
+  // and for both ordinary and adopted not-found recovery, so the recovery paths cannot disagree
+  // with the write path about which record a name should end up on. it re-resolves the holder
+  // after every await, because the intent belongs to the name and follows it
+  async function persistOwed(name: string) {
+    const op = owed.get(name)
+    if (!op || op.running) return
+    op.running = true
+    const generation = op.generation
+    const stillOwed = () => owed.get(name)?.generation == generation
+    try {
+      let holder = canonicalHolder(name)
+      if (!holder) {
+        // nothing holds the name any more (a removal landed): claim it again and confirm, which
+        // adopts a surviving server record if there is one
+        holder = { name, item: op.state, id: deps.newTempId(), saving: null, pending_create: true, adopt_id: null }
+        const index = deps.index()
+        index.byId.set(holder.id, holder)
+        index.byName.set(name, holder)
+      }
+      if (holder.pending_create || holder.adopt_id) {
+        holder.item = op.state
+        await persistCreate(holder)
+        if (stillOwed()) owed.delete(name)
+        return
+      }
+      // landing on a record this intent has not written before is an ADOPTION: the record may
+      // hold fields the owner never saw (a retained duplicate, or the survivor a vanished target
+      // was replaced by), and overwriting them is the fresh-clone loss again. merging under the
+      // intent is exactly what the create path does when it adopts
+      if (op.writtenTo != holder.id) {
+        deps.adopt({ ...holder, item: op.state }, holder)
+        holder.item = op.state
+      }
+      holder.item = op.state
+      const data = await deps.encryptState(payload(holder))
+      if (!stillOwed()) return // a newer save superseded this one while encrypting
+      holder = canonicalHolder(name) ?? holder
+      holder.item = op.state
+      const target = holder.id
+      op.writtenTo = target
+      deps.updateDoc(target, data).catch(e => {
+        if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
+        // the document is gone. the name still owes this state, so re-run for the NAME rather
+        // than inspecting the wrapper this write started from: a delivery may have replaced or
+        // removed it in the meantime, and the intent outlives whichever record held it
+        deps.invalidateAuthority(`hidden write target ${target} not found`)
+        const index = deps.index()
+        if (index.byId.get(target)) removeHidden(index, target) // it does not exist server-side
+        owed.set(name, { generation: ++generationSeq, state: op.state, running: false }) // supersede
+        void enqueue(name, undefined, () => persistOwed(name))
+      })
+      if (stillOwed()) owed.delete(name)
+    } catch (e) {
+      console.error(`persisting hidden item '${name}' failed:`, e)
+    } finally {
+      const op_now = owed.get(name)
+      if (op_now) op_now.running = false
+    }
   }
 
-  // claims a name with a pending wrapper and persists it (confirm -> adopt or create)
-  function createForName(name: string, item: any) {
-    // create: the wrapper claims the name immediately (pending), and the persisted document
-    // is either an adoption of an existing one (found during the phrase prompt, the server
-    // confirmation, or already known locally) or a fresh create
-    const wrapper: HiddenWrapper = {
-      name,
-      item,
-      id: deps.newTempId(),
-      saving: null,
-      pending_create: true,
-      adopt_id: null,
-    }
-    const index = deps.index()
-    index.byId.set(wrapper.id, wrapper)
-    index.byName.set(name, wrapper)
-    if (deps.readonly()) return
-    enqueue(name, wrapper, async () => {
-      try {
-        await persistCreate(wrapper)
-      } catch (e) {
-        console.error('hidden item create failed:', e)
-        throw e
-      }
+  // issues a write for a create/adoption and routes its not-found through the same name-level
+  // recovery the ordinary path uses: the record is gone, so the name is owed its state again
+  function issueForName(name: string, id: string, data: Record<string, any>, state: any, create: boolean) {
+    const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
+    write.catch(e => {
+      if (!isNotFound(e)) return void console.error(`hidden item ${create ? 'create' : 'adoption'} failed:`, e)
+      deps.invalidateAuthority(`hidden write target ${id} vanished`)
+      const index = deps.index()
+      if (index.byId.get(id)) removeHidden(index, id)
+      // ALWAYS supersede: the rejection can arrive while the attempt that caused it is still in
+      // flight, and re-using that record would leave the recovery blocked behind its own
+      // running flag — the recovery would then be dropped when the original attempt finished
+      owed.set(name, { generation: ++generationSeq, state, running: false })
+      void enqueue(name, undefined, () => persistOwed(name))
     })
   }
 
@@ -215,8 +242,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // waited behind it and died with the tab while only the create survived in IndexedDB.
       // rejection recovery stays attached but detached from the chain
       if (wrapper.adopt_id) {
-        const adopted = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
-        issueAdoptedWrite(wrapper, adopted)
+        const state = payload(wrapper) // merged state (see deps.adopt)
+        const adoptId = wrapper.adopt_id
+        const adopted = await deps.encryptState(state)
+        issueForName(wrapper.name, adoptId, adopted, wrapper.item, false)
         finalizeAdoption(deps.index(), wrapper)
       } else {
         const state = payload(wrapper)
@@ -231,15 +260,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           wrapper.adopt_id = late.id
           deps.adopt(wrapper, late)
           const merged = await deps.encryptState(payload(wrapper))
-          issueAdoptedWrite(wrapper, merged)
+          issueForName(wrapper.name, late.id, merged, wrapper.item, false)
           finalizeAdoption(deps.index(), wrapper)
           return
         }
         // issued and released: the id is already allocated, so nothing downstream needs to wait
         // for the server (see the note above)
-        deps.createDoc(id, created).catch(e => {
-          console.error('hidden item create failed:', e)
-        })
+        issueForName(wrapper.name, id, created, wrapper.item, true)
         finalizeCreate(deps.index(), wrapper, id) // restores minimum-id if a lower-id duplicate arrived
       }
     } catch (e) {
@@ -261,84 +288,33 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     }
   }
 
-  // true while the wrapper is a valid target for a queued save: it can have been removed by a
-  // failed create's cleanup, or displaced from byId by a remote
-  // replacement or rename — a write against a transitional wrapper would resurrect deleted
-  // state, bypass create confirmation, or rename the document back
-  function stillCurrent(name: string, wrapper: HiddenWrapper) {
-    const index = deps.index()
-    // wrapper.name is checked too: a stale byName alias can still point at a record that was
-    // RENAMED remotely, and writing through it would put the old store's value into the live
-    // record under its new name
-    return (
-      wrapper.name == name &&
-      index.byName.get(name) === wrapper &&
-      index.byId.get(wrapper.id) === wrapper
-    )
-  }
-
   return {
     // replaces (or creates) the hidden item for the name with the given state. the wrapper's
     // state is updated immediately; the document payload is serialized when the queued task
     // EXECUTES, so it always carries the latest full state — including adoption merges and
     // later save() calls — and a failed earlier write is superseded rather than retried
     save(name: string, item: any) {
-      // the intent belongs to the NAME, not to a wrapper object. a queued save used to hold the
-      // wrapper it was created for and DROP itself if that wrapper had been replaced meanwhile —
-      // silently losing the newest thing the user did, because a remote delivery had landed in
-      // between. the task resolves the name's current holder when it runs instead, so being
-      // overtaken costs nothing
-      intents.set(name, item)
+      // record what the name now OWES and let one routine persist it. the intent belongs to the
+      // NAME: it is not attached to a wrapper (a delivery can replace or remove that record and
+      // the user's change must still land), and it is re-resolved after every await
       const index = deps.index()
-      const existing = index.byName.get(name)
-      if (!existing) {
-        // no record for this name yet: claim it synchronously with a pending wrapper (readers of
-        // the index and `saving_global_store` see it immediately) and persist it
-        createForName(name, item)
-        return
+      let holder = canonicalHolder(name) ?? index.byName.get(name)
+      if (!holder) {
+        // claim the name SYNCHRONOUSLY: readers of the index (and saving_global_store) must see
+        // the store the moment it is saved, not when its task happens to run
+        holder = { name, item, id: deps.newTempId(), saving: null, pending_create: true, adopt_id: null }
+        index.byId.set(holder.id, holder)
+        index.byName.set(name, holder)
       }
-      existing.item = item
-      if (deps.readonly()) return
-      if (pendingSaves.has(name)) return // a queued task will pick up the latest intent
-      pendingSaves.add(name)
-      enqueue(name, existing, async () => {
-        pendingSaves.delete(name) // from here the payload is fixed; a later save queues its own
-        const state = intents.get(name)
-        if (state === undefined) return
-        const holder = deps.index().byName.get(name)
-        if (!holder) return void createForName(name, state) // the record went away: create anew
-        if (holder.pending_create) return // a create for this name is already in flight with it
-        holder.item = state // the resolved target carries the latest intent
-        let data
-        try {
-          data = await deps.encryptState(payload(holder))
-        } catch (e) {
-          return void console.error('hidden item update failed:', e)
-        }
-        // resolve once more: the holder can change during encryption, and the intent follows the
-        // NAME rather than the object it started with
-        const current = deps.index().byName.get(name)
-        if (!current || current.pending_create) return
-        if (current !== holder) current.item = state
-        const target = current.id // the id THIS write goes to; recovery is keyed on it
-        deps.updateDoc(target, data).catch(e => {
-          if (!isNotFound(e)) return void console.error('hidden item update failed:', e)
-          // removed server-side: recover as a create-like transition on this name's chain, keyed
-          // on the TARGET this write used so a second rejection cannot start a second recovery
-          if (recovering.has(target)) return
-          const holderNow = deps.index().byName.get(name)
-          if (!holderNow || holderNow.id != target) return // a later delivery already decided this name
-          deps.invalidateAuthority(`hidden update target ${target} not found`)
-          recovering.add(target)
-          holderNow.pending_create = true
-          holderNow.adopt_id = null
-          enqueue(name, holderNow, () =>
-            persistCreate(holderNow)
-              .catch(err => void console.error('hidden item create failed:', err))
-              .finally(() => recovering.delete(target))
-          )
-        })
-      })
+      holder.item = item
+      if (deps.readonly()) return // the index is updated; nothing is persisted
+      const op = owed.get(name)
+      if (op) {
+        op.state = item // supersede: a queued attempt picks up the latest state
+        op.generation = ++generationSeq
+        if (!op.running) return // its task has not built a payload yet
+      } else owed.set(name, { generation: ++generationSeq, state: item, running: false })
+      void enqueue(name, holder, () => persistOwed(name))
     },
 
     // applies a remote transition (add/modify/remove) for the name ON ITS CHAIN, so it can

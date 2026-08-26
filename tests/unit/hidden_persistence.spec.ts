@@ -149,7 +149,8 @@ test('an update hitting not-found confirms like a create, then creates the lates
   // the server) and confirm BEFORE creating — a blind create could duplicate
   expect(calls.map(c => c.op)).toEqual(['invalidate', 'confirm', 'create'])
   expect(itemOf(calls[2].text)).toEqual({ v: 1 })
-  expect(idx.byName.get('n')!.id).toBe('doc1') // re-keyed to the created document
+  const created = calls.find(c => c.op == 'create')!
+  expect(idx.byName.get('n')!.id).toBe(created.id) // re-keyed to the created document
   expect(idx.byId.has('gone1')).toBe(false)
 })
 
@@ -382,34 +383,44 @@ test('not-found recovery with an authoritative no-op confirmation adopts the ret
   expect(idx.byId.has('gone1')).toBe(false)
 })
 
-test('a save whose wrapper is replaced while its write is in flight drops on not-found instead of recovering', async () => {
+test('a save whose target vanishes is written to whatever holds the name instead', async () => {
+  // round-17 finding 3: the intent belongs to the NAME. when the write's target turns out to be
+  // gone, the state is persisted to the record that holds the name now — previously the recovery
+  // inspected the wrapper the write started from, so a replacement (or a removal) dropped the
+  // user's change entirely
   const inFlight = deferred<void>()
   const { idx, calls, controller } = harness({
-    updateDoc: async () => {
-      await inFlight.promise
-      const e: any = new Error('missing')
-      e.code = 'not-found'
-      throw e
+    updateDoc: async (id, data) => {
+      if (id == 'd1') {
+        await inFlight.promise
+        const e: any = new Error('missing')
+        e.code = 'not-found'
+        throw e
+      }
+      calls.push({ op: 'update', id, text: data.cipher ?? data.text })
     },
   })
   const wrapper: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
   idx.byId.set('d1', wrapper)
   idx.byName.set('n', wrapper)
   controller.save('n', { v: 1 })
-  await flush() // write in flight
-  // a remote replacement lands and the server deletes the old document: the replacement is
-  // canonical, so the stale write must not enter create-recovery and duplicate or rename back
+  await flush() // write to d1 in flight
+  // a remote replacement lands and the server deletes the old document
   const replacement: HiddenWrapper = { id: 'd9', name: 'n', item: { remote: true } }
   idx.byId.delete('d1')
   idx.byId.set('d9', replacement)
   idx.byName.set('n', replacement)
   inFlight.resolve()
   await flush()
-  expect(calls.filter(c => c.op == 'create')).toHaveLength(0)
-  expect(calls.filter(c => c.op == 'confirm')).toHaveLength(0)
-  expect(idx.byName.get('n')).toBe(replacement) // untouched
+  await flush()
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0) // no duplicate document
+  const update = calls.find(c => c.op == 'update' && c.id == 'd9')
+  expect(update, 'the intent followed the name to its current holder').toBeTruthy()
+  // ... and MERGES under itself: this record was never written by this intent, so it may hold
+  // fields the owner never saw (here the replacement's own state). overwriting them would be
+  // the fresh-clone loss again
+  expect(itemOf(update!.text)).toEqual({ v: 1, remote: true })
 })
-
 test('remote transitions are not delayed by an unacknowledged local write', async () => {
   // the chain used to hold until the server acknowledged, which delayed every remote transition
   // for that name behind it — and offline, indefinitely. writes are issued and released now, so
@@ -629,8 +640,7 @@ test('an adopted write rejected as not-found does not leave the wrapper on a van
     },
   })
   controller.save('n', { mine: 1 })
-  await flush()
-  await flush()
+  for (let i = 0; i < 4; i++) await flush() // adoption, its rejection, recovery, then the create
   // the create is re-entered for the name rather than left settled on the vanished document
   expect(calls.filter(c => c.op == 'invalidate')).not.toHaveLength(0) // authority revoked
   const created = calls.find(c => c.op == 'create')
