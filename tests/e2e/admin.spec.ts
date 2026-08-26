@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { interceptMindItems, loadAdmin, loadAnonymous, useGithubToken } from './helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
-// anonymous account with write access (as on mindbox.io); these run after the read-only project
+// anonymous account with write access (as on mindbox.io); these run after the baseline project
 // (see playwright.config.ts) since they add items to the account
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)

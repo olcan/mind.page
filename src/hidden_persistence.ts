@@ -5,11 +5,13 @@
 // to firestore's queue without waiting for acknowledgement, and settles the index transitions in
 // hidden.ts so the name invariant holds.
 //
-// what it does NOT do: order writers, identify its own echoes, or drop work that was overtaken.
-// firestore delivers a document's changes in commit order and every delivery is applied; a
-// queued save carries the latest INTENT for a name and resolves that name's current holder when
-// it runs, so being overtaken costs nothing. there is no revision protocol, no write-identity
-// tracking, and no deletion — emptying a store is an ordinary save of `{}`.
+// what it does NOT do: order writers, identify its own echoes, or drop work that was overtaken. a
+// queued save carries the latest INTENT for a name and resolves that name's current holder when it
+// runs. there is no revision protocol, no write-identity tracking, and no deletion — emptying a
+// store is an ordinary save of `{}`.
+// NOTE an application can FAIL, in which case the delivery is retained dirty and unapplied, and
+// overlapping deliveries for one document can erase one another (one receipt slot per id). both
+// are open blockers — see the ingress coordinator contract in plans/mind_page_next_steps.md.
 //
 // NOTE: `wrapper.saving` is mirrored while a write is being built and issued, and cleared once it
 // reaches the SDK's queue — not when the server acknowledges. item code observes it through
@@ -274,13 +276,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return true
   }
 
-  // ONE attempt for `generation`: resolve the target, build, recheck, issue. returns false when
-  // the target MOVED while building, and the caller then requeues behind the remote applications
-  // that moved it. an inner loop was the obvious alternative and is worse: it re-encrypts while
-  // holding the chain, starving the very receipts it is waiting for, and its "each retarget takes
-  // a lower id" termination argument is false — a removal or rename can retarget upward or to
-  // absence, and receipts can oscillate. safety here rests on receipts eventually going quiet,
-  // and the requeue gives them their turn
+  // ONE attempt for `generation`: resolve the target, build, recheck, issue. returns false when the
+  // target MOVED while building, and the caller requeues. an inner loop is worse: it re-encrypts
+  // while holding the chain, starving the receipts it waits for, and its "each retarget takes a
+  // lower id" termination argument is false — a removal or rename can retarget upward or to
+  // absence. safety rests on receipts eventually going quiet, NOT on the requeue being ordered
+  // behind the application that moved the target, which it is not
   async function attemptWrite(name: string, generation: number): Promise<boolean> {
     const current = () => currentOwed(name, generation)
     const state = current()?.state
@@ -417,8 +418,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       await deps.acquireSecret()
       if (!current()) return
       if (await attemptWrite(name, generation)) return
-      // the target moved. requeue at the BACK of the chain so the receipts that moved it apply
-      // first — retrying here would hold the chain and re-encrypt against a view that cannot change
+      // the target moved: requeue rather than retry here, which would hold the chain and
+      // re-encrypt against a view that cannot change. this does NOT order the retry behind the
+      // remote application — that may be on a different name chain
       const now = current()
       if (!now) return
       now.phase = 'queued'

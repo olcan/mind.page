@@ -14,8 +14,8 @@
 # SKIP_BUILD run as the gate.
 #
 # TARGETED ITERATION: a spec whose project has DEPENDENCIES drags their closure along. `editor`
-# depends on `admin`, which depends on `chromium`, so naming editor.spec.ts selects 55 tests rather
-# than its own 10; add --no-deps for just the file's own:
+# depends on `admin`, which depends on `chromium`, so naming editor.spec.ts runs that whole closure
+# rather than its own tests; add --no-deps for just the file's own:
 #     tests/e2e/run.sh tests/e2e/editor.spec.ts --no-deps
 # `personal` has no dependencies, so naming it needs no flag:
 #     tests/e2e/run.sh tests/e2e/personal.spec.ts

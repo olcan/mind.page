@@ -6435,10 +6435,11 @@
   // error callback) already invalidated — the queued grant carries its receipt epoch and
   // no-ops if the epoch moved
   let hiddenAuthorityEpoch = 0
-  // hidden documents whose change could not be applied (undecryptable or a throwing
-  // application): the index cannot claim completeness while any are unresolved, so grants are
-  // blocked until each is healed — by a later successfully applied change for the same id, or
-  // by a full server re-read (see confirmIndex, which registers every hidden document)
+  // hidden documents whose change could not be applied (undecryptable or a throwing application):
+  // the index cannot claim completeness while any are unresolved, so grants are blocked until a
+  // later successfully applied change for the same id heals it. there is NO rebuild that heals the
+  // whole map — confirmIndex answers one name, can return early, and never touches this — so a
+  // document with no further deliveries stays dirty for the session (an open blocker)
   let hiddenDirtyIds = new Map() // document id -> the generation at which it was marked dirty
   let hiddenDirtySeq = 0 // monotonic: healing may only clear failures its own generation proves
   const markHiddenDirty = id => hiddenDirtyIds.set(id, ++hiddenDirtySeq)
@@ -7389,12 +7390,11 @@
         // would drop the change for good, which is why cross-tab updates only landed sometimes
         function isOwnPendingChange(change, doc, savedItem) {
           if (savedItem.hidden) {
-            // hidden deliveries are NEVER skipped. every delivered state is applied, and a
-            // queued save re-resolves the name's current holder when it runs (see save in
-            // hidden_persistence.ts), so being overtaken costs nothing and the user's latest
-            // intent still lands. the previous skip predicate could not see server-confirmed
-            // changes at all (it was consulted only for pending writes) and matched by NAME, so
-            // it also hid genuinely different documents
+            // a hidden change is NEVER classified as our own echo, so this predicate never skips
+            // one: the delivery goes to the hidden path, which decides what to do with it. the
+            // previous skip predicate could not see server-confirmed changes at all (it was
+            // consulted only for pending writes) and matched by NAME, so it also hid genuinely
+            // different documents
             return false
           }
           const matchesWrite = w => w.time == savedItem.time && w.text == savedItem.text && _.isEqual(w.attr, savedItem.attr)
@@ -7692,11 +7692,9 @@
 
             applyRemoteChangeRef = applyRemoteChange
             // handle changes in non-first snapshot, waiting for init if necessary. the APPLY TASKS
-            // are serialized and each change's decrypt is awaited before it is applied — but hidden
-            // applications are enqueued onto name chains and outlive the task that scheduled them
-            // (see hiddenApplied below), so two deliveries for one document routed through different
-            // names can still land out of receipt order. that is one of the things the ingress
-            // coordinator has to fix
+            // are serialized, but hidden applications are enqueued onto name chains and outlive the
+            // task that scheduled them (see hiddenApplied below), so two deliveries for one document
+            // routed through different names can land out of receipt order — an open blocker
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
             const { settle: settleApplied, revoke: revokeThisRevision } = reserveHiddenAuthority({
@@ -7746,7 +7744,7 @@
               let deferred = 0 // changes held back behind unsettled local intent (reconciled later)
               // a failed hidden decrypt or application keeps this revision from granting
               // authority, and the document id stays DIRTY (blocking later grants) until a
-              // successful change for it applies or a full server re-read heals the index
+              // successful change for it applies
               let hiddenApplyFailed = false
               // hidden transitions apply ON THE NAME'S CONTROLLER CHAIN so they can never
               // interleave with an in-flight write for the same name (a remote replacement

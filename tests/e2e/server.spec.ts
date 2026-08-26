@@ -269,15 +269,15 @@ test('every cdn loader precedes kit\'s bootstrap in the BUILT shell', async ({ r
   const html = await (await request.get('/')).text()
   const bootstrap = html.search(/\/_app\/immutable\/entry\/start\.[^"']+/)
   expect(bootstrap, "kit's generated bootstrap is present").toBeGreaterThan(-1)
-  // EVERY source loader must survive the build, still be classic and parser-blocking, and still
-  // precede the bootstrap. asserting only "some https script precedes it" would pass a build that
-  // dropped a loader or made one async
-  for (const src of expected) {
-    const tag = html.match(new RegExp(`<script\\b[^>]*\\bsrc="${src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`))
-    expect(tag, `${src} survives the build`).toBeTruthy()
-    expect(tag![0], `${src} is still parser-blocking`).not.toMatch(/\basync\b|\bdefer\b/)
-    expect(tag![0], `${src} is still a classic script`).not.toMatch(/type="module"/)
-    expect(tag!.index, `${src} precedes the bootstrap`).toBeLessThan(bootstrap)
+  // the built external scripts must be EXACTLY the source ones — comparing the lists catches a
+  // dropped loader and a build-injected extra alike, where a per-source lookup would miss the
+  // second — and every one of them must still be classic, parser-blocking and above the bootstrap
+  const built = [...html.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)]
+  expect(built.map(m => m[1])).toEqual(expected)
+  for (const tag of built) {
+    expect(tag[0], `${tag[1]} is still parser-blocking`).not.toMatch(/\basync\b|\bdefer\b/)
+    expect(tag[0], `${tag[1]} is still a classic script`).not.toMatch(/type="module"/)
+    expect(tag.index, `${tag[1]} precedes the bootstrap`).toBeLessThan(bootstrap)
   }
 })
 

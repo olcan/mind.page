@@ -92,9 +92,9 @@ test('charts carry real data and geometry (semantic checks the masked goldens ca
 test('every anonymous item renders as before', async ({ page }) => {
   await loadAnonymous(page)
   const ids: string[] = await page.evaluate(() => window._items().map(item => item.id))
-  // 121 seeded items minus the welcome template, which read-only views drop (see adminItems). this
-  // was a separate test that paid for its own full app load to assert one number
-  expect(ids).toHaveLength(120)
+  // 121 seeded items minus the welcome template, which read-only views drop (see adminItems).
+  // SOFT: a wrong count must not abort the 120 golden comparisons below, which are the point
+  expect.soft(ids).toHaveLength(120)
   for (const id of ids) {
     const html = await renderedHtml(page, id)
     expect.soft(html, `item ${id} rendered`).not.toBeNull()

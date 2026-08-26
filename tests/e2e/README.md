@@ -50,7 +50,7 @@ Tests run as five projects (see `playwright.config.ts`), each capped to one work
 mutate anonymous and prerender state its render tests inspect, which is why it stays serial) and
 `personal` are all eligible immediately; `admin` and `editor` mutate the shared anonymous account
 and form a chain behind the baseline lane. Only projects with dependencies drag a closure along, so
-`--no-deps` matters for `editor.spec.ts` (55 tests otherwise, rather than its own 10) and not for
+`--no-deps` matters for `editor.spec.ts`, whose closure is otherwise run in full, and not for
 `personal.spec.ts`.
 
 - `server.spec.ts` - `server.mjs` over http (no browser): the ssr shell and the session fields it
