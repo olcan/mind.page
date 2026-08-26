@@ -24,6 +24,10 @@ export function getHostDir(host) {
 // index.svelte — this is what replaced asking the visitor to make the judgement call
 export const SHARED_HOST = 'shared.mind.page'
 
+// where signing in happens. the isolated origin cannot authenticate anyone — it is deliberately
+// not an authorized auth domain — so a sign-in gesture there has to go somewhere that is
+export const ACCOUNT_HOST = 'mind.page'
+
 // decides whether a shared page must be served from the isolated origin instead of here, and
 // returns the url to move to (or null to stay). kept pure and separate because it is a security
 // control: everything it needs is passed in, so it can be tested directly.

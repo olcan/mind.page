@@ -238,13 +238,15 @@ test('a complete cache without the stored secret still initializes from the serv
     .toBe(true)
 })
 
-test('a foreign shared page leaves this origin instead of asking the visitor to judge', async ({ page }) => {
+test('a foreign shared page never coexists with a session on this origin', async ({ page }) => {
   // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
   // realm recreates the firebase facade, and auth persistence, the session cookie and
   // localStorage (secret included) are per-ORIGIN. so foreign shared pages are served from an
-  // isolated origin instead (see sharedOriginRedirect), which also closes the case a prompt
-  // never could — a visitor signed out today who signs in later while owner code is still
-  // resident in some tab of this origin
+  // isolated origin (see sharedOriginRedirect, pinned in tests/unit/host.spec.ts), which also
+  // closes the case a prompt never could — a visitor signed out today who signs in later while
+  // owner code is still resident in a tab of this origin.
+  // localhost has no second origin, so the redirect is suppressed here and the FALLBACK applies:
+  // the session is ended rather than the visitor being asked to weigh anything
   await firestore()
     .collection('items')
     .doc('e2e-foreign-init')
@@ -263,23 +265,29 @@ test('a foreign shared page leaves this origin instead of asking the visitor to 
     await withSecret(page)
     await loadUser(page, ALICE)
     await waitForApp(page)
-    // the e2e stack runs on localhost, which has no second origin, so the redirect is suppressed
-    // there by design and the decision itself is pinned in tests/unit/host.spec.ts. what this
-    // covers is the on-origin FALLBACK that remains for a visitor who somehow authenticated on
-    // the isolated origin: a signed-in non-owner is still gated before any owner code runs
-    await page.goto('/?shared=crawl_e2e/trap')
-    const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
-    if (await notice.isVisible({ timeout: 15_000 }).catch(() => false)) await notice.click()
-    await expect(page.getByText(/includes code written by its owner/)).toBeVisible({ timeout: 60_000 })
-    await page.locator('.modal .button.cancel', { hasText: 'View Only' }).click()
-    await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
-    expect(await page.evaluate(() => (window as any).__FOREIGN_RAN ?? null)).toBeNull()
     expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
+    await page.goto('/?shared=crawl_e2e/trap')
+    // the session ends, taking the stored secret with it — no prompt, no decision. signOut()
+    // reloads, so an evaluate can land mid-navigation: that is the behavior under test, not a
+    // failure, so the polls tolerate a destroyed context and keep waiting
+    const evalOrRetry = <T>(fn: () => Promise<T>) => fn().catch(() => 'navigating' as unknown as T)
+    await expect
+      .poll(() => evalOrRetry(() => page.evaluate(() => localStorage.getItem('mindpage_secret'))), {
+        timeout: 60_000,
+      })
+      .toBeNull()
+    await expect
+      .poll(() => evalOrRetry(() => page.evaluate(() => window._user?.uid ?? null)), { timeout: 60_000 })
+      .not.toBe(ALICE.uid)
+    // ... and the page then works normally for the anonymous visitor it left behind
+    const notice = page.locator('.modal .button', { hasText: 'View Shared Page' })
+    if (await notice.isVisible({ timeout: 30_000 }).catch(() => false)) await notice.click()
+    await expect(page.getByText('a foreign item with init code')).toBeVisible({ timeout: 60_000 })
+    await expect.poll(() => page.evaluate(() => (window as any).__FOREIGN_RAN ?? null), { timeout: 60_000 }).toBe(1)
   } finally {
     await firestore().collection('items').doc('e2e-foreign-init').delete()
   }
 })
-
 test('a corrupted visible document can still be removed remotely (removal applies by id)', async ({ page }) => {
   // a removed record whose decrypt fails must still apply: removal is id-driven, so the
   // fabricated placeholder must not break text-dependent paths (round 8: the logging expression

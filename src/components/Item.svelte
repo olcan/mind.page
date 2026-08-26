@@ -20,10 +20,8 @@
     skipEscaped,
     exclusionRegExp,
     skipExclusions,
+    isSafeNavigationUrl,
     destroyElem,
-    scrubForeignHtml,
-    scrubForeignNode,
-    isSafeForeignNavigation,
     hash as _hash,
   } from '../util.js'
 
@@ -187,14 +185,13 @@
   function onSourceClick(e) {
     e.stopPropagation()
     e.preventDefault()
-    // `source` is owner-controlled item attr and never passes through the html scrub: a
-    // javascript: (or other active) scheme here is a user-gesture code sink, so the scheme is
-    // validated on EVERY page — not only in view only, where the control is dead anyway
-    if (!isSafeForeignNavigation(source)) {
+    // `source` is an owner-controlled item attribute handed straight to window.open: a
+    // javascript: (or other active) scheme here is a user-gesture code sink that no markup
+    // sanitizer ever sees, so the scheme is validated on every page
+    if (!isSafeNavigationUrl(source)) {
       console.warn('refusing to open item source with unsafe url:', source)
       return
     }
-    if (window['_foreign_code_blocked']) return // view only: no owner-directed navigation at all
     window.open(source)
   }
 
@@ -928,12 +925,6 @@
       text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`
     }
 
-    // VIEW ONLY on a foreign shared page: the visitor declined to run the owner's code, so the
-    // rendered html is made inert before it is inserted (or cached) — the item-code evaluator is
-    // only one execution path, and browser-native active content never passes through it (see
-    // scrubForeignHtml in util.js and the consent gate in index.svelte). the flag is decided
-    // once, before any item renders, so scrubbing before caching is safe
-    if (window['_foreign_code_blocked']) text = scrubForeignHtml(text)
 
     // include html cache key in content to include in svelte content cache key and force svelte update whenever html is re-generated even if generated html is identical since arguments (in particular deephash and version) may capture changes not reflected in generated html
     text += `<!-- html_cache_key=${cache_key} -->`
@@ -1004,7 +995,6 @@
         if (!itemdiv) return
         // view only: typesetting turned owner TeX into NEW dom after the render-time scrub, and
         // TeX can author links (\href{javascript:...}) — re-apply the policy to what it built
-        if (window['_foreign_code_blocked']) scrubForeignNode(itemdiv)
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv.querySelectorAll('.MathJax').forEach(elem => elem.setAttribute('tabindex', '-1'))
         if (done) done()
@@ -1414,11 +1404,7 @@
         // same reasoning as link_urls: data only, listener attached from the DOM below
         return `${pfx}<a href="#" title="${_.escape(tag_resolved)}" data-tag-click="${_.escape(tag_resolved)}">${tag}</a>`
       })
-    // VIEW ONLY: this runs AFTER the render-time scrub and rewrites owner-controlled comment
-    // text, so it is one more post-render producer — the visitor declined the owner's code, so
-    // no new owner-derived links are generated at all
-    if (!window['_foreign_code_blocked'])
-      itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
+    itemdiv.querySelectorAll('.hljs-comment').forEach(comments => {
         comments.innerHTML = link_tags(link_urls(comments.innerHTML))
         // attach listeners from the DOM: the anchors above carry data attributes only, so no
         // owner-controlled value is ever compiled as javascript
@@ -1705,7 +1691,6 @@
       .then(() => window['MathJax'].typesetPromise(math))
       .then(function () {
         const itemdiv = math[0].closest('.item')
-        if (itemdiv && window['_foreign_code_blocked']) scrubForeignNode(itemdiv) // see renderMath
         // NOTE: inTabOrder: false option updates context menu but fails to set tabindex to -1 so we do it here
         itemdiv?.querySelectorAll('.MathJax').forEach(elem => elem.setAttribute('tabindex', '-1'))
         dot.querySelectorAll('.node > text > .MathJax > svg').forEach(mathsvg => {

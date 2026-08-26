@@ -65,25 +65,11 @@
   // visitor signed in to their own account that code could reach the visitor's stored secret,
   // so foreign code runs only after explicit consent (see initialize) and every execution path
   // funnels through Item.eval, which throws while blocked
-  let foreignCodeBlocked = false
   // NOTE: a sign-in gesture started on a foreign shared page is NOT auto-resumed after the
   // navigation. a programmatic call carries no user activation and would simply be popup-blocked;
   // the visitor lands on a clean first-party page and clicks sign in there, which is also the
   // only way the gesture is genuinely theirs
 
-  // per-load, in-memory foreign-code consent. deliberately NOT persisted (see the gate in
-  // initialize): a stored record cannot be an integrity boundary against code running in the
-  // same origin. one load has one page owner, so a boolean says everything
-  let foreignCodeConsented = false
-  // legacy persisted consent from earlier builds is removed on sight, so an old forged key
-  // cannot outlive this change
-  function clearForeignCodeConsent() {
-    if (!isClient) return
-    foreignCodeConsented = false
-    for (const key of Object.keys(window.sessionStorage))
-      if (key.startsWith('mindpage_run_code_')) window.sessionStorage.removeItem(key)
-    localStorage.removeItem('mindpage_consent_principal')
-  }
   let sharer_short_name
   // let spinnerSize = isClient ? Math.max(60, Math.min(innerWidth, innerHeight) * 0.2) : 0 // resized in checkLayout
   let zoom = isClient && localStorage.getItem('mindpage_zoom')
@@ -1196,9 +1182,6 @@
 
     // evaluates given code in context of this item
     eval(evaljs: string = '', options: object = {}) {
-      // foreign shared-page code runs only with the visitor's consent (see initialize): every
-      // execution path — _init, macros, commands, listeners, toggles — funnels through here
-      if (foreignCodeBlocked) throw new Error(`item code is disabled on this shared page (owner's code not confirmed)`)
 
       // disallow deep recursive eval on same item to prevent infinite recursion and stack overflow
       const evalStackCount = _.sumBy(evalStack, id => (id == this.id ? 1 : 0))
@@ -3248,7 +3231,6 @@
     // and every remembered foreign-code consent, plus the principal marker: an ANONYMOUS visit
     // is not gated, so owner code running there could otherwise write a consent key for the uid
     // that just signed out and have it honored when that account signs back in
-    clearForeignCodeConsent()
     resetUser()
     getAuth(firebase)
       .signOut()
@@ -3747,7 +3729,7 @@
           )
           item.shouldReload = true
         }
-        if ((item.style || prev_style) && !dependency && !foreignCodeBlocked) installStyleItem(item) // install new/modified style item
+        if ((item.style || prev_style) && !dependency) installStyleItem(item) // install new/modified style item
         setTimeout(() => {
           const deleted = !indexFromId.has(id)
           items.forEach(item => {
@@ -6249,7 +6231,6 @@
     hash_128_murmur3_x64,
     hash_128_murmur3_x86,
     hash_160_sha1,
-    scrubForeignHtml,
   } from '../util.js'
   import {
     hashSecretPhrase as hashSecretPhraseForUid,
@@ -6258,7 +6239,7 @@
     decryptWithSecret,
     decryptBytesWithSecret,
   } from '../crypto'
-  import { SHARED_HOST, sharedOriginRedirect } from '../host.js'
+  import { ACCOUNT_HOST, SHARED_HOST, sharedOriginRedirect } from '../host.js'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6326,9 +6307,7 @@
     if (itemInitTime) return // already initialized items
     itemInitTime = Date.now()
     items.forEach(item => {
-      // view only: owner css is untrusted too (it can overlay the page or turn a link into a
-      // page-wide click target), so style items are not installed either
-      if (item.style && !foreignCodeBlocked) installStyleItem(item) // initial install of style item
+      if (item.style) installStyleItem(item) // initial install of style item
       if (!item.init) return // not init item
       // if item has js_init block, use that, otherwise use js block (without dependencies to avoid complications due to init order etc)
       const init_block_type = extractBlock(item.text, 'js_init') ? 'js_init' : 'js'
@@ -6635,59 +6614,10 @@
     revokeHiddenAuthority()
     hiddenDirtyIds = new Map() // initialization rebuilds the index from scratch
 
-    // OTHER PEOPLE'S shared pages are served from an isolated origin (see SHARED_HOST). a shared
-    // page runs its owner's code, and no in-origin measure can contain that: any same-origin
-    // realm — an iframe at '/', a window opened under an intercepted click — recreates the whole
-    // firebase facade, and auth persistence, the session cookie and localStorage (secret
-    // included) are shared across the origin. so instead of asking the visitor to weigh a risk
-    // they cannot evaluate, the page is moved somewhere the risk does not exist. this also
-    // closes the case a prompt never could: a visitor who is signed out TODAY and signs in later
-    // on this origin, while owner code is still resident in some tab of it
-    const redirect = sharedOriginRedirect({
-      host: hostname,
-      shared: url_params?.shared,
-      uid: getAuth(firebase)?.currentUser?.uid,
-      path: location.pathname,
-      search: location.search,
-      hash: location.hash,
-    })
-    if (redirect) {
-      location.replace(redirect)
-      return // nothing else initializes; the page is leaving
-    }
-    // still reachable ON the shared origin itself if a visitor somehow authenticated there
-    // (nothing offers it, but the check must not depend on that): consent per load, in memory
-    foreignCodeBlocked = false
-    if (fixed && sharer && getAuth(firebase)?.currentUser?.uid && getAuth(firebase).currentUser.uid != sharer) {
-      if (!foreignCodeConsented) {
-        const run = await new Promise(resolve =>
-          _modal(
-            `This shared page includes code written by its owner, which would run with full ` +
-              `access to your MindPage account — your items, your sign-in and your encryption ` +
-              `secret. Run the owner's code?`,
-            {
-              confirm: 'Run Code',
-              cancel: 'View Only',
-              background: 'cancel',
-              onConfirm: () => resolve(true),
-              onCancel: () => resolve(false),
-            }
-          )
-        )
-        foreignCodeBlocked = !run
-        if (run) foreignCodeConsented = true
-      }
-    }
-    // read by the renderer to make owner html inert (see toHTML in Item.svelte)
-    window['_foreign_code_blocked'] = foreignCodeBlocked
-    // NOTE: there is no attempt to remove the authentication surface from a foreign page. that
-    // was tried and it is not a boundary: any same-origin realm — an iframe at '/', an auxiliary
-    // window opened under an intercepted click — recreates the complete firebase facade, and
-    // auth persistence is origin-wide. RUNNING OWNER CODE MEANS GRANTING ITS AUTHOR FULL
-    // SAME-ORIGIN TRUST, including any session established later in this origin. that is the
-    // documented trust model for shared pages; only a separate execution origin would change it.
-    // what the consent gate above genuinely provides is that an AUTHENTICATED visitor's existing
-    // session is never exposed without an explicit per-load decision
+    // NOTE: no attempt is made to restrict what owner code can do on the isolated origin. that
+    // is not a boundary anything inside an origin can provide — a same-origin realm recreates the
+    // whole firebase facade — and it does not need to be one: that origin holds no session, no
+    // secret and no session cookie
 
     // on a fixed page the shared-items query cannot include the account's hidden items (their
     // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
@@ -6752,9 +6682,8 @@
     // extract special tag functions
     // NOTE: this evaluates owner-authored js DIRECTLY (not through Item.eval), so it is one of
     // the paths the consent gate must cover — the gate's guarantee is "no owner code runs", not
-    // "no Item.eval runs" (see foreignCodeBlocked)
+    // "no Item.eval runs"
     for (const item of items) {
-      if (foreignCodeBlocked) break // view only: owner code must not evaluate here either
       if (!item.text.includes('_special_tag_aliases')) continue // quick check
       const js = extractBlock(item.text, 'js')
       if (!js) continue
@@ -6923,13 +6852,13 @@
 
   let signingIn = false
   function signIn() {
-    // a foreign shared page may be running its OWNER's code in this realm right now (the visitor
-    // consented, or is anonymous and therefore ungated). authenticating here would hand that
-    // code a live authenticated firebase session — it can register its own auth-state listener
-    // and act before this page reloads. so leave the realm FIRST and let the visitor complete
-    // the gesture on a clean first-party load
+    // signing in from someone else's shared page happens in a NEW TAB on the account domain, for
+    // two reasons: this origin may be the isolated one (see SHARED_HOST), which cannot
+    // authenticate anyone because it is not an authorized auth domain — a relative '/' would
+    // just land on its own root and fail — and the visitor asked to sign in, not to lose the
+    // page they were reading. the click is a user gesture, so the tab is not popup-blocked
     if (fixed && sharer && sharer != user?.uid) {
-      location.href = '/' // leave the realm; the visitor completes the gesture on a clean load
+      window.open(`https://${ACCOUNT_HOST}/`, '_blank', 'noopener,noreferrer')
       return
     }
     // if user appears to be signed in, sign out instead
@@ -7104,6 +7033,34 @@
           }
           authStateReceived = true
 
+          // SHARED-PAGE ORIGIN RULES. these run as soon as the auth state is known and before
+          // anything else acts on the page — initialize() is NOT reached on every shared page,
+          // so it is the wrong place for them.
+          // 1. someone else's shared page belongs on the isolated origin: a shared page runs its
+          //    OWNER's code, and no in-origin measure can contain that (any same-origin realm
+          //    recreates the firebase facade), while auth persistence, the session cookie and
+          //    localStorage (secret included) are per-ORIGIN. moving the page removes the risk
+          //    instead of asking the visitor to weigh it
+          const shared_redirect = sharedOriginRedirect({
+            host: hostname,
+            shared: url_params?.shared,
+            uid: authUser?.uid,
+            path: location.pathname,
+            search: location.search,
+            hash: location.hash,
+          })
+          if (shared_redirect) return void location.replace(shared_redirect)
+          // 2. a session on THIS origin while viewing someone else's shared page should not
+          //    exist (the isolated origin offers no sign-in and is not an authorized auth
+          //    domain). if it does — there, or on localhost where there is no second origin —
+          //    end it rather than prompting: auth state is per-origin, so the visitor's session
+          //    on the account domain is untouched, and the page then renders normally for the
+          //    anonymous visitor it leaves behind
+          if (fixed && sharer && authUser?.uid && authUser.uid != sharer) {
+            console.warn(`signing out: a shared page owned by ${sharer} must not open with a session here`)
+            return void signOut()
+          }
+
           if (action == 'signin_failed') {
             _modal(`MindPage could not sign you in to your Google account.`, {
               confirm: 'Try Again',
@@ -7119,7 +7076,6 @@
             // this device: the record lives in session storage, which owner code authorized by a
             // previous visitor could have written for another uid (see the gate in initialize)
             if (localStorage.getItem('mindpage_consent_principal') != (authUser?.uid ?? '')) {
-              clearForeignCodeConsent()
               localStorage.setItem('mindpage_consent_principal', authUser?.uid ?? '')
             }
             user = authUser
@@ -7660,14 +7616,8 @@
                 // if narrating, fill .webcam-title from #webcam-title item if it exists
                 // NOTE: read('html') returns the item's RAW html block — it never passes through
                 // toHTML, so the render-time scrub does not cover it. narration state is restored
-                // from local storage, so a visitor arriving with it enabled would otherwise
-                // execute owner html here despite choosing view only
-                if (narrating) {
-                  const title = _item('#webcam-title')?.read('html') ?? ''
-                  document.querySelector('.webcam-title').innerHTML = foreignCodeBlocked
-                    ? scrubForeignHtml(title)
-                    : title
-                }
+                if (narrating)
+                  document.querySelector('.webcam-title').innerHTML = _item('#webcam-title')?.read('html') ?? ''
               })
 
               firstSnapshot = false

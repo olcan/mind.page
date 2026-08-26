@@ -30,7 +30,9 @@ initializeFirestore(firebase, {
 import { connectAuthEmulator } from 'firebase/auth'
 import { connectFirestoreEmulator } from 'firebase/firestore'
 const EMULATOR_PORT = '3100'
-if (['localhost', '127.0.0.1'].includes(location.hostname) && location.port == EMULATOR_PORT) {
+// true only for the e2e stack's own origin (see tests/e2e), never in production
+const USING_EMULATORS = ['localhost', '127.0.0.1'].includes(location.hostname) && location.port == EMULATOR_PORT
+if (USING_EMULATORS) {
   connectAuthEmulator(getAuth(firebase), 'http://127.0.0.1:9099', { disableWarnings: true })
   connectFirestoreEmulator(getFirestore(firebase), '127.0.0.1', 8080)
   console.warn(`using local firebase emulators (served on port ${EMULATOR_PORT})`)
@@ -43,7 +45,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
-  signInWithCustomToken, // for tests, see tests/e2e
+  signInWithCustomToken,
   getRedirectResult,
   setPersistence,
   browserLocalPersistence,
@@ -54,7 +56,10 @@ Object.assign((firebase['auth'] = {}), {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
-  signInWithCustomToken,
+  // signInWithCustomToken bypasses the authorized-domains check that gates the OAuth flows, so
+  // it is exposed ONLY on the emulator origin the e2e stack runs on: it has no production use,
+  // and shipping it left a sign-in path that domain authorization does not cover
+  ...(USING_EMULATORS ? { signInWithCustomToken } : {}),
   getRedirectResult,
   setPersistence,
   browserLocalPersistence,
