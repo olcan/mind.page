@@ -23,7 +23,7 @@ production build until Ctrl-C; open <http://localhost:3100/> in a browser to bro
 anonymous account. That server is for LOOKING, not for running the suite against: the tests do not
 reuse it (`reuseExistingServer: false`, after a stale bundle once passed a whole round), and a
 second shell is outside the emulator environment anyway. To iterate, use `run.sh` with the build
-skipped: `SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts --no-deps` — non-authoritative,
+skipped: `SKIP_BUILD=1 tests/e2e/run.sh tests/e2e/personal.spec.ts` — non-authoritative,
 since it serves whatever `build/` already holds.
 
 `run.sh` runs everything under `firebase emulators:exec --only auth,firestore`, so the emulators
@@ -46,10 +46,12 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 ## Tests
 
 Tests run as five projects (see `playwright.config.ts`), each capped to one worker with two overall.
-`unit` (no browser), `chromium` (read-only) and `personal` are eligible immediately, so `personal`
-overlaps the read lane; `admin` and `editor` mutate the shared anonymous account and form a chain
-behind it. Only projects with dependencies drag a closure along, so `--no-deps` matters for
-`editor.spec.ts` (55 tests otherwise, rather than its own 10) and not for `personal.spec.ts`.
+`unit` (no browser), `chromium` (the shared-fixture baseline lane — not read-only: its server tests
+mutate anonymous and prerender state its render tests inspect, which is why it stays serial) and
+`personal` are all eligible immediately; `admin` and `editor` mutate the shared anonymous account
+and form a chain behind the baseline lane. Only projects with dependencies drag a closure along, so
+`--no-deps` matters for `editor.spec.ts` (55 tests otherwise, rather than its own 10) and not for
+`personal.spec.ts`.
 
 - `server.spec.ts` - `server.mjs` over http (no browser): the ssr shell and the session fields it
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their

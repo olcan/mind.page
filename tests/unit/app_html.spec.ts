@@ -10,9 +10,9 @@ import { readFileSync } from 'fs'
 // still left it green — comments, css, configuration and auxiliary language scripts satisfied the
 // tokens, and d3 was not checked at all.
 //
-// it is NOT a complete replacement for a browser check: %sveltekit.head% precedes these tags, so
-// kit bootstrap moving into the head would not be caught here. tests/e2e/render.spec.ts holds one
-// of these scripts and proves startup is actually blocked
+// it cannot see kit's BOOTSTRAP, which is generated rather than written here and sits after
+// %sveltekit.head% — above these tags in the source. that half is asserted against the built
+// response in tests/e2e/server.spec.ts
 const html = readFileSync(new URL('../../src/app.html', import.meta.url), 'utf8')
 
 // every global the item runtime reaches for, by exact url: removing or downgrading one is then a

@@ -263,13 +263,22 @@ test('every cdn loader precedes kit\'s bootstrap in the BUILT shell', async ({ r
   // %sveltekit.head% precedes those tags, and the bootstrap is generated, not written by hand.
   // this reads the built response and is the whole remaining guarantee: it replaces a browser test
   // that intercepted the c3 request and waited 1.5s to prove the app had not started
+  const source = readFileSync(resolve(repo, 'src/app.html'), 'utf8')
+  const expected = [...source.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)].map(m => m[1])
+  expect(expected.length, 'the source shell loads cdn scripts').toBeGreaterThan(0)
   const html = await (await request.get('/')).text()
   const bootstrap = html.search(/\/_app\/immutable\/entry\/start\.[^"']+/)
   expect(bootstrap, "kit's generated bootstrap is present").toBeGreaterThan(-1)
-  const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)]
-  expect(scripts.length, 'the built shell loads the cdn scripts').toBeGreaterThan(0)
-  for (const script of scripts)
-    expect(script.index, `${script[1]} precedes the bootstrap`).toBeLessThan(bootstrap)
+  // EVERY source loader must survive the build, still be classic and parser-blocking, and still
+  // precede the bootstrap. asserting only "some https script precedes it" would pass a build that
+  // dropped a loader or made one async
+  for (const src of expected) {
+    const tag = html.match(new RegExp(`<script\\b[^>]*\\bsrc="${src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`))
+    expect(tag, `${src} survives the build`).toBeTruthy()
+    expect(tag![0], `${src} is still parser-blocking`).not.toMatch(/\basync\b|\bdefer\b/)
+    expect(tag![0], `${src} is still a classic script`).not.toMatch(/type="module"/)
+    expect(tag!.index, `${src} precedes the bootstrap`).toBeLessThan(bootstrap)
+  }
 })
 
 test.describe('/user/<uid>', () => {

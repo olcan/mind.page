@@ -21,12 +21,12 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  // `unit` (no browser or app instance), `chromium` (read-only) and `personal` are all eligible
-  // immediately; with two workers, unit runs beside chromium and personal takes the worker unit
-  // releases. `admin` and `editor` mutate the shared anonymous account, so they are an explicit
-  // chain behind the read lane. each project is capped to one worker of its own, so nothing inside
-  // a lane overlaps — the read lane in particular stays serial, since its server tests mutate
-  // anonymous/prerender data the render tests inspect
+  // `unit` (no browser or app instance), `chromium` (the shared-fixture baseline lane) and
+  // `personal` are all eligible immediately, and two workers run whichever of them is ready.
+  // `admin` and `editor` mutate the shared anonymous account, so they are an explicit chain behind
+  // the baseline lane. each project is capped to one worker of its own, so nothing inside a lane
+  // overlaps — chromium in particular is NOT read-only: its server tests mutate anonymous and
+  // prerender state that its render tests then inspect, which is why it stays serial
   projects: [
     { name: 'unit', testDir: 'tests/unit', workers: 1 }, // capped like the rest: the comment above says every project is
     {

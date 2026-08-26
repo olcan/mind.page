@@ -7837,7 +7837,7 @@
                   applyRemoteChange({ type: 'removed' }, doc, { hidden: false, text: '' })
                 }
                 if (savedItem.hidden) {
-                  const seenDirtySeq = hiddenDirtySeq // this transition can only heal what it saw
+                  const seenDirtySeq = hiddenDirtySeq // best-effort: see the note on the drop path above
                   const removed = change.type == 'removed'
                   let wrapper = null
                   let names = []
@@ -7886,7 +7886,7 @@
                       .then(
                         () => {
                           hiddenApplyOk.set(doc.id, true)
-                          healHiddenDirty(doc.id, seenDirtySeq) // heals only ITS OWN generation
+                          healHiddenDirty(doc.id, seenDirtySeq) // best-effort (completion order)
                           // released HERE, inside the success handler, and only if this is still
                           // the latest receipt. chaining a second .then after a rejection handler
                           // released it on failure too, because the handler returns normally and

@@ -13,12 +13,6 @@ const DYNAMIC_ITEMS: Record<string, string> = {
   UYPNsdxKgnZ7wUJjmzK1: 'welcome template (renders the corpus age in days, which drifts daily)',
 }
 
-test('anonymous account loads from the emulator', async ({ page }) => {
-  await loadAnonymous(page)
-  // 121 seeded items minus the welcome template, which read-only views drop (see adminItems)
-  expect(await page.evaluate(() => window._items().length)).toBe(120)
-})
-
 test('charts regenerate after a stale hidden render (zero-width skip)', async ({ page }) => {
   // clicking a section separator transiently renders off-screen items; their chart scripts measure
   // zero width in a delayed callback, skip generation and invalidate the element cache — which
@@ -98,6 +92,9 @@ test('charts carry real data and geometry (semantic checks the masked goldens ca
 test('every anonymous item renders as before', async ({ page }) => {
   await loadAnonymous(page)
   const ids: string[] = await page.evaluate(() => window._items().map(item => item.id))
+  // 121 seeded items minus the welcome template, which read-only views drop (see adminItems). this
+  // was a separate test that paid for its own full app load to assert one number
+  expect(ids).toHaveLength(120)
   for (const id of ids) {
     const html = await renderedHtml(page, id)
     expect.soft(html, `item ${id} rendered`).not.toBeNull()
