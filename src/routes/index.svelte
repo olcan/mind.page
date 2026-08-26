@@ -7783,8 +7783,15 @@
                 // each world indexes documents separately, so the old representation has to go
                 // or it lingers as a phantom — a hidden wrapper cleanup could still act on, or a
                 // visible item nothing will ever update again
-                if (!savedItem.hidden && hiddenItems.has(doc.id) && change.type != 'removed') {
+                // nameForDocument, not byId membership: an adoption target is absent from byId until
+                // finalization, so this branch was UNREACHABLE for exactly the case its comment
+                // below claimed to cover — the adopter kept its pointer and a retry could turn the
+                // now-visible record hidden again
+                const hiddenName = hiddenPersistence.nameForDocument(doc.id)
+                if (!savedItem.hidden && hiddenName && change.type != 'removed') {
                   const stale = hiddenItems.get(doc.id)
+                  // only what this transition SAW: an older success must not clear a newer failure
+                  const seenDirtySeqForDrop = hiddenDirtySeq
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
                   // the hidden-side REMOVAL is published as a semantic receipt BEFORE the entry
                   // marker can go away. without it the marker appears and disappears entirely
@@ -7801,12 +7808,18 @@
                   // dropping it out of that set was a regression introduced with the `void`
                   hiddenApplied.push(
                     hiddenPersistence
-                      .applyRemote([hiddenPersistence.nameForDocument(doc.id) ?? stale?.name], () =>
-                        removeHidden(hiddenIndex(), doc.id)
-                      )
+                      .applyRemote([hiddenName], () => removeHidden(hiddenIndex(), doc.id))
                       .then(
-                        () => hiddenPersistence.releaseRemote(doc.id, dropped),
+                        () => {
+                          hiddenApplyOk.set(doc.id, true)
+                          // the server holds no hidden record for this id any more, so no later
+                          // hidden delivery is guaranteed to heal it — without this, one earlier
+                          // undecryptable revision left authority unusable for the whole session
+                          healHiddenDirty(doc.id, seenDirtySeqForDrop)
+                          hiddenPersistence.releaseRemote(doc.id, dropped)
+                        },
                         e => {
+                          hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
                           console.error('could not drop stale hidden representation:', doc.id, e)
                           hiddenApplyFailed = true
                           markHiddenDirty(doc.id)
