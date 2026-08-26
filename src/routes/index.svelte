@@ -3349,14 +3349,20 @@
 
   // returns true when the deferral reached a TERMINAL outcome (applied, proven equal, or no
   // longer ours to settle) and false when it should be retried. the marker is cleared only on a
-  // terminal outcome, and both local intent and the marker generation are rechecked after every
-  // await: a save that starts while the read is in flight builds its payload from live item
-  // state, so applying the response over it would persist the rollback
+  // terminal outcome, and local intent, its VERSION and the marker generation are all rechecked
+  // after every await: a save that starts while the read is in flight builds its payload from live
+  // item state, so applying the response over it would persist the rollback.
+  // the version is what makes that check complete. `hasLocalIntent` samples the PRESENT, so a save
+  // that both started and finished inside the read window left no trace in it — and the response,
+  // read before that save landed, was applied over the user's completed edit and then persisted by
+  // the next save. that was the one remaining destructive case in this file
   async function reconcileDeferredRemoteChange(item, generation) {
     const id = item?.savedId
     if (!id || deferredRemoteChanges.get(id) !== generation) return true // superseded or gone
     if (hasLocalIntent(item)) return true // more local intent queued: reconcile when IT settles
-    const stale = () => deferredRemoteChanges.get(id) !== generation || hasLocalIntent(item)
+    const seenSaveSeq = item.saveSeq ?? 0
+    const stale = () =>
+      deferredRemoteChanges.get(id) !== generation || hasLocalIntent(item) || (item.saveSeq ?? 0) !== seenSaveSeq
     const settle = result => {
       if (deferredRemoteChanges.get(id) === generation) deferredRemoteChanges.delete(id)
       return result
@@ -5321,6 +5327,10 @@
       item.savingText = item.text // required when saving == true
       items = items // trigger svelte render for saving state change
     }
+    // VERSION the intent, do not merely flag it: hasLocalIntent below answers "is a save in
+    // flight NOW", which a save that starts and finishes inside a reconcile's server read escapes
+    // entirely. every save passes through here, silent or not
+    item.saveSeq = (item.saveSeq ?? 0) + 1
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
         // wait for persistent id as long as item is not deleted in mean time
