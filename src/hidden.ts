@@ -36,9 +36,8 @@ export type HiddenIndex = {
 
 export type InvalidHidden = {
   wrapper: HiddenWrapper
-  // 'malformed' wrappers (unparseable text or missing name) are quarantined: reported but never
-  // auto-deleted, and never indexed — converting an unreadable record into absence would be
-  // destructive
+  // 'malformed' wrappers (unparseable text or missing name) are quarantined: reported and never
+  // indexed — converting an unreadable record into absence would be destructive
   reason: 'duplicate' | 'anonymous' | 'orphaned' | 'malformed'
 }
 

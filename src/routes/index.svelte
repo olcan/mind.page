@@ -755,7 +755,7 @@
             modified = !_.isEqual(__item.global_store, hiddenItemsByName.get(name)?.item || {})
             if (modified && invalidate_elem_cache) this.invalidate_elem_cache({ force_render, render_delay })
             // an empty store is SAVED as empty, not physically deleted. emptying is an ordinary
-            // state change and travels the same revisioned write path as any other, so it needs
+            // state change and travels the same write path as any other, so it needs
             // no deletion tombstone, no causally-later-save bookkeeping and no discovery drain —
             // and it cannot race a concurrent rename into deleting a live record. a store that
             // never existed is simply not created
@@ -3208,7 +3208,7 @@
     // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
     localStorage.removeItem('mindpage_user')
     window.sessionStorage.removeItem('mindpage_signin_pending')
-    document.cookie = '__session=;max-age=0' // delete cookie for server
+    clearSessionMarker()
   }
 
   let signingOut = false
@@ -6381,6 +6381,24 @@
   // own — anything attached lazily to the returned object is discarded immediately. session
   // quarantine lives here for exactly that reason (it silently did nothing when it was attached
   // to the temporary), and is reset with the maps in initialize
+  // ONE definition of the session marker's attributes. every set and clear must use the same
+  // path, or a clear silently misses: the old setter had no Path, so a page under a pwa scope
+  // (/2/, /2f/, ...) wrote a cookie at THAT path, and a root clear could not remove it.
+  // the value is a flag, never a credential (see where it is set) — but old scoped cookies from
+  // earlier builds still hold full firebase ID tokens, so they are swept once here
+  const SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60
+  function setSessionMarker() {
+    document.cookie = `__session=1;max-age=${SESSION_COOKIE_MAX_AGE};path=/;samesite=lax`
+  }
+  function clearSessionMarker() {
+    document.cookie = '__session=;max-age=0;path=/;samesite=lax'
+    // legacy cookies written without Path by earlier builds, at every pwa scope prefix
+    for (let i = 0; i < 10; i++)
+      for (const suffix of ['', 'f', 's', 'm', 'b'])
+        document.cookie = `__session=;max-age=0;path=/${i}${suffix}/;samesite=lax`
+    document.cookie = '__session=;max-age=0' // and one with no path at all, as they were written
+  }
+
   let hiddenQuarantined = new Set<string>()
   const hiddenIndex = () => ({ byId: hiddenItems, byName: hiddenItemsByName, quarantined: hiddenQuarantined })
   // whether the hidden-item index is confirmed against the server: on a fixed page the shared
@@ -6390,7 +6408,7 @@
   let hiddenIndexAuthoritative = false
   // every revocation bumps the epoch: a grant decided at snapshot RECEIPT (and queued behind
   // the serialized applications) must not be able to re-grant into a state that a NEWER
-  // synchronous revocation (sync disabled, a failed delete, a firestore error, the listener's
+  // synchronous revocation (sync disabled, a firestore error, the listener's
   // error callback) already invalidated — the queued grant carries its receipt epoch and
   // no-ops if the epoch moved
   let hiddenAuthorityEpoch = 0
@@ -6411,7 +6429,7 @@
   // the plaintext `hidden` field, before any decrypt) and only counted as applied once every one
   // of its transitions has landed. authority is USABLE only when the two agree — otherwise data
   // that is already on this client, but still queued behind a name chain or a phrase prompt,
-  // would be invisible to a create's confirmation (duplicate) or to destructive cleanup (which
+  // would be invisible to a create's confirmation (duplicate) or to invalid-record reporting (which
   // could delete a name's last surviving record). ordering the settlement callbacks is NOT
   // enough on its own: a later revision can begin applying while an earlier one is still queued
   let hiddenReceivedGen = 0
@@ -6898,14 +6916,15 @@
 
     resetUser()
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
-    document.cookie = '__session=signin_pending;max-age=600' // temporary setting for server post-redirect
+    // same attributes as the marker (see setSessionMarker), so the clears above remove it
+    document.cookie = '__session=signin_pending;max-age=600;path=/;samesite=lax'
     // a failed (or user-cancelled) sign-in must clear the in-progress state and the pending
     // markers set above: leaving them meant the loading overlay stayed up and every later auth
     // callback was ignored (signingIn gates onAuthStateChanged), wedging the page until reload
     const failedSignIn = () => {
       signingIn = false
       window.sessionStorage.removeItem('mindpage_signin_pending')
-      document.cookie = '__session=;max-age=0'
+      clearSessionMarker()
     }
     let provider = new GoogleAuthProvider()
     getAuth(firebase).useDeviceLanguage()
@@ -6967,7 +6986,7 @@
     secret = null // should never be needed under anonymous account
     anonymous = true
     // anonymous account should not have a server cookie (even if admin)
-    document.cookie = '__session=;max-age=0'
+    clearSessionMarker()
   }
 
   let initialization
@@ -7127,7 +7146,7 @@
               // daily, purely to be tested for non-emptiness. `__session` is the only cookie
               // firebase hosting forwards (see https://stackoverflow.com/a/44935288), so the
               // name stays even though the value no longer means anything
-              document.cookie = `__session=1;max-age=${7 * 24 * 60 * 60};path=/;samesite=lax`
+              setSessionMarker()
             }
           }
 

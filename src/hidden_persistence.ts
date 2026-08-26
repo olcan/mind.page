@@ -1,16 +1,18 @@
 // per-name persistence controller for hidden items (stage 1b of the index.svelte split;
 // matrix-tested in tests/unit/hidden_persistence.spec.ts).
 //
-// what it does: serializes the BUILDING of writes for a name (encryption can prompt), issues
-// them to firestore's own durable ordered queue without waiting for acknowledgement, and settles
-// the index transitions in hidden.ts so the name invariant holds. it does NOT order writers:
-// firestore delivers a document's changes in commit order, and the only thing the client has to
-// recognize is the echo of a write it issued itself, by the outbound ciphertext (unique per
-// write via the random IV). there is no revision protocol, no provenance-by-plaintext, and no
-// deletion — emptying a store is an ordinary save of `{}`.
+// what it does: serializes the BUILDING of writes for a name (encryption can prompt), issues them
+// to firestore's queue without waiting for acknowledgement, and settles the index transitions in
+// hidden.ts so the name invariant holds.
 //
-// NOTE: `wrapper.saving` is mirrored while a write is being BUILT and ISSUED, and cleared once
-// it reaches the SDK's queue — not when the server acknowledges. item code observes it through
+// what it does NOT do: order writers, identify its own echoes, or drop work that was overtaken.
+// firestore delivers a document's changes in commit order and every delivery is applied; a
+// queued save carries the latest INTENT for a name and resolves that name's current holder when
+// it runs, so being overtaken costs nothing. there is no revision protocol, no write-identity
+// tracking, and no deletion — emptying a store is an ordinary save of `{}`.
+//
+// NOTE: `wrapper.saving` is mirrored while a write is being built and issued, and cleared once it
+// reaches the SDK's queue — not when the server acknowledges. item code observes it through
 // _Item.saving_global_store, so that meaning is part of the window contract.
 
 import {
@@ -36,11 +38,7 @@ export type HiddenPersistenceDeps = {
   // be much later (or never, until reconnect) — so the controller must not wait on it to decide
   // anything, and callers must not treat resolution as "saved"
   updateDoc: (id: string, data: Record<string, any>) => Promise<void>
-  // creates the document AT the given id. the id is allocated by the caller (newDocId) so the
-  // payload can be registered as outstanding BEFORE the write is issued — the local echo of a
-  // create arrives through latency compensation almost immediately, and an id known only after
-  // the promise resolves leaves a window in which our own create looks like a remote record and
-  // replaces the very wrapper whose next save is still queued
+  // creates the document AT the given id, allocated by the caller (newDocId)
   createDoc: (id: string, data: Record<string, any>) => Promise<void>
   newDocId: () => string
   // server re-confirmation of the hidden index before an unconfirmed create (registration may
@@ -85,9 +83,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // both used to start a recovery — the second ran against the already-settled wrapper, could not
   // see the record the first had just created, and created a duplicate
   const recovering = new Set<string>()
-  // remote records observed at RECEIPT but whose application is queued (possibly behind the very
-  // create that needs to know about them): serialization must not HIDE a same-name survivor from
-  // a create/adopt decision, which would create a duplicate the listener then has to clean up
   // the LATEST receipt per document: either the record as received, or the fact of its removal.
   // one map rather than a map plus a removed-set — the two could disagree, and only the map was
   // ever released, so removed ids accumulated for the page lifetime and a document that was

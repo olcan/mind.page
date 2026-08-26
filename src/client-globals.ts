@@ -19,9 +19,17 @@ window['firebase'] = firebase
 // multi-tab manager is required since several tabs (e.g. /0/../9/ scopes) can be open at once;
 // must be called before getFirestore(firebase) (which then returns this instance); if IndexedDB
 // is unavailable (e.g. private mode) the sdk logs a warning and falls back to memory cache
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+import { initializeFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+// the isolated shared-page host uses a MEMORY cache: every owner's page runs on that one origin,
+// so anything persisted there is readable by the next owner's code. the app persists nothing
+// else there (see itemStore in index.svelte), and firestore's own IndexedDB cache was the last
+// thing it left behind. shared pages are read-only anyway, so the offline benefit is small
+const SHARED_PAGE_HOST = 'shared.mind.page'
 initializeFirestore(firebase, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache:
+    location.hostname == SHARED_PAGE_HOST
+      ? memoryLocalCache()
+      : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })
 
 // connect to local firebase emulators (see firebase.json) when served on the port dedicated to the

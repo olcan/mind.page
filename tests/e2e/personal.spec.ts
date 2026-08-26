@@ -536,7 +536,9 @@ test('signing out clears the secret, the session and the local cache', async ({ 
   expect(
     await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')])
   ).toEqual([null, null])
-  expect(await page.evaluate(() => document.cookie)).not.toContain('__session=ey')
+  // the marker must be GONE after sign-out, not merely free of a token: a stale `__session=1`
+  // keeps suppressing anonymous server rendering for signed-out requests
+  expect(await page.evaluate(() => document.cookie)).not.toMatch(/__session=[^;]/)
   // the firestore cache of the account was deleted (a fresh one is created for the anonymous account)
   await page.getByText('Stay Anonymous', { exact: true }).click()
   await waitForApp(page)
