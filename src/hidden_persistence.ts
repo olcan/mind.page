@@ -136,7 +136,14 @@ export type HiddenPersistenceDeps = {
   // write into a failed one), but that also swallowed the outcome of THIS write's own echo: on a
   // failed application the controller took its success path and reconciled the owner from an index
   // that may still hold the pre-write state, rolling the owner back with no later echo guaranteed
-  echoApplied: (id: string) => boolean
+  // ARMS AN EXACT ECHO WAITER for the ciphertext about to be written, against the coordinator's
+  // per-id receipt frontier at this instant — so an OLDER already-open matching cipher cannot
+  // satisfy it. its continuation records the delivery's terminal outcome; cancel() disposes it.
+  // this replaces a per-id "did the last application succeed" flag, which was wrong twice over: a
+  // later unrelated application for the same id overwrote the answer, and an id never applied
+  // read as SUCCESS — so an echo that never arrived reconciled the owner from an index that never
+  // took the write
+  armEcho: (id: string, cipher: string) => { promise: Promise<'applied' | 'blocked'>; cancel(): void }
   // revokes hidden-index authority (see reserveHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
@@ -427,6 +434,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const issuedMarker: Marker | undefined =
       create && markerWrapper ? { id, wrapper: markerWrapper, token: ++markerSeq } : undefined
     if (issuedMarker) marker = issuedMarker
+    // ARMED IMMEDIATELY BEFORE THE SDK CALL, no await in between: the coordinator stamps the
+    // waiter with this id's receipt frontier at this instant
+    let echo: 'applied' | 'blocked' | undefined
+    const waiter = deps.armEcho(id, String(data.cipher ?? ''))
+    void waiter.promise.then(outcome => {
+      // RECORDS ONLY, while this generation is still current: it clears and reconciles nothing
+      // itself. the acknowledgement path below reads it
+      if (currentOwed(name, generation)) echo = outcome
+    })
     const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
     // COMPARE-AND-SET on the token: a newer create may already have replaced the marker, and this
     // settlement must not clear that one. it never reinserts or finalizes the old wrapper either
@@ -443,21 +459,32 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // `owes()`, letting that delivery through as if nothing were outstanding
         void enqueue(name, async () => {
           if (!currentOwed(name, generation)) return
+          // ONE CAUSAL MICROTASK before reading the recorded outcome, so a waiter that already
+          // resolved can publish its promise reaction. one boundary, not polling
+          await Promise.resolve()
+          if (!currentOwed(name, generation)) return
           owed.delete(name) // settled, and still the latest: the write IS committed
           // STOP WINS over the echo. reconciling publishes owner state derived from an index that
           // has stopped tracking the server, so a stop that landed while this write was in flight
           // must clear the record and stop there — even if an applied echo was already recorded
-          if (stopped) return
-          // ... but only reconcile from an index that actually took this write's echo. when the
-          // application FAILED the index may still hold the pre-write state, and the owner already
-          // holds what we wrote — reconciling would roll it back, with no later echo guaranteed.
-          // authority revocation and the dirty marking drive the repair instead
-          if (deps.echoApplied(id)) deps.reconcileOwner(name)
-          else console.warn(`hidden echo for '${name}' (${id}) did not apply; owner left as written`)
+          if (stopped) return void waiter.cancel()
+          if (echo == 'applied') return void deps.reconcileOwner(name)
+          if (echo == 'blocked') {
+            // the application FAILED: the index may still hold the pre-write state while the owner
+            // holds what we wrote, so reconciling would roll it back with no later echo guaranteed
+            console.warn(`hidden echo for '${name}' (${id}) did not apply; owner left as written`)
+            return
+          }
+          // NO RECORDED OUTCOME. on a fixed/shared page the live query is the shared subset, so
+          // this write's echo may never arrive at all. clear without reconciliation and dispose
+          // the waiter rather than leaking it for the page's lifetime — a later full-query echo
+          // still applies normally, and an equal own echo changes no owner state
+          waiter.cancel()
         })
       },
       e => {
         clearMarker()
+        waiter.cancel() // a rejected write has no echo to wait for
         const current = currentOwed(name, generation)
         if (!current) return // superseded: this outcome no longer matters
         if (!isNotFound(e)) {

@@ -3312,11 +3312,9 @@
   // reconciles the owner from the APPLIED index, so an ack that overtook a delivered-but-not-yet
   // decrypted echo reconciled the owner from state that echo was about to replace — and then
   // cleared owes(), letting the echo through as a spurious "changed remotely"
-  let snapshotFrontier = () => Promise.resolve()
   // the outcome of the LATEST hidden application per document. settlement reconciles the owner
   // only from an index that actually took this write's echo (see echoApplied in the controller);
   // absent means nothing has failed for it
-  const hiddenApplyOk = new Map()
 
   // true while anything local is still going to write this item: an in-flight write, a queued
   // save task, or a save in progress. replaying under any of these loses the later intent —
@@ -7403,18 +7401,6 @@
 
       let firstSnapshot = true
       let snapshotApply = Promise.resolve() // serializes remote-change application across snapshots
-      // FULLY APPLIED, and SETTLE-ONLY. three things were wrong with returning snapshotApply:
-      // - firestore resolves a write's promise before emitting its acknowledgement listener
-      //   events, and the observer is dispatched on a timer, so the echo's callback may not have
-      //   ENTERED yet. one timer turn lets a queued observer run first. this is a deliberate
-      //   dependency on the installed sdk's scheduling, not a guarantee it documents
-      // - snapshotApply can REJECT, and a rejected application must never turn a committed
-      //   firestore write into a failed one. errors here belong to the listener's own logging and
-      //   authority revocation
-      snapshotFrontier = async () => {
-        await new Promise(resolve => setTimeout(resolve, 0))
-        await snapshotApply.catch(() => {})
-      }
       function initFirebaseRealtime() {
         if (!user) return // need user.uid
 
@@ -8024,10 +8010,8 @@
                       )
                       .then(
                         () => {
-                          hiddenApplyOk.set(doc.id, true)
                         },
                         e => {
-                          hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this
                           console.error('could not apply remote change:', doc.id, e)
                           // NO revocation here: the record's blocked outcome performs exactly one,
                           // and it covers the abort and orchestration paths this branch cannot see
@@ -8853,7 +8837,7 @@
     // a settled permission/validation failure means the change is NOT saved, while `owes()` is a
     // boolean and `isSaving(name)` has already cleared — so without this the only trace was a
     // console line, with owner notifications suppressed indefinitely behind the retained record
-    echoApplied: id => hiddenApplyOk.get(id) !== false,
+    armEcho: (id, cipher) => hiddenIngress.armEcho(id, cipher),
     notifyFailure: (name, error) => {
       const owner = name.match(/^global_store_(.+)$/)?.[1] ?? name
       // GUARDED formatter: `error` is an arbitrary thrown value. String(Symbol) is fine — the
@@ -8883,15 +8867,11 @@
     // lower it, no rule enforces the increment, and equal revisions carry no order. ordering
     // comes from firestore itself, which delivers a document's changes in commit order; the
     // controller only has to recognize the echoes of writes it issued
-    updateDoc: async (id, data) => {
-      await updateDoc(doc(getFirestore(firebase), 'items', id), data)
-      await snapshotFrontier() // settle BEHIND everything already delivered (see snapshotFrontier)
-    },
+    // NO frontier wait: the exact echo waiter answers precisely what the deleted snapshot
+    // make LIKELY. every hidden write paid a macrotask plus the whole snapshot tail for a guess
+    updateDoc: (id, data) => updateDoc(doc(getFirestore(firebase), 'items', id), data),
     // the plaintext user field is required for creates (see firestore rules); updates keep it
-    createDoc: async (id, data) => {
-      await setDoc(doc(getFirestore(firebase), 'items', id), { ...data, user: user.uid })
-      await snapshotFrontier()
-    },
+    createDoc: (id, data) => setDoc(doc(getFirestore(firebase), 'items', id), { ...data, user: user.uid }),
     newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
     // the coordinator's global gate and per-id receipt frontier: every writer staleness check
     // reads these instead of the listener's own receipt map

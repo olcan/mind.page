@@ -63,7 +63,10 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     acquireSecret: async () => {},
     reconcileOwner: () => {},
     notifyFailure: () => {},
-    echoApplied: () => true,
+    // the REAL coordinator waiter: the harness's arrivals open deliveries with 'cipher:<id>', and
+    // the writer's payloads carry 'cipher:<text>' — so an echo matches only when a delivery for
+    // that exact ciphertext actually arrives, which is the point
+    armEcho: (id, cipher) => ingress.armEcho(id, cipher),
     // the DEFAULT models "the server has exactly what the applied index has", so the plan is a
     // no-op and confirmation is behaviour-preserving for schedules that do not exercise it. a
     // test that cares supplies its own answer
@@ -105,8 +108,11 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
 // manufactures an ordering production prevents.
 // `ingress` is required for any schedule that exercises writer staleness; without it the gate
 // never closes and the writer cannot see the delivery at all
-function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper, ingress?: any) {
-  const handle = ingress?.open(wrapper.id, 'cipher:' + wrapper.id)
+// `cipher` matters only for an ECHO: the writer arms a waiter for the exact ciphertext it wrote,
+// so a delivery standing in for our own echo must carry that same string. any other arrival can
+// use the default, which deliberately matches nothing a writer armed
+function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper, ingress?: any, cipher?: string) {
+  const handle = ingress?.open(wrapper.id, cipher ?? 'cipher:' + wrapper.id)
   const names = [idx.byId.get(wrapper.id)?.name, wrapper.name]
   const apply = () => controller.applyRemote(names, () => void applyRemoteAdded(idx, wrapper))
   if (!handle) return apply()
@@ -998,6 +1004,7 @@ test('settlement reconciles the owner behind an already-received transition, not
   const pending: Array<() => void> = []
   const h = harness()
   const { idx, calls } = h
+  const ack = deferred<void>()
   const controller = createHiddenPersistence({
     ...h.deps,
     encryptState: async state => {
@@ -1006,6 +1013,10 @@ test('settlement reconciles the owner behind an already-received transition, not
       encrypted.cipher = 'cipher:' + state.text
       encrypted.text = null
       return encrypted
+    },
+    updateDoc: async (id, data) => {
+      calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise // held, so this write's echo can arrive first
     },
     reconcileOwner: name => void order.push('reconcile ' + name),
   })
@@ -1033,6 +1044,13 @@ test('settlement reconciles the owner behind an already-received transition, not
   pending.shift()?.() // the retry's encryption
   for (let i = 0; i < 8; i++) await flush()
   expect(calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
+  // ECHO BEFORE ACKNOWLEDGEMENT, the design's primary schedule. the echo carries the EXACT
+  // ciphertext written, which is what the armed waiter matches — an unrelated later application
+  // for the same id can no longer be mistaken for it
+  const issued = calls.find(c => c.op == 'update')!.text!
+  await arrive(controller, idx, { id: 'd1', name: 'n', item: { v: 1 } }, h.ingress, issued)
+  ack.resolve()
+  for (let i = 0; i < 8; i++) await flush()
   expect(order).toEqual(['remote applied', 'reconcile n'])
   expect(controller.owes('n')).toBe(false) // cleared only once settlement ran on the chain
 })
@@ -1287,9 +1305,9 @@ test('settlement follows the write dependency, so an ack behind the frontier rec
   // round-20 finding 2: settlement waited behind transitions already noted, but production does not
   // note a transition until its snapshot is decrypted. a fast ack therefore crossed the app's own
   // echo, reconciled the owner from the state that echo was about to replace, and cleared owes() —
-  // so the echo then arrived as a spurious "changed remotely". the fix is in the write dependency,
-  // which now awaits the application frontier before resolving (see snapshotFrontier in
-  // index.svelte); this pins the controller half of that contract
+  // so the echo then arrived as a spurious "changed remotely". the frontier heuristic that used to
+  // paper over this is DELETED: settlement now reads the EXACT echo waiter's recorded outcome, one
+  // causal microtask after the acknowledgement
   const reconciled: any[] = []
   const ack = deferred<void>()
   const pending: Array<() => void> = []
@@ -1322,9 +1340,13 @@ test('settlement follows the write dependency, so an ack behind the frontier rec
   await flush() // rebuilt for a1 and issued
   expect(calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['a1'])
   expect(controller.owes('n')).toBe(true) // unsettled while the acknowledgement is outstanding
-  await arrive(controller, idx, { id: 'a1', name: 'n', item: { v: 'D' } }, h.ingress) // our own echo, applied
+  // OUR OWN ECHO, carrying the exact ciphertext that was written — that is what the armed waiter
+  // matches on, and it is why an unrelated later application for the same id can no longer be
+  // mistaken for this write's echo
+  const issued = calls.find(c => c.op == 'update')!.text!
+  await arrive(controller, idx, { id: 'a1', name: 'n', item: { v: 'D' } }, h.ingress, issued)
   ack.resolve()
-  await flush()
+  for (let i = 0; i < 6; i++) await flush()
   expect(reconciled).toEqual([{ v: 'D' }]) // in step with the echo, never rolled back to B
   expect(controller.owes('n')).toBe(false)
 })
@@ -1401,32 +1423,9 @@ test('a delivery that decodes into a removal is not written through by the retry
   expect(calls.filter(c => c.op == 'create'), 'it re-enters create resolution').toHaveLength(1)
 })
 
-test('settlement does not reconcile the owner when its own echo failed to apply', async () => {
-  // round-22 finding 2: the write barrier is settle-only on purpose — an unrelated listener failure
-  // must never turn a committed firestore write into a failed one — but that also swallowed the
-  // outcome of THIS write's echo. the controller then took its success path and reconciled from an
-  // index that may still hold the pre-write state, rolling the owner back with no later echo
-  // guaranteed. the write is still committed, so `owes()` clears either way
-  const reconciled: string[] = []
-  const h = harness()
-  const { idx } = h
-  const controller = createHiddenPersistence({
-    ...h.deps,
-    echoApplied: () => false, // this document's application failed
-    reconcileOwner: name => void reconciled.push(name),
-  })
-  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
-  idx.byId.set('d1', live)
-  idx.byName.set('n', live)
-  controller.save('n', { v: 'D' })
-  await flush()
-  await flush()
-  expect(controller.owes('n')).toBe(false) // committed: the record is not held open
-  expect(reconciled, 'the owner already holds what was written').toEqual([])
-})
-
-
-
+// NOTE 'settlement does not reconcile the owner when its own echo failed to apply' stood here and
+// is SUPERSEDED by 'a BLOCKED echo does not reconcile', which proves the same round-22 property
+// against the real waiter instead of an echoApplied flag the harness could assert into existence.
 test('an adoption invalidated DURING encryption neither issues nor finalizes against the stale pointer', async () => {
   // round-35 stage-1a guard 2. targetStamp is not the pointer's CAS: for a target absent from byId
   // (adoption targets are, until finalization) the stamp reads `absent` before and after, so only
@@ -2575,7 +2574,6 @@ test('a rejected Apply on a name chain is consumed by ORDINARY queued work, not 
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    echoApplied: () => false, // keep reconciliation out of the assertion
     updateDoc: async (id, data) => {
       h.calls.push({ op: 'update', id, text: data.cipher })
       await ack.promise
@@ -2728,4 +2726,87 @@ test('a fresh same-id observation defeats the bypass: the wrapper is no longer o
   for (let i = 0; i < 10; i++) await flush()
   expect(h.calls.filter(c => c.op == 'confirm').length, 'NOT bypassed: it confirmed').toBeGreaterThan(before)
   ack.resolve()
+})
+
+// ---- acknowledgement versus the exact echo ----
+
+test('acknowledgement BEFORE any echo: cleared, not reconciled, and the waiter is disposed', async () => {
+  // on a fixed/shared page the live query is the shared subset, so a hidden write's echo may never
+  // arrive at all. the old per-id flag read "no entry" as SUCCESS and reconciled the owner from an
+  // index that never took the write
+  const reconciled: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, reconcileOwner: n => void reconciled.push(n) })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update'), 'the write was acknowledged').toHaveLength(1)
+  expect(controller.owes('n'), 'and the record is cleared').toBe(false)
+  expect(reconciled, 'but the owner is NOT reconciled from an echo that never came').toEqual([])
+  // a LATER delivery for that id must not be mistaken for the disposed waiter's echo
+  const issued = h.calls.find(c => c.op == 'update')!.text!
+  await arrive(controller, h.idx, { id: 'd1', name: 'n', item: { mine: 1 } }, h.ingress, issued)
+  for (let i = 0; i < 6; i++) await flush()
+  expect(reconciled, 'the waiter was disposed at settlement').toEqual([])
+})
+
+test('a BLOCKED echo does not reconcile: the index may still hold the pre-write state', async () => {
+  const reconciled: string[] = []
+  const warnings: string[] = []
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    reconcileOwner: n => void reconciled.push(n),
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise
+    },
+  })
+  const realWarn = console.warn
+  console.warn = (...a: any[]) => void warnings.push(String(a[0]))
+  try {
+    registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+    controller.save('n', { mine: 1 })
+    for (let i = 0; i < 8; i++) await flush()
+    const issued = h.calls.find(c => c.op == 'update')!.text!
+    // our echo arrives but its APPLICATION fails: the delivery is blocked
+    const handle = h.ingress.open('d1', issued)
+    handle.ready(() => Promise.reject(new Error('application failed')))
+    expect(await handle.done).toBe('blocked')
+    ack.resolve()
+    for (let i = 0; i < 8; i++) await flush()
+    expect(reconciled, 'the owner already holds what we wrote; reconciling would roll it back').toEqual([])
+    expect(warnings.some(w => w.includes('did not apply')), 'and it says so').toBe(true)
+  } finally {
+    console.warn = realWarn
+  }
+})
+
+test('an echo terminalizing in the SAME turn as the acknowledgement is still seen', async () => {
+  // the causal microtask: handle.done resolving queues the waiter's reaction as a microtask, so a
+  // settlement that read the recorded outcome immediately would see nothing and skip
+  // reconciliation for an echo that HAD arrived
+  const reconciled: string[] = []
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    reconcileOwner: n => void reconciled.push(n),
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  const issued = h.calls.find(c => c.op == 'update')!.text!
+  const handle = h.ingress.open('d1', issued)
+  // terminalize the echo and resolve the acknowledgement in the SAME synchronous turn, without
+  // awaiting handle.done in between
+  handle.ready(async () => {})
+  ack.resolve()
+  for (let i = 0; i < 8; i++) await flush()
+  expect(reconciled, 'the echo was recorded in time').toEqual(['n'])
 })
