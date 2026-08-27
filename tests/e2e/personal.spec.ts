@@ -489,6 +489,35 @@ test('global-store updates and deletions reach a second tab of the same account'
         timeout: 30_000,
       })
       .toBeNull()
+
+    // THE OLD-SIDE EFFECT of a hidden-to-visible transition (round 65): when a global_store
+    // document becomes an ordinary visible item, the owner's store must be updated and its
+    // change notification raised — a bare index removal leaves both stale. the store document is
+    // overwritten in the clear, and the owner's store must lose the key on BOTH tabs
+    const storeDoc = (
+      await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
+    ).docs.find(d => d.id)
+    if (storeDoc) {
+      await page.evaluate(() => void (window._item('#e2e_xstore')!.global_store._old = 7))
+      await expect
+        .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
+          timeout: 30_000,
+        })
+        .toBe(7)
+      await firestore().collection('items').doc(storeDoc.id).set({
+        user: ALICE.uid,
+        time: Date.now(),
+        text: '#e2e_was_a_store now visible',
+        attr: null,
+      })
+      // the hidden representation is dropped THROUGH the real reducer, so the owner's store is
+      // synchronized rather than left holding a value whose document no longer backs it
+      await expect
+        .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
+          timeout: 30_000,
+        })
+        .toBeNull()
+    }
   } finally {
     await other.close()
   }
@@ -538,6 +567,21 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   // render-time client any more (see reportInvalidHiddenCandidates)
   await page.waitForTimeout(3_000)
   expect(await hiddenDocs()).toBe(base)
+
+  // ... and the ADMISSION-OVERLAP branch, on the same loaded page (round 65): the corrupt id is
+  // still known to the coordinator, so a VISIBLE document written to it is admitted by
+  // hasOutstanding(id) rather than by the raw hidden flag. that delivery used to fall through to
+  // the ordinary path, run detached from its record, and leave the id blocked forever
+  await firestore().collection('items').doc('e2e-corrupt-hidden').set({
+    user: ALICE.uid,
+    time: Date.now(),
+    text: '#e2e_healed_visible now an ordinary item',
+    attr: null,
+  })
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_healed_visible', true)?.id ?? null), { timeout: 30_000 })
+    .not.toBeNull()
+  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
 })
 
 // NOTE this test used to SIGN IN on the shared page itself. That route no longer exists: a
