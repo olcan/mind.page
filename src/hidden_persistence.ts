@@ -210,7 +210,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const currentOwed = (name: string, generation: number) =>
     owed.get(name)?.generation == generation ? owed.get(name) : undefined
 
-  // enqueue work for the name; failures settle inside each task, so the chain always continues.
+  // enqueue work for the name. the rejection arm of `.then(task, task)` is LOAD-BEARING: since
+  // applyRemote publishes its raw operation result, a predecessor on this chain can be a REJECTED
+  // remote Apply — and an acknowledgement settlement really can queue behind one. persistOwed
+  // still handles its own errors; this is about the predecessor, not the task.
   // saving state is NOT mirrored here: it is DERIVED per name (see isSaving), because a wrapper
   // can be replaced, renamed or removed while its write is still owed
   function enqueue(name: string, task: () => Promise<void>) {
@@ -350,16 +353,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // finalization, so "is it still the record we would choose" can never answer this; the payload
   // was built from what we believed the document to be, and that belief is what must still hold.
   // a receipt (newest delivery) wins; otherwise the live object, whose IDENTITY changes when an
-  // application replaces it. a spurious mismatch only costs one requeue — issuing wrongly does not
+  // application replaces it. a spurious mismatch only costs one requeue; issuing wrongly does not.
   // TWO facts, captured together so a caller cannot compare one and forget the other: the
   // coordinator's per-id RECEIPT FRONTIER (advanced by every open() for this document; zero for
   // an id with no cell, and reading it never allocates one) AND the live wrapper's exact object
   // IDENTITY.
-  // the WRAPPER half is PROVISIONAL and currently unpinned: removing it leaves every test green,
-  // and today's registerHidden() invalidates adopters before every replacement, so the pointer or
-  // projection guard refuses first. It is retained only until the corpus seam can judge it against
-  // a real stale-write schedule — run the wrapper-only mutation there FIRST and delete the field
-  // if it stays green (rounds 61-63)
+  // the WRAPPER half is PROVISIONAL and currently unpinned, pending the corpus-seam mutation
+  // (the recipe and the history are in the test)
   type TargetToken = { seq: number; wrapper: unknown }
   const targetStamp = (id: string): TargetToken => ({
     seq: deps.receiptFrontier(id),
@@ -849,7 +849,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // never interleave with an in-flight write for the same name; with no queued work it runs
     // immediately. returns a promise that settles when the transition has applied — the caller
     // aggregates these before settling that revision's authority. pass the name when known; a removal
-    // of an id not in the index applies immediately (nothing in flight can target it)
+    // of an id not in the index has no affected name, so it starts on the NEXT MICROTASK with
+    // nothing to wait for (the design's asynchronous direct path) rather than synchronously
     applyRemote(
       names: (string | undefined)[] | string | undefined,
       apply: () => void | Promise<void>

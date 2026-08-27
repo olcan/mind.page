@@ -2472,12 +2472,10 @@ test('the shared tail: every affected name reserved at once, behind every predec
   // prior tails on A and C; B is IDLE
   void controller.applyRemote(['A'], () => A.promise)
   void controller.applyRemote(['C'], () => C.promise)
-  const s1Started = deferred<void>()
   const s1Body = deferred<void>()
   let s1Runs = 0
   const s1 = controller.applyRemote(['A', 'B', 'C'], async () => {
     s1Runs++
-    s1Started.resolve()
     await s1Body.promise
   })
   let s2Ran = false
@@ -2487,11 +2485,12 @@ test('the shared tail: every affected name reserved at once, behind every predec
   await checkpoint()
   expect(s1Runs, 'S1 waits for EVERY predecessor, not just one').toBe(0)
   expect(s2Ran, 'and S2 is behind S1 on the idle name B').toBe(false)
-  // C resolves: S1 starts, exactly once, and S2 is still held by its async body
+  // C resolves: S1 starts, exactly once, and S2 is still held by its async body. asserting on a
+  // CHECKPOINT rather than awaiting s1Started makes a Promise.all mutant fail here immediately
+  // (S1 never runs at all) instead of hanging until the suite timeout
   C.resolve()
-  await s1Started.promise
-  expect(s1Runs, 'exactly once').toBe(1)
   await checkpoint()
+  expect(s1Runs, 'exactly once, and it DID run: a fulfillment-only wait would skip it').toBe(1)
   expect(s2Ran, "S2 is behind S1's ASYNC body, not merely its invocation").toBe(false)
   // S1 rejects: its OWN result rejects, and S2 still runs
   s1Body.reject(new Error('S1 failed'))
@@ -2582,4 +2581,57 @@ test('stop before a queued name-chain turn runs: the chain-entry check does no s
   for (let i = 0; i < 6; i++) await flush()
   expect(acquisitions, 'and refuses at chain entry, before acquiring anything').toBe(0)
   expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+})
+
+test('a rejected Apply on a name chain is consumed by ORDINARY queued work, not just by applyRemote', async () => {
+  // publishing the RAW result made enqueue's rejection arm — `.then(task, task)` — load-bearing.
+  // the A/C/B row proves another applyRemote consumes a rejected predecessor through allSettled;
+  // this proves acknowledgement settlement does too, which is the production shape: an ack really
+  // can enter the name chain while a delivery Apply owns it
+  const ack = deferred<void>()
+  const applyBody = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    echoApplied: () => false, // keep reconciliation out of the assertion
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  await checkpoint()
+  expect(h.calls.filter(c => c.op == 'update'), 'the write is issued and awaiting its ack').toHaveLength(1)
+  // a same-name Apply is now running and held
+  const application = controller.applyRemote(['n'], () => applyBody.promise)
+  await checkpoint()
+  // the acknowledgement resolves WHILE that Apply owns the chain: its settlement queues behind
+  // the still-held raw tail
+  ack.resolve()
+  await checkpoint()
+  expect(controller.owes('n'), 'settlement has not run yet: it is behind the Apply').toBe(true)
+  const follower = controller.applyRemote(['n'], () => {})
+  applyBody.reject(new Error('the Apply failed'))
+  await expect(application).rejects.toThrow('the Apply failed')
+  await follower // the exact drain boundary
+  expect(controller.owes('n'), 'the queued settlement ran THROUGH the rejected predecessor').toBe(false)
+})
+
+test('applyRemote with NO affected name still starts asynchronously and rejects a synchronous throw', async () => {
+  // the design's asynchronous direct path: no name to reserve, but the body must not run in the
+  // caller's turn, and a synchronous throw must arrive as a rejection like any other
+  const h = harness()
+  const controller = createHiddenPersistence(h.deps)
+  let ran = false
+  const direct = controller.applyRemote(undefined, () => void (ran = true))
+  expect(ran, 'not in the calling turn').toBe(false)
+  await direct
+  expect(ran).toBe(true)
+  const boom = new Error('synchronous throw')
+  await expect(
+    controller.applyRemote(undefined, () => {
+      throw boom
+    })
+  ).rejects.toBe(boom)
 })
