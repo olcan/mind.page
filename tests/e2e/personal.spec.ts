@@ -527,9 +527,9 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_orphan_owner', true)?.id ?? null), { timeout: 30_000 })
     .toBeNull()
-  // removing the corrupt document heals its dirty id (removal applies by plaintext hidden + id,
-  // no decrypt needed) and the same authoritative revision re-grants; the false -> true grant
-  // recomputes invalidity from CURRENT state and deletes the now-orphaned store
+  // removing the corrupt document heals its block (removal applies by plaintext hidden + id, no
+  // decrypt needed) and the same authoritative revision re-grants; the grant recomputes invalidity
+  // from CURRENT state
   await firestore().collection('items').doc('e2e-corrupt-hidden').delete()
   await expect.poll(authority, { timeout: 30_000 }).toBe(true)
   // the now-orphaned store is REPORTED and quarantined, not deleted: a classification describes

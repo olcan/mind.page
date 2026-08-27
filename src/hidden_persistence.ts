@@ -16,8 +16,10 @@
 // NOTE: saving state is owned BY NAME (`isSaving`), true from the moment save() accepts an intent
 // until that generation's write reaches the SDK's queue — not until the server acknowledges. item
 // code observes it through _Item.saving_global_store, so that meaning is part of the window
-// contract, with one exception: a BLOCKED gate reads as not saving, since the change cannot be
-// written until a later delivery heals it. it was previously mirrored on the WRAPPER, which could
+// contract, with one exception: a QUEUED generation reads as not saving while the gate is
+// blocked, since it cannot be written until a later delivery heals it. a generation already
+// BUILDING stays saving even if the gate blocks mid-build — it goes false when the attempt
+// observes the block and requeues. it was previously mirrored on the WRAPPER, which could
 // not survive that wrapper being
 // replaced, renamed or removed while the writer was parked on the gate (round 60): the intent,
 // the wake and the blocked report already belong to the name, and so does this.
@@ -352,8 +354,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // TWO facts, captured together so a caller cannot compare one and forget the other: the
   // coordinator's per-id RECEIPT FRONTIER (advanced by every open() for this document; zero for
   // an id with no cell, and reading it never allocates one) AND the live wrapper's exact object
-  // IDENTITY — a successful same-id corpus replacement swaps the wrapper without opening any
-  // delivery, so the frontier alone would not notice it
+  // IDENTITY.
+  // the WRAPPER half is PROVISIONAL and currently unpinned: removing it leaves every test green,
+  // and today's registerHidden() invalidates adopters before every replacement, so the pointer or
+  // projection guard refuses first. It is retained only until the corpus seam can judge it against
+  // a real stale-write schedule — run the wrapper-only mutation there FIRST and delete the field
+  // if it stays green (rounds 61-63)
   type TargetToken = { seq: number; wrapper: unknown }
   const targetStamp = (id: string): TargetToken => ({
     seq: deps.receiptFrontier(id),
@@ -666,9 +672,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // THE ONE WRITER STOP TRANSITION, in TWO SYNCHRONOUS PHASES so a throwing notification hook
     // cannot leave later generations half-stopped and a reentrant save cannot observe a partial
     // state. phase 1 sets stopped state, cancels every NAME-owned wake, updates each
-    // report-once token, and CAPTURES the notifications; phase 2
-    // invokes them under individual guards — nothing escapes stop().
-    // effects are qualified BY GENERATION: an unissued generation clears its mirror, reports
+    // report-once token, and CAPTURES the notifications; phase 2 invokes them under individual
+    // guards — nothing escapes stop().
+    // effects are qualified BY GENERATION: an unissued generation reports
     // once and RETAINS its owed intent (the change is not lost, it simply cannot be written by
     // this page); an issued generation stays owned by its SDK result and is never prematurely
     // cleared or reported as a stopped build
@@ -761,7 +767,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       const index = deps.index()
       // accept the byName alias only while it is still the LIVE record for that id and name.
       // a stale alias (kept deliberately for read-only display) would otherwise take the claim
-      // and briefly carry saving state for an object no longer in the live index
+      // for an object no longer in the live index
       const claimed = index.byName.get(name)
       let holder = claimed && index.byId.get(claimed.id) === claimed && claimed.name == name ? claimed : undefined
       if (!holder) {
@@ -859,39 +865,23 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // reserving every tail at once also removes the deadlock the canonical sort defended
       // against: nothing can be half-acquired, so there is no acquisition order to agree on
       const affected = [...new Set((Array.isArray(names) ? names : [names]).filter(Boolean) as string[])]
-      if (!affected.length) {
-        try {
-          return Promise.resolve(apply()) // still ADOPTS an async apply (the third fix)
-        } catch (e) {
-          return Promise.reject(e)
-        }
+      const predecessors = affected.map(name => chains.get(name)).filter(Boolean) as Promise<void>[]
+      // ONE promise, published to every affected tail BEFORE apply() can run. the previous version
+      // had a synchronous no-predecessor branch that invoked apply() first and published after,
+      // which reverses the whole property: a reentrant same-name operation saw no predecessor,
+      // published its own tail, and had it overwritten when the outer call resumed.
+      // no cardinality branches: with no predecessors the `then` still runs a microtask later,
+      // after publication; with no affected name it is the design's asynchronous direct path; and
+      // it assimilates an async apply and turns a synchronous throw into a rejection for free
+      const result = Promise.allSettled(predecessors).then(() => apply())
+      for (const name of affected) chains.set(name, result)
+      // publish `result` ITSELF, not a fulfilled mirror. the mirror was not load-bearing — the
+      // inbound allSettled already consumes predecessor rejection — and it HID the rejected-
+      // predecessor branch from any schedule that tried to exercise it
+      const cleanup = () => {
+        for (const name of affected) if (chains.get(name) === result) chains.delete(name)
       }
-      const predecessors = affected.map(n => chains.get(n)).filter(Boolean) as Promise<void>[]
-      // SETTLE-ONLY on the way in: a predecessor that rejected is someone else's failure and must
-      // not skip this application. an idle name contributes no predecessor, but still receives
-      // the tail below
-      const result: Promise<void> = predecessors.length
-        ? Promise.allSettled(predecessors).then(() => apply())
-        : (() => {
-            // nothing to wait for: apply NOW, as the previous no-chain path did. deferring every
-            // ordinary delivery by a microtask would be a behavior change for no benefit
-            try {
-              return Promise.resolve(apply())
-            } catch (e) {
-              return Promise.reject(e)
-            }
-          })()
-      // ... and settle-only on the way OUT: one rejection must not poison every affected tail
-      const settled = result.then(
-        () => {},
-        () => {}
-      )
-      for (const name of affected) {
-        chains.set(name, settled)
-        void settled.then(() => {
-          if (chains.get(name) === settled) chains.delete(name)
-        })
-      }
+      void result.then(cleanup, cleanup) // two-way: no unhandled rejection from the tail copy
       return result // the REAL result: the caller's handle records blocked on rejection
     },
 

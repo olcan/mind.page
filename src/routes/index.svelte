@@ -6469,7 +6469,7 @@
     //    lease later reaches its ordered turn — a terminal listener error arrives outside any
     //    callback, so there is no lease to fail for it
     hiddenIngress.invalidateAuthority()
-    // 2. the ONE writer stop transition, whose first effect is cancelling every generation-owned
+    // 2. the ONE writer stop transition, whose first effect is cancelling every name-owned
     //    observer — BEFORE any handle can publish a terminal outcome, since block() synchronously
     //    resolves matching waiters and cancellation cannot retract a resolved promise
     try {
@@ -8847,7 +8847,7 @@
       secret = await Promise.resolve(secret)
     },
     // a settled permission/validation failure means the change is NOT saved, while `owes()` is a
-    // boolean and `wrapper.saving` has already cleared — so without this the only trace was a
+    // boolean and `isSaving(name)` has already cleared — so without this the only trace was a
     // console line, with owner notifications suppressed indefinitely behind the retained record
     echoApplied: id => hiddenApplyOk.get(id) !== false,
     notifyFailure: (name, error) => {

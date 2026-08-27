@@ -218,7 +218,7 @@ export function repairNameIndex(index: HiddenIndex) {
 }
 
 // recomputes invalid hidden records from the CURRENT index (never from startup snapshots,
-// which go stale as remote changes apply — see cleanupInvalidHidden in index.svelte):
+// which go stale as remote changes apply — see reportInvalidHiddenCandidates in index.svelte):
 // - 'duplicate': a wrapper that is not its name's byName holder (the minimum-id rule keeps the
 //   canonical one; the rest are redundant records)
 // - 'orphaned': a canonical global_store_<id> wrapper whose owner item is absent per ownerExists

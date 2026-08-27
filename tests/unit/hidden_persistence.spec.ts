@@ -23,6 +23,11 @@ function deferred<T>() {
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
+// ONE macrotask, which drains every recursively queued microtask first — so a settled chain has
+// fully propagated without coupling the assertion to a guessed number of hops. used for negative
+// assertions; positive progress awaits the real deferred (see hidden_ingress.spec.ts, round 44)
+const checkpoint = () => new Promise<void>(res => setImmediate(res))
+
 type Call = { op: string; id?: string; text?: string }
 
 function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
@@ -2059,8 +2064,8 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
 })
 
 // ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
-// these isolate the per-id receipt frontier and the global gate. TargetToken.wrapper is NOT
-// pinned by any row: see the note at the end of this file
+// these isolate the per-id receipt frontier and the global gate — the two halves of the issue
+// token that ARE pinned. TargetToken.wrapper is not: see the note at the end of this file
 
 test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
   // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
@@ -2201,7 +2206,9 @@ for (const [label, settle] of [
     // the KEYS alone are too weak: without the fulfil guard, adoption mutates the pending
     // wrapper's pointer and projection while preserving them. capture those directly, and count
     // encryptions, so this row proves what its name says
-    const pendingBefore = [...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item] as const)
+    // CLONE the projection: storing it by reference would miss an in-place mutation, which is
+    // exactly what "mutates nothing" is supposed to exclude
+    const pendingBefore = JSON.stringify([...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item]))
     controller.stop()
     expect(failures, 'stop reported this generation once').toEqual(['n'])
     published.length = 0
@@ -2209,8 +2216,8 @@ for (const [label, settle] of [
     for (let i = 0; i < 10; i++) await flush()
     expect([...h.idx.byId.keys()], 'the late continuation mutated no index state').toEqual(before)
     expect(
-      [...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item] as const),
-      'no adoption pointer moved and no projection was rebased'
+      JSON.stringify([...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item])),
+      'no adoption pointer moved and no projection was rebased or mutated in place'
     ).toEqual(pendingBefore)
     expect(encrypted, 'and nothing was encrypted').toEqual([])
     expect(published, 'and published nothing').toEqual([])
@@ -2374,6 +2381,9 @@ test('a generation that heals, builds, and RE-BLOCKS is not saving and is report
   const bad2 = h.ingress.open('d3', 'cipher:bad2')
   bad2.ready(() => Promise.reject(new Error('decrypt failed')))
   expect(await bad2.done).toBe('blocked')
+  // THE SUB-WINDOW: a build in progress stays saving even though the gate just blocked. a formula
+  // that gated `building` on the gate would pass everything else in this row
+  expect(controller.isSaving('n'), 'building stays saving across a gate block').toBe(true)
   encrypting.resolve()
   await secondWake.promise // the retry has parked again: the exact completion signal
   expect(controller.isSaving('n'), 'false after refusal and requeue').toBe(false)
@@ -2448,103 +2458,69 @@ test('an ISSUED update rejecting not-found after stop starts no recovery', async
   expect(controller.owes('n'), 'the intent is retained').toBe(true)
 })
 
-// ---- applyRemote publishes ONE operation to every affected tail (round 62) ----
+// ---- applyRemote publishes ONE operation to every affected tail (rounds 62-63) ----
+// ONE schedule replaces four timer-heavy partial rows. It kills, together: the idle-name filter,
+// delayed/recursive reservation of the idle name, waiting on only some predecessors,
+// fulfillment-only predecessor handling, a discarded async result, a lost own rejection, and tail
+// poisoning. Everything is driven by deferreds -- no flush loops
 
-test('an application reserves an IDLE affected name, so a write starting during it is ordered behind', async () => {
-  // the old `.filter(chains.has)` dropped every affected name with no in-flight write, which is
-  // exactly the ordering guarantee multi-name acquisition exists to provide
-  const order: string[] = []
-  const applying = deferred<void>()
-  const h = harness()
-  const controller = createHiddenPersistence({
-    ...h.deps,
-    updateDoc: async id => void order.push('write ' + id),
-    createDoc: async id => void order.push('create ' + id),
-  })
-  registerHidden(h.idx, { id: 'd2', name: 'q', item: { v: 0 } }, () => {})
-  // 'q' is IDLE: nothing is in flight for it
-  expect(controller.isSaving('q')).toBe(false)
-  const application = controller.applyRemote(['n', 'q'], async () => {
-    order.push('application started')
-    await applying.promise
-    order.push('application finished')
-  })
-  // a write for the idle affected name starts DURING the application
-  controller.save('q', { mine: 1 })
-  for (let i = 0; i < 4; i++) await flush()
-  expect(order, 'the write has not run: it is behind the application').toEqual(['application started'])
-  applying.resolve()
-  await application
-  for (let i = 0; i < 6; i++) await flush()
-  expect(order).toEqual(['application started', 'application finished', 'write d2'])
-})
-
-test('an ASYNC application is awaited before either affected tail continues', async () => {
-  const order: string[] = []
-  const applying = deferred<void>()
+test('the shared tail: every affected name reserved at once, behind every predecessor', async () => {
   const h = harness()
   const controller = createHiddenPersistence(h.deps)
-  const application = controller.applyRemote(['n', 'q'], async () => {
-    order.push('start')
-    await applying.promise
-    order.push('end')
+  const A = deferred<void>()
+  const C = deferred<void>()
+  // prior tails on A and C; B is IDLE
+  void controller.applyRemote(['A'], () => A.promise)
+  void controller.applyRemote(['C'], () => C.promise)
+  const s1Started = deferred<void>()
+  const s1Body = deferred<void>()
+  let s1Runs = 0
+  const s1 = controller.applyRemote(['A', 'B', 'C'], async () => {
+    s1Runs++
+    s1Started.resolve()
+    await s1Body.promise
   })
-  let after = false
-  void controller.applyRemote(['q'], () => void (after = true))
-  for (let i = 0; i < 4; i++) await flush()
-  expect(after, 'the second operation waits on the first, on the shared tail').toBe(false)
-  applying.resolve()
-  await application
-  for (let i = 0; i < 4; i++) await flush()
-  expect(order, 'the async body ran to completion first').toEqual(['start', 'end'])
-  expect(after).toBe(true)
+  let s2Ran = false
+  const s2 = controller.applyRemote(['B'], () => void (s2Ran = true)) // newer, on the IDLE name
+  // A REJECTS while C is still held: neither may start
+  A.reject(new Error('predecessor A failed'))
+  await checkpoint()
+  expect(s1Runs, 'S1 waits for EVERY predecessor, not just one').toBe(0)
+  expect(s2Ran, 'and S2 is behind S1 on the idle name B').toBe(false)
+  // C resolves: S1 starts, exactly once, and S2 is still held by its async body
+  C.resolve()
+  await s1Started.promise
+  expect(s1Runs, 'exactly once').toBe(1)
+  await checkpoint()
+  expect(s2Ran, "S2 is behind S1's ASYNC body, not merely its invocation").toBe(false)
+  // S1 rejects: its OWN result rejects, and S2 still runs
+  s1Body.reject(new Error('S1 failed'))
+  await expect(s1).rejects.toThrow('S1 failed')
+  await s2
+  expect(s2Ran, 'a rejected operation does not poison the tail it published to').toBe(true)
 })
 
-test('a rejected application does not poison the tails it published to', async () => {
+test('a reentrant same-name operation is not overwritten by its outer publication', async () => {
+  // the exact window the old synchronous no-predecessor branch opened: the inner call published
+  // its tail, then the outer publication replaced it, and a follower passed the inner work
   const h = harness()
   const controller = createHiddenPersistence(h.deps)
-  await expect(
-    controller.applyRemote(['n', 'q'], async () => {
-      throw new Error('application failed')
+  const inner = deferred<void>()
+  let innerDone = false
+  let followerRan = false
+  const outer = controller.applyRemote(['n'], () => {
+    // synchronously queue async same-name work from inside the Apply
+    void controller.applyRemote(['n'], async () => {
+      await inner.promise
+      innerDone = true
     })
-  ).rejects.toThrow('application failed')
-  let ran = false
-  await controller.applyRemote(['n', 'q'], () => void (ran = true))
-  expect(ran, 'both tails still accept work').toBe(true)
-})
-
-test('an ASYNC application BEHIND a predecessor is also awaited before the tail continues', async () => {
-  // the sibling row exercises the no-predecessor branch; this one covers the branch that waits on
-  // Promise.allSettled(predecessors), where dropping the async result was separately unpinned
-  const order: string[] = []
-  const writing = deferred<void>()
-  const applying = deferred<void>()
-  const h = harness()
-  const controller = createHiddenPersistence({
-    ...h.deps,
-    updateDoc: async () => {
-      order.push('write')
-      await writing.promise
-    },
   })
-  registerHidden(h.idx, { id: 'd1', name: 'n', item: { v: 0 } }, () => {})
-  controller.save('n', { mine: 1 }) // 'n' now has a real predecessor on its chain
-  for (let i = 0; i < 4; i++) await flush()
-  expect(order, 'the write is in flight').toEqual(['write'])
-  const application = controller.applyRemote(['n'], async () => {
-    order.push('apply start')
-    await applying.promise
-    order.push('apply end')
-  })
-  let after = false
-  void controller.applyRemote(['n'], () => void (after = true))
-  writing.resolve()
-  for (let i = 0; i < 6; i++) await flush()
-  expect(order, 'the application started once the write settled').toEqual(['write', 'apply start'])
-  expect(after, 'and the next operation is still behind its async body').toBe(false)
-  applying.resolve()
-  await application
-  for (let i = 0; i < 4; i++) await flush()
-  expect(order).toEqual(['write', 'apply start', 'apply end'])
-  expect(after).toBe(true)
+  await outer
+  void controller.applyRemote(['n'], () => void (followerRan = true))
+  await checkpoint()
+  expect(followerRan, 'the follower is behind the INNER work, not just the outer call').toBe(false)
+  inner.resolve()
+  await checkpoint()
+  expect(innerDone).toBe(true)
+  expect(followerRan).toBe(true)
 })
