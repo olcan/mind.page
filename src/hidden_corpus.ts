@@ -113,18 +113,21 @@ export function createHiddenCorpus() {
       return turn
     },
 
-    // sticky and page-scoped. `cause` is the ACTIVE operation's own fatal error when it stops
+    // sticky and page-scoped. `active` carries the ACTIVE operation's own fatal error when it stops
     // itself: without it, resolving a shared signal queued its reaction before the body's
     // rejection could win the race, so a postcommit failure that entered sticky stop and rethrew
-    // reported CorpusStopped instead of the error the caller has to see
-    stop(cause?: unknown) {
+    // reported CorpusStopped instead of the error the caller has to see.
+    // THE CAUSE IS WRAPPED, and the wrapper is the whole point: JavaScript can legally throw
+    // `undefined`, so a bare optional parameter could not tell an active `throw undefined` from an
+    // ordinary external stop. A caller that already holds an optional wrapper now forwards it
+    // DIRECTLY — an `arguments.length` test here forced every caller to branch instead, and a
+    // caller that wrote the natural `stop(active?.cause)` silently misclassified every external stop
+    stop(active?: { cause: unknown }) {
       if (stopped) return
       stopped = true
       membership = new Set()
-      // computed here, not retained: it is consumed in this same call. checking arguments.length
-      // rather than `cause !== undefined` matters because JavaScript can legally throw undefined,
-      // and an ordinary external stop must not be misread as an active `undefined` cause
-      cancelActive?.(arguments.length > 0 ? cause : new CorpusStopped())
+      // computed here, not retained: it is consumed in this same call
+      cancelActive?.(active ? active.cause : new CorpusStopped())
     },
   }
 }

@@ -32,6 +32,20 @@ async function withSecret(page: Page) {
 
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
 
+// the account's hidden document holding a given store NAME, or null. names live inside the
+// ciphertext, so this decrypts — which is also why an account-wide COUNT can never identify one
+async function findStoreDoc(name: string) {
+  const { decryptWithSecret } = await import('../../src/crypto.js')
+  const snap = await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
+  for (const doc of snap.docs) {
+    try {
+      const plain = JSON.parse(await decryptWithSecret(doc.data().cipher, secretFor(ALICE, PHRASE)))
+      if (JSON.parse(plain.text).name == name) return doc.id
+    } catch {} // an unrelated corrupt or foreign-keyed record: not ours to identify
+  }
+  return null
+}
+
 test('first sign-in copies the welcome item and sets up a secret phrase that encrypts items', async ({ page }) => {
   await loadUser(page, ALICE)
   // an empty account is seeded with the anonymous account's welcome item (/_welcome), whose save
@@ -448,9 +462,15 @@ test('a corrupted visible document can still be removed remotely (removal applie
   await page.evaluate(() => void window._create('#e2e_corrupt_removed to be corrupted'))
   await expect.poll(() => savedId(page, '#e2e_corrupt_removed'), { timeout: 30_000 }).toBeTruthy()
   const id = await savedId(page, '#e2e_corrupt_removed')
-  // corrupt the document server-side (its later change events cannot decrypt), then delete it
+  // corrupt the document server-side (its later change events cannot decrypt), then delete it.
+  // CAUSAL, not a fixed sleep: the skip is what the removal below has to follow, and the app logs
+  // it — a timer only guessed how long the corrupt modify would take to arrive
+  const skipped = page.waitForEvent('console', {
+    predicate: m => m.text().includes('could not apply remote change') && m.text().includes(id!),
+    timeout: 60_000,
+  })
   await firestore().collection('items').doc(id!).update({ cipher: 'not decryptable', text: null, attr: null })
-  await page.waitForTimeout(2_000) // the corrupt modify arrives and is skipped (logged)
+  await skipped
   await firestore().collection('items').doc(id!).delete()
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_corrupt_removed', true)?.id ?? null), { timeout: 30_000 })
@@ -500,39 +520,16 @@ test('global-store updates and deletions reach a second tab of the same account'
       })
       .toBe(7)
     const ownerId = await savedId(page, '#e2e_xstore')
-    const { decryptWithSecret } = await import('../../src/crypto.js')
-    const storeDocId = await expect
-      .poll(
-        async () => {
-          const snap = await firestore()
-            .collection('items')
-            .where('user', '==', ALICE.uid)
-            .where('hidden', '==', true)
-            .get()
-          for (const d of snap.docs) {
-            const text = await decryptWithSecret(d.data().cipher, secretFor(ALICE, PHRASE))
-            if (text.includes(`global_store_${ownerId}`)) return d.id
-          }
-          return null
-        },
-        { timeout: 30_000 }
-      )
+    // ONE query/decrypt pass. `expect.poll(...).not.toBeNull()` discards the value it polled, so
+    // the old shape ran the whole account query and decrypted every hidden document a second time
+    // just to recover the id it had already found
+    let storeDocId: string | null = null
+    await expect
+      .poll(async () => (storeDocId = await findStoreDoc(`global_store_${ownerId}`)), { timeout: 30_000 })
       .not.toBeNull()
-      .then(async () => {
-        const snap = await firestore()
-          .collection('items')
-          .where('user', '==', ALICE.uid)
-          .where('hidden', '==', true)
-          .get()
-        for (const d of snap.docs) {
-          const text = await decryptWithSecret(d.data().cipher, secretFor(ALICE, PHRASE))
-          if (text.includes(`global_store_${ownerId}`)) return d.id
-        }
-        throw new Error('store wrapper vanished')
-      })
     // overwrite THAT id with visible content: the hidden side is dropped through the real
     // reducer, so the owner's store loses the value on BOTH tabs
-    await firestore().collection('items').doc(storeDocId).set({
+    await firestore().collection('items').doc(storeDocId!).set({
       user: ALICE.uid,
       time: Date.now(),
       text: '#e2e_was_a_store now visible',
@@ -566,12 +563,12 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   await expect.poll(() => savedId(page, '#e2e_orphan_owner'), { timeout: 30_000 }).toBeTruthy()
   const ownerId = await savedId(page, '#e2e_orphan_owner')
   await page.evaluate(() => void (window._item('#e2e_orphan_owner')!.global_store._e2e = 1))
-  const hiddenDocs = async () =>
-    (await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()).size
-  const base = await expect
-    .poll(hiddenDocs, { timeout: 30_000 })
-    .toBeGreaterThan(0)
-    .then(() => hiddenDocs())
+  // THIS store's own document id. earlier tests leave their stores behind, so an account-wide
+  // count cannot say WHICH document survived — and this test is about exactly one of them
+  let storeId: string | null = null
+  await expect
+    .poll(async () => (storeId = await findStoreDoc(`global_store_${ownerId}`)), { timeout: 30_000 })
+    .not.toBeNull()
   // an undecryptable hidden change arrives: the revision fails to apply it, so authority is
   // revoked AND the id stays dirty — later confirmations must not re-grant past the gap
   await firestore().collection('items').doc('e2e-corrupt-hidden').set({
@@ -581,6 +578,14 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     cipher: 'not decryptable',
   })
   await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+  // the classification pass REPORTS what it found, and a deletion would have followed that
+  // report — so the report is the causal signal that "kept" can be distinguished from "not yet
+  // deleted". armed BEFORE the delete that orphans the store
+  const reported = page.waitForEvent('console', {
+    predicate: m =>
+      m.text().includes('invalid hidden record(s) reported and quarantined') && m.text().includes(storeId!),
+    timeout: 90_000,
+  })
   // the owner item is deleted server-side while unauthoritative: its store is now orphaned
   await firestore().collection('items').doc(ownerId!).delete()
   await expect
@@ -667,8 +672,8 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   // one moment while the delete it used to queue landed later, after another client could have
   // renamed or updated that very document into a valid record. nothing is destroyed from a
   // render-time client any more (see reportInvalidHiddenCandidates)
-  await page.waitForTimeout(3_000)
-  expect(await hiddenDocs()).toBe(base)
+  await reported
+  expect((await firestore().collection('items').doc(storeId!).get()).exists, 'the reported orphan is KEPT').toBe(true)
 })
 
 // NOTE this test used to SIGN IN on the shared page itself. That route no longer exists: a

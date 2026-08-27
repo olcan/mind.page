@@ -87,7 +87,7 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     newTempId: () => 'temp' + ++ids,
     readonly: () => false,
     // OFF by default: most schedules are ordinary pages. the fixed-page rows turn it on
-    confirmsUpdates: () => false,
+    confirmsUpdates: false,
     // A REAL COORDINATOR, exactly as production wires it: the writer's staleness, refusal and
     // requeue decisions read this gate and frontier, so the arrival helpers below open real
     // deliveries rather than driving a fake predicate
@@ -2794,7 +2794,7 @@ test('a fixed page confirms before an update, and writes to the CONFIRMED target
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     // the server has 'srv' under this name; local 'stale' is gone
     confirmTarget: (name, hooks) =>
       serverAnswer([{ id: 'srv', name: 'n', item: { server: 1 } }], h.calls, () => h.ingress.gate())(name, hooks),
@@ -2821,7 +2821,7 @@ test('the direct bypass skips confirmation for our own unacknowledged create —
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await ack.promise // unacknowledged: the marker stands
@@ -2849,7 +2849,7 @@ test('a fresh same-id observation defeats the bypass: the wrapper is no longer o
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await ack.promise
@@ -3090,7 +3090,7 @@ test('markers are PER NAME: a concurrent create for another name does not clobbe
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await (data.cipher!.includes('"A"') ? ackA.promise : ackB.promise)
@@ -3139,7 +3139,7 @@ test('the PRECOMMIT marker CAS runs before the first effect, even when a fresh l
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await ack.promise // `m` stays unacknowledged, so its marker is live at read start
@@ -3198,7 +3198,7 @@ test('a create marker is cleared on FULFILMENT and on REJECTION, so neither exem
     const removed: string[] = []
     const controller = createHiddenPersistence({
       ...h.deps,
-      confirmsUpdates: () => true,
+      confirmsUpdates: true,
       notifyFailure: () => {},
       createDoc: async (id, data) => {
         h.calls.push({ op: 'create', id, text: data.cipher })
@@ -3241,7 +3241,7 @@ test('a CONFIRMED update refuses when its requiredMarker settles in the continua
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     encryptState: async state => {
       encryptions++
       return h.deps.encryptState(state)
@@ -3311,7 +3311,7 @@ test('a bypassed update REFUSES when the create settles during its encryption', 
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await ack.promise
@@ -3367,7 +3367,7 @@ test('the a/m schedule: stale lower `a` is removed, unacknowledged `m` is preser
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true,
+    confirmsUpdates: true,
     createDoc: async (id, data) => {
       h.calls.push({ op: 'create', id, text: data.cipher })
       await ack.promise // `m` stays unacknowledged
@@ -3466,7 +3466,7 @@ test('commit effects: a RELEVANT indeterminate answer produces zero effects, and
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmsUpdates: () => true, // so the RETRY confirms too, rather than updating blind
+    confirmsUpdates: true, // so the RETRY confirms too, rather than updating blind
     registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
     confirmTarget: async (name, hooks) => {
       if (++attempt == 1) throw new Error('hidden document d1 could not be classified: unparseable')

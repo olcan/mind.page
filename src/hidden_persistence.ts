@@ -9,9 +9,10 @@
 // queued save carries the latest INTENT for a name and resolves that name's current holder when it
 // runs. there is no revision protocol, no write-identity tracking, and no deletion — emptying a
 // store is an ordinary save of `{}`.
-// NOTE an application can FAIL, in which case the delivery is retained dirty and unapplied, and
-// overlapping deliveries for one document can erase one another (one receipt slot per id). both
-// are open blockers — see the ingress coordinator contract in plans/mind_page_next_steps.md.
+// NOTE a failed application is retained as a BLOCK on the coordinator's cell for that document
+// and heals only when a strictly higher delivery for the same cell reaches a terminal outcome (see
+// src/hidden_ingress.ts). The old per-id receipt slot, where overlapping deliveries for one
+// document could erase one another, is gone.
 //
 // NOTE: saving state is owned BY NAME (`isSaving`), true from the moment save() accepts an intent
 // until that generation's write reaches the SDK's queue — not until the server acknowledges. item
@@ -161,8 +162,10 @@ export type HiddenPersistenceDeps = {
   // FIXED PAGES confirm before an UPDATE as well as before a create: only there can a stale
   // lower-id holder win re-resolution against a server that no longer has it. an ordinary page's
   // full-account listener already keeps the index current, so confirming every update would buy
-  // nothing for a complete server read per write
-  confirmsUpdates: () => boolean
+  // nothing for a complete server read per write.
+  // A BOOLEAN, not a callback: this is fixed for the page's lifetime, and a getter invited a
+  // reader to wonder when it could change
+  confirmsUpdates: boolean
 }
 
 // JSON-NORMALIZING deep clone, in the payload's STRUCTURAL POSITION: the state is persisted as
@@ -317,11 +320,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // retain, and briefly stalling unrelated names is cheaper than a second reservation protocol
   const gateWritable = () => deps.gate() == 'writable'
 
-  // retained under their old names so the refuse-and-requeue call sites read unchanged: both now
-  // ask the one gate. a fresh create could never rule out that an undecoded delivery is a
-  // same-name record, and an update could never rule out that one changes its target
-  const hasPendingReceipts = () => !gateWritable()
-  const isPending = (_id: string) => !gateWritable()
+  // ONE question at every refuse-and-requeue site: is the gate writable? the two aliases this
+  // replaces were left from the per-id receipt map and were both `!gateWritable()` — one ignoring
+  // the id it took. a fresh create could never rule out that an undecoded delivery is a same-name
+  // record, and an update could never rule out that one changes its target, so there is nothing
+  // per-id to ask
 
   // THE NAME-OWNED WAKE: at most one live subscription per name, REUSED across supersession —
   // `Owed` already represents the latest intent for the name, so a parked waiter serves whatever
@@ -409,8 +412,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // new delivery outstanding. an ADOPTION target is deliberately absent from the index until
   // finalization, so "is it still the record we would choose" can never answer this; the payload
   // was built from what we believed the document to be, and that belief is what must still hold.
-  // a receipt (newest delivery) wins; otherwise the live object, whose IDENTITY changes when an
-  // application replaces it. a spurious mismatch only costs one requeue; issuing wrongly does not.
+  // the coordinator's frontier for the id (advanced by the newest delivery) plus the live object,
+  // whose IDENTITY changes when an application replaces it. a spurious mismatch costs one requeue;
+  // issuing wrongly does not.
   // TWO facts, captured together so a caller cannot compare one and forget the other: the
   // coordinator's per-id RECEIPT FRONTIER (advanced by every open() for this document; zero for
   // an id with no cell, and reading it never allocates one) AND the live wrapper's exact object
@@ -604,17 +608,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // check BEFORE the expensive work as well as after it: a refusal discovered only at the end
     // costs a secret acquisition and a full encryption per retry, and a slow decode turns that into
     // repeated builds. (this is still polling — see the requeue below — but cheap polling)
-    if (isPending(holder.id)) return false
+    if (!gateWritable()) return false
     // FIXED PAGES: confirm the target before UPDATING it, unless the direct bypass applies. a
     // stale lower-id holder the server no longer has would otherwise keep winning re-resolution
     // and receive the very update confirmation exists to prevent
     let requiredMarker: Marker | undefined
-    if (deps.confirmsUpdates() && bypassesConfirmation(name, holder)) {
+    if (deps.confirmsUpdates && bypassesConfirmation(name, holder)) {
       // A DIRECT BYPASS still carries its proof: skipping confirmation BECAUSE the marker is live
       // makes the whole attempt depend on it staying live, so if the create settles during the
       // encryption below, the exempted update must not issue
       requiredMarker = markers.get(name)
-    } else if (deps.confirmsUpdates()) {
+    } else if (deps.confirmsUpdates) {
       const result = await deps.confirmTarget(name, {
         captureReadMarker: () => markers.get(name),
         commit: (answer, readMarker) => commitTargetSlice(name, answer, readMarker),
@@ -634,7 +638,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (!confirmed) return false // the name has no holder now: the retry re-enters the create
       if (confirmed.pending_create || confirmed.adopt_id) return await attemptCreate(confirmed, generation)
       holder = confirmed
-      if (isPending(holder.id)) return false
+      if (!gateWritable()) return false
     }
     // build the payload for a target WITHOUT mutating it unless it is live in the index: a record
     // that has only been received is about to be applied, and writing our state into that object
@@ -655,7 +659,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // delivery for this document awaits applyRemote on THIS name's chain, which this write owns —
     // the writer would wait for the listener while the listener waits for the writer. requeueing
     // releases the chain, lets that application run, and fails closed in the meantime
-    if (isPending(holder.id)) return false
+    if (!gateWritable()) return false
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
     if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
@@ -676,7 +680,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const current = () => currentOwed(name, generation)
     try {
       // as in the ordinary path: refuse before confirming the index or allocating an id, not after
-      if (wrapper.adopt_id ? isPending(wrapper.adopt_id) : hasPendingReceipts()) return false
+      if (!gateWritable()) return false
       if (!wrapper.adopt_id) {
         // CONFIRMATION, updates included: one attempt never performs both a create-only index
         // confirmation and an update. the controller commits the name slice synchronously inside
@@ -721,7 +725,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const stamp = targetStamp(adoptId) // what we believe the target is, before we build for it
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
-        if (isPending(adoptId)) return false // refuse, do not await (see the ordinary path)
+        if (!gateWritable()) return false // refuse, do not await (see the ordinary path)
         // a NEWER selection (pointer moved or projection rebased): refuse and clear NOTHING — the
         // selection belongs to whoever made it, and the retry re-merges from the current state
         if (wrapper.adopt_id !== adoptId || wrapper.item !== projection) return false
@@ -749,7 +753,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // change that turns out to be unrelated, and a duplicate document is the worse outcome
       // a fresh create refuses while ANY delivery is undecoded: their names are unknown, so any of
       // them could be the same-name record that would make this create a duplicate
-      if (findSurvivor(wrapper) || hasPendingReceipts()) return false // requeue: the retry adopts it
+      if (findSurvivor(wrapper) || !gateWritable()) return false // requeue: the retry adopts it
       if (stopped) return true // see the ordinary path's no-await recheck
       if (issueWrite(name, generation, id, data, true, wrapper)) finalizeCreate(deps.index(), wrapper, id)
       return true
@@ -990,7 +994,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // the claim is made against the APPLIED index: a record that has only been RECEIVED is not
       // in byName, and treating it as the holder here would leave the name with no local entry
       // at all. choosing the write TARGET is a different question, answered at persist time by
-      // the receipt-overlaid resolver
+      // canonicalHolder against the committed index
       const index = deps.index()
       // accept the byName alias only while it is still the LIVE record for that id and name.
       // a stale alias (kept deliberately for read-only display) would otherwise take the claim

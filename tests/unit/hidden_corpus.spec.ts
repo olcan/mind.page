@@ -94,7 +94,7 @@ test('an operation that stops ITSELF keeps its own error; a queued one gets Corp
     started.resolve()
     await held.promise // genuinely mid-flight: a body that throws SYNCHRONOUSLY wins the race on
     // array order alone, so it could not tell the cause channel apart from anything
-    c.stop(boom) // sticky stop, carrying the real cause
+    c.stop({ cause: boom }) // sticky stop, carrying the real cause
     throw boom
   })
   const b = c.run(async () => {
@@ -109,6 +109,29 @@ test('an operation that stops ITSELF keeps its own error; a queued one gets Corp
   expect(bState.error, 'B gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
   expect(bRan, "and B's body never ran").toBe(false)
   expect(c.pendingBoundary('anything'), 'no read is in flight after stop').toBeUndefined()
+})
+
+test('an active `throw undefined` is still an active cause, not an ordinary stop', async () => {
+  // this is the ONLY reason the cause is wrapped. an optional bare parameter cannot tell
+  // `stop(undefined)` from `stop()`, and a caller forwarding an optional `active?.cause` would then
+  // turn every external stop into a spurious active `undefined` — silently replacing CorpusStopped
+  // for every queued operation
+  const c = createHiddenCorpus()
+  const held = deferred()
+  const started = deferred()
+  const a = c.run(async () => {
+    started.resolve()
+    await held.promise
+    c.stop({ cause: undefined })
+    throw undefined
+  })
+  const b = c.run(async () => 'b')
+  const bState = watch(b)
+  await started.promise
+  held.resolve()
+  await expect(a, 'A keeps the exact value it threw').rejects.toBeUndefined()
+  await checkpoint()
+  expect(bState.error, 'and B still gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
 })
 
 test('stop releases the caller, a queued operation and the boundary WHILE the body is still held', async () => {
@@ -141,13 +164,13 @@ test('stop releases the caller, a queued operation and the boundary WHILE the bo
   c.stop()
   await checkpoint()
   // ... all of this BEFORE releasing the hold
-  expect(aState.settled, "the active caller is released").toBe(true)
+  expect(aState.settled, 'the active caller is released').toBe(true)
   expect(aState.error, 'with CorpusStopped').toBeInstanceOf(CorpusStopped)
   expect(bState.settled, 'the queued caller is released too').toBe(true)
   expect(bState.error).toBeInstanceOf(CorpusStopped)
   expect(boundary.settled, 'and the captured boundary fulfils').toBe(true)
   expect(isPending(c, 'h'), 'membership is closed').toBe(false)
-  expect(bRan, "the queued body never ran").toBe(false)
+  expect(bRan, 'the queued body never ran').toBe(false)
   // now release the held body: its late continuation is inert
   held.resolve()
   await late.promise
@@ -212,7 +235,7 @@ test('the boundary is the ACTIVE producer, not the queue: B enqueued behind A do
   aHeld.resolve()
   await a
   await checkpoint()
-  expect(boundary.settled, "released by A alone, while unrelated B is still running").toBe(true)
+  expect(boundary.settled, 'released by A alone, while unrelated B is still running').toBe(true)
   bHeld.resolve()
   await b
 })

@@ -6308,6 +6308,10 @@
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
+  // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
+  // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
+  // discriminated contract (the allocation call below)
+  import type { DocumentChange } from 'firebase/firestore'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
   import { createHiddenCorpus } from '../hidden_corpus'
@@ -6570,8 +6574,9 @@
     // 0. the corpus first: a held server read or phrase prompt must release its caller, boundary
     //    and tail before anything downstream waits on them
     try {
-      if (active) hiddenCorpus.stop(active.cause)
-      else hiddenCorpus.stop()
+      // FORWARDED WHOLE: the wrapper is what distinguishes an active `throw undefined` from an
+      // ordinary external stop, so there is nothing to branch on here
+      hiddenCorpus.stop(active)
     } catch (e) {
       console.error('corpus stop failed:', e) // cleanup below still runs
     }
@@ -7952,15 +7957,19 @@
             // the last two catch a visible-to-hidden round trip whose second change looks
             // ordinary (raw hidden:false, absent from the index) and would otherwise leave a
             // phantom hidden representation, or strand an unhealable block
-            const changes = snapshot.docChanges() // read ONCE
-            // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary)
-            const corpusBoundaries = new Map<string, Promise<void> | undefined>()
+            // TYPED AT THE SEAM. the firebase facade is a global (see the destructuring at the top
+            // of this file), so `snapshot` is `any` and everything built from it type-checks
+            // against anything — which is how the adapter silently stopped emitting the `kind`
+            // discriminant and EVERY record became blind. this one annotation, plus the explicit
+            // return type below, restores checking exactly where an SDK `any` enters a
+            // discriminated contract. it is a TYPE-ONLY import: nothing is added to the bundle
+            const changes: DocumentChange[] = snapshot.docChanges() // read ONCE
+            // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary). one entry
+            // PER CHANGE, positionally: allocate() preserves order, so record i is change i — an
+            // id-keyed map silently collapsed two changes for the same id in one callback
+            const corpusBoundaries: (Promise<void> | undefined)[] = []
             const batch = recordAllocator.allocate(
-              // EXPLICITLY ANNOTATED. `snapshot` is untyped here, so `docChanges()` is `any` and
-              // every call built from it type-checks against anything — which is how the adapter
-              // silently stopped emitting the `kind` discriminant and EVERY record became blind.
-              // annotating the callback's return restores checking at this seam regardless
-              changes.map((change: any): AllocationRequest => {
+              changes.map((change): AllocationRequest => {
                 const id = change.doc.id
                 const rawHidden = !!change.doc.data().hidden
                 // THE PENDING-CORPUS BOUNDARY, read HERE and stored — never looked up later. by
@@ -7981,14 +7990,10 @@
                 // deleted, and a visible discriminator change carries a cipher that is no longer
                 // a hidden record at all
                 const live = change.type != 'removed' && rawHidden
-                corpusBoundaries.set(id, corpusBoundary)
+                corpusBoundaries.push(corpusBoundary)
                 return admitted
-                  ? {
-                      kind: 'admitted' as const,
-                      id,
-                      handle: hiddenIngress.open(id, live ? change.doc.data().cipher : undefined),
-                    }
-                  : { kind: 'blind' as const, id }
+                  ? { kind: 'admitted', id, handle: hiddenIngress.open(id, live ? change.doc.data().cipher : undefined) }
+                  : { kind: 'blind', id }
               }),
               // this callback's OWN state-only revocation, not a fresh outside-callback ordinal:
               // a fresh one would stale a NEWER callback's candidate that should be able to heal
@@ -8015,7 +8020,13 @@
             const applied: string[] = [] // labels of applied changes, logged in aggregate below
             let ownSkipped = 0
             let deferred = 0 // changes held back behind unsettled local intent (reconciled later)
-            const prepare = async (change: any, record: (typeof records)[number]) => {
+            const prepare = async (
+              change: DocumentChange,
+              record: (typeof records)[number],
+              // this change's OWN captured boundary, passed beside it rather than looked up: an
+              // id-keyed lookup could return a different change's producer
+              corpusPredecessor: Promise<void> | undefined
+            ) => {
               await initialization
               if (!initialized) {
                 // initialization failed, we should be signing out ...
@@ -8066,7 +8077,6 @@
                     return // finish() blocks the handle, whose blocked outcome revokes exactly once
                   }
                   applied.push(`${change.type} ${savedItem.hidden ? 'hidden ' : ''}${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
-                  const corpusPredecessor = corpusBoundaries.get(doc.id)
                   record.schedule(async () => {
                     // a delivery admitted by a corpus producer's membership applies only AFTER
                     // that producer's boundary: it must not mutate the pre-rebuild index the scan
@@ -8176,7 +8186,7 @@
             // abort another record's scheduled work
             for (const [i, change] of changes.entries()) {
               const record = records[i]
-              void prepare(change, record)
+              void prepare(change, record, corpusBoundaries[i])
                 .catch(e => {
                   // an UNOWNED preparation escape: firestore will not replay this change, so the
                   // page can no longer claim to track the server. expected blind body failures
@@ -9093,7 +9103,7 @@
     readonly: () => readonly,
     // a FIXED page has no full-account listener keeping the hidden index current, so an update
     // must confirm its target the same way a create does
-    confirmsUpdates: () => fixed,
+    confirmsUpdates: fixed,
   })
 
   // the ONE definition of what counts as an input block. the runnable flag (which shows the run
