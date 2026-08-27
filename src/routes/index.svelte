@@ -761,7 +761,13 @@
             // never existed is simply not created
             if (modified) {
               if (_.isEmpty(__item.global_store) && !hiddenItemsByName.has(name)) return // nothing to record
-              saveHiddenItem(name, _.cloneDeep(__item.global_store))
+              // a REJECTED save (non-JSON state) is settled HERE, at the owner boundary: the
+              // applied index is truthful and unchanged, so leaving the invalid value in the
+              // owner's store would re-run this whole modified branch — invalidation, listeners,
+              // the failure modal — on every later automatic save pass. restoring the last
+              // applied state makes the rejection one notification/change cycle (round 38)
+              if (!saveHiddenItem(name, _.cloneDeep(__item.global_store)))
+                __item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item ?? {})
             }
           }
 
@@ -8769,7 +8775,14 @@
     echoApplied: id => hiddenApplyOk.get(id) !== false,
     notifyFailure: (name, error) => {
       const owner = name.match(/^global_store_(.+)$/)?.[1] ?? name
-      _modal_alert(`Could not save hidden state for ${owner}: ${(error as any)?.message ?? error}`)
+      // GUARDED formatter: `error` is an arbitrary thrown value, and String() of a Symbol (a
+      // legal toJSON throw) itself throws — which would let save() escape synchronously despite
+      // its contract (round 38)
+      let detail = 'unknown error'
+      try {
+        detail = String((error as any)?.message ?? error)
+      } catch {}
+      _modal_alert(`Could not save hidden state for ${owner}: ${detail}`)
     },
     // while a name owes a change, deliveries do not touch the owner's copy (see owes()); this
     // puts it back in step once the change settles, so the owner cannot be left behind
@@ -8804,7 +8817,10 @@
       const owner = name.match(/^global_store_(.+)$/)?.[1]
       if (!owner) return
       const local = tempIdFromSavedId.get(owner) ?? owner
-      if (_exists(local)) item(local).global_store = _.cloneDeep(state)
+      // no cloneDeep: the controller clones at its boundary (see mergeAdopted/cloneState), so
+      // `state` is already this call's private copy — a second full-state clone per publication
+      // bought nothing (round 38)
+      if (_exists(local)) item(local).global_store = state
     },
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     confirmIndex: async pendingName => {
@@ -8846,10 +8862,13 @@
     return blockRegExp('\\S+_input(?:_hidden|_removed)? *')
   }
 
+  // returns false when the save was REJECTED (non-JSON state): the caller must settle the
+  // rejection — the applied index is deliberately unchanged, so without settlement the same
+  // invalid value re-triggers invalidation, listeners and the failure modal on every later pass
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')
-    hiddenPersistence.save(name, item)
+    return hiddenPersistence.save(name, item)
   }
 
   function hiddenItemChangedRemotely(name, change_type) {

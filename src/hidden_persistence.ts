@@ -70,10 +70,11 @@ export type HiddenPersistenceDeps = {
   // required: correctness depends on it, and an optional critical hook lets an adapter silently
   // reopen the invariant
   reconcileOwner: (name: string) => void
-  // reports a TERMINAL write failure (a settled permission/validation error, not an offline
-  // retry) to something the user can see. the record stays retryable, but `owes()` is a boolean
-  // and `wrapper.saving` has already settled, so without this hook the only trace was a console
-  // line while owner notifications stayed suppressed indefinitely
+  // reports a save failure to something the user can see. TWO shapes now reach it (round 38): a
+  // TERMINAL write failure (a settled permission/validation error, not an offline retry), where
+  // the record stays retryable; and a PRE-ACCEPTANCE validation rejection from save() — non-JSON
+  // state — where no owed record exists at all and save() returned false. `error` is an arbitrary
+  // thrown JavaScript value: the adapter must format it guardedly (String() of a Symbol throws)
   notifyFailure: (name: string, error: unknown) => void
   // whether the latest hidden application for this document SUCCEEDED. the write barrier is
   // settle-only by design (an unrelated listener failure must never turn a committed firestore
@@ -514,18 +515,30 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // state is updated immediately; the document payload is serialized when the queued task
     // EXECUTES, so it always carries the latest full state — including adoption merges and
     // later save() calls — and a failed earlier write is superseded rather than retried
-    save(name: string, item: any) {
-      // NORMALIZE FIRST, before any index or owed mutation: cloneState freezes the JSON
-      // representation that will be persisted, and state JSON cannot serialize (a BigInt, a
-      // throwing toJSON) must fail through the same user-visible hook as a settled write failure —
-      // not synchronously out of save() after the index was already mutated (round 37)
+    save(name: string, item: any): boolean {
+      // a READ-ONLY save never serializes: it mutates the index and persists nothing, so a plain
+      // in-memory store holding a cycle or BigInt must not be rejected for a write that will
+      // never happen (round 38)
+      const readOnly = deps.readonly()
+      // NORMALIZE FIRST for writable saves, before any index or owed mutation: cloneState freezes
+      // the JSON representation that will be persisted, and state JSON cannot serialize (a
+      // BigInt, a throwing toJSON) must fail through the same user-visible hook as a settled
+      // write failure — not synchronously out of save() after the index was already mutated
+      // (round 37). the rejection creates NO owed generation; an older valid generation already
+      // owed stays owed, so remote application is not suppressed and prior work still lands.
+      // returns false so the OWNER boundary can settle the rejection (roll its state back or
+      // suppress the repeat) — the index stays truthful and unchanged, and without that
+      // settlement the same invalid value would re-trigger invalidation and this hook on every
+      // later automatic save pass
       let intent: any
-      try {
-        intent = cloneState(item)
-      } catch (e) {
-        console.error(`hidden save for '${name}' rejected: state is not JSON-serializable:`, e)
-        return void deps.notifyFailure(name, e)
-      }
+      if (!readOnly)
+        try {
+          intent = cloneState(item)
+        } catch (e) {
+          console.error(`hidden save for '${name}' rejected: state is not JSON-serializable:`, e)
+          deps.notifyFailure(name, e)
+          return false
+        }
       // record what the name now OWES and let one routine persist it. the intent belongs to the
       // NAME: it is not attached to a wrapper (a delivery can replace or remove that record and
       // the user's change must still land), and it is re-resolved after every await.
@@ -554,7 +567,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         index.byName.set(name, holder)
       }
       holder.item = item
-      if (deps.readonly()) return // the index is updated; nothing is persisted
+      if (readOnly) return true // the index is updated; nothing is persisted
       const op = owed.get(name)
       if (op) {
         // CLONE: the baseline must stay immutable under later caller mutations and adoption merges
@@ -563,10 +576,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // a record that is QUEUED already has a task coming. one that is building, issued or
         // failed does not — and treating those as "already queued" is how failed work sat idle
         // forever, and how a save after issuance was never written
-        if (op.phase == 'queued') return
+        if (op.phase == 'queued') return true
         op.phase = 'queued'
       } else owed.set(name, { generation: ++generationSeq, localIntent: intent, phase: 'queued' })
       void enqueue(name, holder, () => persistOwed(name))
+      return true
     },
 
     // true when this name still owes the server a local change. used for NOTIFICATION, never to

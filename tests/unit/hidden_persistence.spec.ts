@@ -789,13 +789,21 @@ test('a build that fails is retried by the next save, not left idle forever', as
   expect(itemOf(created!.text)).toMatchObject({ v: 2 })
 })
 
-test('readonly mode mutates the index but never writes', async () => {
-  const { idx, calls, controller } = harness({ readonly: () => true })
+test('readonly mode mutates the index but never writes — and never serializes', async () => {
+  const failures: string[] = []
+  const { idx, calls, controller } = harness({ readonly: () => true, notifyFailure: n => void failures.push(n) })
   controller.save('n', { v: 1 })
   await flush()
   expect(idx.byName.get('n')!.item).toEqual({ v: 1 })
   controller.save('n', {}) // emptying is an ordinary save now, and is equally suppressed
   await flush()
+  // a read-only save NEVER serializes (round 38): a plain in-memory store holding non-JSON state
+  // must not be rejected for a write that will never happen
+  const cyclic: any = { bad: BigInt(1) }
+  cyclic.self = cyclic
+  expect(controller.save('n2', cyclic), 'accepted: nothing will be written').toBe(true)
+  expect(idx.byName.get('n2')!.item, 'the index still updates').toBe(cyclic)
+  expect(failures, 'no failure for a write that cannot happen').toEqual([])
   expect(calls).toEqual([])
 })
 
@@ -1463,6 +1471,7 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
   // its already-encrypted v1 payload. and the refusal must clear nothing: the selection is v2's
   const gate = deferred<void>()
   let gated = false
+  let gatedPayload: string | undefined
   const published: any[] = []
   const h = harness()
   const { idx, calls } = h
@@ -1476,6 +1485,7 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
     encryptState: async state => {
       if (!gated) {
         gated = true
+        gatedPayload = state.text // what the FIRST attempt is encrypting, captured at entry
         await gate.promise // hold the v1 attempt inside encryption
       }
       return { cipher: 'cipher:' + state.text } // the harness default shape (see itemOf)
@@ -1485,6 +1495,11 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
   for (let i = 0; i < 4; i++) await flush() // reach the encryption gate with the v1 projection
   const pending = idx.byName.get('n')!
   expect(pending.adopt_id).toBe('a1')
+  // PRECONDITION (round 38): the first attempt actually reached encryption CARRYING v1 before the
+  // replacement registers — otherwise a scheduling change could let v2 arrive first and this test
+  // would produce its exact end state without ever exercising the same-id ABA
+  expect(gated, 'the v1 attempt is inside encryption').toBe(true)
+  expect(JSON.parse(gatedPayload!).item.shared, 'and it is encrypting v1').toBe('v1')
   // the replacement arrives while the v1 attempt encrypts: same id, same name, v2
   registerHidden(idx, { id: 'a1', name: 'n', item: { shared: 'v2' } }, (p, f) => controller.mergeAdopted(p, f))
   expect(pending.adopt_id, 'freshly re-adopted to the same id').toBe('a1')
@@ -1554,16 +1569,51 @@ test('non-JSON state fails through notifyFailure at save time, mutating nothing'
   // so its failure must reach the same user-visible hook as a settled write failure — and must
   // reach it BEFORE any index or owed mutation, or the failed save would leave a claimed name
   const failures: string[] = []
+  const errors: unknown[] = []
   const h = harness()
   const { idx, calls } = h
   const controller = createHiddenPersistence({
     ...h.deps,
-    notifyFailure: name => void failures.push(name),
+    notifyFailure: (name, e) => void (failures.push(name), errors.push(e)),
   })
-  controller.save('n', { bad: BigInt(1) })
+  expect(controller.save('n', { bad: BigInt(1) }), 'rejected').toBe(false)
   for (let i = 0; i < 4; i++) await flush()
   expect(failures, 'the user-visible hook fired').toEqual(['n'])
   expect(idx.byName.has('n'), 'no claimed name').toBe(false)
-  expect(controller.owes('n'), 'nothing owed').toBe(false)
+  expect(controller.owes('n'), 'the rejected save creates no owed generation').toBe(false)
   expect(calls.filter(c => c.op == 'create' || c.op == 'update')).toHaveLength(0)
+
+  // a legal toJSON can throw a SYMBOL, which String() rethrows on — the hook must receive the raw
+  // value and adapters must format it guardedly (round 38; the production adapter is guarded)
+  expect(
+    controller.save('n', {
+      toJSON: () => {
+        throw Symbol('bad')
+      },
+    } as any),
+    'rejected too'
+  ).toBe(false)
+  expect(typeof errors.at(-1), 'the raw thrown value reaches the hook').toBe('symbol')
+})
+
+test('rejecting a NEW invalid value does not erase an older valid owed generation', async () => {
+  // round-38 scoping: "creates no owed generation" must not read as "clears owed" — the older
+  // valid work is still owed, still retryable, and remote application stays suppressed for it
+  const gate = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await gate.promise
+      return { cipher: 'cipher:' + state.text }
+    },
+  })
+  expect(controller.save('n', { mine: 1 }), 'valid save accepted').toBe(true)
+  await flush()
+  expect(controller.owes('n'), 'the valid generation is owed').toBe(true)
+  expect(controller.save('n', { bad: BigInt(1) }), 'later invalid value rejected').toBe(false)
+  expect(controller.owes('n'), 'the OLDER generation is still owed').toBe(true)
+  gate.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'create'), 'and it still lands').toHaveLength(1)
 })
