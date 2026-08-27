@@ -69,6 +69,8 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     // deliveries rather than driving a fake predicate
     gate: () => ingress.gate(),
     receiptFrontier: id => ingress.receiptFrontier(id),
+    whenActionable: () => ingress.whenActionable(),
+    whenWritable: () => ingress.whenWritable(),
     ...overrides,
   }
   return { idx, calls, deps, ingress, controller: createHiddenPersistence(deps) }
@@ -1860,4 +1862,106 @@ test('stop leaves an ISSUED generation\'s saving mirror alone (it is owned by it
   w.saving = mirror
   controller.stop()
   expect(w.saving, 'an in-flight write is still saving: the mirror is its SDK result to clear').toBe(mirror)
+})
+
+// ---- the wake: gate first, off the chain (round 58) ----
+
+test('a save while the gate is PENDING does no secret work at all until the delivery applies', async () => {
+  let acquisitions = 0
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, acquireSecret: async () => void ++acquisitions })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  // an unrelated document is mid-decode: the gate is global, so it holds every writer
+  const other = h.ingress.open('d2', 'cipher:d2')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  // THE POINT: acquireSecret PROMPTS for a phrase in production. doing that for a write that
+  // cannot issue is user-visible damage, not just wasted work
+  expect(acquisitions, 'no phrase prompt while the gate is shut').toBe(0)
+  expect(h.calls.filter(c => c.op == 'update'), 'and no write').toHaveLength(0)
+  // the delivery applies, the gate opens, and the wake resumes the writer
+  other.ready(async () => {})
+  expect(await other.done).toBe('applied')
+  for (let i = 0; i < 8; i++) await flush()
+  expect(acquisitions, 'exactly one acquisition, after the wake').toBe(1)
+  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'and the write went out').toEqual(['d1'])
+})
+
+test('a BLOCKED gate is reported once and waits for healing, instead of polling forever', async () => {
+  const failures: string[] = []
+  let acquisitions = 0
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => void ++acquisitions,
+    notifyFailure: n => void failures.push(n),
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  // a delivery for an unrelated document fails to apply and is RETAINED as a block: only a
+  // strictly higher delivery in ITS cell can clear that
+  const bad = h.ingress.open('d2', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(acquisitions, 'no secret work for a write that cannot issue').toBe(0)
+  expect(h.calls.filter(c => c.op == 'update'), 'no write').toHaveLength(0)
+  expect(failures, 'the user is told ONCE, not on every wake').toEqual(['n'])
+  expect(controller.owes('n'), 'still owed: healing can still let it through').toBe(true)
+  // healing: a strictly higher delivery in d2's cell succeeds
+  const heal = h.ingress.open('d2', 'cipher:good')
+  heal.ready(async () => {})
+  expect(await heal.done).toBe('applied')
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'the healed write issues').toEqual(['d1'])
+  expect(failures, 'and no second report').toEqual(['n'])
+})
+
+test('a second block while already parked adds no report: parking is what bounds the reporting', async () => {
+  // this is the property that actually holds, and it comes from the LOOP, not a flag: a blocked
+  // writer waits on whenWritable, so a further block cannot wake it and cannot re-report. a
+  // reported-once flag was tried here and deleted — no schedule could tell it apart
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const bad1 = h.ingress.open('d2', 'cipher:bad1')
+  bad1.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad1.done).toBe('blocked')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 6; i++) await flush()
+  expect(failures, 'reported for this generation').toEqual(['n'])
+  // a SECOND corrupt delivery lands in a different cell before the first is healed, so healing
+  // d2 leaves the gate blocked by d3 and the writer parks again
+  const bad2 = h.ingress.open('d3', 'cipher:bad2')
+  bad2.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad2.done).toBe('blocked')
+  const heal2 = h.ingress.open('d2', 'cipher:good')
+  heal2.ready(async () => {})
+  expect(await heal2.done).toBe('applied')
+  for (let i = 0; i < 8; i++) await flush()
+  expect(failures, 'STILL one report: the writer never woke to re-report').toEqual(['n'])
+  // healing the second cell finally lets it through
+  const heal3 = h.ingress.open('d3', 'cipher:good')
+  heal3.ready(async () => {})
+  expect(await heal3.done).toBe('applied')
+  for (let i = 0; i < 8; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
+  expect(failures, 'and never a second report').toEqual(['n'])
+})
+
+test('a superseding save cancels the older generation wake, and only the newest state is written', async () => {
+  const h = harness()
+  const controller = createHiddenPersistence(h.deps)
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const held = h.ingress.open('d2', 'cipher:d2')
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 4; i++) await flush()
+  controller.save('n', { v: 2 }) // supersedes while the first is parked on its wake
+  held.ready(async () => {})
+  expect(await held.done).toBe('applied')
+  for (let i = 0; i < 10; i++) await flush()
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(updates, 'one write, not one per parked generation').toHaveLength(1)
+  expect(itemOf(updates[0].text), 'carrying the newest intent').toEqual({ v: 2 })
 })

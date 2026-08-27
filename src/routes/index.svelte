@@ -8933,6 +8933,10 @@
     // reads these instead of the listener's own receipt map
     gate: () => hiddenIngress.gate(),
     receiptFrontier: id => hiddenIngress.receiptFrontier(id),
+    // the level-triggered wakes: a writer waits on a real coordinator transition instead of
+    // polling, and a BLOCKED gate is reported once rather than retried forever
+    whenActionable: () => hiddenIngress.whenActionable(),
+    whenWritable: () => hiddenIngress.whenWritable(),
     // MERGE ONLY (see the dep's docstring): rebase and owner publication live in the controller
     adopt: (pending, found) => _.defaultsDeep(pending.item, found.item),
     syncOwner: (name, state) => {

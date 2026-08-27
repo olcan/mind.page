@@ -66,6 +66,13 @@ export type HiddenPersistenceDeps = {
   // the coordinator's per-id receipt frontier: advanced by every delivery opened for that
   // document, zero for an id with no cell. reading it must never allocate a cell
   receiptFrontier: (id: string) => number
+  // THE WAKES, level-triggered and cancellable (see the coordinator's waits). `whenActionable`
+  // resolves on writable OR blocked — a writer's blocked behaviour cannot run off a
+  // writable-only promise — and `whenWritable` only on writable, which is what a blocked writer
+  // waits on for healing. both replace the timer requeue: a retained block used to hot-poll
+  // forever, and every pending state cost a chain turn and a secret acquisition
+  whenActionable: () => { promise: Promise<'blocked' | 'writable'>; cancel(): void }
+  whenWritable: () => { promise: Promise<void>; cancel(): void }
   // publishes an EXACT state to whatever owns a name (the owner item's in-memory global_store),
   // as a clone, never an alias. the owner saves fresh full-state snapshots, so a merge it never
   // sees is erased on its next save — this is how it sees one
@@ -258,10 +265,90 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const isPending = (_id: string) => !gateWritable()
 
 
-  // a requeue must not spin while a decode runs: the decode is not on this name's chain, so an
-  // immediate retry can re-check the same unchanged state forever as a microtask loop. one
-  // macrotask turn lets the listener make progress between attempts
-  const yieldToDecoding = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+  // THE GENERATION-OWNED WAKE: at most one live subscription per name, cancelled when the
+  // generation is superseded or ingress stops. without this, a wake outlives its generation and
+  // resolves into work nobody owes
+  const wakes = new Map<string, { cancel(): void }>()
+  function cancelWake(name: string) {
+    wakes.get(name)?.cancel()
+    wakes.delete(name)
+  }
+  // waits for a WRITABLE gate before any secret acquisition, target resolution, wrapper creation,
+  // owner publication or encryption — the design's "wait until gate() is writable" step. returns
+  // false when this generation no longer owns the name (superseded, stopped, or blocked).
+  // `blocked` is a real outcome, not a retry: it is delivered by whenActionable precisely so the
+  // writer can report it once and then wait for HEALING on whenWritable, rather than hot-polling
+  // a state only a later successful delivery can clear
+  async function awaitWritable(name: string): Promise<boolean> {
+    for (;;) {
+      // NAME-SCOPED, not generation-scoped: the intent belongs to the name, so a save that
+      // supersedes while this is parked is served by this same wake — persistOwed re-reads the
+      // current generation when it runs. scoping it to a generation meant a supersession had to
+      // cancel and re-arm, and the "already queued" shortcut then dropped the work entirely
+      if (stopped || !owed.has(name)) return false
+      const g = deps.gate()
+      if (g == 'writable') return true
+      cancelWake(name)
+      // blocked waits ONLY for writable: whenActionable would resolve immediately on the same
+      // blocked level and spin. pending waits on whenActionable so a block that appears while
+      // waiting is reported rather than silently waited through
+      const sub: { promise: Promise<unknown>; cancel(): void } =
+        g == 'blocked' ? deps.whenWritable() : deps.whenActionable()
+      wakes.set(name, sub)
+      if (g == 'blocked') reportBlocked(name)
+      await sub.promise
+      if (wakes.get(name) === sub) wakes.delete(name)
+      // LOOP rather than trust the level: the wake resolved for the gate at that instant, and a
+      // new delivery can open before this continuation runs
+    }
+  }
+  // THE SCHEDULING ENTRY POINT: wait for a writable gate OFF the name chain, then take the chain.
+  // this ordering is the whole point — persistOwed runs inside the chain, and a delivery's
+  // application enqueues on that same chain, so a writer that waits while holding it deadlocks
+  // against the very delivery that would release it
+  function scheduleOwed(name: string, holder?: HiddenWrapper) {
+    // MIRROR SYNCHRONOUSLY. saving_global_store must be true the moment the user saves — that is
+    // part of the window contract in this file's header — and the gate wait below happens BEFORE
+    // enqueue, which is what normally installs the mirror. this placeholder covers exactly that
+    // new window; enqueue supersedes it, and the finally below settles it either way so nothing
+    // awaiting it hangs
+    let resolvePlaceholder: (() => void) | undefined
+    let placeholder: Promise<string> | undefined
+    if (holder) {
+      placeholder = new Promise<string>(res => (resolvePlaceholder = () => res(holder.id)))
+      placeholder.catch(() => {})
+      holder.saving = placeholder
+    }
+    void (async () => {
+      try {
+        if (!owed.has(name)) return
+        if (!(await awaitWritable(name))) return
+        void enqueue(name, holder, () => persistOwed(name)) // installs the real mirror
+      } finally {
+        resolvePlaceholder?.()
+        // never leave a resolved placeholder standing as the mirror: it reads as truthy, so the
+        // owner would show a save in progress forever. enqueue's replacement is left alone
+        if (holder && holder.saving === placeholder) holder.saving = null
+      }
+    })()
+  }
+
+  // reported ONCE PER BLOCK EPISODE, which is what the loop above already gives: a blocked writer
+  // parks on whenWritable and can only reach this line again after an intervening writable gate.
+  // so a permanently corrupt record notifies once, not on every wake, and two genuinely distinct
+  // incidents are two reports. an extra reported-once FLAG was tried and removed: no schedule
+  // could distinguish it, because the parking is what bounds the reporting
+  function reportBlocked(name: string) {
+    const op = owed.get(name)
+    if (!op) return
+    const holder = deps.index().byName.get(name)
+    if (holder?.saving) holder.saving = null // it is not saving, and will not be until healed
+    try {
+      deps.notifyFailure(name, new Error(`hidden ingress blocked: '${name}' cannot be written until a later change for the affected document applies`))
+    } catch (e) {
+      console.error('blocked notification failed:', name, e)
+    }
+  }
 
   // a value that CHANGES if a document is removed, renamed, replaced under the same id, or has a
   // new delivery outstanding. an ADOPTION target is deliberately absent from the index until
@@ -514,6 +601,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const generation = op.generation
     const current = () => currentOwed(name, generation)
     try {
+      // the gate may have closed while this task sat in the chain queue. RECHECK, but never wait
+      // here: persistOwed runs ON the name chain, and the delivery that would reopen the gate
+      // applies on that same chain — awaiting inside it deadlocks (the reason the target checks
+      // below refuse rather than await). rescheduling waits OFF the chain instead
+      if (deps.gate() != 'writable') {
+        const now = current()
+        if (!now) return
+        now.phase = 'queued'
+        scheduleOwed(name)
+        return
+      }
       // the phrase is acquired BEFORE any payload is resolved, and single-flighted by the
       // dependency: encryptState must not prompt, because a prompt between the last resolution
       // and the write could register a lower-id record
@@ -522,16 +620,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (await attemptWrite(name, generation)) return
       // the target moved: requeue rather than retry here, which would hold the chain and
       // re-encrypt against a view that cannot change. this does NOT order the retry behind the
-      // remote application — that may be on a different name chain
+      // remote application — that may be on a different name chain. no yield is needed any more:
+      // awaitWritable at the top of the retry blocks on a real coordinator transition, so a
+      // requeue can no longer spin against an unchanged view
       const now = current()
       if (!now) return
       now.phase = 'queued'
-      // yield ONLY when a decode is outstanding: that is the case a bare requeue could spin on,
-      // since the decode is not on this name's chain. an ordinary retarget has already observed
-      // the change it is reacting to and should retry immediately
-      const requeue = () => void enqueue(name, undefined, () => persistOwed(name))
-      if (hasPendingReceipts()) void yieldToDecoding().then(requeue)
-      else requeue()
+      scheduleOwed(name)
     } catch (e) {
       const now = current()
       if (now) now.phase = 'failed' // retryable: a later save schedules it again
@@ -558,6 +653,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     stop(): undefined {
       if (stopped) return undefined
       stopped = true
+      // every generation-owned observer, first: a wake resolving after stop would re-enter
+      // persistOwed for a page that can never write again
+      for (const name of [...wakes.keys()]) cancelWake(name)
       const notifications: Array<[string, unknown]> = []
       for (const [name, op] of owed) {
         // ORDER MATTERS: the issued exclusion comes FIRST. an issued generation is owned by its
@@ -695,7 +793,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         }
         return true
       }
-      void enqueue(name, holder, () => persistOwed(name))
+      scheduleOwed(name, holder)
       return true
     },
 

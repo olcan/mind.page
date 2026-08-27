@@ -236,11 +236,13 @@ export function createHiddenIngress() {
   // the INITIAL wait: resolves when the gate is writable OR blocked (the writer's required
   // blocked behaviour — clear the saving mirror, notify once — can never run off a writable-only
   // promise); pending keeps waiting
-  const whenActionable = (): Subscription<Gate> =>
+  // the return type is NARROWED to what this actually resolves with: 'pending' never reaches a
+  // waiter, and saying so lets a consumer's blocked branch be exhaustive rather than defensive
+  const whenActionable = (): Subscription<'blocked' | 'writable'> =>
     subscribe(actionableWaiters, () => {
       const g = gate()
       return g == 'pending' ? undefined : [g]
-    })
+    }) as Subscription<'blocked' | 'writable'>
 
   // the HEALING wait, installed once by the blocked handler: resolves only on writable. reusing
   // whenActionable while already blocked would resolve immediately and spin
