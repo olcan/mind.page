@@ -160,48 +160,19 @@ export function planTargetSlice({
   return { remove, register, preservedMarker, requiredMarker }
 }
 
-// ---- point-answer normalization -------------------------------------------------------------
-// A post-initialization scan intersecting the live listener takes ONE fresh point read per id. The
-// application is deliberately ASYMMETRIC (round 54).
+// ---- point answers ---------------------------------------------------------------------------
+// What ONE fresh point read said about a document. The scan (src/hidden_scan.ts) collects these for
+// the ids a listener record raced, and applies them in strict precedence over the full query's own
+// row: a point answer REPLACES its raw entry, because iterating the older row after the fresher
+// answer moves the index backward again.
+//
+// NOTE `normalizeScan` used to live here, merging raw rows and point answers into an ordered apply
+// list. The shared scan now does that in ONE precedence pass per document — admitted, then point
+// answer, then raw — which is what removed the class of defect where a stale raw row could veto
+// fresher evidence. The function had no production caller left and is deleted rather than
+// generalized to keep it (review 73/74).
 
 export type PointAnswer =
   | { kind: 'hidden'; name: string; wrapper: unknown }
   // shared-visible, absent, or nonshared. all three mean the same thing here
   | { kind: 'not-hidden' }
-
-export type NormalizedScan = {
-  // rows entering hidden registration through the production apply body, in CANONICAL id order
-  // even when the point reads completed out of order — so a pending create cannot adopt a higher
-  // duplicate first
-  apply: { id: string; name: string; wrapper: unknown }[]
-}
-// NOTE there is no `suppress` list. OMISSION from `apply` already expresses suppression, and the
-// design's `skippedIds` is a different, caller-specific concept — conflating them would invite a
-// consumer to treat a suppressed row as skipped work. a not-hidden point answer makes ZERO
-// production-body calls: a blind change is by definition neither hidden nor outstanding when
-// received, so its completed ordinary task or existing deferral owns visible state, and replaying
-// the visible side would bypass hasLocalIntent/deferRemoteChange and overwrite an unsaved edit the
-// live callback deliberately deferred
-
-/**
- * Applies point answers over a raw scan result. Each answer REPLACES its raw entry — collected
- * first and applied once, because applying a fresh answer and then iterating the older full-query
- * row moves the index backward again.
- */
-export function normalizeScan(
-  raw: { id: string; name: string; wrapper: unknown }[],
-  answers: Map<string, PointAnswer>
-): NormalizedScan {
-  const apply: { id: string; name: string; wrapper: unknown }[] = []
-  for (const row of raw) {
-    const point = answers.get(row.id)
-    if (!point) {
-      apply.push(row) // no intersection: the raw row stands
-      continue
-    }
-    if (point.kind == 'hidden') apply.push({ id: row.id, name: point.name, wrapper: point.wrapper })
-    // a not-hidden answer is simply not applied
-  }
-  apply.sort((a, b) => compareIds(a.id, b.id))
-  return { apply }
-}

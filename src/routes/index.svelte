@@ -6330,7 +6330,12 @@
     type HiddenWrapper,
   } from '../hidden'
   import { classifyHiddenDocument } from '../hidden_confirm'
-  import { scanHiddenDocuments, type ScanDeps, type ScanRow as HiddenScanRow } from '../hidden_scan'
+  import {
+    resolveDeliveryEvidence,
+    scanHiddenDocuments,
+    type ScanDeps,
+    type ScanRow as HiddenScanRow,
+  } from '../hidden_scan'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -6509,6 +6514,20 @@
   // producers — a create/fixed-update confirmation and the post-prompt candidate scan — read the
   // account's hidden documents exactly this way; the ordering, grouping and fail-closed rules live
   // in the module
+  // ONE fresh point read of a document: server-confirmed, decrypted, purely classified. shared by
+  // the scan's intersection resolution and by a DELIVERY whose own payload cannot speak for the
+  // hidden side (see speaksForHiddenSide) — the same question, so the same read.
+  // it returns the SNAPSHOT too, because a delivery that learns the document is now hidden has to
+  // apply the CURRENT document through the ordinary reducers, not the stale payload it was handed
+  async function pointReadHidden(id: string, decrypt: (data: any, id: string) => Promise<any> = decryptHiddenDoc) {
+    const snap = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+    // a document that does not exist is definite absence, which is a not-hidden answer here
+    if (!snap.exists()) return { classification: { kind: 'not-hidden' as const }, snap: undefined, item: undefined }
+    const item = await decrypt(snap.data(), id)
+    return { classification: classifyHiddenDocument(id, !!item.hidden, item.text), snap, item }
+  }
+  const decryptHiddenDoc = (data: any, id: string) => decryptItem(Object.assign(data, { id }))
+
   function hiddenScanDeps(
     run: { publishMembership: (ids: Iterable<string>) => void; cancelled: () => boolean; cancellation: Promise<never> },
     // decrypts ONE raw document. the session `secret` is not always the right key: the post-prompt
@@ -6538,12 +6557,7 @@
       },
       cancellation: run.cancellation,
       classify,
-      pointRead: async id => {
-        const fresh = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
-        // a document that does not exist is definite absence, which is a not-hidden answer here
-        if (!fresh.exists()) return { kind: 'not-hidden' as const }
-        return classify(id, fresh.data())
-      },
+      pointRead: async id => (await pointReadHidden(id, decrypt)).classification,
     }
   }
   // ACTIVE callback contexts: each snapshot callback's lease with the handles it opened, removed
@@ -8085,6 +8099,27 @@
                     // producer's — not whichever one happens to be active now
                     if (corpusPredecessor) await corpusPredecessor
                     if (ingressStopped) throw new Error('hidden ingress stopped')
+                    // FINAL-STATE EVIDENCE for a payload that cannot speak for the hidden side —
+                    // the rule, and why withholding is not enough, are in resolveDeliveryEvidence
+                    // (src/hidden_scan.ts). taken HERE: after the corpus boundary, and before the
+                    // name chains below, which the answer determines as much as the effects do
+                    const evidence = await resolveDeliveryEvidence({
+                      speaksForHidden: speaksForHiddenSide({ fixed, removed }),
+                      payload: { hidden: !!savedItem!.hidden, removed, snap: doc, item: savedItem },
+                      pointRead: () => pointReadHidden(doc.id),
+                    })
+                    if (ingressStopped) throw new Error('hidden ingress stopped')
+                    const saved = evidence.item
+                    const gone = evidence.removed
+                    const applyDoc: any = evidence.snap
+                    const target = evidence.wrapper ?? wrapper
+                    // a re-read that found the document HIDDEN is a transition, not the removal the
+                    // payload described: re-type it from current presence so the ordinary reducers
+                    // install it
+                    const applyChange: any =
+                      evidence.snap === doc
+                        ? change
+                        : { ...change, type: hiddenIndex().byId.has(doc.id) ? 'modified' : 'added', doc: evidence.snap }
                     return hiddenPersistence
                       .applyRemote(
                         // IN-TURN: the affected name chains are read HERE, from the index as it
@@ -8093,8 +8128,8 @@
                         // adopting name of a document absent from byId until finalization.
                         // decided during preparation, an overlapping same-id B->C transition
                         // could capture A/C while its predecessor had not installed B
-                        savedItem!.hidden && !removed
-                          ? [hiddenPersistence.nameForDocument(doc.id), wrapper!.name]
+                        saved.hidden && !gone
+                          ? [hiddenPersistence.nameForDocument(doc.id), target!.name]
                           : [hiddenPersistence.nameForDocument(doc.id)],
                         () => {
                           // STOP REJECTS here rather than returning: a handle already `running`
@@ -8108,12 +8143,12 @@
                           const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
                           if (local?.savedId && hasLocalIntent(local))
                             throw new Error(`local intent held for ${doc.id}`)
-                          if (savedItem!.hidden) {
+                          if (saved.hidden) {
                             // VISIBLE -> HIDDEN, both halves in this turn
-                            removeVisibleForHidden(doc)
+                            removeVisibleForHidden(applyDoc)
                             // NOTE no own-pending check: isOwnPendingChange returns false for a
                             // hidden saved item by construction, so the branch could never fire
-                            applyRemoteChangeAndSupersede(change, doc, savedItem)
+                            applyRemoteChangeAndSupersede(applyChange, applyDoc, saved)
                             hiddenCleanupPending = true // validity may have changed
                             return
                           }
@@ -8122,28 +8157,22 @@
                           // its downstream notification, not a bare index mutation: a
                           // global_store_<owner> document that becomes visible must not leave the
                           // owner's store and its change notification stale.
-                          //
-                          // ... EXCEPT when the delivery does not speak for the hidden side at all
-                          // (see speaksForHiddenSide in src/snapshot.ts and the design's "What a
-                          // removal is evidence OF"): a fixed page's removal means the document
-                          // left the SHARED SET, which includes TURNING HIDDEN, so acting on it
-                          // would drop the very record a scan or confirmation just registered
-                          const { removed: dropped } = speaksForHiddenSide({ fixed, removed })
-                            ? removeHidden(hiddenIndex(), doc.id)
-                            : { removed: undefined }
+                          // this is now always backed by evidence: a payload that could not speak
+                          // for the hidden side was replaced above by a fresh read
+                          const { removed: dropped } = removeHidden(hiddenIndex(), doc.id)
                           if (dropped) {
-                            hiddenItemChangedRemotely(dropped.name, change.type)
+                            hiddenItemChangedRemotely(dropped.name, applyChange.type)
                             hiddenCleanupPending = true
                           }
-                          if (removed) return void applyRemoteChangeAndSupersede(change, doc, savedItem)
+                          if (gone) return void applyRemoteChangeAndSupersede(applyChange, applyDoc, saved)
                           // NORMALIZE the visible half from CURRENT presence, so a redelivery
                           // repairs an absent row and a partially installed one identically
                           const present = indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)
                           const visible =
-                            change.type == (present ? 'modified' : 'added')
-                              ? change
-                              : ({ ...change, type: present ? 'modified' : 'added', doc } as any)
-                          applyRemoteChangeAndSupersede(visible, doc, savedItem)
+                            applyChange.type == (present ? 'modified' : 'added')
+                              ? applyChange
+                              : ({ ...applyChange, type: present ? 'modified' : 'added', doc: applyDoc } as any)
+                          applyRemoteChangeAndSupersede(visible, applyDoc, saved)
                         }
                       )
                       .then(

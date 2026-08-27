@@ -493,9 +493,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const clearMarker = () => {
       if (issuedMarker && markers.get(name)?.token === issuedMarker.token) markers.delete(name)
     }
-    // A SYNCHRONOUS SDK THROW leaks both otherwise: the waiter stays registered for the page's
-    // lifetime and the create marker stays installed, exempting a document that was never written
-    // from every later confirmation
+    // A SYNCHRONOUS SDK THROW would otherwise leak the waiter, which stays registered for the
+    // page's lifetime. clearing the marker here is HYGIENE rather than a rule: finalizeCreate runs
+    // only after this returns, so the marker points at a wrapper that never entered the index —
+    // absent from `local`, so no plan can preserve it; a different object from any holder, so the
+    // bypass cannot match it; and overwritten by the next create for this name
     let write: Promise<unknown>
     try {
       write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)

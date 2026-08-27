@@ -2141,9 +2141,9 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
   ).toHaveLength(1)
 })
 
-// ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
-// these isolate the per-id receipt frontier and the global gate — the two halves of the issue
-// token that ARE pinned. TargetToken.wrapper is not: see the note at the end of this file
+// ---- the receipt frontier and the global gate are independently necessary (rounds 58, 59) ----
+// these isolate the two facts a write's issue decision rests on. the third — a captured wrapper
+// identity — is DELETED (round 74): see the corpus-replacement row below for what catches that
 
 test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
   // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
@@ -2427,16 +2427,17 @@ for (const [label, hold] of [
     ).toHaveLength(0)
   })
 
-// THE `TargetToken.wrapper` DECISION, settled (review 73 asked for it). The wrapper-only mutation
-// stayed green against the whole suite INCLUDING the landed corpus seam — but that only meant no
-// test drove the schedule it exists for. The schedule is below, and with it the mutation fails.
+// THE SCHEDULE THE DELETED `TargetToken.wrapper` EXISTED FOR (settled in review 73/74). A CORPUS
+// registration replaces the indexed object for an id WITHOUT advancing that id's receipt frontier,
+// because no delivery is opened — the reachable case is a phrase prompt, where name A is
+// mid-encryption when name B's acquireSecret runs the post-prompt candidate scan and it registers
+// fresh rows for MANY names, A's id among them.
 //
-// What the seq half cannot see: a CORPUS registration replaces the indexed object for an id
-// WITHOUT advancing that id's receipt frontier, because no delivery was opened. The reachable case
-// is a phrase prompt: name A is mid-encryption when name B's acquireSecret runs the post-prompt
-// candidate scan, which registers fresh rows for MANY names — A's id among them. Its adoption merge
-// may have rebased A's projection onto server state A's in-flight payload never saw, so issuing
-// against the stale object overwrites it. The frontier is unchanged throughout.
+// The frontier cannot see it. What DOES is `canonicalHolder(name) !== holder`, which this row
+// pins: registerHidden does byId.set, so the holder identity changes, the attempt refuses, and the
+// retry builds against the CURRENT record. (On the adoption path the equivalent is
+// invalidateAdopters clearing the pointer.) That is why the captured wrapper identity was a fourth
+// overlapping fact and is gone.
 
 test('a CORPUS registration replaces the target object without a delivery, and the write refuses', async () => {
   const encrypting = deferred<void>()
@@ -2467,8 +2468,8 @@ test('a CORPUS registration replaces the target object without a delivery, and t
   expect(encryptions, 'the stale-target attempt REFUSED and the retry built again').toBe(2)
   const updates = h.calls.filter(c => c.op == 'update')
   expect(updates, 'exactly one write').toHaveLength(1)
-  // WITHOUT the wrapper half the first attempt issues, carrying `server: 1` — the state the
-  // registration had just replaced, silently reverting it
+  // WITHOUT the holder-identity check the first attempt issues, carrying `server: 1` — the state
+  // the registration had just replaced, silently reverting it
   expect(itemOf(updates[0].text), 'built against the CURRENT record, not the replaced one').toEqual({
     mine: 1,
     server: 2,
@@ -3028,7 +3029,7 @@ test('STOP disposes an offline write‘s waiter, whose sdk promise will never se
   expect(spy.cancelled, 'stop owns what nothing else can reach').toEqual(['d1'])
 })
 
-test('a SYNCHRONOUS sdk throw disposes the waiter and clears the create marker', async () => {
+test('a SYNCHRONOUS sdk throw disposes the waiter, and leaves nothing a marker could exempt', async () => {
   const spy = echoSpy()
   const h = harness()
   const boom = new Error('sdk refused synchronously')

@@ -162,11 +162,12 @@ test('a throw partway through the batch enters sticky stop BEFORE the caller rej
   // registration, the adoption merge and the owner publication all mutate: row one lands and row
   // two throws, so the index is partially applied and ingress must not stay live over it
   const boom = new Error('adoption merge failed')
+  const mutated: string[] = []
   const h = adoptHarness({
     register: rows => {
       for (const row of rows) {
         if (row.id == 'b') throw boom
-        // row one has already mutated the index
+        mutated.push(row.id) // row one really did land: the index is PARTIALLY applied
       }
       return undefined
     },
@@ -178,19 +179,21 @@ test('a throw partway through the batch enters sticky stop BEFORE the caller rej
   expect(h.isStopped(), 'and stop was observable first').toBe(true)
   expect(await queuedState, 'the queued corpus operation is stopped').toBeInstanceOf(CorpusStopped)
   expect(queuedRan, 'and its body never ran').toBe(false)
-  expect(h.log, 'nothing is published from a partially applied index').toEqual(['stop'])
+  expect(mutated, 'row one landed before row two threw — the index is partially applied').toEqual(['a'])
+  expect(h.log, 'and nothing is published from it').toEqual(['stop'])
 })
 
 test('a stop winning the post-scan continuation gap publishes nothing and persists nothing', async () => {
-  // the corpus turn has already SETTLED by then, so nothing inside it can see this stop
+  // THE REAL GAP: the corpus run has already RESOLVED, so nothing inside the turn can see this stop
+  // — a final check moved inside the body would miss it entirely
   let stopped = false
-  const h = adoptHarness({
-    register: rows => {
-      stopped = true // the stop lands while this turn is settling
-      return void rows
-    },
-    stopped: () => stopped,
-  })
+  const h = adoptHarness()
+  const inner = h.deps.runCorpus
+  h.deps.runCorpus = async body => {
+    await inner(body) // the corpus turn settles first ...
+    stopped = true // ... and the stop lands in the continuation gap, before adopt resumes
+  }
+  h.deps.stopped = () => stopped
   await expect(adoptValidatedSecret('sec', h.deps)).rejects.toThrow(/hidden ingress stopped/)
-  expect(h.log, 'registration ran; publication did not').toEqual([])
+  expect(h.log, 'registration ran; publication did not').toEqual(['register:a,b'])
 })

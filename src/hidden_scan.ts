@@ -24,7 +24,7 @@
 // dependency. Ordering, grouping, fail-closed classification and normalization live here.
 
 import { compareIds } from './hidden.js'
-import type { Classification, PointAnswer } from './hidden_confirm.js'
+import type { Classification, ParsedWrapper, PointAnswer } from './hidden_confirm.js'
 import type { ListenerPrefix, ListenerRecord } from './hidden_listener_records.js'
 
 export type ScanRow = { id: string; name: string; wrapper: unknown }
@@ -150,5 +150,57 @@ export async function scanHiddenDocuments(deps: ScanDeps): Promise<HiddenScan> {
     return { apply: rows, rawIds, admittedIds: [...admitted].sort(compareIds) }
   } finally {
     close()
+  }
+}
+
+// ---- a delivery's FINAL-STATE evidence ---------------------------------------------------------
+// Firestore hands a `removed` change the document's OLD data, and a fixed page's query is a strict
+// subset a hidden document can never be in — so a removal there means the document left the SHARED
+// SET: deleted, unshared, or TURNED HIDDEN (see speaksForHiddenSide in src/snapshot.ts, and the
+// design's "What a removal is evidence OF").
+//
+// WITHHOLDING the hidden-side effect is not enough. A confirmation for an unrelated name registers
+// nothing for this id — its commit covers only its own affected closure — so nothing else would
+// ever install the hidden record and the page would end up holding NEITHER representation. The
+// delivery would also publish `applied` and heal every strictly older same-cell block while having
+// established nothing about the hidden side.
+//
+// So the delivery OWNS the evidence: ONE fresh point read, taken after its corpus boundary and
+// BEFORE it enters the name chains, because the answer determines the affected NAMES as well as the
+// effects — and the stale payload's name set is empty.
+
+export type DeliveryPayload = {
+  // what the change carried: the OLD document on a removal
+  hidden: boolean
+  removed: boolean
+  snap: unknown
+  item: any
+}
+
+export async function resolveDeliveryEvidence(deps: {
+  // whether the delivery's own payload speaks for the hidden side
+  speaksForHidden: boolean
+  payload: DeliveryPayload
+  // ONE fresh point read, taken ONLY when the payload cannot speak. `snap`/`item` are absent when
+  // the document does not exist, which is a not-hidden answer
+  pointRead: () => Promise<{ classification: Classification; snap?: unknown; item?: any }>
+}): Promise<DeliveryPayload & { wrapper?: ParsedWrapper }> {
+  if (deps.speaksForHidden) return deps.payload
+  const fresh = await deps.pointRead()
+  // FAIL CLOSED: a read or classification failure is not absence, and this delivery must not heal
+  // an older same-cell block on evidence it does not have
+  if (fresh.classification.kind == 'indeterminate')
+    throw new Error(`hidden document could not be classified: ${fresh.classification.reason}`)
+  // CURRENT STATE IS VISIBLE OR ABSENT: the removal stands, and the hidden-side removal it
+  // authorizes is now backed by evidence rather than by a stale payload
+  if (fresh.classification.kind == 'not-hidden') return deps.payload
+  // CURRENT STATE IS HIDDEN: this is a visible-to-hidden transition whose payload described the old
+  // side. the effects must be applied from the CURRENT document, through the ordinary reducers
+  return {
+    hidden: true,
+    removed: false,
+    snap: fresh.snap,
+    item: fresh.item,
+    wrapper: fresh.classification.wrapper,
   }
 }

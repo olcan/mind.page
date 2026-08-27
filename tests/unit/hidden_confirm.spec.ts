@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
   planTargetSlice,
-  normalizeScan,
   classifyHiddenDocument,
   type ClassifiedRow,
   type PointAnswer,
@@ -190,103 +189,7 @@ test('a marker for a row the name does not hold locally is irrelevant', () => {
   expect(plan.requiredMarker).toBeUndefined()
 })
 
-// ---- point-answer normalization ----
-
-test('a HIDDEN point answer replaces the stale raw row and enters registration', () => {
-  const raw = [{ id: 'd1', name: 'n', wrapper: { stale: true } }]
-  const answers = new Map<string, PointAnswer>([['d1', { kind: 'hidden', name: 'q', wrapper: { fresh: true } }]])
-  const out = normalizeScan(raw, answers)
-  expect(out.apply, 'the point answer REPLACES the raw entry').toEqual([
-    { id: 'd1', name: 'q', wrapper: { fresh: true } },
-  ])
-})
-
-test('a NOT-HIDDEN point answer only suppresses: zero production-body calls', () => {
-  // replaying the visible side would bypass hasLocalIntent/deferRemoteChange and overwrite an
-  // unsaved edit the live callback deliberately deferred
-  const raw = [{ id: 'd1', name: 'n', wrapper: {} }]
-  const answers = new Map<string, PointAnswer>([['d1', { kind: 'not-hidden' }]])
-  const out = normalizeScan(raw, answers)
-  expect(out.apply, 'nothing is applied').toEqual([])
-  // omission from `apply` IS the suppression: there is no separate list
-})
-
-test('rows with no point answer stand, and everything applies in CANONICAL id order', () => {
-  // point reads complete out of order; a pending create must not adopt a higher duplicate first
-  const raw = [
-    { id: 'z', name: 'n', wrapper: {} },
-    { id: 'a', name: 'n', wrapper: { stale: true } },
-    { id: 'm', name: 'n', wrapper: {} },
-  ]
-  const freshWrapper = { fresh: true }
-  const answers = new Map<string, PointAnswer>([
-    ['a', { kind: 'hidden', name: 'n', wrapper: freshWrapper }],
-    ['m', { kind: 'not-hidden' }],
-  ])
-  const out = normalizeScan(raw, answers)
-  expect(
-    out.apply.map(r => r.id),
-    'canonical, not point-read completion order'
-  ).toEqual(['a', 'z'])
-  expect(out.apply[0].wrapper, 'exact wrapper identity').toBe(freshWrapper)
-  // 'm' is simply absent from apply
-})
-
-// ---- pure classification ----
-
-test('classification is complete and side-effect free, and fails closed on an unusable answer', () => {
-  expect(classifyHiddenDocument('d', false, 'anything'), 'not hidden').toEqual({ kind: 'not-hidden' })
-  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: 'n', item: { v: 1 } }))).toEqual({
-    kind: 'hidden',
-    wrapper: { id: 'd', name: 'n', item: { v: 1 } },
-  })
-  // INDETERMINATE is not absence: the document exists and this read cannot say which name it
-  // belongs to, so a confirmation must fail closed rather than synthesize target-side absence
-  expect(classifyHiddenDocument('d', true, 'not json').kind).toBe('indeterminate')
-  expect(classifyHiddenDocument('d', true, JSON.stringify({ item: {} })).kind, 'missing name').toBe('indeterminate')
-  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: '', item: {} })).kind, 'empty name').toBe(
-    'indeterminate'
-  )
-  expect(classifyHiddenDocument('d', true, JSON.stringify('scalar')).kind, 'not an object').toBe('indeterminate')
-  expect(classifyHiddenDocument('d', true, null).kind, 'no text').toBe('indeterminate')
-})
-
-test('a quarantined LOWER row is skipped, and the eligible row registers', () => {
-  // counting a quarantined duplicate as a survivor would let registration skip that first row,
-  // leaving a stale adoption selection or preventing a later eligible row from performing the one
-  // rebase/publication. the quarantined id is NOT in `local`: quarantineNonCanonical removes it
-  // from byId, and `local` is the nonpending byId slice
-  const plan = planTargetSlice({
-    name: 'n',
-    local: [],
-    answer: answerOf(ineligible('a', 'n'), hidden('k', 'n')),
-  })
-  expect(plan.remove).toEqual([])
-  expect(
-    plan.register.map(r => r.id),
-    'only the eligible row registers'
-  ).toEqual(['k'])
-})
-
-test('a stale local row with only a quarantined fresh row: removed, and no fresh registration', () => {
-  const plan = planTargetSlice({
-    name: 'n',
-    local: [{ id: 'h', name: 'n', wrapper: {} }],
-    answer: answerOf(absent('h'), ineligible('k', 'n')),
-  })
-  expect(plan.remove, 'the disproved local row still goes').toEqual(['h'])
-  expect(plan.register, 'nothing eligible to perform the rebase/publication').toEqual([])
-})
-test('server plaintext cannot inject controller-only transient state', () => {
-  // persistence writes only name and item. a stored object carrying pending_create or adopt_id
-  // would otherwise reach registerHidden as if it were live controller state — and an embedded id
-  // must never beat the caller's
-  const c = classifyHiddenDocument(
-    'real',
-    true,
-    JSON.stringify({ id: 'forged', name: 'n', item: { v: 1 }, pending_create: true, adopt_id: 'x' })
-  )
-  expect(c).toEqual({ kind: 'hidden', wrapper: { id: 'real', name: 'n', item: { v: 1 } } })
-  expect('pending_create' in (c as any).wrapper, 'no transient state').toBe(false)
-  expect('adopt_id' in (c as any).wrapper).toBe(false)
-})
+// NOTE the point-answer normalization rows are gone with `normalizeScan`. The shared scan now
+// resolves precedence in ONE pass per document — admitted, then point answer, then raw — and its
+// rows in tests/unit/hidden_scan.spec.ts drive the real composition, including the stale-raw cases
+// a merge over pre-classified rows could not express (review 73/74).

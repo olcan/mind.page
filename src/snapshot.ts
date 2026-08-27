@@ -110,12 +110,11 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
  * SHARED SET, which has three causes and only one is deletion: deleted, unshared, or **turned
  * hidden**, whose `removed` payload describes the old, visible side.
  *
- * Acting on it would drop the hidden record a candidate scan or a target confirmation just
- * registered, leaving the page with neither representation while the server row is hidden.
- *
- * The converse is bounded and already covered: a hidden document genuinely deleted on a fixed page
- * produces no listener event at all (it was never in the shared query), and every fixed-page write
- * re-confirms its target against the server, which is what disproves a stale row.
+ * A `false` answer does not mean "do nothing to the hidden side": it means this delivery must go
+ * and GET the evidence (see resolveDeliveryEvidence in src/hidden_scan.ts). Withholding alone would
+ * leave a newly hidden document under an unrelated name registered by nobody, since a confirmation
+ * commits only its own affected closure — and would still heal older same-cell blocks while having
+ * established nothing.
  */
 export function speaksForHiddenSide(facts: { fixed: boolean; removed: boolean }): boolean {
   return !(facts.fixed && facts.removed)

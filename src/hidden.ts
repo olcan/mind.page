@@ -105,7 +105,7 @@ export function buildHiddenIndex(
   return invalid
 }
 
-// registers one decrypted hidden document (phrase validation on fixed pages, or the
+// registers one decrypted hidden document (the post-prompt candidate scan on fixed pages, or the
 // create-confirmation path in saveHiddenItem): a pending create that already claimed the name
 // ADOPTS the document (update instead of create, existing state filled in under the pending
 // changes via the caller-provided merge); otherwise the document is indexed under the

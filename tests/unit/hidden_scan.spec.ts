@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { scanHiddenDocuments, type ScanDeps } from '../../src/hidden_scan.js'
+import {
+  resolveDeliveryEvidence,
+  scanHiddenDocuments,
+  type DeliveryPayload,
+  type ScanDeps,
+} from '../../src/hidden_scan.js'
 import { createRecordAllocator, type RecordHandle } from '../../src/hidden_listener_records.js'
 import type { Classification } from '../../src/hidden_confirm.js'
 
@@ -360,8 +365,8 @@ test('rows are applied in CANONICAL id order even when point reads complete out 
 })
 
 test('a point answer that says HIDDEN survives a query row classified otherwise', async () => {
-  // the freshest evidence wins: normalizeScan replaces BY ID, so a row the query read called
-  // not-hidden has to be present for its newer point answer to replace it
+  // the freshest evidence wins outright: the point answer is consulted BEFORE the raw row is
+  // classified at all, so a query row that says otherwise never gets a vote
   const h = harness({ classify: () => notHidden, point: id => hidden(id, 'fresh') })
   const scan = h.scan()
   const batch = h.allocator.allocate([{ kind: 'blind', id: 'a' }], () => {})
@@ -369,4 +374,83 @@ test('a point answer that says HIDDEN survives a query row classified otherwise'
   h.answerQuery(['a'])
   const result = await scan
   expect(result.apply.map(r => `${r.id}:${r.name}`)).toEqual(['a:fresh'])
+})
+
+// ---- a delivery's FINAL-STATE evidence ---------------------------------------------------------
+// the round-74 correction: withholding a fixed removal's hidden-side effect is not enough, because
+// a confirmation for an UNRELATED name registers nothing for this id — so the delivery itself has to
+// establish what the document currently is
+
+const payload = (over: Partial<DeliveryPayload> = {}): DeliveryPayload => ({
+  hidden: false,
+  removed: true,
+  snap: 'stale-snapshot',
+  item: { hidden: false, text: '#visible' },
+  ...over,
+})
+
+test('a payload that SPEAKS for the hidden side is used as delivered, with no point read', async () => {
+  let reads = 0
+  const given = payload({ hidden: true, removed: false })
+  const out = await resolveDeliveryEvidence({
+    speaksForHidden: true,
+    payload: given,
+    pointRead: async () => (reads++, { classification: notHidden }),
+  })
+  expect(out).toBe(given)
+  expect(reads, 'a payload that speaks needs no server read').toBe(0)
+})
+
+test('a fixed removal whose document is now HIDDEN becomes the transition it actually is', async () => {
+  // THE SCHEDULE: an unrelated confirmation exposed `k`, its commit registered nothing for `k`
+  // (different affected closure), and this delivery is the only thing left that can install it
+  const out = await resolveDeliveryEvidence({
+    speaksForHidden: false,
+    payload: payload(),
+    pointRead: async () => ({
+      classification: hidden('k', 'global_store_b'),
+      snap: 'fresh-snapshot',
+      item: { hidden: true, text: '{"name":"global_store_b"}' },
+    }),
+  })
+  expect(out.hidden, 'the current document is hidden').toBe(true)
+  expect(out.removed, 'so it was not removed at all — it left the SHARED query').toBe(false)
+  expect(out.snap, 'and the effects apply from the FRESH document, not the stale payload').toBe('fresh-snapshot')
+  expect(out.wrapper?.name, 'which is also what decides the affected name chains').toBe('global_store_b')
+})
+
+test('a fixed removal whose document is visible or absent keeps the removal, now backed by evidence', async () => {
+  const given = payload()
+  expect(
+    await resolveDeliveryEvidence({
+      speaksForHidden: false,
+      payload: given,
+      pointRead: async () => ({ classification: notHidden }),
+    }),
+    'a definite not-hidden answer authorizes the hidden-side removal the payload could not'
+  ).toBe(given)
+})
+
+test('an INDETERMINATE answer blocks the delivery rather than healing on evidence it lacks', async () => {
+  // resolving `applied` here would delete every strictly older same-cell block (see finalize in
+  // hidden_ingress.ts) while having established nothing about the hidden side
+  await expect(
+    resolveDeliveryEvidence({
+      speaksForHidden: false,
+      payload: payload(),
+      pointRead: async () => ({ classification: indeterminate }),
+    })
+  ).rejects.toThrow('could not be classified')
+})
+
+test('a failing point read propagates: the delivery blocks, it does not fall through to removal', async () => {
+  await expect(
+    resolveDeliveryEvidence({
+      speaksForHidden: false,
+      payload: payload(),
+      pointRead: async () => {
+        throw new Error('offline')
+      },
+    })
+  ).rejects.toThrow('offline')
 })
