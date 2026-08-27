@@ -234,7 +234,7 @@ export function createHiddenIngress() {
   }
 
   // the INITIAL wait: resolves when the gate is writable OR blocked (the writer's required
-  // blocked behaviour — clear the saving mirror, notify once — can never run off a writable-only
+  // blocked behaviour — stop reporting as saving, notify once — cannot run off a writable-only
   // promise); pending keeps waiting
   // the return type is NARROWED to what this actually resolves with: 'pending' never reaches a
   // waiter, and saying so lets a consumer's blocked branch be exhaustive rather than defensive

@@ -6517,13 +6517,6 @@
   const hiddenAuthorityUsable = () => hiddenIngress.authorityUsable()
 
 
-  // authority settles on its OWN receipt-ordered chain, separate from snapshotApply: snapshot
-  // ingestion must not block on a phrase prompt, but no grant may pass an EARLIER unsettled
-  // hidden revision. every revision reserves its slot at receipt (in listener order) and hands
-  // back a `settle` callback its application calls when its hidden transitions have landed; a
-  // later metadata revision therefore cannot overtake an earlier queued hidden transition and
-  // grant into a state that transition is about to change (which could delete both records of
-  // a name at cleanup — see deleteInvalidHiddenCandidates)
   // reserves this callback's AUTHORITY LEASE at receipt, in listener order, and returns the
   // settle/revoke pair the application already expects. the coordinator owns the ordering: a
   // sealed candidate advances the durable basis only after every EARLIER lease settles, so a
@@ -6567,17 +6560,7 @@
   }
 
 
-  // settles the hidden-index authority for one revision, INSIDE the serialized snapshot chain
-  // and in RECEIPT order (every revision — first, metadata-only, data — queues its settlement
-  // when it arrives):
-  // - a current (server, no-pending-writes) revision whose hidden changes all applied grants,
-  //   unless its receipt epoch is stale (a newer revocation intervened) or unresolved dirty
-  //   hidden ids remain
-  // - a cached revision revokes (offline/stale: the index can be behind the server), as does a
-  //   failed hidden application — creates then re-confirm against the server, failing closed
-  // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
-  // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
-  // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
+  // recomputes and REPORTS invalid hidden records from CURRENT state — runs INSIDE the
   // serialized snapshot chain on a false -> true authority grant, so classification cannot race
   // remote applications. startup candidates are not deleted from their (stale) provisional
   // classification: startup ORPHANS were never indexed (see buildHiddenIndex), so one whose

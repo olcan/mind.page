@@ -16,7 +16,9 @@
 // NOTE: saving state is owned BY NAME (`isSaving`), true from the moment save() accepts an intent
 // until that generation's write reaches the SDK's queue — not until the server acknowledges. item
 // code observes it through _Item.saving_global_store, so that meaning is part of the window
-// contract. it was previously mirrored on the WRAPPER, which could not survive the wrapper being
+// contract, with one exception: a BLOCKED gate reads as not saving, since the change cannot be
+// written until a later delivery heals it. it was previously mirrored on the WRAPPER, which could
+// not survive that wrapper being
 // replaced, renamed or removed while the writer was parked on the gate (round 60): the intent,
 // the wake and the blocked report already belong to the name, and so does this.
 
@@ -100,7 +102,7 @@ export type HiddenPersistenceDeps = {
   // failed application the controller took its success path and reconciled the owner from an index
   // that may still hold the pre-write state, rolling the owner back with no later echo guaranteed
   echoApplied: (id: string) => boolean
-  // revokes hidden-index authority (see settleHiddenAuthority in index.svelte): called when a
+  // revokes hidden-index authority (see reserveHiddenAuthority in index.svelte): called when a
   // write proves the index stale (e.g. its target document no longer exists server-side)
   invalidateAuthority: (reason: string) => void
   newTempId: () => string
@@ -663,8 +665,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   return {
     // THE ONE WRITER STOP TRANSITION, in TWO SYNCHRONOUS PHASES so a throwing notification hook
     // cannot leave later generations half-stopped and a reentrant save cannot observe a partial
-    // state. phase 1 sets stopped state, cancels every generation-owned observer, updates each
-    // report-once token, clears each saving mirror, and CAPTURES the notifications; phase 2
+    // state. phase 1 sets stopped state, cancels every NAME-owned wake, updates each
+    // report-once token, and CAPTURES the notifications; phase 2
     // invokes them under individual guards — nothing escapes stop().
     // effects are qualified BY GENERATION: an unissued generation clears its mirror, reports
     // once and RETAINS its owed intent (the change is not lost, it simply cannot be written by
@@ -673,7 +675,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     stop(): undefined {
       if (stopped) return undefined
       stopped = true
-      // every generation-owned observer, first: a wake resolving after stop would re-enter
+      // every name-owned wake, first: one resolving after stop would re-enter
       // persistOwed for a page that can never write again
       for (const name of [...wakes.keys()]) cancelWake(name)
       const notifications: Array<[string, unknown]> = []
