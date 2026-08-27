@@ -22,14 +22,11 @@
 // the blind path became an uninitialized resolver and a swallowed TypeError; here it cannot be
 // written at all.
 
-export type Outcome = 'applied' | 'blocked'
+import type { DeliveryHandle, Outcome } from './hidden_ingress.js'
 
-// the coordinator's DeliveryHandle, narrowed to what a record needs
-export type RecordHandle = {
-  ready(apply: () => Promise<void>): void
-  block(): void
-  done: Promise<Outcome>
-}
+// exactly the coordinator's handle: restating its shape here invited the two to drift, and this
+// module has no reason to accept anything narrower
+export type RecordHandle = DeliveryHandle
 
 type Base = {
   id: string
@@ -51,11 +48,10 @@ type Base = {
 
 export type AdmittedRecord = Base & {
   kind: 'admitted'
-  handle: RecordHandle
-  // the lane tail as it stood at THIS record's receipt position
-  blindPredecessor: Promise<void>
   // hands the handle its Apply once the captured lane position has passed. safe to call at any
-  // point during preparation: the handle is not blocked while a schedule is outstanding
+  // point during preparation: the handle is not blocked while a schedule is outstanding.
+  // NOTE the handle and the captured lane position are deliberately NOT exposed: every caller
+  // reaches them through schedule/finish/cancel, and exposing them invites a second scheduler
   schedule(apply: () => Promise<void>): void
 }
 
@@ -84,11 +80,11 @@ export type Batch = {
   abort(): void
 }
 
-export type AllocationRequest = {
-  id: string
-  // an admitted document MUST carry its handle; a blind one MUST NOT. the caller decides admission
-  handle?: RecordHandle
-}
+// DISCRIMINATED on the same key as the records it produces: an admitted document MUST carry its
+// handle and a blind one MUST NOT, and an optional field let a caller pass neither or both
+export type AllocationRequest =
+  | { kind: 'admitted'; id: string; handle: RecordHandle }
+  | { kind: 'blind'; id: string }
 
 export function createRecordAllocator(deps: {
   // an unexpected blind body failure. the lane consumes it so later slots still run, but the
@@ -107,7 +103,9 @@ export function createRecordAllocator(deps: {
     // through its OWN receipt so C2 can heal it
     allocate(requests: AllocationRequest[], revoke: (reason: string) => void): Batch {
       const records: ListenerRecord[] = []
-      for (const { id, handle } of requests) {
+      for (const request of requests) {
+        const { id } = request
+        const handle = request.kind == 'admitted' ? request.handle : undefined
         let settled = false
         let resolve!: () => void
         let reject!: (e: unknown) => void
@@ -139,8 +137,6 @@ export function createRecordAllocator(deps: {
             kind: 'admitted',
             id,
             done,
-            handle,
-            blindPredecessor,
             schedule(apply) {
               scheduled = true
               void blindPredecessor.then(() => handle.ready(apply))

@@ -77,8 +77,8 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
           .filter(w => !w.pending_create && !w.adopt_id)
           .map(w => [w.id, { id: w.id, kind: 'hidden' as const, name: w.name, wrapper: w, eligible: true }])
       )
-      if (ingress.gate() != 'writable') return 'inconclusive'
-      return hooks.commit(answer, hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+      if (ingress.gate() != 'writable') return { kind: 'inconclusive' as const }
+      return hooks.commit(answer, hooks.captureReadMarker())
     },
     registerTargetRow: (wrapper, mergeAdoptedFor) => void registerHidden(idx, wrapper, mergeAdoptedFor),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
@@ -147,12 +147,12 @@ function serverAnswer(rows: { id: string; name: string; item?: any }[], calls?: 
     // BOTH GATE CHECKS live in the adapter in production (see the confirmTarget dep): one after
     // the corpus predecessor, one immediately before the synchronous commit. a harness that skips
     // them commits behind a shut gate and cannot exercise the inconclusive path at all
-    if (gate && gate() != 'writable') return 'inconclusive'
+    if (gate && gate() != 'writable') return { kind: 'inconclusive' as const }
     const answer = new Map(
       rows.map(r => [r.id, { id: r.id, kind: 'hidden' as const, name: r.name, wrapper: r, eligible: true }])
     )
-    if (gate && gate() != 'writable') return 'inconclusive'
-    return hooks.commit(answer, hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+    if (gate && gate() != 'writable') return { kind: 'inconclusive' as const }
+    return hooks.commit(answer, hooks.captureReadMarker()) // VERBATIM, as production does
   }
 }
 
@@ -349,7 +349,7 @@ test('a save queued during a pending create is dropped when the create fails (ne
     confirmTarget: async (_name, hooks) => {
       calls.push({ op: 'confirm' })
       await confirm.promise // hold the create in confirmation while the second save queues
-      return hooks.commit(new Map(), hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+      return hooks.commit(new Map(), hooks.captureReadMarker())
     },
   })
   controller.save('n', { v: 1 })
@@ -836,7 +836,7 @@ test('a build that fails is retried by the next save, not left idle forever', as
     confirmTarget: async (_name, hooks) => {
       calls.push({ op: 'confirm' })
       if (failConfirm) throw new Error('server unavailable')
-      return hooks.commit(new Map(), hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+      return hooks.commit(new Map(), hooks.captureReadMarker())
     },
   })
   controller.save('n', { v: 1 })
@@ -2809,4 +2809,75 @@ test('an echo terminalizing in the SAME turn as the acknowledgement is still see
   ack.resolve()
   for (let i = 0; i < 8; i++) await flush()
   expect(reconciled, 'the echo was recorded in time').toEqual(['n'])
+})
+
+// ---- marker scope and provenance (round 71) ----
+
+test('markers are PER NAME: a concurrent create for another name does not clobber ours', async () => {
+  // ONE controller-wide slot was wrong. write construction serializes per NAME, so two names can
+  // hold unacknowledged creates at once: B's marker replaced A's, a later fixed-page save for A no
+  // longer bypassed, and a complete read that legitimately omits unacknowledged A removed its
+  // wrapper and let the retry allocate a duplicate
+  const ackA = deferred<void>()
+  const ackB = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await (data.cipher!.includes('"A"') ? ackA.promise : ackB.promise)
+    },
+    // every confirmation answers EMPTY: without a live marker the slice replacement removes the
+    // unacknowledged create's wrapper
+    confirmTarget: (name, hooks) => serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks),
+  })
+  controller.save('nameA', { v: 'A' })
+  for (let i = 0; i < 8; i++) await flush()
+  controller.save('nameB', { v: 'B' }) // a SECOND name's create, also unacknowledged
+  for (let i = 0; i < 8; i++) await flush()
+  const createdA = h.calls.find(c => c.op == 'create' && c.text!.includes('"A"'))!.id!
+  expect(h.idx.byId.has(createdA), "A's wrapper is in the index").toBe(true)
+  // a second save for A must still bypass, and must not lose its wrapper
+  controller.save('nameA', { v: 'A2' })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.idx.byId.has(createdA), "A's marker survived B's create").toBe(true)
+  expect(h.calls.filter(c => c.op == 'create' && c.text!.includes('"A')), 'no duplicate for A').toHaveLength(1)
+  ackA.resolve()
+  ackB.resolve()
+})
+
+test('a bypassed update REFUSES when the create settles during its encryption', async () => {
+  // the bypass skipped confirmation BECAUSE the marker was live, so the attempt depends on it
+  // staying live. without carrying that proof, an exempted update issued after settlement
+  const ack = deferred<void>()
+  const encrypting = deferred<void>()
+  let encryptions = 0
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise
+    },
+    encryptState: async state => {
+      const e: any = state
+      e.cipher = 'cipher:' + state.text
+      e.text = null
+      if (++encryptions == 2) await encrypting.promise // hold the UPDATE's encryption
+      return e
+    },
+    confirmTarget: (name, hooks) => serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks),
+  })
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  controller.save('n', { v: 2 }) // bypasses, and is now held in encryption
+  for (let i = 0; i < 6; i++) await flush()
+  const updatesBefore = h.calls.filter(c => c.op == 'update').length
+  ack.resolve() // the create settles: the marker clears
+  for (let i = 0; i < 4; i++) await flush()
+  encrypting.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update').length, 'the exempted payload did not issue').toBe(updatesBefore)
 })

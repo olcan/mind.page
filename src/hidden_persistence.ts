@@ -87,7 +87,7 @@ export type HiddenPersistenceDeps = {
       // the gate nor a frontier predicting the remainder
       commit: (answer: Map<string, ClassifiedRow>, readMarker: Marker | undefined) => CommitResult
     }
-  ) => Promise<'committed' | 'inconclusive'>
+  ) => Promise<CommitResult>
   // the ADAPTER-owned synchronous registration for one fresh target row: it runs the
   // visible-to-hidden discriminator prelude and then calls registerHidden EXACTLY ONCE, whose
   // first eligible registration performs the single rebase/adoption/publication. NOTIFICATION-FREE:
@@ -213,12 +213,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // reported at all
   type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean; reportedBlocked?: boolean }
   const owed = new Map<string, Owed>()
-  // THE OWN-UNACKNOWLEDGED-CREATE MARKER. the writer retains the exact id it issued a create for
-  // until that SDK promise settles, INDEPENDENTLY of any later owed generation. it is an
-  // exact-target confirmation EXEMPTION that never overrides name selection, and it is
+  // THE OWN-UNACKNOWLEDGED-CREATE MARKERS, PER NAME. the writer retains the exact id it issued a
+  // create for until that SDK promise settles, INDEPENDENTLY of any later owed generation. it is
+  // an exact-target confirmation EXEMPTION that never overrides name selection, and it is
   // WRAPPER-EXACT: registerHidden replaces the indexed object on a fresh same-id observation, and
-  // a same-id rename does too, so an id-only exemption would mistake either for this create
-  let marker: Marker | undefined
+  // a same-id rename does too, so an id-only exemption would mistake either for this create.
+  // ONE SLOT WAS WRONG: write construction serializes per NAME, not globally, so two names can
+  // hold unacknowledged creates at once — B's marker replaced A's, a later fixed-page save for A
+  // no longer bypassed or preserved it, and a complete read that legitimately omits unacknowledged
+  // A removed its wrapper and let the retry allocate a duplicate. serializing creates until
+  // acknowledgement would instead break offline durability
+  const markers = new Map<string, Marker>()
   let markerSeq = 0
 
   // sticky for the controller's lifetime; every await-crossing continuation rechecks it
@@ -433,7 +438,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // mistaken for it
     const issuedMarker: Marker | undefined =
       create && markerWrapper ? { id, wrapper: markerWrapper, token: ++markerSeq } : undefined
-    if (issuedMarker) marker = issuedMarker
+    if (issuedMarker) markers.set(name, issuedMarker)
     // ARMED IMMEDIATELY BEFORE THE SDK CALL, no await in between: the coordinator stamps the
     // waiter with this id's receipt frontier at this instant
     let echo: 'applied' | 'blocked' | undefined
@@ -447,7 +452,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // COMPARE-AND-SET on the token: a newer create may already have replaced the marker, and this
     // settlement must not clear that one. it never reinserts or finalizes the old wrapper either
     const clearMarker = () => {
-      if (issuedMarker && marker && marker.token === issuedMarker.token) marker = undefined
+      if (issuedMarker && markers.get(name)?.token === issuedMarker.token) markers.delete(name)
     }
     write.then(
       () => {
@@ -557,20 +562,26 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // stale lower-id holder the server no longer has would otherwise keep winning re-resolution
     // and receive the very update confirmation exists to prevent
     let requiredMarker: Marker | undefined
-    if (deps.confirmsUpdates() && !bypassesConfirmation(holder)) {
-      const outcome = await deps.confirmTarget(name, {
-        captureReadMarker: () => marker,
-        commit: (answer, readMarker) => {
-          const result = commitTargetSlice(name, answer, readMarker)
-          if (result.kind == 'committed') requiredMarker = result.requiredMarker
-          return result
-        },
+    if (deps.confirmsUpdates() && bypassesConfirmation(name, holder)) {
+      // A DIRECT BYPASS still carries its proof: skipping confirmation BECAUSE the marker is live
+      // makes the whole attempt depend on it staying live, so if the create settles during the
+      // encryption below, the exempted update must not issue
+      requiredMarker = markers.get(name)
+    } else if (deps.confirmsUpdates()) {
+      const result = await deps.confirmTarget(name, {
+        captureReadMarker: () => markers.get(name),
+        commit: (answer, readMarker) => commitTargetSlice(name, answer, readMarker),
       })
       // it awaited: recheck everything the await could have invalidated
       if (!current()) return true
       if (stopped) return true
-      if (outcome == 'inconclusive') return false // zero mutation: release the chain and retry
+      if (result.kind == 'inconclusive') return false // zero mutation: release the chain and retry
       if (!gateWritable()) return false
+      requiredMarker = result.requiredMarker
+      // IMMEDIATELY after the confirmation await, before re-resolving, publishing or encrypting:
+      // settlement in the continuation gap makes this a cheap retry with ZERO post-confirmation
+      // effects rather than a wasted build
+      if (requiredMarker && markers.get(name) !== requiredMarker) return false
       // RE-RESOLVE from the committed index: the confirmation may have replaced the whole slice
       const confirmed = canonicalHolder(name)
       if (!confirmed) return false // the name has no holder now: the retry re-enters the create
@@ -603,7 +614,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
     // the carried marker must still be LIVE: settlement during encryption invalidates this
     // attempt, and the retry confirms normally
-    if (requiredMarker && marker !== requiredMarker) return false
+    if (requiredMarker && markers.get(name) !== requiredMarker) return false
     if (stopped) return true // rechecked in the no-await token: a write already encrypting when
     // the listener died must not issue afterwards
     issueWrite(name, generation, holder.id, data, false)
@@ -623,14 +634,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // CONFIRMATION, updates included: one attempt never performs both a create-only index
         // confirmation and an update. the controller commits the name slice synchronously inside
         // the corpus turn through this callback, so the whole affected closure applies at once
-        const outcome = await deps.confirmTarget(name, {
-          captureReadMarker: () => marker,
+        const result = await deps.confirmTarget(name, {
+          captureReadMarker: () => markers.get(name),
           commit: (answer, readMarker) => commitTargetSlice(name, answer, readMarker),
         })
         if (!current()) return true // superseded: the newer generation redoes this
         // INCONCLUSIVE means a gate check refused with zero mutation: release the chain and let
         // the delivery that made the gate non-writable apply, then retry
-        if (outcome == 'inconclusive') return false
+        if (result.kind == 'inconclusive') return false
         // THE SAME CONTINUATION RULE as after acquireSecret: confirmation is an await, so a
         // delivery can open or ingress can stop across it. checking only generation ownership let
         // this go on to select an adopter, publish to the owner through mergeAdopted, and start a
@@ -725,8 +736,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // registerHidden replaces the indexed object on a fresh same-id observation and a same-id rename
   // does too. a lower-id competitor currently canonical is NOT covered by an exemption for a
   // different target: this compares the SELECTED target, not the name
-  const bypassesConfirmation = (holder: HiddenWrapper) =>
-    !!marker && marker.id === holder.id && marker.wrapper === holder && !!marker.token
+  const bypassesConfirmation = (name: string, holder: HiddenWrapper) => {
+    const m = markers.get(name)
+    return !!m && m.id === holder.id && m.wrapper === holder && !!m.token
+  }
 
   // THE ONE COMMIT ALGORITHM, run synchronously inside the corpus turn (see the confirmTarget
   // dep). the whole affected closure applies in ONE JavaScript turn
@@ -747,8 +760,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // THE PRECOMMIT COMPARE-AND-SET. if preservation used the proof and it settled while the
     // answer was in flight, the whole result is inconclusive with ZERO effects — even when a
     // fresh lower row would eventually have been selected
-    if (plan.preservedMarker && !(marker && marker === plan.preservedMarker && marker.token === plan.preservedMarker.token))
-      return { kind: 'inconclusive' }
+    if (markers.get(name) !== plan.preservedMarker && plan.preservedMarker) return { kind: 'inconclusive' }
     // (3) destructive rows once, in canonical id order
     for (const id of plan.remove) removeHidden(index, id)
     // (4) clear a pending wrapper's stale adopt_id when it differs from the canonical fresh target

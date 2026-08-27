@@ -8903,7 +8903,7 @@
       return hiddenCorpus.run(async run => {
         // GATE CHECK ONE, after the corpus predecessor. a cheap early return: a delivery pending
         // by now already makes the server query and full-account decrypt unusable
-        if (hiddenIngress.gate() != 'writable') return 'inconclusive' as const
+        if (hiddenIngress.gate() != 'writable') return { kind: 'inconclusive' as const }
         // the read-start proof, captured immediately before the query
         const readMarker = hooks.captureReadMarker()
         const docs = await getDocsFromServer(
@@ -8926,7 +8926,7 @@
         if (run.cancelled()) throw new Error('hidden corpus stopped')
         // ---- from here to the commit is ONE synchronous turn ----
         // GATE CHECK TWO, immediately before the commit: nothing can open between them
-        if (hiddenIngress.gate() != 'writable') return 'inconclusive' as const
+        if (hiddenIngress.gate() != 'writable') return { kind: 'inconclusive' as const }
         const index = hiddenIndex()
         const answer = new Map(
           classified.map(row => [
@@ -8938,7 +8938,22 @@
               : { id: row.id, kind: 'absent' as const },
           ])
         )
-        return hooks.commit(answer, readMarker).kind == 'committed' ? ('committed' as const) : ('inconclusive' as const)
+        // ONLY the synchronous commit is wrapped. once it begins mutating -- removal, pointer
+        // clearing, baseline publication, visible removal, registration, rebase, owner publication
+        // -- a throw leaves a PARTIALLY MUTATED index, and the writer would see an ordinary build
+        // failure while ingress stayed live and queued corpus turns kept running. that is exactly
+        // what the active-cause channel exists for, and until now nothing supplied it.
+        // fetch/decode/classification failures stay OUTSIDE: they happen before any mutation and
+        // must reject normally without stopping the page
+        try {
+          // VERBATIM: translating to a two-value string forced the controller to capture
+          // requiredMarker through mutable closure state, and a direct bypass then carried no
+          // proof at all
+          return hooks.commit(answer, readMarker)
+        } catch (e) {
+          stopIngress('hidden corpus commit failed', { cause: e })
+          throw e // the EXACT value: the active operation keeps its own error
+        }
       })
     },
     // the visible-to-hidden discriminator prelude plus EXACTLY ONE registerHidden, whose first
