@@ -6749,11 +6749,13 @@
   }
 
   async function initialize() {
-    // authority is only ever granted by a current (server, no-pending-writes) revision of the
-    // full-account query in the items listener: a cache-initialized account may be partial, and
-    // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
-    // per save (see saveHiddenItem)
-    revokeHiddenAuthority()
+    // NO fresh outside-callback revocation here. the INITIALIZING CALLBACK'S OWN LEASE owns this
+    // lifecycle: it reserved an ordinal at receipt and seals only after this rebuild succeeds, so
+    // a fresh ordinal would additionally stale every later callback that should be able to grant
+    // once the rebuild lands. authority is still only ever granted by a current
+    // (server, no-pending-writes) revision of the full-account query: a cache-initialized account
+    // may be partial, and fixed pages never hold durable authority — their creates re-confirm per
+    // save (see saveHiddenItem)
     // initialization rebuilds the index from scratch; the coordinator's retained blocks belong
     // to deliveries, which initialization does not open (see the design's first-snapshot
     // boundary) — nothing to clear here
@@ -7734,6 +7736,24 @@
 
               return
             }
+            // ONE ALWAYS-SETTLING INITIALIZATION ATTEMPT. `initialization` resolves only on the
+            // success path (resolve_init runs after rendering), so a rejection or early return
+            // left it pending forever — and every callback lease, whose settle() awaits it, then
+            // queued behind it for the page's lifetime. this wrapper settles on every exit and
+            // enters sticky stop when initialization cannot complete, so a metadata-only
+            // candidate received during a failing rebuild can never seal over a half-built index
+            const attemptInitialize = async (): Promise<boolean> => {
+              try {
+                await initialize()
+                await initialization // the rendering pass that sets `initialized`
+                if (!initialized) stopIngress('initialization did not complete')
+                return initialized
+              } catch (e) {
+                console.error('initialization failed:', e)
+                stopIngress('initialization failed')
+                return false
+              }
+            }
             if (action == 'initialize' || action == 'wait_for_server') {
               // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
               init_log(
@@ -7742,12 +7762,18 @@
               )
               if (action == 'wait_for_server') {
                 init_log('ignoring first snapshot from cache (waiting for server) ...')
+                // it still RESERVED an ordinal at receipt, so it must terminalize: failing is
+                // correct, since a callback that applied nothing establishes nothing. returning
+                // without settling left every later lease queued behind it
+                reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: true })
                 return // firstSnapshot stays true: the next snapshot is still the first
               }
               if (initTime) {
                 // unreachable since the sapper-era preload was removed (initialization only
                 // starts here); log loudly if a new producer appears, and skip repopulating
                 console.error('first snapshot with initialization already started (unexpected)')
+                reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: true })
+                stopIngress('first snapshot with initialization already started')
               } else if (action == 'initialize') {
                 snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
                 // alert on any firebase errors before/during first snapshot
@@ -7758,14 +7784,19 @@
                     background: 'confirm',
                     onConfirm: () => location.reload(),
                   })
+                  // this callback consumed the first snapshot and cannot initialize: terminalize
+                  // its lease and stop, rather than leaving the page live over no index at all
+                  reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: true })
+                  stopIngress('firestore errors before initialization')
                 } else {
                   initTime = window['_init_time'] = instance.init_time = Date.now() // init started
-                  initialize()
                   // the FIRST revision takes the first slot on the authority chain: revisions
                   // received while initialization runs reserve theirs behind it, so an old
-                  // authoritative first snapshot can never grant after a later revision revoked
-                  reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: false })
-
+                  // authoritative first snapshot can never grant after a later revision revoked.
+                  // it SEALS only after the attempt succeeds — settling as success up front let a
+                  // lease seal over a rebuild that had not finished, or had failed
+                  const lease = reserveHiddenAuthority({ policy: decision.policy })
+                  void attemptInitialize().then(ok => lease.settle({ failed: !ok }))
                 }
               }
               // set up callback to complete init (or "sync")
