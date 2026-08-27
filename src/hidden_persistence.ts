@@ -145,8 +145,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // by adoption: every merge rebases from a fresh clone of it (see mergeAdopted). the pending
   // wrapper's `item` is the mutable DERIVED projection built over it; the owner's global_store is
   // a published clone of that projection — three distinct identities (round 35)
-  type Owed = { generation: number; localIntent: any; phase: Phase }
+  // reportedStop: the terminal stop is reported ONCE PER GENERATION — a genuinely superseding
+  // save creates a new generation and may report its own immediate stopped outcome, while old
+  // continuations may not report again
+  type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean }
   const owed = new Map<string, Owed>()
+  // sticky for the controller's lifetime; every await-crossing continuation rechecks it
+  let stopped = false
   let generationSeq = 0
 
   // the LATEST receipt per document: either the record as received, or the fact of its removal.
@@ -324,6 +329,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           console.error(`hidden write for '${name}' failed:`, e)
           return void deps.notifyFailure(name, e)
         }
+        if (stopped) return // not-found recovery NEVER starts after stop
         deps.invalidateAuthority(`hidden write target ${id} not found`)
         const index = deps.index()
         if (index.byId.get(id)) removeHidden(index, id) // it does not exist server-side
@@ -342,6 +348,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // behind the application that moved the target, which it is not
   async function attemptWrite(name: string, generation: number): Promise<boolean> {
     const current = () => currentOwed(name, generation)
+    if (stopped) return true // ingress is terminal: no new work, and the intent stays owed
     if (!current()) return true // superseded: nothing owed by this generation any more
     // PER-ATTEMPT WORKING COPY of the immutable baseline: merges below must not touch it
     const state = cloneState(current()!.localIntent)
@@ -396,6 +403,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
     if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
+    if (stopped) return true // rechecked in the no-await token: a write already encrypting when
+    // the listener died must not issue afterwards
     issueWrite(name, generation, holder.id, data, false)
     return true
   }
@@ -452,6 +461,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           wrapper.adopt_id = null // ours, still current — see the identity check above
           return false
         }
+        if (stopped) return true // see the ordinary path's no-await recheck
         if (issueWrite(name, generation, adoptId, data, false)) finalizeAdoption(deps.index(), wrapper)
         return true
       }
@@ -468,6 +478,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // a fresh create refuses while ANY delivery is undecoded: their names are unknown, so any of
       // them could be the same-name record that would make this create a duplicate
       if (findSurvivor(wrapper) || hasPendingReceipts()) return false // requeue: the retry adopts it
+      if (stopped) return true // see the ordinary path's no-await recheck
       if (issueWrite(name, generation, id, data, true)) finalizeCreate(deps.index(), wrapper, id)
       return true
     } catch (e) {
@@ -529,6 +540,37 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   }
 
   return {
+    // THE ONE WRITER STOP TRANSITION, in TWO SYNCHRONOUS PHASES so a throwing notification hook
+    // cannot leave later generations half-stopped and a reentrant save cannot observe a partial
+    // state. phase 1 sets stopped state, cancels every generation-owned observer, updates each
+    // report-once token, clears each saving mirror, and CAPTURES the notifications; phase 2
+    // invokes them under individual guards — nothing escapes stop().
+    // effects are qualified BY GENERATION: an unissued generation clears its mirror, reports
+    // once and RETAINS its owed intent (the change is not lost, it simply cannot be written by
+    // this page); an issued generation stays owned by its SDK result and is never prematurely
+    // cleared or reported as a stopped build
+    stop(): undefined {
+      if (stopped) return undefined
+      stopped = true
+      const notifications: Array<[string, unknown]> = []
+      for (const [name, op] of owed) {
+        const holder = deps.index().byName.get(name)
+        if (holder?.saving) holder.saving = null // the mirror clears immediately
+        if (op.phase == 'issued') continue // owned by its SDK result
+        if (op.reportedStop) continue
+        op.reportedStop = true
+        notifications.push([name, new Error('hidden ingress stopped: reload to recover')])
+      }
+      for (const [name, error] of notifications) {
+        try {
+          deps.notifyFailure(name, error)
+        } catch (e) {
+          console.error('stop notification failed:', name, e)
+        }
+      }
+      return undefined
+    },
+
     // the adoption merge for REGISTRATION paths (fixed-page phrase validation, post-init
     // arrivals): rebases from this name's immutable local intent when one is owed, merges, and
     // publishes to the owner — one contract for every path that adopts (round 35)

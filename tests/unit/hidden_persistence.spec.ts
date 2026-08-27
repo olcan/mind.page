@@ -1735,3 +1735,68 @@ test('rejection with NOTHING owed rolls the owner back to the applied state', as
   expect(controller.save('fresh', { bad: BigInt(1) })).toBe(false)
   expect(published.at(-1), 'and {} when the name has nothing at all').toEqual({})
 })
+
+// STAGE 3: the writer's half of the sticky ingress stop
+
+test('stop retains unissued intent, clears the mirror, and reports once per generation', async () => {
+  const failures: string[] = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  // stop arrives BEFORE the queued task runs, so the generation is still unissued — flushing
+  // first would let the write complete and leave nothing owed to retain
+  controller.save('n', { mine: 1 })
+  expect(controller.owes('n')).toBe(true)
+  const holder = idx.byName.get('n')!
+  holder.saving = Promise.resolve() as any
+
+  controller.stop()
+  expect(holder.saving, 'the saving mirror clears immediately').toBe(null)
+  expect(failures, 'reported once for this generation').toEqual(['n'])
+  expect(controller.owes('n'), 'the accepted intent is RETAINED — not lost, just unwritable').toBe(true)
+
+  // a second stop is a no-op, and no further work starts
+  calls.length = 0
+  controller.stop()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(failures, 'no second report for the same generation').toEqual(['n'])
+  expect(calls.filter(c => c.op == 'create' || c.op == 'update'), 'no new SDK work').toHaveLength(0)
+})
+
+// TABLED WITH ITS POSITIVE CONTROL, and pinning the OUTCOME rather than a specific barrier: with
+// the no-await stop recheck deleted this still passes, because the refused attempt requeues and
+// the retry refuses at attemptWrite's entry instead. Both checks are required by the design (a
+// write already encrypting must not issue after the listener dies) and the no-await one is the
+// only one that holds if a future path ever issues without requeueing — it is defence in depth,
+// reviewed directly rather than pinned here. The control is what proves this schedule reaches the
+// issue path at all
+for (const stopDuringEncryption of [false, true])
+  test(`a write encrypting when ingress ${stopDuringEncryption ? 'STOPS never issues' : 'stays live DOES issue'}`, async () => {
+    const h = gatedHarness()
+    const { calls, controller } = h
+    controller.save('n', { mine: 1 })
+    await h.awaitGate('the create for n')
+    if (stopDuringEncryption) controller.stop() // the listener died while this payload encrypted
+    await h.releaseGate()
+    await h.drainAll()
+    const written = calls.filter(c => c.op == 'create' || c.op == 'update')
+    if (stopDuringEncryption) {
+      expect(written, 'the no-await recheck refused').toHaveLength(0)
+      expect(controller.owes('n'), 'and the intent is still owed').toBe(true)
+    } else {
+      expect(written, 'the control: this schedule really does reach the issue path').toHaveLength(1)
+      expect(controller.owes('n')).toBe(false)
+    }
+  })
+
+test('a save AFTER stop takes the stopped outcome without entering a chain', async () => {
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  controller.stop()
+  expect(controller.save('n', { mine: 1 }), 'accepted as intent').toBe(true)
+  for (let i = 0; i < 6; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  expect(controller.owes('n'), 'retained for a reload').toBe(true)
+  void failures // its own report is optional; what matters is that nothing was written
+})

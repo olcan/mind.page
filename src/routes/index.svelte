@@ -6446,6 +6446,57 @@
   // pair (now open/terminal deliveries, which the gate reads directly), and the dirty-id map
   // (now retained blocked deliveries, healed by a strictly higher same-cell success)
   const hiddenIngress = createHiddenIngress()
+  // ACTIVE callback contexts: each snapshot callback's lease with the handles it opened, removed
+  // when the callback terminalizes. not a subscription registry — stop needs exactly this to fail
+  // and block what is still in flight
+  const activeIngressContexts = new Set<{ lease: { fail: () => void }; handles: Map<string, any> }>()
+  // STICKY, page-lifetime: firestore does not replay an ignored callback's docChanges, so a
+  // dropped callback (sync disabled) or a terminal listener error means this page can never
+  // again claim to track the server. reload is the only recovery
+  let ingressStopped = false
+  let unsubscribeItems: null | (() => void) = null
+  // called after onSnapshot returns: if the stop already happened while it was being installed,
+  // the closure is invoked immediately rather than retained for a stop that will never come
+  function armItemsUnsubscribe(unsubscribe: () => void) {
+    if (ingressStopped) unsubscribe()
+    else unsubscribeItems = unsubscribe
+  }
+  function stopIngress(reason: string) {
+    if (ingressStopped) return // first false-to-true transition only
+    ingressStopped = true
+    console.warn(`hidden ingress STOPPED for this page: ${reason} (reload to recover)`)
+    // 1. a FRESH outside-callback ordinal, so authority stays unusable even if a sealed older
+    //    lease later reaches its ordered turn — a terminal listener error arrives outside any
+    //    callback, so there is no lease to fail for it
+    hiddenIngress.invalidateAuthority()
+    // 2. the ONE writer stop transition, whose first effect is cancelling every generation-owned
+    //    observer — BEFORE any handle can publish a terminal outcome, since block() synchronously
+    //    resolves matching waiters and cancellation cannot retract a resolved promise
+    try {
+      hiddenPersistence.stop()
+    } catch (e) {
+      console.error('writer stop failed:', e) // cleanup below still runs
+    }
+    // 3-4. fail every active lease and block its nonrunning handles (a running application owns
+    //      its own outcome under the CAS contract)
+    for (const ctx of activeIngressContexts) {
+      try {
+        ctx.lease.fail()
+        for (const handle of ctx.handles.values()) handle.block()
+      } catch (e) {
+        console.error('ingress context cleanup failed:', e)
+      }
+    }
+    activeIngressContexts.clear()
+    // 5. unsubscribe the items listener EXACTLY once — a live listener would keep doing
+    //    reserve/fail churn, cache and network work for a page only reload can recover
+    try {
+      unsubscribeItems?.()
+    } catch (e) {
+      console.error('items listener unsubscribe failed:', e)
+    }
+    unsubscribeItems = null
+  }
 
   // sticky: any event that can change hidden VALIDITY marks cleanup owed, and it stays owed
   // until a run actually happens. a non-authoritative hidden revision can introduce a duplicate
@@ -6505,7 +6556,7 @@
       if (failed || !initialized) lease.fail()
       else lease.seal()
     }
-    return { settle, revoke }
+    return { settle, revoke, lease }
   }
 
   // an OUTSIDE-callback revocation (a firestore error, sync disabled, a shutdown): it takes a
@@ -7605,7 +7656,10 @@
 
         // start listening for remote changes
         // (also initialize if items were not returned by server)
-        onSnapshot(
+        // the unsubscribe closure is RETAINED so a sticky stop can invoke it exactly once, with
+        // the race-safe check below in case stop was reached before onSnapshot returned
+        armItemsUnsubscribe(
+          onSnapshot(
           items_query,
           // metadata changes are included so that the fromCache -> server transition fires a
           // snapshot even when the cached data matches the server (see the first-snapshot gate
@@ -7647,7 +7701,10 @@
             // would reclassify them applied (see settleHiddenAuthority)
             if (action == 'ignore_sync_disabled') {
               console.warn('ignoring firestore snapshot due to _disable_sync')
-              revokeHiddenAuthority('sync disabled') // revoking early is safe; only granting must queue
+              // STICKY: firestore does not replay this callback's docChanges, so clearing the flag
+              // later and receiving a metadata-only candidate would establish a newer basis over
+              // state that was never applied
+              stopIngress('sync disabled')
               return
             }
             if (action == 'ignore_metadata_only') {
@@ -7749,7 +7806,7 @@
             // routed through different names can land out of receipt order — an open blocker
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
-            const { settle: settleApplied, revoke: revokeThisRevision } = reserveHiddenAuthority({
+            const { settle: settleApplied, revoke: revokeThisRevision, lease } = reserveHiddenAuthority({
               policy: decision.policy,
             })
 
@@ -7784,6 +7841,10 @@
               // echo failed to decrypt rather than waiting forever; a removal carries none
               if (relevant) handles.set(id, hiddenIngress.open(id, change.doc.data().cipher))
             }
+            // this callback is ACTIVE until it terminalizes: a sticky stop fails its lease and
+            // blocks every handle that has not started applying
+            const context = { lease, handles }
+            activeIngressContexts.add(context)
 
             const applyTask = async () => {
               // GUARANTEED release: a write REFUSES and requeues while a marker stands for its
@@ -7793,6 +7854,7 @@
               try {
                 await applyChanges()
               } finally {
+                activeIngressContexts.delete(context) // terminalized: stop no longer owns it
                 for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
                 // EVERY opened handle must terminalize, or the gate stays pending forever and no
                 // hidden write can ever issue again. block() is a compare-and-set: it converts
@@ -8056,8 +8118,9 @@
           },
           error => {
             console.error(error)
-            // a terminal listener error means the index no longer tracks the server at all
-            revokeHiddenAuthority('items listener error')
+            // a terminal listener error means the index no longer tracks the server at all — and
+            // it arrives OUTSIDE any callback, so there is no lease to fail for it
+            stopIngress('items listener error')
             if (isFirestoreShutdown(error)) onFirestoreShutdown() // e.g. cache cleared in another tab
             if (error.code == 'permission-denied') {
               // NOTE: server (admin) can still preload items if user account was deactivated with encrypted items
@@ -8073,7 +8136,7 @@
               })
             }
           }
-        )
+        ))
       }
 
       onMount(() => {
