@@ -2881,3 +2881,101 @@ test('a bypassed update REFUSES when the create settles during its encryption', 
   for (let i = 0; i < 6; i++) await flush()
   expect(h.calls.filter(c => c.op == 'update').length, 'the exempted payload did not issue').toBe(updatesBefore)
 })
+
+// ---- the a/m schedule, and one effect-log table for the commit's call counts ----
+
+test('the a/m schedule: stale lower `a` is removed, unacknowledged `m` is preserved and updated once', async () => {
+  // the schedule the design names as the reason the COMMIT belongs to the controller: create `m`
+  // issued and unacknowledged, stale lower `a` canonical, and a confirmation answer containing
+  // NEITHER. an adapter-only slice replacement removes both, and re-resolution then creates a
+  // second document instead of updating `m` behind its own create
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise // `m` stays unacknowledged
+    },
+    confirmTarget: (name, hooks) => serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks),
+  })
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  const m = h.calls.find(c => c.op == 'create')!.id!
+  // a stale LOWER id is canonical locally, and the server answer contains neither it nor `m`
+  registerHidden(h.idx, { id: 'a', name: 'n', item: { stale: 1 } }, () => {})
+  expect(h.idx.byName.get('n')!.id, '`a` sorts below `m` and wins selection').toBe('a')
+  controller.save('n', { mine: 2 })
+  for (let i = 0; i < 12; i++) await flush()
+  expect(h.idx.byId.has('a'), 'the disproved stale row is removed').toBe(false)
+  expect(h.idx.byId.has(m), 'the unacknowledged create is PRESERVED by its marker').toBe(true)
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(updates.map(u => u.id), 'exactly one update, to `m`').toEqual([m])
+  expect(h.calls.filter(c => c.op == 'create'), 'and no second document').toHaveLength(1)
+  ack.resolve()
+})
+
+// the four controller acceptance properties as ONE effect-log table, per review 71
+for (const [what, rows, expected] of [
+  ['an empty answer', [], { register: 0, published: 1 }],
+  ['an ineligible-only answer', [{ id: 'q', name: 'n', eligible: false }], { register: 0, published: 1 }],
+  ['a quarantined lower row beside an eligible one', [{ id: 'a', name: 'n', eligible: false }, { id: 'k', name: 'n', eligible: true }], { register: 1, published: 0 }],
+] as const)
+  test(`commit effects: ${what}`, async () => {
+    const registered: string[] = []
+    const published: string[] = []
+    const h = harness()
+    const controller = createHiddenPersistence({
+      ...h.deps,
+      registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
+      syncOwner: n => void published.push(n),
+      confirmTarget: async (name, hooks) => {
+        const answer = new Map(
+          rows.map(r => [r.id, { id: r.id, kind: 'hidden' as const, name: r.name, wrapper: { id: r.id, name: r.name, item: {} }, eligible: r.eligible }])
+        )
+        return hooks.commit(answer, hooks.captureReadMarker())
+      },
+    })
+    registerHidden(h.idx, { id: 'stale', name: 'n', item: {} }, () => {})
+    h.idx.byName.delete('n')
+    published.length = 0
+    controller.save('n', { mine: 1 })
+    for (let i = 0; i < 10; i++) await flush()
+    expect(registered.length, 'registerTargetRow calls').toBe(expected.register)
+    // NOTE the baseline-publication half is NOT pinned here and is not claimed: syncOwner has
+    // several callers in a save (the name claim, the adopt path), so a publication count cannot
+    // isolate the commit's reset — deleting the reset leaves this row green. The registration
+    // count IS the discriminating property, and `register.length == 0` is what selects the reset
+    // branch, so that branch is reached exactly when this asserts zero registrations
+    void published
+    void expected.published
+  })
+
+test('commit effects: a RELEVANT indeterminate answer produces zero effects, and a later read succeeds', async () => {
+  // indeterminate is not absence: the document exists and this read cannot place it, so treating
+  // it as target-side absence would remove a live record from a stale negative
+  let attempt = 0
+  const registered: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true, // so the RETRY confirms too, rather than updating blind
+    registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
+    confirmTarget: async (name, hooks) => {
+      if (++attempt == 1) throw new Error('hidden document d1 could not be classified: unparseable')
+      return serverAnswer([{ id: 'k', name: 'n', item: {} }])(name, hooks)
+    },
+  })
+  const live: HiddenWrapper = { id: 'live', name: 'n', item: { v: 1 } }
+  registerHidden(h.idx, live, () => {})
+  h.idx.byName.delete('n')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  expect(registered, 'the failed classification mutated nothing').toEqual([])
+  expect(h.idx.byId.has('live'), 'and removed nothing from a stale negative').toBe(true)
+  // a later save confirms successfully
+  controller.save('n', { mine: 2 })
+  for (let i = 0; i < 12; i++) await flush()
+  expect(registered, 'the retry commits').toContain('k')
+})
