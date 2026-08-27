@@ -7812,16 +7812,6 @@
               policy: decision.policy,
             })
 
-            // ENTRY receipts, taken SYNCHRONOUSLY for the whole snapshot before anything is
-            // queued: a write already encrypting for one of these documents must not issue while a
-            // change for it is in flight. taking them inside the per-change loop left every later
-            // change in this snapshot — and all of the next one, behind snapshotApply — unmarked
-            // while a slow decrypt ran. they are invisible to canonical resolution and are released
-            // (or superseded by the real receipt) as each change is handled
-            // EVERY changed document, not a predicate. classification cannot become less relevant
-            // because a later callback arrived: a hidden delivery that is itself only pending is
-            // absent from hiddenItems and invisible to nameForDocument, so a following
-            // hidden-to-visible change for the same id would have been marked as irrelevant
             // ONE COMPLETION RECORD PER CHANGED DOCUMENT, allocated synchronously at receipt, in
             // document order, before any decode. the record/lane mechanism itself lives in
             // src/hidden_listener_records.ts — production uses that exact module, and its
@@ -7833,13 +7823,11 @@
             // ordinary (raw hidden:false, absent from the index) and would otherwise leave a
             // phantom hidden representation, or strand an unhealable block
             const changes = snapshot.docChanges() // read ONCE
-            const entryReceipts = new Map<string, number>()
             // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary)
             const corpusBoundaries = new Map<string, Promise<void> | undefined>()
             const batch = recordAllocator.allocate(
               changes.map(change => {
                 const id = change.doc.id
-                entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
                 const rawHidden = !!change.doc.data().hidden
                 // THE PENDING-CORPUS BOUNDARY, read HERE and stored — never looked up later. by
                 // the time a delivery has decrypted, the producer that published this id may have
@@ -7880,7 +7868,6 @@
             activeIngressContexts.add(context)
             void batch.landed.then(results => {
               activeIngressContexts.delete(context)
-              for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
               settleApplied({ failed: batch.failed(results) })
             })
 
@@ -7943,9 +7930,6 @@
                     // authority on a view that includes the stale record
                     return // finish() blocks the handle, whose blocked outcome revokes exactly once
                   }
-                  // receipt-time intent: a create/adopt decision must see this record even though
-                  // its application is queued — possibly behind that very create
-                  const receipt = hiddenPersistence.noteRemote(wrapper, doc.id, removed)
                   applied.push(`${change.type} ${savedItem.hidden ? 'hidden ' : ''}${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   const corpusPredecessor = corpusBoundaries.get(doc.id)
                   record.schedule(async () => {
@@ -8011,10 +7995,6 @@
                       .then(
                         () => {
                           hiddenApplyOk.set(doc.id, true)
-                          // released inside the SUCCESS handler only: a failed application must
-                          // keep its receipt or survivor selection forgets a record it was told
-                          // about
-                          hiddenPersistence.releaseRemote(doc.id, receipt)
                         },
                         e => {
                           hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this

@@ -220,26 +220,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const stoppedError = () => new Error('hidden ingress stopped: reload to recover')
   let generationSeq = 0
 
-  // the LATEST receipt per document: either the record as received, or the fact of its removal.
-  // one map rather than a map plus a removed-set — the two could disagree, and only the map was
-  // ever released, so removed ids accumulated for the page lifetime and a document that was
-  // removed and later recreated stayed invisible to survivor selection forever.
-  // each receipt carries a token; a release only takes effect if it is still the latest, so an
-  // older application settling cannot discard a newer receipt that a pending create still needs
-  // `pending` marks a change the listener has RECEIVED but not yet decrypted. it exists only to
-  // move the target stamp: a document being decoded right now is a document that may be about to
-  // change, and a write that was built before it arrived must not issue. it is deliberately
-  // INVISIBLE to canonical resolution — nothing is known about it yet, so treating it as a record
-  // or as a removal would both be wrong
-  // `pending` marks a delivery the listener has received but not yet decoded. it is a BARRIER, not
-  // a marker for comparison: a stamp read before and after an encryption cannot see a change that
-  // was already in flight when the build started, and that stalled-decrypt window is where a stale
-  // full-state write got out. it is a plain flag deliberately — an awaitable promise per entry
-  // strands its waiter as soon as a second callback for the same id replaces the slot
-  type Receipt = { token: number; wrapper?: HiddenWrapper; pending?: boolean }
-  const receipts = new Map<string, Receipt>()
-  let receiptSeq = 0
-
   // adopts `found` under `pending`: REBASES the projection from a clone of the immutable local
   // intent when this name owes one, merges the found state underneath, and publishes the exact
   // result to the owner. rebasing here — at selection time, not at the next write attempt — is
@@ -274,24 +254,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return next
   }
 
-  // the EFFECTIVE view of a name's records: live `byId` entries overlaid with the latest receipt
-  // per document, with removal receipts taken out. every path uses it — update, create and
-  // adoption — because a record that has been RECEIVED but whose application is still queued is
-  // just as real as an applied one, and ignoring it is how a write lands on a document that is
-  // about to stop being canonical, or how a create duplicates a record already in hand
+  // the name's records, read from the APPLIED INDEX ALONE. there is no receipt overlay any more:
+  // the coordinator's global gate is what makes this safe — a delivery that has been received but
+  // not applied keeps the gate non-writable, so no writer resolution can reach an issue while the
+  // index is behind. the overlay predated the gate and duplicated the same fact worse: one
+  // replaceable slot per document id stood for every delivery received, the latest decoded state
+  // and the application lifecycle at once
   function effectiveRecords(name: string): HiddenWrapper[] {
     const index = deps.index()
-    const byId = new Map<string, HiddenWrapper>()
-    for (const w of index.byId.values()) if (w.name == name) byId.set(w.id, w)
-    for (const [id, receipt] of receipts) {
-      if (receipt.pending) continue // received, not yet decoded: says nothing about the record yet
-      if (!receipt.wrapper)
-        byId.delete(id) // its removal was received
-      else if (receipt.wrapper.name == name)
-        byId.set(id, receipt.wrapper) // receipts REPLACE
-      else byId.delete(id) // received under a different name (a rename): no longer ours
-    }
-    return [...byId.values()].filter(w => !isQuarantined(index, w.id))
+    const records: HiddenWrapper[] = []
+    for (const w of index.byId.values()) if (w.name == name && !isQuarantined(index, w.id)) records.push(w)
+    return records
   }
 
   // the record that holds the name right now: the eligible minimum id, or a create in flight
@@ -508,9 +481,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
 
   // ONE attempt for `generation`: resolve the target, build, recheck, issue. returns false when the
   // target MOVED while building, and the caller requeues. an inner loop is worse: it re-encrypts
-  // while holding the chain, starving the receipts it waits for, and its "each retarget takes a
+  // while holding the chain, starving the deliveries it waits for, and its "each retarget takes a
   // lower id" termination argument is false — a removal or rename can retarget upward or to
-  // absence. safety rests on receipts eventually going quiet, NOT on the requeue being ordered
+  // absence. safety rests on the GATE eventually going writable, NOT on the requeue being ordered
   // behind the application that moved the target, which it is not
   async function attemptWrite(name: string, generation: number): Promise<boolean> {
     const current = () => currentOwed(name, generation)
@@ -1045,43 +1018,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       return result // the REAL result: the caller's handle records blocked on rejection
     },
 
-    // releases a receipt once its application has settled — only if it is still the latest, so a
-    // newer receipt (e.g. a rename that a pending create must see) is never discarded by an
-    // older application finishing. the inbox exists only so a create/adopt decision can see a
-    // record whose application is still queued; keeping entries for the page lifetime let a
-    // QUARANTINED duplicate be re-adopted by the next same-name create
-    releaseRemote(id: string, token: number) {
-      if (receipts.get(id)?.token != token) return
-      receipts.delete(id)
-    },
-
-    // records what was received for a document and returns the token to release it with. a
-    // removal is recorded as a receipt with no wrapper, so a later add of the same id simply
-    // supersedes it
-    noteRemote(wrapper: HiddenWrapper | undefined, id: string, removed: boolean) {
-      const token = ++receiptSeq
-      receipts.set(id, { token, wrapper: removed ? undefined : wrapper })
-      return token
-    },
-
-    // records that a change for this document has ENTERED the listener, before anything is known
-    // about it. production cannot call noteRemote until after decryptItem, and every controller
-    // branch can finish encrypting and issue synchronously in that window — so a removal, rename
-    // or same-id replacement already inside the listener left the target stamp unchanged and a
-    // stale write went out. this moves the stamp at ENTRY instead, at the cost of an occasional
-    // extra requeue for a change that turns out not to concern us. a requeue is safe; the write
-    // was not. release it once the change has been noted properly (or has proved irrelevant)
-    noteRemotePending(id: string) {
-      const token = ++receiptSeq
-      receipts.set(id, { token, pending: true })
-      return token
-    },
-
     // the name a document belongs to, including one being ADOPTED (whose server id is not in
     // byId until finalization): a removal of that id must serialize on the adopting name's chain
     nameForDocument(id: string) {
       const index = deps.index()
-      const known = index.byId.get(id)?.name ?? receipts.get(id)?.wrapper?.name
+      // NO receipt fallback: the listener decides the affected names IN ITS RESERVED TURN now
+      // (round 65), from the index as it stands then, so a name recovered from an undecoded
+      // delivery is neither needed nor trustworthy
+      const known = index.byId.get(id)?.name
       if (known) return known
       for (const w of index.byId.values()) if (w.adopt_id == id) return w.name
       return undefined
