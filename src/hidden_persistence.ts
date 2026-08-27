@@ -528,26 +528,36 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // (round 37). the rejection creates NO owed generation; an older valid generation already
       // owed stays owed and still lands. (owes() DOES keep suppressing owner synchronization and
       // remote-change notification for that name meanwhile — index application is what is never
-      // skipped — which is exactly why the rollback above must prefer the owed localIntent.)
-      // returns false so the OWNER boundary can settle the rejection (roll its state back or
-      // suppress the repeat) — the index stays truthful and unchanged, and without that
-      // settlement the same invalid value would re-trigger invalidation and this hook on every
-      // later automatic save pass
+      // skipped — which is exactly why the rollback in the catch below prefers the owed
+      // localIntent.) the CONTROLLER settles the rejection — it rolls the owner back itself, via
+      // syncOwner — and returns false only so the caller stops its post-acceptance effects
+      // (listeners, invalidation) for a value that was never accepted
       let intent: any
       if (!readOnly)
         try {
           intent = cloneState(item)
         } catch (e) {
           console.error(`hidden save for '${name}' rejected: state is not JSON-serializable:`, e)
-          // ROLL BACK THE OWNER HERE, where both inputs live (round 39). the last ACCEPTED local
-          // view is what must be restored, and that is NOT always the applied index: while an
+          // ROLL BACK THE OWNER HERE, where both inputs live (round 39). the last accepted local
+          // INTENT is what must be restored, and that is NOT always the applied index: while an
           // older valid generation is owed, owes() deliberately suppresses owner synchronization,
           // so the applied index may hold a remote value the owner never saw — restoring THAT
-          // would discard the accepted owed view, and the local-change callback running after the
-          // replacement could save it and supersede the owed work. the owed localIntent wins;
-          // the applied index (or {}) is the fallback when nothing is owed
+          // would discard the accepted owed intent, and the local-change callback running after
+          // the replacement could save it and supersede the owed work. the owed localIntent wins
+          // (already normalized, so its clone cannot throw); the applied index is the fallback —
+          // and READ-ONLY mode indexes raw non-JSON state, so if the page later became writable
+          // that fallback itself may not clone: publish {} then, notify with the ORIGINAL
+          // rejection, and never let the replacement error escape save() (round 40)
           const op = owed.get(name)
-          deps.syncOwner(name, cloneState(op ? op.localIntent : (deps.index().byName.get(name)?.item ?? {})))
+          let baseline: any = {}
+          if (op) baseline = cloneState(op.localIntent)
+          else
+            try {
+              baseline = cloneState(deps.index().byName.get(name)?.item ?? {})
+            } catch {
+              baseline = {}
+            }
+          deps.syncOwner(name, baseline)
           deps.notifyFailure(name, e)
           return false
         }

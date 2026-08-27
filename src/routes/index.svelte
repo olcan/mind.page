@@ -761,13 +761,13 @@
             // never existed is simply not created
             if (modified) {
               if (_.isEmpty(__item.global_store) && !hiddenItemsByName.has(name)) return // nothing to record
-              // a REJECTED save (non-JSON state) already rolled the owner back INSIDE the
-              // controller, which owns the choice of baseline — the owed localIntent when a valid
-              // generation is still owed (the applied index may hold remote state the owner never
-              // saw while owes() suppresses sync), else the applied state. RETURN, deliberately:
-              // rejection means "not accepted", so the local-change listeners below must not run
-              // for it — they would observe the restored baseline and could immediately resave it
-              // (round 39; this early return is the pinned product behavior, not an accident)
+              // a REJECTED save (non-JSON state) is settled INSIDE the controller, which owns
+              // the rollback baseline — the owed localIntent when a valid generation is still
+              // owed (the applied index may hold remote state the owner never saw while owes()
+              // suppresses sync), else the applied state. RETURN, deliberately: rejection means
+              // "not accepted", so the local-change listeners below must not run for it — they
+              // would observe the restored baseline and could immediately resave it. this early
+              // return is documented intended behavior (round 40)
               if (!saveHiddenItem(name, _.cloneDeep(__item.global_store))) return
             }
           }
@@ -8864,9 +8864,9 @@
     return blockRegExp('\\S+_input(?:_hidden|_removed)? *')
   }
 
-  // returns false when the save was REJECTED (non-JSON state): the caller must settle the
-  // rejection — the applied index is deliberately unchanged, so without settlement the same
-  // invalid value re-triggers invalidation, listeners and the failure modal on every later pass
+  // returns false when the save was REJECTED (non-JSON state). the CONTROLLER settles the
+  // rejection itself (it rolls the owner back through syncOwner); false only tells the caller to
+  // stop its post-acceptance effects for a value that was never accepted
   function saveHiddenItem(name, item) {
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')

@@ -81,6 +81,14 @@ function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper) {
     .then(() => controller.releaseRemote(wrapper.id, token))
 }
 
+function arriveModified(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper) {
+  const token = controller.noteRemote(wrapper, wrapper.id, false)
+  const names = [idx.byId.get(wrapper.id)?.name, wrapper.name]
+  return controller
+    .applyRemote(names, () => applyRemoteModified(idx, wrapper))
+    .then(() => controller.releaseRemote(wrapper.id, token))
+}
+
 function arriveRemoval(controller: any, idx: HiddenIndex, id: string) {
   const token = controller.noteRemote(undefined, id, true)
   return controller
@@ -806,6 +814,40 @@ test('readonly mode mutates the index but never writes — and never serializes'
   expect(idx.byName.get('n2')!.item, 'the index still updates').toBe(cyclic)
   expect(failures, 'no failure for a write that cannot happen').toEqual([])
   expect(calls).toEqual([])
+})
+
+test('a rejection whose applied fallback is raw read-only state publishes {} instead of throwing', async () => {
+  // round 40: read-only mode indexes RAW non-JSON state, and production's readonly flag is
+  // mutable — so a later writable rejection's fallback clone can itself throw, which would skip
+  // syncOwner/notifyFailure/return-false and let the replacement error escape save()
+  let readOnly = true
+  const failures: unknown[] = []
+  const published: any[] = []
+  const h = harness()
+  const { idx, calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    readonly: () => readOnly,
+    notifyFailure: (_name, e) => void failures.push(e),
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
+  })
+  const cyclic: any = { bad: BigInt(1) }
+  cyclic.self = cyclic
+  expect(controller.save('n', cyclic), 'raw state accepted while read-only').toBe(true)
+  readOnly = false // the page becomes writable
+  const invalid = {
+    toJSON: () => {
+      throw new Error('original rejection')
+    },
+  }
+  expect(controller.save('n', invalid as any), 'returns false rather than throwing').toBe(false)
+  expect(failures, 'exactly one notification, with the ORIGINAL thrown value').toHaveLength(1)
+  expect((failures[0] as Error).message).toBe('original rejection')
+  expect(published.at(-1), 'the owner is published {} — the raw baseline cannot clone').toEqual({})
+  expect(idx.byName.get('n')!.item, 'the applied index still holds the exact raw object').toBe(cyclic)
+  expect(controller.owes('n'), 'no owed generation').toBe(false)
+  await flush()
+  expect(calls.filter(c => c.op == 'create' || c.op == 'update'), 'no SDK write').toHaveLength(0)
 })
 
 test('a failed application keeps its receipt, so the next create still sees the record', async () => {
@@ -1599,7 +1641,9 @@ test('non-JSON state fails through notifyFailure at save time, mutating nothing'
 })
 
 test('rejecting a NEW invalid value keeps the older owed generation AND rolls the owner back to it', async () => {
-  // round-39: the rollback baseline must be the last ACCEPTED local view. while D is owed, owes()
+  // round-39: the rollback baseline must be the last accepted local INTENT (Owed.localIntent, the
+  // immutable user snapshot — adoption can later publish a derived projection, so "last owner
+  // view" would be a stronger claim than rejection safety needs). while D is owed, owes()
   // suppresses owner synchronization, so the applied index can hold remote C the owner never saw —
   // restoring C would discard the accepted owed D, and the local-change callback could then save C
   // and supersede D. the SDK acknowledgement (not encryption, which owns the name chain) is held
@@ -1620,16 +1664,23 @@ test('rejecting a NEW invalid value keeps the older owed generation AND rolls th
   for (let i = 0; i < 6; i++) await flush()
   expect(calls.filter(c => c.op == 'create'), 'D was issued').toHaveLength(1)
   expect(controller.owes('n'), 'D is still owed (unacknowledged)').toBe(true)
-  // remote C applies to the index while D is owed (owner sync is suppressed by owes())
-  applyRemoteModified(idx, { id: idx.byName.get('n')!.id, name: 'n', item: { mine: 'C' } })
+  // remote C arrives through the production lifecycle (never a direct reducer call — see arrive)
+  const docId = idx.byName.get('n')!.id
+  await arriveModified(controller, idx, { id: docId, name: 'n', item: { mine: 'C' } })
   expect(idx.byName.get('n')!.item, 'the applied index holds C').toEqual({ mine: 'C' })
 
+  published.length = 0 // the fresh-create attempt already published D; only the REJECTION is under test
   expect(controller.save('n', { bad: BigInt(1) }), 'invalid E rejected').toBe(false)
   expect(controller.owes('n'), 'the OLDER generation is still owed').toBe(true)
-  expect(published.at(-1), 'rollback publishes owed D, never applied C').toEqual({ mine: 'D' })
+  expect(published, 'the rejection itself published exactly owed D, never applied C').toEqual([{ mine: 'D' }])
+  expect(idx.byName.get('n')!.item, 'the applied index STILL holds C — nothing rolled it back').toEqual({
+    mine: 'C',
+  })
   // ... and the issued payload was D, not merely "one create occurred"
   expect(itemOf(calls.find(c => c.op == 'create')!.text)).toEqual({ mine: 'D' })
   ack.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(controller.owes('n'), 'the owed generation settles — no detached work left behind').toBe(false)
 })
 
 test('rejection with NOTHING owed rolls the owner back to the applied state', async () => {

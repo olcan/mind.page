@@ -9,8 +9,9 @@ export default defineConfig({
   // keeps its serialized lanes unchanged
   fullyParallel: true,
   // a FIXED small cap, not undefined: these tests share no state, so four workers cut the fast
-  // loop ~25-30% (round 37), while unbounded workers would let a large machine oversubscribe for
-  // no gain at this suite size. the full e2e config keeps its serialized `unit` project unchanged
+  // loop ~25-30% (round 37). above four the returns diminish and oversubscription risk grows
+  // (round 40 measured a further 6-14% at eight on a 32-thread host, plateauing beyond), so the
+  // portable cap stays. the full e2e config keeps its serialized `unit` project unchanged
   workers: 4,
   reporter: [['list']],
 })
