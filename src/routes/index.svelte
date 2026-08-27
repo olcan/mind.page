@@ -764,7 +764,8 @@
               // a REJECTED save (non-JSON state) is settled INSIDE the controller, which owns
               // the rollback baseline — the owed localIntent when a valid generation is still
               // owed (the applied index may hold remote state the owner never saw while owes()
-              // suppresses sync), else the applied state. RETURN, deliberately: rejection means
+              // suppresses sync), else a CLONEABLE applied state, otherwise {} — read-only mode
+              // can index raw non-JSON state. RETURN, deliberately: rejection means
               // "not accepted", so the local-change listeners below must not run for it — they
               // would observe the restored baseline and could immediately resave it. this early
               // return is documented intended behavior (round 40)

@@ -835,15 +835,18 @@ test('a rejection whose applied fallback is raw read-only state publishes {} ins
   cyclic.self = cyclic
   expect(controller.save('n', cyclic), 'raw state accepted while read-only').toBe(true)
   readOnly = false // the page becomes writable
+  // ONE hoisted error object, asserted by IDENTITY: a fresh Error inside toJSON compared by
+  // message would stay green if the controller replaced or wrapped it (round 41)
+  const original = new Error('original rejection')
   const invalid = {
     toJSON: () => {
-      throw new Error('original rejection')
+      throw original
     },
   }
   expect(controller.save('n', invalid as any), 'returns false rather than throwing').toBe(false)
-  expect(failures, 'exactly one notification, with the ORIGINAL thrown value').toHaveLength(1)
-  expect((failures[0] as Error).message).toBe('original rejection')
-  expect(published.at(-1), 'the owner is published {} — the raw baseline cannot clone').toEqual({})
+  expect(failures, 'exactly one notification, with the ORIGINAL thrown object').toHaveLength(1)
+  expect(failures[0], 'the same object, not a replacement').toBe(original)
+  expect(published, 'exactly one rollback publication: {}').toEqual([{}])
   expect(idx.byName.get('n')!.item, 'the applied index still holds the exact raw object').toBe(cyclic)
   expect(controller.owes('n'), 'no owed generation').toBe(false)
   await flush()
@@ -1679,7 +1682,9 @@ test('rejecting a NEW invalid value keeps the older owed generation AND rolls th
   // ... and the issued payload was D, not merely "one create occurred"
   expect(itemOf(calls.find(c => c.op == 'create')!.text)).toEqual({ mine: 'D' })
   ack.resolve()
-  for (let i = 0; i < 6; i++) await flush()
+  // ONE flush suffices: the acknowledgement handler and name-chain settlement are pure promise
+  // work, drained before this timer fires (round 41)
+  await flush()
   expect(controller.owes('n'), 'the owed generation settles — no detached work left behind').toBe(false)
 })
 
