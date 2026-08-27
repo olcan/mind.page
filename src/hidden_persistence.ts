@@ -844,26 +844,55 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // immediately. returns a promise that settles when the transition has applied — the caller
     // aggregates these before settling that revision's authority. pass the name when known; a removal
     // of an id not in the index applies immediately (nothing in flight can target it)
-    applyRemote(names: (string | undefined)[] | string | undefined, apply: () => void): Promise<void> {
-      // EVERY affected name is acquired, in a canonical order so two renames in opposite
-      // directions cannot deadlock: a rename must join the in-flight write on its OLD name too,
-      // otherwise an already-issued old-name update can write the old name back
+    applyRemote(
+      names: (string | undefined)[] | string | undefined,
+      apply: () => void | Promise<void>
+    ): Promise<void> {
+      // ONE OPERATION PUBLISHED TO EVERY AFFECTED TAIL, in a single synchronous turn. three
+      // things were wrong with the previous shape:
+      //  - `.filter(chains.has)` dropped every affected name with no in-flight write, so a write
+      //    STARTING for that name during this application was not ordered behind it — which is
+      //    the entire guarantee multi-name acquisition exists to provide;
+      //  - acquisition was RECURSIVE, so the second name was not reserved until the first chain
+      //    reached it, and a writer for the second could slip in between; and
+      //  - an async `apply` was typed and treated as void, so the chain did not await the work.
+      // reserving every tail at once also removes the deadlock the canonical sort defended
+      // against: nothing can be half-acquired, so there is no acquisition order to agree on
       const affected = [...new Set((Array.isArray(names) ? names : [names]).filter(Boolean) as string[])]
-        .filter(name => chains.has(name))
-        .sort(compareIds)
       if (!affected.length) {
         try {
-          apply()
-          return Promise.resolve()
+          return Promise.resolve(apply()) // still ADOPTS an async apply (the third fix)
         } catch (e) {
           return Promise.reject(e)
         }
       }
-      const acquire = (i: number): Promise<void> =>
-        i == affected.length
-          ? Promise.resolve(apply())
-          : (enqueue(affected[i], () => acquire(i + 1)) as Promise<void>)
-      return acquire(0)
+      const predecessors = affected.map(n => chains.get(n)).filter(Boolean) as Promise<void>[]
+      // SETTLE-ONLY on the way in: a predecessor that rejected is someone else's failure and must
+      // not skip this application. an idle name contributes no predecessor, but still receives
+      // the tail below
+      const result: Promise<void> = predecessors.length
+        ? Promise.allSettled(predecessors).then(() => apply())
+        : (() => {
+            // nothing to wait for: apply NOW, as the previous no-chain path did. deferring every
+            // ordinary delivery by a microtask would be a behavior change for no benefit
+            try {
+              return Promise.resolve(apply())
+            } catch (e) {
+              return Promise.reject(e)
+            }
+          })()
+      // ... and settle-only on the way OUT: one rejection must not poison every affected tail
+      const settled = result.then(
+        () => {},
+        () => {}
+      )
+      for (const name of affected) {
+        chains.set(name, settled)
+        void settled.then(() => {
+          if (chains.get(name) === settled) chains.delete(name)
+        })
+      }
+      return result // the REAL result: the caller's handle records blocked on rejection
     },
 
     // releases a receipt once its application has settled — only if it is still the latest, so a

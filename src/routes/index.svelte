@@ -7930,7 +7930,7 @@
                   // hand-rolled heal that needed a captured sequence to be safe
                   const dropHandle = handles.get(doc.id)
                   const dropApply = () =>
-                    hiddenPersistence.applyRemote([hiddenName], () => removeHidden(hiddenIndex(), doc.id)).then(
+                    hiddenPersistence.applyRemote([hiddenName], () => void removeHidden(hiddenIndex(), doc.id)).then(
                       () => {
                         hiddenApplyOk.set(doc.id, true)
                         hiddenPersistence.releaseRemote(doc.id, dropped)

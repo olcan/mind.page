@@ -482,7 +482,7 @@ test('remote transitions are not delayed by an unacknowledged local write', asyn
   controller.save('n', { v: 1 })
   await flush() // write issued, still unacknowledged
   const order: string[] = []
-  await controller.applyRemote(['n'], () => order.push('remote'))
+  await controller.applyRemote(['n'], () => void order.push('remote'))
   expect(order).toEqual(['remote']) // applied without waiting for the acknowledgement
   ack.resolve()
 })
@@ -536,7 +536,7 @@ test('a write already issued is not retracted by a later rename (durability over
   controller.save('old', { v: 1 })
   await flush() // issued, carrying name 'old'
   const order: string[] = []
-  await controller.applyRemote(['old', 'new'], () => order.push('rename applied'))
+  await controller.applyRemote(['old', 'new'], () => void order.push('rename applied'))
   expect(order).toEqual(['rename applied']) // applies immediately; the queued write is not held
   expect(itemOf(calls[0].text)).toEqual({ v: 1 })
   ack.resolve()
@@ -1359,7 +1359,7 @@ test('a change that has ENTERED the listener but not yet decrypted still stops a
   expect(calls.filter(c => c.op == 'update'), 'no write while a change for the target is in flight').toHaveLength(0)
   // the change turns out to be a removal, applied as that delivery's own Apply
   entering.ready(() =>
-    controller.applyRemote([controller.nameForDocument('d1')], () => removeHidden(idx, 'd1'))
+    controller.applyRemote([controller.nameForDocument('d1')], () => void removeHidden(idx, 'd1'))
   )
   await entering.done
   controller.releaseRemote('d1', token)
@@ -2446,4 +2446,105 @@ test('an ISSUED update rejecting not-found after stop starts no recovery', async
   expect([...h.idx.byId.keys()], 'the live wrapper was not removed').toEqual(idsBefore)
   expect(h.calls.filter(c => c.op == 'create'), 'and no recovery create').toHaveLength(0)
   expect(controller.owes('n'), 'the intent is retained').toBe(true)
+})
+
+// ---- applyRemote publishes ONE operation to every affected tail (round 62) ----
+
+test('an application reserves an IDLE affected name, so a write starting during it is ordered behind', async () => {
+  // the old `.filter(chains.has)` dropped every affected name with no in-flight write, which is
+  // exactly the ordering guarantee multi-name acquisition exists to provide
+  const order: string[] = []
+  const applying = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async id => void order.push('write ' + id),
+    createDoc: async id => void order.push('create ' + id),
+  })
+  registerHidden(h.idx, { id: 'd2', name: 'q', item: { v: 0 } }, () => {})
+  // 'q' is IDLE: nothing is in flight for it
+  expect(controller.isSaving('q')).toBe(false)
+  const application = controller.applyRemote(['n', 'q'], async () => {
+    order.push('application started')
+    await applying.promise
+    order.push('application finished')
+  })
+  // a write for the idle affected name starts DURING the application
+  controller.save('q', { mine: 1 })
+  for (let i = 0; i < 4; i++) await flush()
+  expect(order, 'the write has not run: it is behind the application').toEqual(['application started'])
+  applying.resolve()
+  await application
+  for (let i = 0; i < 6; i++) await flush()
+  expect(order).toEqual(['application started', 'application finished', 'write d2'])
+})
+
+test('an ASYNC application is awaited before either affected tail continues', async () => {
+  const order: string[] = []
+  const applying = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence(h.deps)
+  const application = controller.applyRemote(['n', 'q'], async () => {
+    order.push('start')
+    await applying.promise
+    order.push('end')
+  })
+  let after = false
+  void controller.applyRemote(['q'], () => void (after = true))
+  for (let i = 0; i < 4; i++) await flush()
+  expect(after, 'the second operation waits on the first, on the shared tail').toBe(false)
+  applying.resolve()
+  await application
+  for (let i = 0; i < 4; i++) await flush()
+  expect(order, 'the async body ran to completion first').toEqual(['start', 'end'])
+  expect(after).toBe(true)
+})
+
+test('a rejected application does not poison the tails it published to', async () => {
+  const h = harness()
+  const controller = createHiddenPersistence(h.deps)
+  await expect(
+    controller.applyRemote(['n', 'q'], async () => {
+      throw new Error('application failed')
+    })
+  ).rejects.toThrow('application failed')
+  let ran = false
+  await controller.applyRemote(['n', 'q'], () => void (ran = true))
+  expect(ran, 'both tails still accept work').toBe(true)
+})
+
+test('an ASYNC application BEHIND a predecessor is also awaited before the tail continues', async () => {
+  // the sibling row exercises the no-predecessor branch; this one covers the branch that waits on
+  // Promise.allSettled(predecessors), where dropping the async result was separately unpinned
+  const order: string[] = []
+  const writing = deferred<void>()
+  const applying = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async () => {
+      order.push('write')
+      await writing.promise
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { v: 0 } }, () => {})
+  controller.save('n', { mine: 1 }) // 'n' now has a real predecessor on its chain
+  for (let i = 0; i < 4; i++) await flush()
+  expect(order, 'the write is in flight').toEqual(['write'])
+  const application = controller.applyRemote(['n'], async () => {
+    order.push('apply start')
+    await applying.promise
+    order.push('apply end')
+  })
+  let after = false
+  void controller.applyRemote(['n'], () => void (after = true))
+  writing.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(order, 'the application started once the write settled').toEqual(['write', 'apply start'])
+  expect(after, 'and the next operation is still behind its async body').toBe(false)
+  applying.resolve()
+  await application
+  for (let i = 0; i < 4; i++) await flush()
+  expect(order).toEqual(['write', 'apply start', 'apply end'])
+  expect(after).toBe(true)
 })
