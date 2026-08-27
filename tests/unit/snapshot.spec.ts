@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { speaksForHiddenSide, snapshotDecision, type SnapshotFacts, type AuthorityPolicy } from '../../src/snapshot.js'
+import {
+  needsFinalStateEvidence,
+  snapshotDecision,
+  type SnapshotFacts,
+  type AuthorityPolicy,
+} from '../../src/snapshot.js'
 
 // table tests for the items-listener gate (see src/snapshot.ts); each case documents an incident
 // or a policy the e2e cache tests exercise end-to-end (empty cache, partial cache, complete
@@ -163,16 +168,17 @@ test('a cached metadata-only post-initialization revision is ignored as data and
   ).toEqual({ action: 'ignore_metadata_only', policy: 'revoke' })
 })
 
-// what a delivery is EVIDENCE OF (see speaksForHiddenSide). a removal from a SUBSET query carries
-// the document's OLD data and three possible causes, only one of which is deletion
+// WHEN A DELIVERY MUST ESTABLISH THE CURRENT STATE (see needsFinalStateEvidence). ONE predicate
+// decides both admission at receipt and the read at the delivery boundary — a blind record never
+// reaches the resolver, so the two decisions must not be able to disagree
+const owner = { fixed: true, readonly: false, anonymous: false, removed: true }
 for (const [what, facts, expected] of [
-  ['a full-account removal IS deletion', { fixed: false, removed: true }, true],
-  [
-    'a fixed-page removal is "left the shared set", which includes turning hidden',
-    { fixed: true, removed: true },
-    false,
-  ],
-  ['a fixed-page non-removal carries the current document', { fixed: true, removed: false }, true],
-  ['a full-account non-removal likewise', { fixed: false, removed: false }, true],
+  ['an owner-fixed removal is ambiguous: deleted, unshared, or TURNED HIDDEN', owner, true],
+  ['a full-account removal IS deletion', { ...owner, fixed: false }, false],
+  ['a fixed non-removal carries the current document', { ...owner, removed: false }, false],
+  // a foreign or read-only fixed page cannot read or decrypt the sharer's hidden corpus, and must
+  // never prompt a visitor for their secret
+  ['a READ-ONLY fixed page stays an ordinary visible-query removal', { ...owner, readonly: true }, false],
+  ['an ANONYMOUS fixed page likewise', { ...owner, anonymous: true }, false],
 ] as const)
-  test(`hidden-side evidence: ${what}`, () => expect(speaksForHiddenSide(facts)).toBe(expected))
+  test(`final-state evidence: ${what}`, () => expect(needsFinalStateEvidence(facts)).toBe(expected))

@@ -100,22 +100,35 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
 }
 
 /**
- * Whether one delivery's payload is evidence about the HIDDEN side of its document.
+ * Whether a delivery must go and establish what its document CURRENTLY is, rather than acting on
+ * the payload it was handed.
  *
  * Firestore hands a `removed` change the document's **old** data. On the full-account listener that
- * is harmless: the query IS the account, so leaving it can only mean deletion and both
- * representations go. A fixed (shared) page's query is a strict subset —
- * `attr.shared.keys array-contains <key>` — and a hidden document can never be in it, because
- * hidden documents are written with `attr` null. So a removal there means the document left the
- * SHARED SET, which has three causes and only one is deletion: deleted, unshared, or **turned
- * hidden**, whose `removed` payload describes the old, visible side.
+ * is harmless: the query IS the account, so leaving it can only mean deletion. A fixed (shared)
+ * page's query is a strict subset — `attr.shared.keys array-contains <key>` — and a hidden document
+ * can never be in it, because hidden documents are written with `attr` null. So a removal there
+ * means the document left the SHARED SET: deleted, unshared, or **turned hidden**, whose payload
+ * describes the old, visible side.
  *
- * A `false` answer does not mean "do nothing to the hidden side": it means this delivery must go
- * and GET the evidence (see resolveDeliveryEvidence in src/hidden_scan.ts). Withholding alone would
- * leave a newly hidden document under an unrelated name registered by nobody, since a confirmation
- * commits only its own affected closure — and would still heal older same-cell blocks while having
- * established nothing.
+ * Acting on that payload loses the document: the visible row is removed and nothing installs the
+ * hidden record, because a confirmation commits only its own name's affected closure. The delivery
+ * would also resolve `applied` and heal every strictly older same-cell block having established
+ * nothing about the hidden side.
+ *
+ * SCOPED TO THE OWNER, and positively: only a writable, authenticated owner of a fixed page can
+ * read or decrypt that account's hidden corpus. A foreign or read-only fixed page must keep
+ * treating its removals as ordinary visible-query removals — its read would be unauthorized, and it
+ * must never prompt a visitor for the sharer's secret.
+ *
+ * ONE predicate for both uses: it forces ADMITTED allocation at receipt (a blind record never
+ * reaches the resolver at all) and selects the final-state read at the delivery boundary. Those two
+ * decisions must not be able to disagree.
  */
-export function speaksForHiddenSide(facts: { fixed: boolean; removed: boolean }): boolean {
-  return !(facts.fixed && facts.removed)
+export function needsFinalStateEvidence(facts: {
+  fixed: boolean
+  readonly: boolean
+  anonymous: boolean
+  removed: boolean
+}): boolean {
+  return facts.fixed && !facts.readonly && !facts.anonymous && facts.removed
 }

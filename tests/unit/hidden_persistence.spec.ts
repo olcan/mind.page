@@ -1451,7 +1451,7 @@ test('a delivery that decodes into a removal is not written through by the retry
 // is SUPERSEDED by 'a BLOCKED echo does not reconcile', which proves the same round-22 property
 // against the real waiter instead of an echoApplied flag the harness could assert into existence.
 test('an adoption invalidated DURING encryption neither issues nor finalizes against the stale pointer', async () => {
-  // round-35 stage-1a guard 2. targetStamp is not the pointer's CAS: for a target absent from byId
+  // round-35 stage-1a guard 2. the receipt frontier is not the pointer's CAS: for a target absent from byId
   // (adoption targets are, until finalization) the stamp reads `absent` before and after, so only
   // the captured-pointer equality can notice invalidateAdopters clearing the selection while the
   // attempt was inside encryptState
@@ -2142,8 +2142,9 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
 })
 
 // ---- the receipt frontier and the global gate are independently necessary (rounds 58, 59) ----
-// these isolate the two facts a write's issue decision rests on. the third — a captured wrapper
-// identity — is DELETED (round 74): see the corpus-replacement row below for what catches that
+// these isolate the two facts a write's issue decision rests on. what was deleted (round 74) is the
+// DUPLICATE captured-wrapper field in the issue token — the ordinary write still checks exact
+// holder-object identity, which is what the corpus-replacement row below pins
 
 test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
   // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
@@ -2436,8 +2437,8 @@ for (const [label, hold] of [
 // The frontier cannot see it. What DOES is `canonicalHolder(name) !== holder`, which this row
 // pins: registerHidden does byId.set, so the holder identity changes, the attempt refuses, and the
 // retry builds against the CURRENT record. (On the adoption path the equivalent is
-// invalidateAdopters clearing the pointer.) That is why the captured wrapper identity was a fourth
-// overlapping fact and is gone.
+// invalidateAdopters clearing the pointer.) That is why the token's SEPARATE captured wrapper was a
+// fourth overlapping fact and is gone — the identity check itself is very much alive.
 
 test('a CORPUS registration replaces the target object without a delivery, and the write refuses', async () => {
   const encrypting = deferred<void>()

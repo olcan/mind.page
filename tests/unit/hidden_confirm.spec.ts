@@ -1,11 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-  planTargetSlice,
-  classifyHiddenDocument,
-  type ClassifiedRow,
-  type PointAnswer,
-  type Marker,
-} from '../../src/hidden_confirm.js'
+import { planTargetSlice, classifyHiddenDocument, type ClassifiedRow, type Marker } from '../../src/hidden_confirm.js'
 
 // PURE tables for confirmTarget's planning (see src/hidden_confirm.ts). No timers, no promises,
 // no fakes — these are decisions, and the point of extracting them is that they can be tabled
@@ -16,13 +10,6 @@ const hidden = (id: string, name: string, wrapper: unknown = { id }): Classified
   name,
   wrapper,
   eligible: true,
-})
-const ineligible = (id: string, name: string): ClassifiedRow => ({
-  id,
-  kind: 'hidden',
-  name,
-  wrapper: { id },
-  eligible: false,
 })
 const absent = (id: string): ClassifiedRow => ({ id, kind: 'absent' })
 const answerOf = (...rows: ClassifiedRow[]) => new Map(rows.map(r => [r.id, r]))
@@ -193,3 +180,38 @@ test('a marker for a row the name does not hold locally is irrelevant', () => {
 // resolves precedence in ONE pass per document — admitted, then point answer, then raw — and its
 // rows in tests/unit/hidden_scan.spec.ts drive the real composition, including the stale-raw cases
 // a merge over pre-classified rows could not express (review 73/74).
+//
+// The CLASSIFIER rows below stayed: nothing else invokes the real classifier — the scan harness
+// injects a Classification — so these are the only place its fail-closed and anti-injection
+// boundaries are exercised (they were deleted by accident in round 75 and restored).
+
+test('classification is complete and side-effect free, and fails closed on an unusable answer', () => {
+  expect(classifyHiddenDocument('d', false, 'anything'), 'not hidden').toEqual({ kind: 'not-hidden' })
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: 'n', item: { v: 1 } }))).toEqual({
+    kind: 'hidden',
+    wrapper: { id: 'd', name: 'n', item: { v: 1 } },
+  })
+  // INDETERMINATE is not absence: the document exists and this read cannot say which name it
+  // belongs to, so a confirmation must fail closed rather than synthesize target-side absence
+  expect(classifyHiddenDocument('d', true, 'not json').kind).toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ item: {} })).kind, 'missing name').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: '', item: {} })).kind, 'empty name').toBe(
+    'indeterminate'
+  )
+  expect(classifyHiddenDocument('d', true, JSON.stringify('scalar')).kind, 'not an object').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, null).kind, 'no text').toBe('indeterminate')
+})
+
+test('server plaintext cannot inject controller-only transient state', () => {
+  // persistence writes only name and item. a stored object carrying pending_create or adopt_id
+  // would otherwise reach registerHidden as if it were live controller state — and an embedded id
+  // must never beat the caller's
+  const c = classifyHiddenDocument(
+    'real',
+    true,
+    JSON.stringify({ id: 'forged', name: 'n', item: { v: 1 }, pending_create: true, adopt_id: 'x' })
+  )
+  expect(c).toEqual({ kind: 'hidden', wrapper: { id: 'real', name: 'n', item: { v: 1 } } })
+  expect('pending_create' in (c as any).wrapper, 'no transient state').toBe(false)
+  expect('adopt_id' in (c as any).wrapper).toBe(false)
+})

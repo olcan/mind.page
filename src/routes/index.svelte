@@ -6315,7 +6315,7 @@
   import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
   import { adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
-  import { snapshotDecision, speaksForHiddenSide } from '../snapshot'
+  import { needsFinalStateEvidence, snapshotDecision } from '../snapshot'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -6330,12 +6330,7 @@
     type HiddenWrapper,
   } from '../hidden'
   import { classifyHiddenDocument } from '../hidden_confirm'
-  import {
-    resolveDeliveryEvidence,
-    scanHiddenDocuments,
-    type ScanDeps,
-    type ScanRow as HiddenScanRow,
-  } from '../hidden_scan'
+  import { resolveFinalState, scanHiddenDocuments, type ScanDeps, type ScanRow as HiddenScanRow } from '../hidden_scan'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -6514,15 +6509,21 @@
   // producers — a create/fixed-update confirmation and the post-prompt candidate scan — read the
   // account's hidden documents exactly this way; the ordering, grouping and fail-closed rules live
   // in the module
-  // ONE fresh point read of a document: server-confirmed, decrypted, purely classified. shared by
-  // the scan's intersection resolution and by a DELIVERY whose own payload cannot speak for the
-  // hidden side (see speaksForHiddenSide) — the same question, so the same read.
-  // it returns the SNAPSHOT too, because a delivery that learns the document is now hidden has to
-  // apply the CURRENT document through the ordinary reducers, not the stale payload it was handed
+  // ONE fresh read establishing what a document CURRENTLY is: server-confirmed, and shaped so that
+  // ABSENCE is a real answer rather than a denial. it is the owner's hidden-set query, not a direct
+  // get of the id: the read rule reads fields off `resource.data`, and a deleted document has no
+  // resource — so a direct get of a missing id is DENIED, which a caller cannot tell from a network
+  // failure and which would block a delivery nothing is guaranteed to heal. constraining the query
+  // by documentId() reproduces the same denial. Both are pinned in tests/e2e/rules.spec.ts.
+  //
+  // it also means NO DECRYPT is needed to answer "not hidden": a document outside this set is
+  // deleted, visible or unshared, which are the same thing to the hidden side
   async function pointReadHidden(id: string, decrypt: (data: any, id: string) => Promise<any> = decryptHiddenDoc) {
-    const snap = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
-    // a document that does not exist is definite absence, which is a not-hidden answer here
-    if (!snap.exists()) return { classification: { kind: 'not-hidden' as const }, snap: undefined, item: undefined }
+    const rows = await getDocsFromServer(
+      query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
+    )
+    const snap = rows.docs.find(d => d.id == id)
+    if (!snap) return { classification: { kind: 'not-hidden' as const }, snap: undefined, item: undefined }
     const item = await decrypt(snap.data(), id)
     return { classification: classifyHiddenDocument(id, !!item.hidden, item.text), snap, item }
   }
@@ -6568,6 +6569,13 @@
   // dropped callback (sync disabled) or a terminal listener error means this page can never
   // again claim to track the server. reload is the only recovery
   let ingressStopped = false
+  // THE PAGE-STOP SIGNAL: never fulfils, REJECTS when ingress stops. a running handle cannot be
+  // terminalized by batch.abort() (its outcome is its own), so a delivery holding a never-settling
+  // network read would retain that handle, its callback context and `batch.landed` until reload.
+  // race it wherever a delivery awaits the network
+  let stopIngressSignal!: (e: unknown) => void
+  const ingressStoppedSignal = new Promise<never>((_, reject) => (stopIngressSignal = reject))
+  ingressStoppedSignal.catch(() => {}) // raced, not always observed
   let unsubscribeItems: null | (() => void) = null
   // called after onSnapshot returns: if the stop already happened while it was being installed,
   // the closure is invoked immediately rather than retained for a stop that will never come
@@ -6585,6 +6593,7 @@
     if (ingressStopped) return // first false-to-true transition only
     ingressStopped = true
     console.warn(`hidden ingress STOPPED for this page: ${reason} (reload to recover)`)
+    stopIngressSignal(new Error(`hidden ingress stopped: ${reason}`)) // releases held network reads
     // 0. the corpus first: a held server read or phrase prompt must release its caller, boundary
     //    and tail before anything downstream waits on them
     try {
@@ -7993,8 +8002,15 @@
                 // producer this delivery must follow or waits for one that may itself depend on
                 // this callback's record
                 const corpusBoundary = hiddenCorpus.pendingBoundary(id)
+                // AN AMBIGUOUS OWNER-FIXED REMOVAL IS ADMITTED ON ITS OWN. its payload is the OLD
+                // visible document, so `rawHidden` is false and an ordinary visible-to-hidden
+                // transition has no wrapper, no outstanding handle and no corpus membership either
+                // — it would run BLIND, remove the visible row from a stale payload, and never take
+                // the final-state read that installs the hidden record (review 75). the SAME
+                // predicate selects that read at the delivery boundary, so the two cannot disagree
                 const admitted =
                   rawHidden ||
+                  needsFinalStateEvidence({ fixed, readonly, anonymous, removed: change.type == 'removed' }) ||
                   !!hiddenPersistence.nameForDocument(id) ||
                   hiddenIngress.hasOutstanding(id) ||
                   !!corpusBoundary
@@ -8083,6 +8099,7 @@
                 // its record and lease
                 if (record.kind == 'admitted') {
                   const removed = change.type == 'removed'
+                  const needsEvidence = needsFinalStateEvidence({ fixed, readonly, anonymous, removed })
                   const wrapper = savedItem.hidden && !removed ? parseHiddenWrapper(doc.id, savedItem.text) : null
                   if (savedItem.hidden && !removed && !wrapper) {
                     // a valid -> MALFORMED server modification: the record is quarantined (never
@@ -8099,27 +8116,43 @@
                     // producer's — not whichever one happens to be active now
                     if (corpusPredecessor) await corpusPredecessor
                     if (ingressStopped) throw new Error('hidden ingress stopped')
-                    // FINAL-STATE EVIDENCE for a payload that cannot speak for the hidden side —
-                    // the rule, and why withholding is not enough, are in resolveDeliveryEvidence
-                    // (src/hidden_scan.ts). taken HERE: after the corpus boundary, and before the
-                    // name chains below, which the answer determines as much as the effects do
-                    const evidence = await resolveDeliveryEvidence({
-                      speaksForHidden: speaksForHiddenSide({ fixed, removed }),
-                      payload: { hidden: !!savedItem!.hidden, removed, snap: doc, item: savedItem },
-                      pointRead: () => pointReadHidden(doc.id),
-                    })
-                    if (ingressStopped) throw new Error('hidden ingress stopped')
-                    const saved = evidence.item
-                    const gone = evidence.removed
-                    const applyDoc: any = evidence.snap
-                    const target = evidence.wrapper ?? wrapper
-                    // a re-read that found the document HIDDEN is a transition, not the removal the
-                    // payload described: re-type it from current presence so the ordinary reducers
-                    // install it
-                    const applyChange: any =
-                      evidence.snap === doc
-                        ? change
-                        : { ...change, type: hiddenIndex().byId.has(doc.id) ? 'modified' : 'added', doc: evidence.snap }
+                    // FINAL-STATE EVIDENCE for an ambiguous owner-fixed removal — the rule, and
+                    // why withholding is not enough, are in resolveFinalState (src/hidden_scan.ts).
+                    // taken HERE: after the corpus boundary, and before the name chains below,
+                    // which the answer determines as much as the effects do. the SAME predicate
+                    // forced this record to be allocated ADMITTED at receipt, since a blind record
+                    // would never reach this line
+                    let saved = savedItem!
+                    let target = wrapper
+                    let gone = removed
+                    let applyChange: any = change
+                    let applyDoc: any = doc
+                    if (needsEvidence) {
+                      const final = await resolveFinalState(() =>
+                        Promise.race([pointReadHidden(doc.id), ingressStoppedSignal])
+                      ).catch(e => {
+                        // the ORIGINAL cause: this rejection blocks the handle before applyRemote,
+                        // so it never reaches the diagnostic arm that logs application failures
+                        console.error('could not establish final state for remote change:', doc.id, e)
+                        throw e
+                      })
+                      if (ingressStopped) throw new Error('hidden ingress stopped')
+                      if (final.kind == 'hidden') {
+                        saved = final.item
+                        target = final.wrapper as any
+                        gone = false
+                        applyDoc = final.snap
+                        // re-typed from CURRENT presence, so the ordinary reducers install it as
+                        // the transition it is rather than the removal the payload described
+                        applyChange = {
+                          ...change,
+                          type: hiddenIndex().byId.has(doc.id) ? 'modified' : 'added',
+                          doc: final.snap,
+                        }
+                      }
+                      // otherwise the document really is gone from this page's world: the removal
+                      // stands, and the hidden-side removal below is now backed by evidence
+                    }
                     return hiddenPersistence
                       .applyRemote(
                         // IN-TURN: the affected name chains are read HERE, from the index as it
