@@ -24,7 +24,6 @@ test('the whole nonpending slice is replaced: every local row the answer disprov
   })
   expect(plan.remove, 'destructive rows in canonical id order').toEqual(['h', 'j'])
   expect(plan.register.map(r => r.id), 'fresh rows in canonical id order').toEqual(['k', 'l'])
-  expect(plan.resetBaseline).toBe(false)
 })
 
 test('a local row the answer places under ANOTHER name projects to target-side absence only', () => {
@@ -37,7 +36,6 @@ test('a local row the answer places under ANOTHER name projects to target-side a
   })
   expect(plan.remove, 'h is absent FROM n').toEqual(['h'])
   expect(plan.register, 'and nothing is registered for q').toEqual([])
-  expect(plan.resetBaseline, 'no fresh target for n').toBe(true)
 })
 
 test('an unrelated row in the answer produces no effect at all', () => {
@@ -72,8 +70,7 @@ test('an empty answer with local rows removes them all and resets the baseline o
     answer: answerOf(absent('h'), absent('j')),
   })
   expect(plan.remove).toEqual(['h', 'j'])
-  expect(plan.register).toEqual([])
-  expect(plan.resetBaseline).toBe(true)
+  expect(plan.register, 'no fresh registration IS the baseline-reset branch').toEqual([])
 })
 
 // ---- the read-start marker proof ----
@@ -90,8 +87,9 @@ test('an OMITTED row matching the read-start proof is preserved, and carries the
     marker,
   })
   expect(plan.remove, 'not removed from a stale negative').toEqual([])
-  expect(plan.requiredMarker, 'and the plan depends on that proof').toBe(marker)
-  expect(plan.resetBaseline).toBe(false)
+  expect(plan.preservedMarker, 'the controller must CAS the proof before mutating').toBe(marker)
+  expect(plan.requiredMarker, 'and m is the selection, so the dependency is carried').toBe(marker)
+  expect(plan.register, 'no fresh registration: the baseline still resets once').toEqual([])
 })
 
 test('the exemption is WRAPPER-exact: a same-id proof against a different object does not preserve', () => {
@@ -104,6 +102,7 @@ test('the exemption is WRAPPER-exact: a same-id proof against a different object
     marker: { id: 'm', wrapper: { original: true }, token: 1 },
   })
   expect(plan.remove, 'the indexed object is no longer the proof').toEqual(['m'])
+  expect(plan.preservedMarker, 'nothing was preserved, so no CAS is owed').toBeUndefined()
   expect(plan.requiredMarker).toBeUndefined()
 })
 
@@ -125,14 +124,18 @@ test('a fresh LOWER row wins selection, so a preserved marker carries no depende
   // m is preserved (omitted, proof matches) but a fresh lower `a` is canonical. the dependency is
   // provenance: it is carried only when the preserved row is the one actually selected
   const wrapper = { mine: true }
+  const marker: Marker = { id: 'm', wrapper, token: 1 }
   const plan = planTargetSlice({
     name: 'n',
     local: [{ id: 'm', name: 'n', wrapper }],
     answer: answerOf(hidden('a', 'n')),
-    marker: { id: 'm', wrapper, token: 1 },
+    marker,
   })
   expect(plan.remove, 'm is preserved, not removed').toEqual([])
   expect(plan.register.map(r => r.id)).toEqual(['a'])
+  // TWO DIFFERENT FACTS: the plan still preserved m because of M, so the CAS is owed even though
+  // the final selection is a and carries no dependency
+  expect(plan.preservedMarker, 'the CAS is still owed').toBe(marker)
   expect(plan.requiredMarker, 'a lower fresh row is independent evidence').toBeUndefined()
 })
 
@@ -157,8 +160,8 @@ test('a marker for a row the name does not hold locally is irrelevant', () => {
     marker: { id: 'elsewhere', wrapper: {}, token: 1 },
   })
   expect(plan.remove).toEqual(['h'])
+  expect(plan.preservedMarker).toBeUndefined()
   expect(plan.requiredMarker).toBeUndefined()
-  expect(plan.resetBaseline).toBe(true)
 })
 
 // ---- point-answer normalization ----

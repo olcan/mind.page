@@ -33,21 +33,29 @@ export type TargetPlan = {
   // fresh target-name rows to register, in CANONICAL id order, so a pending create cannot adopt a
   // higher duplicate first
   register: { id: string; name: string; wrapper: unknown }[]
-  // no eligible fresh target: the pending projection resets to its immutable local-intent baseline
-  // exactly once
-  resetBaseline: boolean
-  // set when this plan PRESERVED an omitted row because of the read-start proof, and that row is
-  // the selected target. the writer re-requires the same proof immediately before the first commit
-  // mutation and again in the final no-await token
+  // set whenever omission preservation USED the read-start proof. the controller must
+  // compare-and-set it immediately before the first mutation: if it settled while the answer was
+  // in flight, the whole result is inconclusive with zero effects — EVEN IF a fresh lower row
+  // would eventually be selected. that is a different fact from the one below, and deriving it
+  // from local/answer/marker at the call site would defeat the point of a pure planner
+  preservedMarker?: Marker
+  // set only when that preserved wrapper is also the FINAL selected target. the writer carries
+  // this into the no-await issue token; an independently observed row, or a fresh lower one that
+  // wins selection, is server evidence in its own right and needs no dependency
   requiredMarker?: Marker
 }
+// NOTE there is no `resetBaseline` field. `register.length == 0` IS the baseline-reset branch —
+// with only an omitted, marker-preserved wrapper there is no fresh registration to perform the
+// rebase/publication, so the pending projection must still reset once. And `register[0]?.id` is
+// the canonical eligible FRESH target for stale-adopt_id clearing. Both are already here.
 
 /**
  * Builds the target-name slice plan.
  *
- * `answer` is the complete classified read, keyed by id. `local` is every applied-index row the
- * confirmed name currently holds. `marker` is the read-start proof, captured after the corpus
- * predecessor and immediately before the query.
+ * `answer` is the complete classified read, keyed by id. `local` is the complete NONPENDING,
+ * SERVER-BACKED slice for the confirmed name — not every applied-index row: a pending create is
+ * preserved by the controller, not judged here. `marker` is the read-start proof, captured after
+ * the corpus predecessor and immediately before the query.
  */
 export function planTargetSlice({
   name,
@@ -62,7 +70,7 @@ export function planTargetSlice({
 }): TargetPlan {
   const remove: string[] = []
   const register: { id: string; name: string; wrapper: unknown }[] = []
-  let requiredMarker: Marker | undefined
+  let preservedMarker: Marker | undefined
 
   // ---- the LOCAL side: every row the name currently holds is judged by the fresh answer ----
   for (const row of local) {
@@ -81,7 +89,7 @@ export function planTargetSlice({
     // token may have cleared while the answer was in flight, and a live-at-plan-time lookup would
     // see nothing, synthesize absence, and remove from a stale negative
     if (marker && marker.id == row.id && marker.wrapper === row.wrapper) {
-      requiredMarker = marker // preserved BECAUSE of the proof
+      preservedMarker = marker // preserved BECAUSE of the proof: the controller must CAS it
       continue
     }
     remove.push(row.id)
@@ -100,14 +108,11 @@ export function planTargetSlice({
   // preserved row is the one the plan actually selects. an independently observed `m`, or a fresh
   // lower `a` that wins selection, is server evidence in its own right and needs no dependency —
   // carrying one anyway would force a needless reconfirmation
-  const survivors = [
-    ...register.map(r => r.id),
-    ...(requiredMarker ? [requiredMarker.id] : []),
-  ].sort(compareIds)
+  const survivors = [...register.map(r => r.id), ...(preservedMarker ? [preservedMarker.id] : [])].sort(compareIds)
   const selected = survivors[0]
-  if (requiredMarker && selected != requiredMarker.id) requiredMarker = undefined
+  const requiredMarker = preservedMarker && selected == preservedMarker.id ? preservedMarker : undefined
 
-  return { remove, register, resetBaseline: survivors.length == 0, requiredMarker }
+  return { remove, register, preservedMarker, requiredMarker }
 }
 
 // ---- point-answer normalization -------------------------------------------------------------

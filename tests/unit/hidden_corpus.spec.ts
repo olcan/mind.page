@@ -43,48 +43,63 @@ test('operations serialize: the second body does not start until the first settl
   await a
 })
 
-test("a FAILED operation rejects its caller with the body's own error, and does not poison the tail", async () => {
+test('a FAILED operation: original error, FULFILLED boundary, cleared membership, tail intact', async () => {
+  // folded from two rows so the boundary is actually captured: changing it to reject on failure
+  // would strand every delivery admitted by that operation's membership, and neither earlier row
+  // would have noticed
   const c = createHiddenCorpus()
+  const held = deferred()
   const boom = new Error('read failed')
-  await expect(
-    c.run(async () => {
-      throw boom
-    }),
-    'the ORIGINAL error, not a wrapped outcome the caller must unwrap'
-  ).rejects.toBe(boom)
-  expect(await c.run(async () => 7), 'the next operation still ran').toBe(7)
-})
-
-test('membership is published BEFORE the point reads and cleared on success', async () => {
-  const c = createHiddenCorpus()
-  const held = deferred()
-  expect(c.isPendingHiddenId('d1'), 'nothing pending yet').toBe(false)
-  const op = c.run(async run => {
-    run.publishMembership(['d1', 'd2'])
-    await held.promise // the point reads
-    return 'done'
-  })
-  await checkpoint()
-  expect(c.isPendingHiddenId('d1'), 'admitted while the scan is in flight').toBe(true)
-  expect(c.isPendingHiddenId('d3')).toBe(false)
-  held.resolve()
-  expect(await op).toBe('done')
-  expect(c.isPendingHiddenId('d1'), 'and cleared once it settles').toBe(false)
-})
-
-test('membership is cleared when the operation FAILS, not only when it succeeds', async () => {
-  const c = createHiddenCorpus()
-  const held = deferred()
   const op = c.run(async run => {
     run.publishMembership(['d1'])
     await held.promise
-    throw new Error('read failed')
+    throw boom
   })
+  const state = watch(op)
   await checkpoint()
-  expect(c.isPendingHiddenId('d1')).toBe(true)
+  const boundary = watch(c.boundary())
+  await checkpoint()
+  expect(c.isPendingHiddenId('d1'), 'membership is open while it runs').toBe(true)
+  expect(boundary.settled, 'and the boundary is pending').toBe(false)
+  held.reject(boom)
+  await checkpoint()
+  expect(state.error, 'the ORIGINAL error, not a wrapped outcome the caller must unwrap').toBe(boom)
+  expect(boundary.settled, 'the boundary FULFILS on failure').toBe(true)
+  expect(boundary.error, 'it does not reject').toBeUndefined()
+  expect(c.isPendingHiddenId('d1'), 'membership is cleared').toBe(false)
+  expect(await c.run(async () => 7), 'and the tail is intact').toBe(7)
+})
+
+test('an operation that stops ITSELF keeps its own error; a queued one gets CorpusStopped', async () => {
+  // the round-69 defect, reproduced by the reviewer: resolving a shared stop signal queued its
+  // reaction before the async body rejection could win the race, so a postcommit failure that
+  // entered sticky stop and rethrew reported CorpusStopped instead of the error the caller needs
+  const c = createHiddenCorpus()
+  const boom = new Error('commit failed')
+  let bRan = false
+  const held = deferred()
+  const started = deferred()
+  const a = c.run(async () => {
+    started.resolve()
+    await held.promise // genuinely mid-flight: a body that throws SYNCHRONOUSLY wins the race on
+    // array order alone, so it could not tell the cause channel apart from anything
+    c.stop(boom) // sticky stop, carrying the real cause
+    throw boom
+  })
+  const b = c.run(async () => {
+    bRan = true
+    return 'b'
+  })
+  const bState = watch(b)
+  await started.promise
   held.resolve()
-  await expect(op).rejects.toThrow('read failed')
-  expect(c.isPendingHiddenId('d1'), 'a membership set that outlives its operation admits forever').toBe(false)
+  await expect(a, 'A retains its exact commit error').rejects.toBe(boom)
+  await checkpoint()
+  expect(bState.error, 'B gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
+  expect(bRan, "and B's body never ran").toBe(false)
+  const boundary = watch(c.boundary())
+  await checkpoint()
+  expect(boundary.settled, 'the active boundary still fulfils').toBe(true)
 })
 
 test('stop releases the caller, a queued operation and the boundary WHILE the body is still held', async () => {

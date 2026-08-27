@@ -37,7 +37,8 @@ export type CorpusRun = {
 }
 
 export function createHiddenCorpus() {
-  // SERIALIZATION. settle-only: a rejected or cancelled operation must not stop the next one
+  // SERIALIZATION. each operation's two-arm fulfilled mirror is its slot: a rejected or cancelled
+  // operation must not stop the next one
   let tail: Promise<void> = Promise.resolve()
   // THE ACTIVE PRODUCER'S completion, installed only when a body actually starts — NOT the queue
   // tail. a delivery admitted by A's membership must be released when A finishes, not when some
@@ -48,74 +49,79 @@ export function createHiddenCorpus() {
   // serialized and the listener asks one boolean question
   let membership = new Set<string>()
   let stopped = false
-  let signalStop!: () => void
-  const stopSignal = new Promise<void>(res => (signalStop = res))
+  // WRAPPED so `stop(undefined)` is distinguishable from an ordinary external stop
+  let stopCause: { value: unknown } | undefined
+  // ONE active cancellation, replaced each turn and dropped when it ends. a shared never-resolved
+  // signal accumulated two reactions PER RUN that a completed run could not detach, retaining
+  // every fixed-page confirmation until page stop
+  let cancelActive: ((error: unknown) => void) | undefined
 
   return {
     // is this id part of an in-flight corpus read? the listener's admission predicate consults
     // this so a delivery arriving mid-scan is admitted rather than treated as ordinary
     isPendingHiddenId: (id: string) => membership.has(id),
-    // the ACTIVE producer's completion. fulfils on stop as well as on completion, so a caller
-    // awaiting it is released rather than held for the page's lifetime
+    // the ACTIVE producer's completion. FULFILS on failure and on stop as well as on success, so a
+    // caller awaiting it is released rather than held for the page's lifetime
     boundary: () => currentBoundary,
 
     // run one corpus operation on the tail. the CALLER's promise carries the outcome: it rejects
-    // with the body's own error, or with CorpusStopped. the tail and the boundary are private
+    // with the body's own error, or with the stop cause. the tail and the boundary are private
     // fulfilled mirrors — that split is the whole contract, and making the caller unwrap a
     // fulfilled outcome union gave every call site a chance to continue after a failed read
     run<T>(body: (run: CorpusRun) => Promise<T>): Promise<T> {
-      let finish!: () => void
-      const completed = new Promise<void>(res => (finish = res))
-      // STOP RELEASES THE MIRRORS IMMEDIATELY, even while the body is held at a point read or a
-      // human-length phrase prompt. the late body stays responsible for checking cancelled()
-      void stopSignal.then(finish)
       const turn = tail.then(async (): Promise<T> => {
-        // the LIVE sticky bit, checked when this turn actually begins — not the value captured
+        // the LIVE sticky bit, checked when this turn actually BEGINS — not the value captured
         // when it was enqueued, which let an operation queued before stop run its server read
         // after it
+        // a QUEUED turn always gets the ordinary stop outcome: the cause belongs to the operation
+        // that stopped itself, and handing it to unrelated queued callers would report someone
+        // else's commit failure as their own
         if (stopped) throw new CorpusStopped()
-        currentBoundary = completed
+        currentBoundary = mirror
         let published = false
+        // the active cancellation: stop rejects THIS, releasing a body held at a point read or a
+        // human-length phrase prompt
+        const cancelled = new Promise<never>((_, reject) => (cancelActive = reject))
+        cancelled.catch(() => {}) // it is raced, not always observed
         try {
-          return await body({
-            publishMembership(ids) {
-              if (published) throw new Error('corpus membership already published')
-              published = true
-              if (stopped) return // a late continuation must not reopen a window stop closed
-              membership = new Set(ids)
-            },
-            cancelled: () => stopped,
-          })
+          return await Promise.race([
+            body({
+              publishMembership(ids) {
+                if (published) throw new Error('corpus membership already published')
+                published = true
+                if (stopped) return // a late continuation must not reopen a window stop closed
+                membership = new Set(ids)
+              },
+              cancelled: () => stopped,
+            }),
+            cancelled,
+          ])
         } finally {
           // CLEARED ON EVERY OUTCOME: a membership set that outlives its operation admits those
           // ids forever and makes the gate permanently pending
           membership = new Set()
-          finish()
+          cancelActive = undefined
         }
       })
-      const caller = Promise.race([
-        turn,
-        stopSignal.then((): never => {
-          throw new CorpusStopped()
-        }),
-      ])
-      caller.catch(() => {}) // observed by the caller; never an unhandled rejection here
-      // serialize on COMPLETION, which stop also fulfils. NOTE this is indistinguishable from
-      // following `turn` by any test, and deliberately so: before stop the two settle together,
-      // and after stop every queued caller rejects at the race regardless of whether the tail
-      // ever advances. `completed` is kept because it states the intent — this operation is done
-      // for scheduling purposes — not because a schedule can tell them apart
-      tail = completed.then(() => {})
-      return caller
+      // the two-arm fulfilled mirror IS this operation's serializer slot and its boundary
+      const mirror = turn.then(
+        () => {},
+        () => {}
+      )
+      tail = mirror
+      return turn
     },
 
-    // sticky and page-scoped. releases the caller, the current boundary and the tail immediately,
-    // makes every later run reject without executing its body, and closes the membership window
-    stop() {
+    // sticky and page-scoped. `cause` is the ACTIVE operation's own fatal error when it stops
+    // itself: without it, resolving a shared signal queued its reaction before the body's
+    // rejection could win the race, so a postcommit failure that entered sticky stop and rethrew
+    // reported CorpusStopped instead of the error the caller has to see
+    stop(cause?: unknown) {
       if (stopped) return
       stopped = true
+      if (arguments.length > 0) stopCause = { value: cause }
       membership = new Set()
-      signalStop()
+      cancelActive?.(stopCause ? stopCause.value : new CorpusStopped())
     },
   }
 }
