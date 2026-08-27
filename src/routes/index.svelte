@@ -6282,6 +6282,7 @@
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator } from '../hidden_listener_records'
+  import { createHiddenCorpus } from '../hidden_corpus'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6448,6 +6449,9 @@
   // (now retained blocked deliveries, healed by a strictly higher same-cell success)
   const hiddenIngress = createHiddenIngress()
   // the listener's completion records and the global blind lane (see hidden_listener_records.ts)
+  // the corpus seam: one settle-only tail, one active-producer boundary, one pending-hidden-id
+  // membership window (see src/hidden_corpus.ts)
+  const hiddenCorpus = createHiddenCorpus()
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
   })
@@ -6466,10 +6470,24 @@
     if (ingressStopped) unsubscribe()
     else unsubscribeItems = unsubscribe
   }
-  function stopIngress(reason: string) {
+  // `active` carries the fatal error of a corpus operation that is stopping ITSELF — a synchronous
+  // commit catch that stops and rethrows. it is WRAPPED because JavaScript can legally throw
+  // undefined, and the corpus must branch on whether a cause was supplied at all: passing
+  // `active?.cause` unconditionally would misread an ordinary external stop (a listener error,
+  // sync-disabled shutdown) as an active `undefined` cause, and the operation would lose its real
+  // error the way round 69 described
+  function stopIngress(reason: string, active?: { cause: unknown }) {
     if (ingressStopped) return // first false-to-true transition only
     ingressStopped = true
     console.warn(`hidden ingress STOPPED for this page: ${reason} (reload to recover)`)
+    // 0. the corpus first: a held server read or phrase prompt must release its caller, boundary
+    //    and tail before anything downstream waits on them
+    try {
+      if (active) hiddenCorpus.stop(active.cause)
+      else hiddenCorpus.stop()
+    } catch (e) {
+      console.error('corpus stop failed:', e) // cleanup below still runs
+    }
     // 1. a FRESH outside-callback ordinal, so authority stays unusable even if a sealed older
     //    lease later reaches its ordered turn — a terminal listener error arrives outside any
     //    callback, so there is no lease to fail for it
@@ -7805,13 +7823,24 @@
             // phantom hidden representation, or strand an unhealable block
             const changes = snapshot.docChanges() // read ONCE
             const entryReceipts = new Map<string, number>()
+            // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary)
+            const corpusBoundaries = new Map<string, Promise<void> | undefined>()
             const batch = recordAllocator.allocate(
               changes.map(change => {
                 const id = change.doc.id
                 entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
                 const rawHidden = !!change.doc.data().hidden
+                // THE PENDING-CORPUS BOUNDARY, read HERE and stored — never looked up later. by
+                // the time a delivery has decrypted, the producer that published this id may have
+                // finished and an unrelated one become active, so a late lookup either misses the
+                // producer this delivery must follow or waits for one that may itself depend on
+                // this callback's record
+                const corpusBoundary = hiddenCorpus.pendingBoundary(id)
                 const admitted =
-                  rawHidden || !!hiddenPersistence.nameForDocument(id) || hiddenIngress.hasOutstanding(id)
+                  rawHidden ||
+                  !!hiddenPersistence.nameForDocument(id) ||
+                  hiddenIngress.hasOutstanding(id) ||
+                  !!corpusBoundary
                 // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own
                 // echo failed to decrypt rather than waiting forever. ONLY for a live raw-hidden
                 // delivery: firestore hands a REMOVED change its old data, so forwarding that
@@ -7819,6 +7848,7 @@
                 // deleted, and a visible discriminator change carries a cipher that is no longer
                 // a hidden record at all
                 const live = change.type != 'removed' && rawHidden
+                corpusBoundaries.set(id, corpusBoundary)
                 return {
                   id,
                   handle: admitted
@@ -7906,8 +7936,15 @@
                   // its application is queued — possibly behind that very create
                   const receipt = hiddenPersistence.noteRemote(wrapper, doc.id, removed)
                   applied.push(`${change.type} ${savedItem.hidden ? 'hidden ' : ''}${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
-                  record.schedule(() =>
-                    hiddenPersistence
+                  const corpusPredecessor = corpusBoundaries.get(doc.id)
+                  record.schedule(async () => {
+                    // a delivery admitted by a corpus producer's membership applies only AFTER
+                    // that producer's boundary: it must not mutate the pre-rebuild index the scan
+                    // is still reading. the promise was captured at receipt, so it is that exact
+                    // producer's — not whichever one happens to be active now
+                    if (corpusPredecessor) await corpusPredecessor
+                    if (ingressStopped) throw new Error('hidden ingress stopped')
+                    return hiddenPersistence
                       .applyRemote(
                         // IN-TURN: the affected name chains are read HERE, from the index as it
                         // stands in this delivery's reserved turn. a rename must join the
@@ -7976,7 +8013,7 @@
                           throw e // REJECT: the coordinator records this delivery as blocked
                         }
                       )
-                  )
+                  })
                   return
                 }
 
