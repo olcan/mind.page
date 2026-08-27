@@ -6322,7 +6322,8 @@
     isQuarantined,
     type HiddenWrapper,
   } from '../hidden'
-  import { classifyHiddenDocument, type PointAnswer } from '../hidden_confirm'
+  import { classifyHiddenDocument } from '../hidden_confirm'
+  import { scanHiddenDocuments, type ScanDeps } from '../hidden_scan'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
@@ -6489,6 +6490,46 @@
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
   })
+  // the firestore/decryption half of the ONE shared hidden scan (src/hidden_scan.ts). both corpus
+  // producers — a create/fixed-update confirmation and the post-prompt candidate scan — read the
+  // account's hidden documents exactly this way; the ordering, grouping and fail-closed rules live
+  // in the module
+  function hiddenScanDeps(
+    run: { publishMembership: (ids: Iterable<string>) => void; cancelled: () => boolean },
+    // decrypts ONE raw document. the session `secret` is not always the right key: the post-prompt
+    // scan runs BEFORE the validated phrase is published (a save that saw it early could duplicate
+    // a record this scan has not registered yet), so it supplies a candidate-keyed decryptor
+    decrypt: (data: any, id: string) => Promise<any> = (data, id) => decryptItem(Object.assign(data, { id }))
+  ): ScanDeps {
+    const classify = async (id: string, data: any) => {
+      const item = await decrypt(data, id)
+      return classifyHiddenDocument(id, !!item.hidden, item.text)
+    }
+    return {
+      openPrefix: () => recordAllocator.openPrefix(),
+      queryHidden: async () =>
+        (
+          await getDocsFromServer(
+            query(
+              collection(getFirestore(firebase), 'items'),
+              where('user', '==', user.uid),
+              where('hidden', '==', true)
+            )
+          )
+        ).docs.map(d => ({ id: d.id, data: d.data() })),
+      publishMembership: ids => void run.publishMembership(ids),
+      assertLive: () => {
+        if (run.cancelled()) throw new Error('hidden corpus stopped')
+      },
+      classify,
+      pointRead: async id => {
+        const fresh = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
+        // a document that does not exist is definite absence, which is a not-hidden answer here
+        if (!fresh.exists()) return { kind: 'not-hidden' as const }
+        return classify(id, fresh.data())
+      },
+    }
+  }
   // ACTIVE callback contexts: each snapshot callback's lease with the handles it opened, removed
   // when the callback terminalizes. not a subscription registry — stop needs exactly this to fail
   // and block what is still in flight
@@ -8942,75 +8983,40 @@
         if (hiddenIngress.gate() != 'writable') return { kind: 'inconclusive' as const }
         // the read-start proof, captured immediately before the query
         const readMarker = hooks.captureReadMarker()
-        // THE BOUNDED PREFIX, opened at fresh-read start. membership below covers callbacks
-        // received AFTER these ids expose; it cannot retroactively cover one received while the
-        // server read was still hiding them — a live `h -> visible` change would take the blind
-        // lane, apply, and never open a hidden delivery, so the gate could stay writable and the
-        // older query answer would then register hidden `h` over the newer visible transition
-        const prefix = recordAllocator.openPrefix()
-        const docs = await getDocsFromServer(
-          query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
-        )
-        if (run.cancelled()) throw new Error('hidden corpus stopped')
-        // RAW MEMBERSHIP published before any further await, so a delivery for one of these ids
-        // arriving mid-operation is admitted rather than classified as ordinary
-        run.publishMembership(docs.docs.map(d => d.id))
-        prefix.close() // from here on, membership is what admits
-        // INTERSECTIONS: a blind record for one of these ids raced the read. await ONLY that
-        // record's own completion — never the whole callback, whose other admitted changes may be
-        // waiting on a held chain or on this very scan — then take one fresh point read. an
-        // ADMITTED intersection is owned by its real delivery, and makes this confirmation
-        // inconclusive through the gate check below rather than being point-read here
-        const rawIds = new Set(docs.docs.map(d => d.id))
-        const pointAnswers = new Map<string, PointAnswer>()
-        for (const record of prefix.records()) {
-          if (!rawIds.has(record.id) || record.kind != 'blind') continue
-          await record.done.catch(() => {}) // its own completion only
-          if (run.cancelled()) throw new Error('hidden corpus stopped')
-          const fresh = await getDocFromServer(doc(getFirestore(firebase), 'items', record.id))
-          const point = fresh.exists() ? await decryptItem(Object.assign(fresh.data(), { id: record.id })) : null
-          const classified = point ? classifyHiddenDocument(record.id, !!point.hidden, point.text) : null
-          pointAnswers.set(
-            record.id,
-            classified?.kind == 'hidden'
-              ? { kind: 'hidden', name: classified.wrapper.name, wrapper: classified.wrapper }
-              : { kind: 'not-hidden' }
-          )
-        }
-        const classified: { id: string; name?: string; wrapper?: HiddenWrapper }[] = []
-        for (const doc of docs.docs) {
-          // a point answer REPLACES the stale raw row entirely: applying the raw row after the
-          // fresh answer would move the index backward again
-          const point = pointAnswers.get(doc.id)
-          if (point) {
-            // not-hidden SUPPRESSES with zero production-body calls; hidden replaces
-            if (point.kind == 'hidden')
-              classified.push({ id: doc.id, name: point.name, wrapper: point.wrapper as HiddenWrapper })
-            else classified.push({ id: doc.id })
-            continue
-          }
-          const item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
-          const c = classifyHiddenDocument(doc.id, !!item.hidden, item.text)
-          // FAIL CLOSED: an indeterminate row exists and this read cannot say which name it
-          // belongs to, so treating it as target-side absence could remove a live record from a
-          // stale negative
-          if (c.kind == 'indeterminate') throw new Error(`hidden document ${doc.id} could not be classified: ${c.reason}`)
-          classified.push(c.kind == 'hidden' ? { id: doc.id, name: c.wrapper.name, wrapper: c.wrapper as HiddenWrapper } : { id: doc.id })
-        }
-        if (run.cancelled()) throw new Error('hidden corpus stopped')
+        // THE ONE SHARED SCAN (src/hidden_scan.ts): bounded prefix, raw membership, grouped
+        // intersections, fail-closed classification and normalization. it owns prefix closure on
+        // every outcome, one point read per unique id, and the historical admitted fact below
+        const scan = await scanHiddenDocuments(hiddenScanDeps(run))
+        // an ADMITTED intersection is owned by its real delivery, and this is a HISTORICAL fact,
+        // not a gate reading: the gate is a CURRENT level, so a delivery that finished before gate
+        // check two would leave it writable and let this older query answer commit over the newer
+        // application
+        if (scan.admittedIds.length) return { kind: 'inconclusive' as const }
         // ---- from here to the commit is ONE synchronous turn ----
         // GATE CHECK TWO, immediately before the commit: nothing can open between them
         if (hiddenIngress.gate() != 'writable') return { kind: 'inconclusive' as const }
         const index = hiddenIndex()
+        const applied = new Map(scan.apply.map(row => [row.id, row]))
         const answer = new Map(
-          classified.map(row => [
-            row.id,
-            row.wrapper
-              ? // ELIGIBILITY from the CURRENT quarantine set, in this turn: that is the state
-                // whose registration is about to run
-                { id: row.id, kind: 'hidden' as const, name: row.name!, wrapper: row.wrapper, eligible: !isQuarantined(index, row.id) }
-              : { id: row.id, kind: 'absent' as const },
-          ])
+          scan.rawIds.map(id => {
+            const row = applied.get(id)
+            return [
+              id,
+              row
+                ? // ELIGIBILITY from the CURRENT quarantine set, in this turn: that is the state
+                  // whose registration is about to run
+                  {
+                    id,
+                    kind: 'hidden' as const,
+                    name: row.name,
+                    wrapper: row.wrapper as HiddenWrapper,
+                    eligible: !isQuarantined(index, id),
+                  }
+                : // suppressed by a fresh point answer, or simply not hidden: either way this id
+                  // is not part of any hidden name any more
+                  { id, kind: 'absent' as const },
+            ]
+          })
         )
         // ONLY the synchronous commit is wrapped. once it begins mutating -- removal, pointer
         // clearing, baseline publication, visible removal, registration, rebase, owner publication
