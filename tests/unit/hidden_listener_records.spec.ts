@@ -282,3 +282,34 @@ test('S1/S2/S3 for one id: finalization preserves S2, S2 blocks, S3 heals', asyn
   await b3.records[0].done
   expect(ingress.gate(), 'healed').toBe('writable')
 })
+
+// ---- the bounded listener prefix (round 71) ----
+
+test('the prefix captures records live at open AND those allocated before it closes', async () => {
+  // membership covers callbacks received AFTER a corpus read exposes its ids; the prefix is what
+  // covers the ones received WHILE the read was still hiding them
+  const { allocate, a } = allocator()
+  const before = allocate([{ kind: 'blind' as const, id: 'early' }])
+  const prefix = a.openPrefix()
+  expect(prefix.records().map(r => r.id), 'seeded from live records').toEqual(['early'])
+  // a callback arriving DURING the read
+  const during = allocate([{ kind: 'blind' as const, id: 'racing' }])
+  expect(prefix.records().map(r => r.id).sort()).toEqual(['early', 'racing'])
+  prefix.close()
+  // ... and one arriving after membership published is NOT in the prefix: membership admits it
+  allocate([{ kind: 'blind' as const, id: 'later' }])
+  expect(prefix.records().map(r => r.id).sort(), 'closed').toEqual(['early', 'racing'])
+  blind(before.records[0]).run(() => undefined)
+  blind(during.records[0]).run(() => undefined)
+  await before.landed
+  await during.landed
+})
+
+test('a settled record leaves the live set, so a later prefix is not seeded with it', async () => {
+  const { allocate, a } = allocator()
+  const batch = allocate([{ kind: 'blind' as const, id: 'done' }])
+  blind(batch.records[0]).run(() => undefined)
+  await batch.landed
+  await checkpoint()
+  expect(a.openPrefix().records(), 'terminalized records are not part of a later read').toEqual([])
+})

@@ -6322,7 +6322,7 @@
     isQuarantined,
     type HiddenWrapper,
   } from '../hidden'
-  import { classifyHiddenDocument } from '../hidden_confirm'
+  import { classifyHiddenDocument, type PointAnswer } from '../hidden_confirm'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
@@ -8906,6 +8906,12 @@
         if (hiddenIngress.gate() != 'writable') return { kind: 'inconclusive' as const }
         // the read-start proof, captured immediately before the query
         const readMarker = hooks.captureReadMarker()
+        // THE BOUNDED PREFIX, opened at fresh-read start. membership below covers callbacks
+        // received AFTER these ids expose; it cannot retroactively cover one received while the
+        // server read was still hiding them — a live `h -> visible` change would take the blind
+        // lane, apply, and never open a hidden delivery, so the gate could stay writable and the
+        // older query answer would then register hidden `h` over the newer visible transition
+        const prefix = recordAllocator.openPrefix()
         const docs = await getDocsFromServer(
           query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
         )
@@ -8913,8 +8919,40 @@
         // RAW MEMBERSHIP published before any further await, so a delivery for one of these ids
         // arriving mid-operation is admitted rather than classified as ordinary
         run.publishMembership(docs.docs.map(d => d.id))
+        prefix.close() // from here on, membership is what admits
+        // INTERSECTIONS: a blind record for one of these ids raced the read. await ONLY that
+        // record's own completion — never the whole callback, whose other admitted changes may be
+        // waiting on a held chain or on this very scan — then take one fresh point read. an
+        // ADMITTED intersection is owned by its real delivery, and makes this confirmation
+        // inconclusive through the gate check below rather than being point-read here
+        const rawIds = new Set(docs.docs.map(d => d.id))
+        const pointAnswers = new Map<string, PointAnswer>()
+        for (const record of prefix.records()) {
+          if (!rawIds.has(record.id) || record.kind != 'blind') continue
+          await record.done.catch(() => {}) // its own completion only
+          if (run.cancelled()) throw new Error('hidden corpus stopped')
+          const fresh = await getDocFromServer(doc(getFirestore(firebase), 'items', record.id))
+          const point = fresh.exists() ? await decryptItem(Object.assign(fresh.data(), { id: record.id })) : null
+          const classified = point ? classifyHiddenDocument(record.id, !!point.hidden, point.text) : null
+          pointAnswers.set(
+            record.id,
+            classified?.kind == 'hidden'
+              ? { kind: 'hidden', name: classified.wrapper.name, wrapper: classified.wrapper }
+              : { kind: 'not-hidden' }
+          )
+        }
         const classified: { id: string; name?: string; wrapper?: HiddenWrapper }[] = []
         for (const doc of docs.docs) {
+          // a point answer REPLACES the stale raw row entirely: applying the raw row after the
+          // fresh answer would move the index backward again
+          const point = pointAnswers.get(doc.id)
+          if (point) {
+            // not-hidden SUPPRESSES with zero production-body calls; hidden replaces
+            if (point.kind == 'hidden')
+              classified.push({ id: doc.id, name: point.name, wrapper: point.wrapper as HiddenWrapper })
+            else classified.push({ id: doc.id })
+            continue
+          }
           const item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
           const c = classifyHiddenDocument(doc.id, !!item.hidden, item.text)
           // FAIL CLOSED: an indeterminate row exists and this read cannot say which name it

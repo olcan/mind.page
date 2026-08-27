@@ -86,6 +86,16 @@ export type AllocationRequest =
   | { kind: 'admitted'; id: string; handle: RecordHandle }
   | { kind: 'blind'; id: string }
 
+// the BOUNDED LISTENER PREFIX: the records that overlap a corpus read. it is seeded from the
+// records live at fresh-read START and collects newly allocated ones only until raw membership
+// publishes, then closes. membership handles callbacks received AFTER the ids expose; it cannot
+// retroactively cover ones received while the server read was still hiding them — which is the
+// pre-exposure race this closes
+export type ListenerPrefix = {
+  records(): ListenerRecord[]
+  close(): void
+}
+
 export function createRecordAllocator(deps: {
   // an unexpected blind body failure. the lane consumes it so later slots still run, but the
   // record keeps its rejection
@@ -93,8 +103,22 @@ export function createRecordAllocator(deps: {
 }) {
   // ONE lane for the page, across callbacks
   let blindTail: Promise<void> = Promise.resolve()
+  // records that have not terminalized. a corpus read seeds its prefix from these
+  const live = new Set<ListenerRecord>()
+  const collectors = new Set<(record: ListenerRecord) => void>()
 
   return {
+    // opens a bounded prefix. call at FRESH-READ START, close it when raw membership publishes
+    openPrefix(): ListenerPrefix {
+      const collected = new Set<ListenerRecord>(live)
+      const collect = (record: ListenerRecord) => collected.add(record)
+      collectors.add(collect)
+      return {
+        records: () => [...collected],
+        close: () => void collectors.delete(collect),
+      }
+    },
+
     // allocate every record for one callback, SYNCHRONOUSLY and in document order, before any
     // preparation starts
     // `revoke` is the CALLBACK's own state-only revocation, passed per batch. it must not be a
@@ -202,6 +226,14 @@ export function createRecordAllocator(deps: {
         }
       }
 
+      for (const record of records) {
+        live.add(record)
+        for (const collect of collectors) collect(record)
+        void record.done.then(
+          () => live.delete(record),
+          () => live.delete(record)
+        )
+      }
       const landed = Promise.allSettled(records.map(r => r.done))
       return {
         records,
