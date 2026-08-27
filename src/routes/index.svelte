@@ -8081,7 +8081,7 @@
                   // (src/hidden_delivery.ts, schedule-tested); the effects are the injected
                   // reducers below. a rejection blocks the handle
                   scheduleDelivery(
-                    { ...delivery, record },
+                    delivery,
                     { item: savedItem, wrapper },
                     {
                       stopped: () => ingressStopped,
@@ -8108,9 +8108,11 @@
                       }),
                       hiddenChanged: (name, changeType) => void hiddenItemChangedRemotely(name, changeType),
                       markCleanupPending: () => void (hiddenCleanupPending = true),
+                      // an evidence failure logs its ORIGINAL cause here, then rethrows and is
+                      // ALSO caught by onApplyError below — two lines, deliberately: the first
+                      // carries the read/classification specifics, the second marks the delivery
+                      // blocked like every other application failure
                       onEvidenceError: e =>
-                        // the ORIGINAL cause: this rejection blocks the handle before applyRemote,
-                        // so it never reaches the application diagnostic below
                         void console.error('could not establish final state for remote change:', doc.id, e),
                       // NO revocation here: the record's blocked outcome performs exactly one
                       onApplyError: e => void console.error('could not apply remote change:', doc.id, e),

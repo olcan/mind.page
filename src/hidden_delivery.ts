@@ -155,7 +155,9 @@ export function receiveChanges(
   const facts = changes.map(change => {
     const id = change.doc.id
     const removed = change.type == 'removed'
-    const rawHidden = !!change.doc.data().hidden
+    // ONE observation of the payload: every receipt fact below derives from the same read
+    const data = change.doc.data()
+    const rawHidden = !!data.hidden
     const boundary = deps.pendingBoundary(id)
     const needsEvidence = needsFinalStateEvidence({ ...deps.mode, removed })
     const admitted = rawHidden || needsEvidence || deps.tracksDocument(id) || deps.hasOutstanding(id) || !!boundary
@@ -164,7 +166,7 @@ export function receiveChanges(
     // a REMOVED change its old data, so forwarding that cipher would let a deletion satisfy the
     // exact echo waiter of the write it deleted
     const request: AllocationRequest = admitted
-      ? { kind: 'admitted', id, handle: deps.open(id, !removed && rawHidden ? change.doc.data().cipher : undefined) }
+      ? { kind: 'admitted', id, handle: deps.open(id, !removed && rawHidden ? data.cipher : undefined) }
       : { kind: 'blind', id }
     return { change, request, boundary, needsEvidence }
   })
@@ -190,11 +192,16 @@ export function receiveChanges(
  * caller cannot schedule delivery A's application onto delivery B's record.
  */
 export function scheduleDelivery(
-  delivery: Delivery & { record: AdmittedRecord },
+  delivery: Delivery,
   prepared: { item: any; wrapper: ParsedWrapper | null },
   deps: AdmittedDeliveryDeps
 ): undefined {
-  delivery.record.schedule(() =>
+  // narrowed HERE, not by the caller: a `Delivery & { record: AdmittedRecord }` parameter made
+  // every caller reconstruct `{ ...delivery, record }`, which is the substitution hazard this
+  // function exists to remove
+  const record = delivery.record
+  if (record.kind != 'admitted') throw new Error(`cannot schedule a ${record.kind} record`)
+  record.schedule(() =>
     applyAdmittedDelivery(
       {
         change: delivery.change,

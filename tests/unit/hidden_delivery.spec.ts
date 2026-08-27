@@ -44,6 +44,8 @@ function harness(mode: PageMode = OWNER) {
   const allocator = createRecordAllocator({ onBlindError: () => {} })
   const stopWaiters = createStopWaiters()
   const effects: string[] = []
+  const evidenceErrors: unknown[] = []
+  const applyErrors: unknown[] = []
   let stopped = false
   // the applied HIDDEN index: id -> name
   const hiddenById = new Map<string, string>()
@@ -120,16 +122,14 @@ function harness(mode: PageMode = OWNER) {
     },
     hiddenChanged: name => void effects.push(`notify:${name}`),
     markCleanupPending: () => undefined,
-    onEvidenceError: () => undefined,
-    onApplyError: () => undefined,
+    onEvidenceError: e => void evidenceErrors.push(e),
+    onApplyError: e => void applyErrors.push(e),
   })
 
   // schedules one admitted delivery through the REAL scheduleDelivery, with the payload prepared
   // as the listener would (a removal fabricates the old-side item)
-  const schedule = (delivery: Delivery, item: any, wrapper: { id: string; name: string } | null = null) => {
-    if (delivery.record.kind != 'admitted') throw new Error('expected an admitted record')
-    scheduleDelivery({ ...delivery, record: delivery.record }, { item, wrapper }, depsFor(delivery.change.doc.id))
-  }
+  const schedule = (delivery: Delivery, item: any, wrapper: { id: string; name: string } | null = null) =>
+    scheduleDelivery(delivery, { item, wrapper }, depsFor(delivery.change.doc.id))
 
   return {
     ingress,
@@ -142,6 +142,8 @@ function harness(mode: PageMode = OWNER) {
     server,
     receive,
     schedule,
+    evidenceErrors,
+    applyErrors,
     stop: () => {
       stopped = true
       stopWaiters.stop(new Error('hidden ingress stopped'))
@@ -221,29 +223,48 @@ test('RAW-HIDDEN DELETION: a full-account hidden removal removes BOTH representa
   expect(h.visible.has('k'), 'and so is the stale visible row').toBe(false)
 })
 
-test('BOUNDARY: a delivery admitted by corpus membership waits for THAT producer to settle', async () => {
-  // deleting the boundary await left every schedule green in round 77, because no row ever
-  // captured a DEFINED boundary. this one does: the producer publishes `k` and stays held
+test('BOUNDARY: membership-only admission, and NO evidence or reducer until the producer settles', async () => {
+  // the two facts round 78 showed the previous row did not prove. `a` is a VISIBLE non-removal:
+  // rawHidden false, needsEvidence false, nothing tracked or outstanding — pending corpus
+  // membership is its ONLY admission arm, so deleting `|| !!boundary` allocates it blind. `b` is
+  // an ambiguous owner removal whose current state is hidden: its EVIDENCE read must also wait for
+  // the captured producer, not just its reducers — fresh evidence taken against the pre-rebuild
+  // index is exactly what the boundary exists to prevent
   const h = harness()
-  h.server.set('k', { item: { hidden: true, text: 'cipher' }, name: 'global_store_b' })
+  h.server.set('b', { item: { hidden: true, text: 'cipher' }, name: 'global_store_b' })
   const membershipPublished = deferred()
   const producerHold = deferred()
   const producer = h.corpus.run(async run => {
-    run.publishMembership(['k']) // k is in an in-flight corpus read
+    run.publishMembership(['a', 'b'])
     membershipPublished.resolve()
     await producerHold.promise // the producer is HELD, its boundary pending
   })
   await membershipPublished.promise
-  const { deliveries } = h.receive([changeOf('k', 'modified', { hidden: true, cipher: 'x' })])
-  const delivery = deliveries[0]
-  expect(delivery.boundary, 'the receipt captured a DEFINED boundary').toBeTruthy()
-  h.schedule(delivery, { hidden: true, text: '' }, { id: 'k', name: 'global_store_b' })
+  const { deliveries } = h.receive([
+    changeOf('a', 'modified', { hidden: false }), // visible: boundary is the SOLE admission arm
+    changeOf('b', 'removed', { hidden: false }), // ambiguous owner removal: evidence AND boundary
+  ])
+  expect(
+    deliveries.map(d => d.record.kind),
+    'both admitted'
+  ).toEqual(['admitted', 'admitted'])
+  expect(
+    deliveries.map(d => !!d.boundary),
+    'both captured a DEFINED boundary'
+  ).toEqual([true, true])
+  expect(deliveries.map(d => d.needsEvidence)).toEqual([false, true])
+  h.schedule(deliveries[0], { hidden: false, text: 'visible item' })
+  h.schedule(deliveries[1], { hidden: false, text: '' })
   await new Promise(res => setImmediate(res))
-  expect(h.effects, 'NOTHING runs while the producer holds the boundary').toEqual([])
-  producerHold.resolve() // the producer settles; the boundary releases
+  expect(h.membershipReadCount(), 'ZERO evidence reads while the producer holds the boundary').toBe(0)
+  expect(h.effects, 'and zero reducers').toEqual([])
+  producerHold.resolve() // the producer settles; both boundaries release
   await producer
-  expect(await outcomeOf(delivery)).toBe('applied')
-  expect(h.effects[0], 'the application ran only after the boundary released').toContain('chains:')
+  const outcomes = await Promise.all(deliveries.map(outcomeOf))
+  expect(outcomes).toEqual(['applied', 'applied'])
+  expect(h.membershipReadCount(), "b's evidence was taken AFTER the boundary").toBe(1)
+  expect(h.hiddenById.get('b'), 'and b installed from that post-boundary evidence').toBe('global_store_b')
+  expect(h.visible.has('a'), "a's visible modification applied ordinarily").toBe(true)
 })
 
 test('STOP between reservation and the body: the delivery blocks with zero mutation', async () => {
@@ -308,6 +329,12 @@ test('HEALING: failed evidence does not heal an older block; newer successful ev
   const failing = deliverRemoval(h, 'k')
   expect(await failing.outcome, 'blocked, not applied: it established nothing').toBe('blocked')
   expect(h.ingress.gate(), 'and the older block is NOT healed').toBe('blocked')
+  // THE DIAGNOSTIC WIRING, pinned here so the next dropped hook fails in under a second instead of
+  // after a full browser run (round 78): the evidence failure reaches BOTH hooks — the specific
+  // cause first, then the delivery-blocked line every application failure gets
+  expect(h.evidenceErrors, 'the evidence hook got the specific cause').toHaveLength(1)
+  expect(String(h.evidenceErrors[0]), 'reason preserved, not a generic prefix').toContain('could not be classified')
+  expect(h.applyErrors, 'and the apply hook marked the delivery blocked').toHaveLength(1)
   h.server.set('k', { item: { hidden: true, text: 'cipher' }, name: 'global_store_b' })
   const healing = deliverRemoval(h, 'k')
   expect(await healing.outcome).toBe('applied')
@@ -345,7 +372,7 @@ test('SCOPE: a foreign or read-only fixed removal performs no hidden read and is
   }
 })
 
-test('CORRELATION: two changes keep their own records, boundaries and evidence bits', async () => {
+test('CORRELATION: two changes keep their own records and evidence bits (both boundaries undefined)', async () => {
   // the binding invariant receiveChanges owns: swapping two envelopes or records must be visible.
   // `a` is a raw-hidden modification (admitted, no evidence); `b` is an ambiguous owner removal
   // (admitted, evidence). their facts must not cross
