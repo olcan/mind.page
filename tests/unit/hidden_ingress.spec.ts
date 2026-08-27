@@ -598,64 +598,8 @@ test('authority overtaking: an older candidate cannot make authority usable afte
   expect(c.authorityUsable(), 'basis (receipt 1) <= invalidatedThrough (receipt 2)').toBe(false)
 })
 
-// ---- the ADAPTER's callback finalizer (round 58) ----
-// these model the production applyTask lifecycle in index.svelte, which arrive() in
-// hidden_persistence.spec.ts deliberately omits — and which is where the defect lived. one
-// callback: open a handle per admitted document, hand SOME of them an Apply, then sweep. the
-// applications are awaited DETACHED, so the sweep runs while a handed-off slot may still be
-// queued behind an older same-id one
-
-// the finalizer as it must behave: block only what was never handed off
-function finalize(handles: Array<{ handle: any; handedOff: boolean }>) {
-  for (const { handle, handedOff } of handles) if (!handedOff) handle.block()
-}
-
-test('the callback finalizer does NOT abort a handed-off delivery still queued behind an older same-id slot', async () => {
-  const c = createHiddenIngress()
-  const g1 = gatedApply()
-  // callback A opens and hands off S1 for id `d`; its application is held
-  const s1 = c.open('d', 'cipher1')
-  s1.ready(g1.apply)
-  finalize([{ handle: s1, handedOff: true }])
-  await g1.started.promise
-  // callback B opens S2 for the SAME id. its Apply is handed off, but the slot is queued behind
-  // running S1, so it is still `ready` — not `running` — when B's task returns and sweeps
-  let s2ran = false
-  const s2 = c.open('d', 'cipher2')
-  s2.ready(() => ((s2ran = true), Promise.resolve()) as any)
-  finalize([{ handle: s2, handedOff: true }])
-  g1.gate.resolve()
-  expect(await s1.done).toBe('applied')
-  expect(await s2.done, 'the handed-off slot ran on its turn').toBe('applied')
-  expect(s2ran, 'its body actually ran').toBe(true)
-  expect(c.gate(), 'no retained block').toBe('writable')
-})
-
-test('the callback finalizer still blocks a handle that was never handed off', async () => {
-  const c = createHiddenIngress()
-  // an admitted document whose change took an early return: no Apply was ever produced for it
-  const abandoned = c.open('d', 'cipher1')
-  expect(c.gate(), 'open makes writers wait').toBe('pending')
-  finalize([{ handle: abandoned, handedOff: false }])
-  expect(await abandoned.done).toBe('blocked')
-  expect(c.gate(), 'a retained block gates every writer').toBe('blocked')
-})
-
-test('a mixed callback sweeps only the abandoned handle, and a later success heals it', async () => {
-  const c = createHiddenIngress()
-  const handedOffHandle = c.open('d1', 'cipher1')
-  handedOffHandle.ready(applied)
-  const abandoned = c.open('d2', 'cipher2')
-  finalize([
-    { handle: handedOffHandle, handedOff: true },
-    { handle: abandoned, handedOff: false },
-  ])
-  expect(await handedOffHandle.done).toBe('applied')
-  expect(await abandoned.done).toBe('blocked')
-  expect(c.gate(), "d2's block dominates").toBe('blocked')
-  // healing is per CELL: only a higher delivery for d2 clears it
-  const heal = c.open('d2', 'cipher3')
-  heal.ready(applied)
-  expect(await heal.done).toBe('applied')
-  expect(c.gate(), 'healed').toBe('writable')
-})
+// NOTE the three "adapter finalizer" schedules that were here are DELETED (round 59). They
+// defined a local copy of the production sweep and tested the copy: deleting handedOff.add() in
+// index.svelte left all three green, and the mutation that "verified" them mutated the copy. A
+// real seam for overlapping same-id handoff, exceptional exit, late-task stop and raw-cipher
+// classification belongs in the production listener refactor (P1 #2), not in a lookalike here.

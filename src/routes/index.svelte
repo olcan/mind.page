@@ -7846,6 +7846,7 @@
             // settles only after every queued transition of this revision lands. CALLBACK-SCOPED
             // so the task's finally owns the same lifetime on every exit, including a throw
             const hiddenApplied: Promise<unknown>[] = []
+            let landed: Promise<unknown> = Promise.resolve()
             for (const change of snapshot.docChanges()) {
               const id = change.doc.id
               entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
@@ -7883,12 +7884,16 @@
                 // compare-and-set: it converts open and ready alike, so the handed-off ones are
                 // skipped — theirs is not an abandoned slot, it is a queued one
                 for (const handle of handles.values()) if (!handedOff.has(handle)) handle.block()
-                // the context stays ACTIVE until every handed-off record settles: the applications
-                // are detached, so terminalizing here would leave a stop with nothing to block
-                // while real work was still running. lease settlement rides the SAME lifetime,
-                // which is what makes it exactly-once on every exit — a throw out of applyChanges
-                // used to skip settleApplied entirely and strand every later lease behind it
-                void Promise.allSettled(hiddenApplied).then(() => {
+                // ONE aggregate, created on the GUARANTEED path, for all three consumers: the
+                // context lifetime, lease settlement, and the legacy acknowledgement frontier.
+                // building it at the normal bottom of applyChanges instead meant an early change
+                // could hand off a hidden Apply, a later one throw, and snapshotFrontier() then
+                // observe the OLD frontier — letting an acknowledgement reconcile while that
+                // application was still pending. hiddenApplyOk defaults to success, so that is a
+                // wrong owner state, not merely a short wait
+                landed = Promise.allSettled(hiddenApplied)
+                hiddenFrontier = hiddenFrontier.then(async () => void (await landed)) // settle-only: allSettled never rejects
+                void landed.then(() => {
                   activeIngressContexts.delete(context)
                   settleApplied({
                     failed: threw || hiddenApplyFailed,
@@ -8114,16 +8119,6 @@
               // release this revision's reserved authority slot once every hidden transition it
               // queued has landed: the settlement itself runs on the authority chain, in receipt
               // order, so a later revision cannot grant ahead of these transitions
-              // settlement itself moved to the task's finally, which owns the same all-settling
-              // lifetime on EVERY exit (see applyTask). this is only the frontier chain
-              const landed = Promise.allSettled(hiddenApplied)
-              // a snapshot is NOT fully applied when its apply task returns: the hidden
-              // applications above were pushed and awaited detached, and applyRemote acquires
-              // multiple names RECURSIVELY, so a second name is not even reserved until the first
-              // chain reaches it. settlement must cross THIS, not merely the apply task
-              hiddenFrontier = hiddenFrontier.then(async () => {
-                await landed.catch(() => {}) // settle-only: a failed application is the listener's business
-              })
               if (applied.length) {
                 const summary =
                   `${applied.length} remote change${applied.length == 1 ? '' : 's'} ` +

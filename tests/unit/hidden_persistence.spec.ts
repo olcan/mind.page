@@ -1844,28 +1844,6 @@ test('an acknowledgement arriving AFTER stop clears the owed record without reco
   expect(reconciled, 'stop wins over the echo').toEqual([])
 })
 
-test('stop leaves an ISSUED generation\'s saving mirror alone (it is owned by its SDK result)', async () => {
-  const ack = deferred<void>()
-  const h = harness()
-  const controller = createHiddenPersistence({
-    ...h.deps,
-    updateDoc: async (id, data) => {
-      h.calls.push({ op: 'update', id, text: data.cipher })
-      await ack.promise
-    },
-  })
-  const w: HiddenWrapper = { id: 'd1', name: 'n', item: { server: 1 } }
-  registerHidden(h.idx, w, () => {})
-  controller.save('n', { mine: 1 })
-  for (let i = 0; i < 6; i++) await flush()
-  const mirror = Promise.resolve('in flight') // what production keeps while a write is out
-  w.saving = mirror
-  controller.stop()
-  expect(w.saving, 'an in-flight write is still saving: the mirror is its SDK result to clear').toBe(mirror)
-})
-
-// ---- the wake: gate first, off the chain (round 58) ----
-
 test('a save while the gate is PENDING does no secret work at all until the delivery applies', async () => {
   let acquisitions = 0
   const h = harness()
@@ -1917,37 +1895,60 @@ test('a BLOCKED gate is reported once and waits for healing, instead of polling 
   expect(failures, 'and no second report').toEqual(['n'])
 })
 
-test('a second block while already parked adds no report: parking is what bounds the reporting', async () => {
-  // this is the property that actually holds, and it comes from the LOOP, not a flag: a blocked
-  // writer waits on whenWritable, so a further block cannot wake it and cannot re-report. a
-  // reported-once flag was tried here and deleted — no schedule could tell it apart
+test('a NEW generation inheriting a parked wake is still reported blocked', async () => {
+  // round 59: the deleted token was NOT unfalsifiable, and my argument for deleting it was wrong.
+  // generation 1 reports and parks; a superseding save returns through the queued shortcut and
+  // inherits that same parked waiter, so it never reaches the report site on its own
   const failures: string[] = []
   const h = harness()
   const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
   registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
-  const bad1 = h.ingress.open('d2', 'cipher:bad1')
-  bad1.ready(() => Promise.reject(new Error('decrypt failed')))
-  expect(await bad1.done).toBe('blocked')
-  controller.save('n', { mine: 1 })
+  const bad = h.ingress.open('d2', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { v: 1 })
   for (let i = 0; i < 6; i++) await flush()
-  expect(failures, 'reported for this generation').toEqual(['n'])
-  // a SECOND corrupt delivery lands in a different cell before the first is healed, so healing
-  // d2 leaves the gate blocked by d3 and the writer parks again
-  const bad2 = h.ingress.open('d3', 'cipher:bad2')
-  bad2.ready(() => Promise.reject(new Error('decrypt failed')))
-  expect(await bad2.done).toBe('blocked')
-  const heal2 = h.ingress.open('d2', 'cipher:good')
-  heal2.ready(async () => {})
-  expect(await heal2.done).toBe('applied')
-  for (let i = 0; i < 8; i++) await flush()
-  expect(failures, 'STILL one report: the writer never woke to re-report').toEqual(['n'])
-  // healing the second cell finally lets it through
-  const heal3 = h.ingress.open('d3', 'cipher:good')
-  heal3.ready(async () => {})
-  expect(await heal3.done).toBe('applied')
-  for (let i = 0; i < 8; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
-  expect(failures, 'and never a second report').toEqual(['n'])
+  expect(failures, 'generation 1 reported').toEqual(['n'])
+  controller.save('n', { v: 2 }) // supersedes, inherits the parked wake
+  expect(failures, 'generation 2 is told too').toEqual(['n', 'n'])
+  // and still exactly one write, of the newest state, once healed
+  const heal = h.ingress.open('d2', 'cipher:good')
+  heal.ready(async () => {})
+  expect(await heal.done).toBe('applied')
+  for (let i = 0; i < 10; i++) await flush()
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(updates).toHaveLength(1)
+  expect(itemOf(updates[0].text)).toEqual({ v: 2 })
+  expect(failures, 'no further reports').toEqual(['n', 'n'])
+})
+
+test('one generation is reported ONCE even when healing immediately re-blocks', async () => {
+  // the other half: a healing delivery whose own continuation blocks a different cell brings the
+  // waiter back through the blocked branch for the SAME generation. only the token stops a
+  // duplicate report
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const bad = h.ingress.open('d2', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 6; i++) await flush()
+  expect(failures, 'reported once').toEqual(['n'])
+  // heal d2, but a continuation on its own done synchronously opens and blocks d3 before the
+  // writer's waiter continuation runs
+  const heal = h.ingress.open('d2', 'cipher:good')
+  const reblock = heal.done.then(() => {
+    const bad2 = h.ingress.open('d3', 'cipher:bad2')
+    bad2.ready(() => Promise.reject(new Error('decrypt failed')))
+    return bad2.done
+  })
+  heal.ready(async () => {})
+  expect(await reblock).toBe('blocked')
+  for (let i = 0; i < 10; i++) await flush()
+  expect(failures, 'STILL one report for this generation').toEqual(['n'])
+  expect(h.calls.filter(c => c.op == 'update'), 'and no write').toHaveLength(0)
 })
 
 test('a superseding save cancels the older generation wake, and only the newest state is written', async () => {
@@ -1964,4 +1965,130 @@ test('a superseding save cancels the older generation wake, and only the newest 
   const updates = h.calls.filter(c => c.op == 'update')
   expect(updates, 'one write, not one per parked generation').toHaveLength(1)
   expect(itemOf(updates[0].text), 'carrying the newest intent').toEqual({ v: 2 })
+})
+
+test('a wrapper replaced while the writer is parked owns the saving mirror when the chain turn runs', async () => {
+  // round 59: scheduleOwed captured the SAVE-TIME wrapper and handed it to enqueue after the
+  // park. a delivery can replace it meanwhile, so the real chain mirror landed on a detached
+  // object while hiddenItemsByName pointed at the live one -- saving_global_store false for the
+  // whole build and write. the encryption is HELD so the mirror is read while the write is
+  // genuinely in flight, not after the turn has settled and cleared it
+  const encrypting = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      await encrypting.promise
+      const e: any = state
+      e.cipher = 'cipher:' + state.text
+      e.text = null
+      return e
+    },
+  })
+  const a: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
+  registerHidden(h.idx, a, () => {})
+  const held = h.ingress.open('d2', 'cipher:d2') // an unrelated delivery shuts the global gate
+  controller.save('n', { mine: 1 })
+  expect(a.saving, 'the save-time wrapper mirrors immediately').toBeTruthy()
+  // a same-id replacement lands while the writer is parked on the gate
+  const b: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
+  registerHidden(h.idx, b, () => {})
+  expect(h.idx.byName.get('n'), 'B is what the owner reads now').toBe(b)
+  held.ready(async () => {})
+  expect(await held.done).toBe('applied')
+  for (let i = 0; i < 6; i++) await flush()
+  // the chain turn is now running and blocked in encryptState
+  expect(b.saving, 'the LIVE wrapper carries the mirror through the build and write').toBeTruthy()
+  encrypting.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
+  expect(b.saving, 'and it clears when the turn settles').toBe(null)
+})
+test('the gate closing during acquireSecret mutates nothing: no synthetic wrapper, no owner publication', async () => {
+  // round 59 section 6: attemptWrite could clone, resolve a target, INSTALL a synthetic
+  // pending_create in byId/byName and publish owner state before attemptCreate first read the
+  // gate. acquireSecret prompts, so the gate can close while it is pending
+  const published: string[] = []
+  const release = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: () => release.promise,
+    syncOwner: n => void published.push(n),
+  })
+  controller.save('n', { mine: 1 }) // nothing holds 'n': the create path
+  for (let i = 0; i < 4; i++) await flush()
+  // the gate closes while the phrase prompt is open
+  const held = h.ingress.open('d9', 'cipher:d9')
+  release.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  // save() claiming the name synchronously is BY DESIGN (saving_global_store must be visible the
+  // moment the user saves), so that wrapper is not the defect. what must not happen is the work
+  // attemptWrite does on top of it before the gate is read: rewriting the claimed wrapper's item
+  // and PUBLISHING it to the owner
+  expect(published, 'nothing published to the owner while the gate is shut').toEqual([])
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  // once the gate heals the create proceeds normally
+  held.ready(async () => {})
+  expect(await held.done).toBe('applied')
+  for (let i = 0; i < 8; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'create'), 'exactly one create, after the gate opened').toHaveLength(1)
+})
+
+// ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
+// the existing same-id replacement row proves WRAPPER IDENTITY checking. these three isolate the
+// other two halves: the per-id receipt frontier, and the global gate
+
+test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
+  // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
+  // wrapper identity exactly as they were. only receiptFrontier moved, so only it can refuse
+  const { idx, calls, controller, ingress, awaitGate, releaseGate, drain } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'B' })
+  await awaitGate('the first payload')
+  const d = ingress.open('d1', 'cipher:d1')
+  d.ready(async () => {}) // applies and prunes without touching the index at all
+  expect(await d.done).toBe('applied')
+  expect(idx.byName.get('n'), 'selection unchanged').toBe(live)
+  expect(idx.byId.get('d1'), 'wrapper identity unchanged').toBe(live)
+  await releaseGate()
+  expect(calls.filter(c => c.op == 'update'), 'the first payload was refused').toHaveLength(0)
+  await drain(1)
+  expect(calls.filter(c => c.op == 'update').map(c => c.id), 'the retry issues').toEqual(['d1'])
+})
+
+test('an UNRELATED open delivery refuses the payload through the global gate alone', async () => {
+  // nothing about the target changed -- not its frontier, not its wrapper, not the selection.
+  // only the global gate can refuse this one
+  const { idx, calls, controller, ingress, awaitGate, releaseGate, drain } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'B' })
+  await awaitGate('the first payload')
+  const unrelated = ingress.open('d9', 'cipher:d9')
+  await releaseGate()
+  expect(calls.filter(c => c.op == 'update'), 'refused by the GLOBAL gate').toHaveLength(0)
+  unrelated.ready(async () => {})
+  expect(await unrelated.done).toBe('applied')
+  await drain(1)
+  expect(calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
+})
+
+test('an unrelated delivery that applies BEFORE the encryption finishes lets the first payload issue', async () => {
+  // the positive counterpart: this is what proves the frontier is TARGET-SPECIFIC rather than a
+  // hidden global epoch. an unrelated id opening and closing must cost nothing
+  const { idx, calls, controller, ingress, awaitGate, releaseGate } = gatedHarness()
+  const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
+  idx.byId.set('d1', live)
+  idx.byName.set('n', live)
+  controller.save('n', { v: 'B' })
+  await awaitGate('the first payload')
+  const unrelated = ingress.open('d9', 'cipher:d9')
+  unrelated.ready(async () => {})
+  expect(await unrelated.done).toBe('applied') // gone again before the encryption returns
+  await releaseGate()
+  expect(calls.filter(c => c.op == 'update').map(c => c.id), 'ONE write, no retry').toEqual(['d1'])
 })

@@ -155,7 +155,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // reportedStop: the terminal stop is reported ONCE PER GENERATION — a genuinely superseding
   // save creates a new generation and may report its own immediate stopped outcome, while old
   // continuations may not report again
-  type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean }
+  // reportedBlocked: a blocked GENERATION notifies exactly once (design: "notify EXACTLY ONCE").
+  // not per block episode — an intervening writable can let the loop reach the report again for
+  // the same generation, and a NEW generation inheriting a parked wake would otherwise never be
+  // reported at all
+  type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean; reportedBlocked?: boolean }
   const owed = new Map<string, Owed>()
   // sticky for the controller's lifetime; every await-crossing continuation rechecks it
   let stopped = false
@@ -294,10 +298,22 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // waiting is reported rather than silently waited through
       const sub: { promise: Promise<unknown>; cancel(): void } =
         g == 'blocked' ? deps.whenWritable() : deps.whenActionable()
-      wakes.set(name, sub)
+      // RACE against our own cancellation. the coordinator's cancel() splices the waiter and
+      // deliberately does NOT settle its promise — correct for it, but it means a parked schedule
+      // would never resume, never reach its finally, and leave a placeholder mirror standing
+      // forever. this signal is writer-owned; the coordinator keeps its contract
+      let resolveCancelled!: () => void
+      const cancelled = new Promise<void>(res => (resolveCancelled = res))
+      const entry = {
+        cancel() {
+          sub.cancel()
+          resolveCancelled()
+        },
+      }
+      wakes.set(name, entry)
       if (g == 'blocked') reportBlocked(name)
-      await sub.promise
-      if (wakes.get(name) === sub) wakes.delete(name)
+      await Promise.race([sub.promise, cancelled])
+      if (wakes.get(name) === entry) wakes.delete(name)
       // LOOP rather than trust the level: the wake resolved for the gate at that instant, and a
       // new delivery can open before this continuation runs
     }
@@ -323,7 +339,16 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       try {
         if (!owed.has(name)) return
         if (!(await awaitWritable(name))) return
-        void enqueue(name, holder, () => persistOwed(name)) // installs the real mirror
+        // RECHECK AFTER THE AWAIT: awaitWritable can return true from an immediately fulfilled
+        // wake, and stop can land in the continuation gap. without this the writer enqueues, and
+        // persistOwed then prompts for a phrase for a page that can never write again
+        if (stopped || !owed.has(name)) return
+        // RE-RESOLVE THE LIVE HOLDER at the handoff. the wrapper captured at save time can have
+        // been replaced by a delivery while this was parked; putting the real chain mirror on the
+        // DETACHED old object leaves saving_global_store false for the wrapper the owner actually
+        // reads, throughout the build and write that follow
+        const live = deps.index().byName.get(name)
+        void enqueue(name, live ?? holder, () => persistOwed(name)) // installs the real mirror
       } finally {
         resolvePlaceholder?.()
         // never leave a resolved placeholder standing as the mirror: it reads as truthy, so the
@@ -333,14 +358,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     })()
   }
 
-  // reported ONCE PER BLOCK EPISODE, which is what the loop above already gives: a blocked writer
-  // parks on whenWritable and can only reach this line again after an intervening writable gate.
-  // so a permanently corrupt record notifies once, not on every wake, and two genuinely distinct
-  // incidents are two reports. an extra reported-once FLAG was tried and removed: no schedule
-  // could distinguish it, because the parking is what bounds the reporting
+  // ONCE PER GENERATION. the parking bounds it in the simple case, but not in two others: a
+  // healing delivery whose own continuation blocks another cell brings the loop back here for the
+  // SAME generation, and a superseding save that inherits a parked wake is a NEW generation that
+  // must be told. the token distinguishes both; the parking alone distinguishes neither
   function reportBlocked(name: string) {
     const op = owed.get(name)
-    if (!op) return
+    if (!op || op.reportedBlocked) return
+    op.reportedBlocked = true
     const holder = deps.index().byName.get(name)
     if (holder?.saving) holder.saving = null // it is not saving, and will not be until healed
     try {
@@ -443,6 +468,13 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const current = () => currentOwed(name, generation)
     if (stopped) return true // ingress is terminal: no new work, and the intent stays owed
     if (!current()) return true // superseded: nothing owed by this generation any more
+    // THE GATE, BEFORE ANYTHING ELSE. acquireSecret() can prompt, and the gate can close while it
+    // is pending — so this ran with a stale writable answer and got as far as installing a
+    // synthetic pending_create wrapper in byId/byName and publishing owner state before
+    // attemptCreate asked the gate at all. every check below is a REFUSAL, but this one has to
+    // precede the clone, the target resolution, the wrapper mutation and the publication, not
+    // follow them
+    if (!gateWritable()) return false
     // PER-ATTEMPT WORKING COPY of the immutable baseline: merges below must not touch it
     const state = cloneState(current()!.localIntent)
     let holder = canonicalHolder(name)
@@ -597,6 +629,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   async function persistOwed(name: string) {
     const op = owed.get(name)
     if (!op || op.phase == 'building') return
+    // AND AGAIN AT ENTRY: stop can land after the schedule's check but before this turn, which
+    // was already sitting in the name chain queue. the two checks are not redundant — they close
+    // different gaps, and the one below (post-acquisition, in attemptWrite) covers work already
+    // running
+    if (stopped) return
     op.phase = 'building'
     const generation = op.generation
     const current = () => currentOwed(name, generation)
@@ -767,6 +804,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         op.localIntent = intent // supersede: this is what the name owes now
         op.generation = ++generationSeq
         op.reportedStop = false // a new generation reports its own outcome (see Owed)
+        op.reportedBlocked = false
+        // a generation that inherits a PARKED wake would never reach reportBlocked, because the
+        // waiter does not resume until the gate opens. report for it here instead — the wake
+        // itself stays name-scoped (one physical waiter), the REPORTING is generation-scoped
+        if (deps.gate() == 'blocked' && wakes.has(name)) reportBlocked(name)
         // a record that is QUEUED already has a task coming. one that is building, issued or
         // failed does not — and treating those as "already queued" is how failed work sat idle
         // forever, and how a save after issuance was never written.
