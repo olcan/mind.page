@@ -7347,6 +7347,14 @@
 
       let firstSnapshot = true
       let snapshotApply = Promise.resolve() // serializes remote-change application across snapshots
+      // THE GLOBAL BLIND LANE: one settle-only chain carrying every ORDINARY mutation body, in
+      // callback and document receipt order. it exists so callback preparation can stop being
+      // serialized by snapshotApply — which is what deadlocked an admitted change awaiting a
+      // candidate behind a LATER callback's blind change — without ordinary effects gaining
+      // readiness-order concurrency. admitted work never occupies this lane; it runs on the
+      // coordinator's per-id delivery tail, and captures the lane's tail at its own receipt
+      // position so blind-then-admitted order is still preserved
+      let blindTail: Promise<void> = Promise.resolve()
       let hiddenFrontier = Promise.resolve() // ... and their hidden applications, which are detached
       // FULLY APPLIED, and SETTLE-ONLY. three things were wrong with returning snapshotApply:
       // - firestore resolves a write's promise before emitting its acknowledgement listener
@@ -7814,6 +7822,20 @@
               // therefore DERIVED from the aggregate rather than tracked in a second boolean
               done: Promise<void>
               settle: (failed?: boolean) => void
+              // BLIND records only: hands this record's reserved lane slot its mutation body.
+              // the slot exists from receipt, so a record that never gets a body (an early
+              // return, a decrypt failure, a stop) still settles its slot and the lane continues
+              runBlind: (body: () => void) => void
+              // ADMITTED records only: the lane tail AS IT STOOD at this record's receipt
+              // position. the task awaits it before handing its Apply to the handle, which keeps
+              // blind-then-admitted order — while an admitted record does NOT hold up a LATER
+              // blind one, the relaxation the candidate deadlock needs
+              blindPredecessor?: Promise<void>
+              // ADMITTED records only: set SYNCHRONOUSLY when a branch schedules its handoff, and
+              // resolved once ready() has actually been called. the handoff is deferred behind
+              // blindPredecessor, so without this the task's sweep could block the handle first
+              // and the deferred ready() would be a no-op — the round-58 defect in a new form
+              handoff?: Promise<void>
             }
             const records: CallbackRecord[] = []
             const recordById = new Map<string, CallbackRecord>()
@@ -7834,7 +7856,29 @@
               const handle = admitted
                 ? hiddenIngress.open(id, live ? change.doc.data().cipher : undefined)
                 : undefined
+              // IN DOCUMENT ORDER, at this exact position: an admitted record captures the lane
+              // tail as it stands now; a blind one reserves the next slot on it. doing all the
+              // blind reservations first and attaching admitted predecessors afterwards would
+              // make an admitted change wait on a LATER blind one — the exact edge that must
+              // stay relaxed
+              let giveBody!: (body: (() => void) | null) => void
+              const blindPredecessor = blindTail
+              if (!admitted) {
+                const bodyGiven = new Promise<(() => void) | null>(res => (giveBody = res))
+                blindTail = blindTail.then(async () => {
+                  const body = await bodyGiven
+                  if (!body) return // never given one: the slot settles and the lane continues
+                  try {
+                    body()
+                  } catch (e) {
+                    // SETTLE-ONLY: one blind body's failure must not poison the lane for every
+                    // later ordinary change. plaintext ingress is fail-soft by design
+                    console.error('could not apply remote change:', id, e)
+                  }
+                })
+              }
               let settled = false
+              let handedBody = false // a blind body is in the lane and has not run yet
               let resolve!: () => void
               let reject!: (e: unknown) => void
               const done = new Promise<void>((res, rej) => ((resolve = res), (reject = rej)))
@@ -7845,14 +7889,27 @@
                 handle,
                 receipt,
                 done,
+                blindPredecessor: admitted ? blindPredecessor : undefined,
+                runBlind(body) {
+                  handedBody = true // the per-change finally must NOT settle us now: the slot
+                  // has not run yet, and settling here would release the receipt and resolve the
+                  // record before its mutation happened
+                  giveBody(body) // the slot runs it in receipt order, then this record settles
+                  void blindTailAt.then(() => {
+                    handedBody = false
+                    record.settle()
+                  })
+                },
                 settle(failed = false) {
-                  if (settled) return // exactly once, on whichever path gets there first
+                  if (settled || handedBody) return // exactly once, and never before our slot ran
                   settled = true
+                  if (!admitted) giveBody(null) // release an unused slot: the lane must continue
                   hiddenPersistence.releaseRemote(id, receipt) // ITS receipt, on ITS path
                   if (failed) reject(new Error(`hidden ingress: ${id} could not be applied`))
                   else resolve()
                 },
               }
+              const blindTailAt = blindTail // this record's own slot, for runBlind to settle on
               records.push(record)
               recordById.set(id, record)
               // an ADMITTED record is settled by its handle's terminal outcome, whatever produces
@@ -7871,6 +7928,10 @@
                 await applyChanges()
                 threw = false
               } finally {
+                // WAIT FOR SCHEDULED HANDOFFS before sweeping: a handoff deferred behind the blind
+                // lane has not called ready() yet, and block() converts `ready` and `open` alike,
+                // so sweeping first would discard valid work and leave the gate blocked forever
+                await Promise.allSettled(records.map(r => r.handoff).filter(Boolean))
                 // every record that no branch reached settles here. an ADMITTED one settles by
                 // blocking its handle (which rejects the record through the mapping above); a
                 // blind one simply resolves, since blind work is fail-soft. a handed-off handle
@@ -7969,9 +8030,10 @@
                         throw e // REJECT: the coordinator records this delivery as blocked
                       }
                     )
-                  // handed to the handle: its resolution IS the record's outcome (see the
-                  // allocation pass). an unadmitted document has no handle and runs inline
-                  if (dropHandle) dropHandle.ready(dropApply)
+                  // handed to the handle BEHIND the blind lane position captured at this
+                  // record's receipt: an ordinary change received earlier must still mutate
+                  // first. a LATER blind change is deliberately not waited on
+                  if (dropHandle) record.handoff = record.blindPredecessor!.then(() => dropHandle.ready(dropApply))
                   else void dropApply().catch(() => {})
 
                   hiddenCleanupPending = true
@@ -8054,33 +8116,42 @@
                           throw e // REJECT: the coordinator records this delivery as blocked
                         }
                       )
-                  if (hiddenHandle) hiddenHandle.ready(hiddenApply)
+                  if (hiddenHandle) record.handoff = record.blindPredecessor!.then(() => hiddenHandle.ready(hiddenApply))
                   else void hiddenApply().catch(() => {})
                   continue
                 }
                 try {
-                  // pending writes are skipped only when they are OUR OWN (see isOwnPendingChange)
-                  if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) {
-                    ownSkipped++
-                    continue
-                  }
-                  // DEFER any remote change — pending or server-confirmed, from this device or
-                  // another — while local intent for the document is unsettled: applying it now
-                  // rolls the item back under that intent, which then persists the rollback. the
-                  // document is reconciled against the server once the intent settles
-                  const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
-                  if (local?.savedId && hasLocalIntent(local)) {
-                    // NO scheduleReconcile here: local intent is known present, so a zero-delay
-                    // attempt could only bail. the two places that CLEAR intent both schedule
-                    deferRemoteChange(local.savedId)
-                    deferred++
-                    continue
-                  }
-                  applied.push(
-                    `${change.type} '${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})` +
-                      `${doc.metadata.hasPendingWrites ? ' pending' : ''}`
-                  )
-                  applyRemoteChangeAndSupersede(change, doc, savedItem)
+                  // THE BLIND BODY, handed to this record's reserved slot on the GLOBAL lane
+                  // rather than run here. the lane preserves callback and document receipt order
+                  // for every ordinary mutation, which is what lets preparation stop being
+                  // serialized by snapshotApply without ordinary effects gaining
+                  // readiness-order concurrency. the own-pending and deferral decisions are made
+                  // IN THE SLOT, from state as it stands then: evaluated during preparation they
+                  // could read an item an earlier slot is about to replace
+                  record.runBlind(() => {
+                    if (ingressStopped) return // sticky, immediately before the mutation
+                    if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) {
+                      ownSkipped++
+                      return
+                    }
+                    // DEFER any remote change — pending or server-confirmed, from this device or
+                    // another — while local intent for the document is unsettled: applying it now
+                    // rolls the item back under that intent, which then persists the rollback. the
+                    // document is reconciled against the server once the intent settles
+                    const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
+                    if (local?.savedId && hasLocalIntent(local)) {
+                      // NO scheduleReconcile here: local intent is known present, so a zero-delay
+                      // attempt could only bail. the two places that CLEAR intent both schedule
+                      deferRemoteChange(local.savedId)
+                      deferred++
+                      return
+                    }
+                    applied.push(
+                      `${change.type} '${savedItem.text.split('\n', 1)[0].slice(0, 40)}' (${doc.id})` +
+                        `${doc.metadata.hasPendingWrites ? ' pending' : ''}`
+                    )
+                    applyRemoteChangeAndSupersede(change, doc, savedItem)
+                  })
                 } catch (e) {
                   // one failed application must not poison the chain for every later snapshot:
                   // log it and continue with the remaining changes.
@@ -8118,10 +8189,19 @@
                 else console.debug(`applied ${summary}:`, applied.slice(0, 10).join('; ') + (applied.length > 10 ? ` … +${applied.length - 10} more` : ''))
               }
             }
-            // run whether or not the previous task rejected: one revision's failure must never
-            // silently drop every later snapshot (the chain still serializes — each task runs
-            // only after its predecessor settles)
-            snapshotApply = snapshotApply.then(applyTask, applyTask)
+            // PREPARATION STARTS INDEPENDENTLY. it used to be parented by snapshotApply, so a
+            // callback's task did not begin until the previous one settled — which is how an
+            // admitted change awaiting an in-flight candidate deadlocked behind a LATER
+            // callback's blind change that the candidate scan was itself waiting for. ordering
+            // now comes from the two lanes: blind bodies on the global settle-only lane in
+            // receipt order, admitted work on the coordinator's per-id delivery tail behind its
+            // captured lane position.
+            // snapshotApply survives ONLY as the legacy snapshotFrontier bridge, which is deleted
+            // with hiddenApplyOk once the exact echo waiter is wired
+            const task = applyTask() // STARTS NOW
+            // snapshotApply only TRACKS it, so snapshotFrontier still means "everything delivered
+            // so far has settled". it no longer gates when a callback begins
+            snapshotApply = Promise.allSettled([snapshotApply, task]).then(() => {})
           },
           error => {
             console.error(error)
