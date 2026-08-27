@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
+import { createHiddenIngress } from '../../src/hidden_ingress.js'
 import {
   applyRemoteAdded,
   applyRemoteModified,
@@ -26,6 +27,7 @@ type Call = { op: string; id?: string; text?: string }
 
 function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
   const idx: HiddenIndex = { byId: new Map(), byName: new Map(), quarantined: new Set<string>() }
+  const ingress = createHiddenIngress()
   const calls: Call[] = []
   let ids = 0
   const deps: HiddenPersistenceDeps = {
@@ -62,23 +64,37 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
     newTempId: () => 'temp' + ++ids,
     readonly: () => false,
+    // A REAL COORDINATOR, exactly as production wires it: the writer's staleness, refusal and
+    // requeue decisions read this gate and frontier, so the arrival helpers below open real
+    // deliveries rather than driving a fake predicate
+    gate: () => ingress.gate(),
+    receiptFrontier: id => ingress.receiptFrontier(id),
     ...overrides,
   }
-  return { idx, calls, deps, controller: createHiddenPersistence(deps) }
+  return { idx, calls, deps, ingress, controller: createHiddenPersistence(deps) }
 }
+
 
 // mimics the items listener for one remote hidden record: receipt-time intent is noted FIRST
 // (so create/adopt decisions can see it even while its application queues behind them), then the
 // application itself runs on the affected name chains. tests must arrive through this, never by
 // calling the reducer directly — direct calls manufacture an ordering production prevents
-function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper) {
-  // mirrors the production lifecycle exactly (see the items listener): note the receipt, apply
-  // on the affected name chains, and release the token only if the application SUCCEEDED
+// mirrors the production lifecycle exactly (see the items listener): OPEN the coordinator
+// delivery at receipt (which makes the writer's gate pending for its whole lifetime), note the
+// receipt, apply on the affected name chains as the delivery's own Apply, and release the token
+// only if the application SUCCEEDED. `ingress` is optional so schedules that do not exercise
+// writer staleness stay unchanged
+function arrive(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper, ingress?: any) {
+  const handle = ingress?.open(wrapper.id, 'cipher:' + wrapper.id)
   const token = controller.noteRemote(wrapper, wrapper.id, false)
   const names = [idx.byId.get(wrapper.id)?.name, wrapper.name]
-  return controller
-    .applyRemote(names, () => applyRemoteAdded(idx, wrapper))
-    .then(() => controller.releaseRemote(wrapper.id, token))
+  const apply = () =>
+    controller
+      .applyRemote(names, () => applyRemoteAdded(idx, wrapper))
+      .then(() => controller.releaseRemote(wrapper.id, token))
+  if (!handle) return apply()
+  handle.ready(apply)
+  return handle.done
 }
 
 function arriveModified(controller: any, idx: HiddenIndex, wrapper: HiddenWrapper) {
@@ -89,11 +105,16 @@ function arriveModified(controller: any, idx: HiddenIndex, wrapper: HiddenWrappe
     .then(() => controller.releaseRemote(wrapper.id, token))
 }
 
-function arriveRemoval(controller: any, idx: HiddenIndex, id: string) {
+function arriveRemoval(controller: any, idx: HiddenIndex, id: string, ingress?: any) {
+  const handle = ingress?.open(id) // a removal carries no ciphertext
   const token = controller.noteRemote(undefined, id, true)
-  return controller
-    .applyRemote([controller.nameForDocument(id)], () => removeHidden(idx, id))
-    .then(() => controller.releaseRemote(id, token))
+  const apply = () =>
+    controller
+      .applyRemote([controller.nameForDocument(id)], () => removeHidden(idx, id))
+      .then(() => controller.releaseRemote(id, token))
+  if (!handle) return apply()
+  handle.ready(apply)
+  return handle.done
 }
 
 const itemOf = (text?: string) => JSON.parse(String(text).replace(/^cipher:/, '')).item
@@ -1155,23 +1176,24 @@ test('a lower id arriving during an ADOPTION encryption retargets, instead of wr
 // all three previously issued that stale payload
 const TARGET_CHANGES: {
   what: string
-  arrive: (controller: any, idx: HiddenIndex) => Promise<unknown>
+  arrive: (controller: any, idx: HiddenIndex, ingress: any) => Promise<unknown>
   expect?: (updates: Call[]) => void
 }[] = [
   {
     what: 'removed',
-    arrive: (controller: any, idx: HiddenIndex) => arriveRemoval(controller, idx, 'b2'),
+    arrive: (controller: any, idx: HiddenIndex, ingress: any) => arriveRemoval(controller, idx, 'b2', ingress),
     // issuing would RESURRECT a document the server says is gone
   },
   {
     what: 'renamed',
-    arrive: (controller: any, idx: HiddenIndex) => arrive(controller, idx, { id: 'b2', name: 'm', item: { B: 1 } }),
+    arrive: (controller: any, idx: HiddenIndex, ingress: any) =>
+      arrive(controller, idx, { id: 'b2', name: 'm', item: { B: 1 } }, ingress),
     // issuing would write a payload naming it 'n', undoing the rename
   },
   {
     what: 'replaced under the same id',
-    arrive: (controller: any, idx: HiddenIndex) =>
-      arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1, E: 1 } }),
+    arrive: (controller: any, idx: HiddenIndex, ingress: any) =>
+      arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1, E: 1 } }, ingress),
     // b2 is still the RIGHT target here — what must not happen is issuing the already-built
     // { D, B }, which would erase the E that arrived. so the retry rebuilds for it instead
     expect: (updates: Call[]) => {
@@ -1183,13 +1205,13 @@ const TARGET_CHANGES: {
 ]
 for (const { what, arrive: deliver, expect: check } of TARGET_CHANGES)
   test(`an adoption target ${what} during its encryption is not written`, async () => {
-    const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
+    const { idx, calls, controller, ingress, awaitGate, releaseGate, drain } = gatedHarness()
     controller.save('n', { D: 1 })
     await awaitGate('the fresh create')
-    void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } })
+    void arrive(controller, idx, { id: 'b2', name: 'n', item: { B: 1 } }, ingress)
     await releaseGate() // b2 applies, the attempt requeues, and the retry adopts b2
     await awaitGate('the adopted payload for b2') // the window this test is actually about
-    void deliver(controller, idx) // the target changes WHILE its adopted payload encrypts
+    void deliver(controller, idx, ingress) // the target changes WHILE its adopted payload encrypts
     await releaseGate()
     await drain(1) // whatever the retry legitimately chooses instead
     const updates = calls.filter(c => c.op == 'update')
@@ -1321,19 +1343,24 @@ test('a change that has ENTERED the listener but not yet decrypted still stops a
   // controller branch can finish encrypting and issue synchronously in that window — so a removal,
   // rename or same-id replacement already inside the listener left the stamp unchanged and the
   // stale write went out. the receipt now exists from listener ENTRY
-  const { idx, calls, controller, awaitGate, releaseGate, drain } = gatedHarness()
+  const { idx, calls, controller, ingress, awaitGate, releaseGate, drain } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
   controller.save('n', { v: 'D' })
   await awaitGate('the update for d1')
-  // the listener has entered for d1 and is still decrypting: nothing is known about the change yet
-  const entering = controller.noteRemotePending('d1')
+  // the listener has OPENED a delivery for d1 and is still decrypting: nothing is known about the
+  // change yet, and the coordinator's gate is pending for its whole lifetime
+  const entering = ingress.open('d1', 'cipher:d1')
+  const token = controller.noteRemotePending('d1')
   await releaseGate()
   expect(calls.filter(c => c.op == 'update'), 'no write while a change for the target is in flight').toHaveLength(0)
-  // the change turns out to be a removal; the real receipt supersedes the pending one
-  void arriveRemoval(controller, idx, 'd1')
-  controller.releaseRemote('d1', entering)
+  // the change turns out to be a removal, applied as that delivery's own Apply
+  entering.ready(() =>
+    controller.applyRemote([controller.nameForDocument('d1')], () => removeHidden(idx, 'd1'))
+  )
+  await entering.done
+  controller.releaseRemote('d1', token)
   await drain(1)
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
 })
@@ -1346,11 +1373,12 @@ test('a target with an undecoded delivery is REFUSED, and writes once it decodes
   // requeued instead, which fails closed and leaves the chain free for that application to run.
   // this test releases its encryption gate: the previous version did not, so it passed on the
   // implementation it was meant to distinguish
-  const { idx, calls, controller, pending, drainAll } = gatedHarness()
+  const { idx, calls, controller, ingress, pending, drainAll } = gatedHarness()
   const live: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 'A' } }
   idx.byId.set('d1', live)
   idx.byName.set('n', live)
-  const entering = controller.noteRemotePending('d1') // a delivery for our target is decoding
+  const open = ingress.open('d1', 'cipher:d1') // a delivery for our target is decoding
+  const entering = controller.noteRemotePending('d1')
   controller.save('n', { v: 'D' })
   for (let turn = 0; turn < 6; turn++) await flush()
   // it does not even ENCRYPT: refusing only after the build cost a secret acquisition and a full
@@ -1358,7 +1386,11 @@ test('a target with an undecoded delivery is REFUSED, and writes once it decodes
   expect(pending, 'no encryption is attempted while the delivery is undecoded').toHaveLength(0)
   expect(calls.filter(c => c.op == 'update'), 'nothing written while the delivery is undecoded').toHaveLength(0)
   expect(controller.owes('n'), 'the change is still owed').toBe(true)
-  controller.releaseRemote('d1', entering) // decoded, and nothing about the record changed
+  // decoded, and nothing about the record changed: the delivery applies as a no-op and terminates,
+  // which is what returns the gate to writable
+  open.ready(() => Promise.resolve())
+  await open.done
+  controller.releaseRemote('d1', entering)
   await drainAll()
   const updates = calls.filter(c => c.op == 'update')
   expect(updates.map(u => u.id)).toEqual(['d1']) // exactly one write, to the same document

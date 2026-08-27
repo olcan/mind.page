@@ -8842,6 +8842,10 @@
       await snapshotFrontier()
     },
     newDocId: () => doc(collection(getFirestore(firebase), 'items')).id,
+    // the coordinator's global gate and per-id receipt frontier: every writer staleness check
+    // reads these instead of the listener's own receipt map
+    gate: () => hiddenIngress.gate(),
+    receiptFrontier: id => hiddenIngress.receiptFrontier(id),
     // MERGE ONLY (see the dep's docstring): rebase and owner publication live in the controller
     adopt: (pending, found) => _.defaultsDeep(pending.item, found.item),
     syncOwner: (name, state) => {

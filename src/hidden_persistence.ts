@@ -59,6 +59,13 @@ export type HiddenPersistenceDeps = {
   // publishing the result to the owner are the CONTROLLER's job (see mergeAdopted): keeping merge
   // mechanics here and ownership there is what lets every registration path share one contract
   adopt: (pending: HiddenWrapper, found: HiddenWrapper) => void
+  // THE COORDINATOR'S GLOBAL GATE: 'writable' means no delivery is open, ready or running
+  // anywhere and no unhealed block is retained. every refuse-and-requeue decision reads this —
+  // never a per-name predicate (see the design's v1 gate)
+  gate: () => 'blocked' | 'pending' | 'writable'
+  // the coordinator's per-id receipt frontier: advanced by every delivery opened for that
+  // document, zero for an id with no cell. reading it must never allocate a cell
+  receiptFrontier: (id: string) => number
   // publishes an EXACT state to whatever owns a name (the owner item's in-memory global_store),
   // as a clone, never an alias. the owner saves fresh full-state snapshots, so a merge it never
   // sees is erased on its next save — this is how it sees one
@@ -230,12 +237,19 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     return best
   }
 
-  // any change that has ENTERED the listener and is still being decoded. nothing is known about it
-  // yet, so a fresh create cannot rule out that it is a same-name record
-  const hasPendingReceipts = () => [...receipts.values()].some(receipt => receipt.pending)
+  // THE COORDINATOR'S GLOBAL GATE (see the ingress coordinator design): any open, ready or
+  // running delivery anywhere makes writers `pending`; any unhealed block makes them `blocked`.
+  // v1 is deliberately GLOBAL rather than per-name — an aborted ready slot never starts mutating
+  // state, so it can never capture the receipt-order old name a per-name block would have to
+  // retain, and briefly stalling unrelated names is cheaper than a second reservation protocol
+  const gateWritable = () => deps.gate() == 'writable'
 
-  // whether a delivery for this document is still undecoded
-  const isPending = (id: string) => !!receipts.get(id)?.pending
+  // retained under their old names so the refuse-and-requeue call sites read unchanged: both now
+  // ask the one gate. a fresh create could never rule out that an undecoded delivery is a
+  // same-name record, and an update could never rule out that one changes its target
+  const hasPendingReceipts = () => !gateWritable()
+  const isPending = (_id: string) => !gateWritable()
+
 
   // a requeue must not spin while a decode runs: the decode is not on this name's chain, so an
   // immediate retry can re-check the same unchanged state forever as a microtask loop. one
@@ -248,11 +262,19 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // was built from what we believed the document to be, and that belief is what must still hold.
   // a receipt (newest delivery) wins; otherwise the live object, whose IDENTITY changes when an
   // application replaces it. a spurious mismatch only costs one requeue — issuing wrongly does not
-  function targetStamp(id: string): unknown {
-    const receipt = receipts.get(id)
-    if (receipt) return `receipt:${receipt.token}` // pending, present or removed: all are CHANGES
-    return deps.index().byId.get(id) ?? 'absent'
-  }
+  // TWO facts, captured together so a caller cannot compare one and forget the other: the
+  // coordinator's per-id RECEIPT FRONTIER (advanced by every open() for this document; zero for
+  // an id with no cell, and reading it never allocates one) AND the live wrapper's exact object
+  // IDENTITY — a successful same-id corpus replacement swaps the wrapper without opening any
+  // delivery, so the frontier alone would not notice it
+  type TargetToken = { seq: number; wrapper: unknown }
+  const targetStamp = (id: string): TargetToken => ({
+    seq: deps.receiptFrontier(id),
+    wrapper: deps.index().byId.get(id) ?? 'absent',
+  })
+  const sameTarget = (a: TargetToken, b: TargetToken) => a.seq === b.seq && a.wrapper === b.wrapper
+
+
 
   // the minimum-id record a create could adopt instead of creating alongside it
   function findSurvivor(wrapper: HiddenWrapper): HiddenWrapper | undefined {
@@ -373,7 +395,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     if (isPending(holder.id)) return false
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
-    if (canonicalHolder(name) !== holder || targetStamp(holder.id) !== stamp) return false
+    if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
     issueWrite(name, generation, holder.id, data, false)
     return true
   }
@@ -426,7 +448,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // noncanonical, and a change to the target itself (removed, renamed, replaced under the
         // same id) makes the payload we just built wrong for it. clear our selection and re-choose
         const better = findSurvivor(wrapper)
-        if ((better && compareIds(better.id, adoptId) < 0) || targetStamp(adoptId) !== stamp) {
+        if ((better && compareIds(better.id, adoptId) < 0) || !sameTarget(targetStamp(adoptId), stamp)) {
           wrapper.adopt_id = null // ours, still current — see the identity check above
           return false
         }
