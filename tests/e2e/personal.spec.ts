@@ -734,7 +734,13 @@ test('a save from the owner\'s own shared page updates its store rather than dup
   await saveFromOwnSharedPage()
   await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
   await expect(page.getByText(/Enter your secret phrase/)).toBeHidden({ timeout: 60_000 }) // absent or in the closed modal's dom
-  expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
+  // POLLED, not read once: the modal closes when the phrase is accepted, but the secret is
+  // published and stored only AFTER the fresh candidate-keyed hidden scan that follows it (see
+  // getSecretPhrase) — a save that saw the secret before that scan registered could duplicate a
+  // record. the ordering is the contract; the server round trip it costs is not a fixed delay
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('mindpage_secret')), { timeout: 30_000 })
+    .toBe(secretFor(ALICE, PHRASE))
   // decrypted contents of the account's hidden store documents (see src/crypto.ts)
   const storedHidden = async () => {
     const snap = await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
