@@ -25,7 +25,12 @@ export type SnapshotFacts = {
   fixed: boolean
   // this device holds the account secret (localStorage.mindpage_secret)
   hasStoredSecret: boolean
+  // an eligible fixed hidden prefetch settled successfully BEFORE the listener installed (a
+  // successful EMPTY prefetch is still true; failed and not-attempted carry identical policy,
+  // so one boolean suffices — see the design's startup section)
+  prefetchSucceeded: boolean
 }
+
 
 export type SnapshotAction =
   // window._disable_sync: warn and drop the snapshot
@@ -47,30 +52,51 @@ export type SnapshotAction =
   // any later snapshot: apply its doc changes (once initialization completes)
   | 'apply_changes'
 
-export type SnapshotDecision = {
-  action: SnapshotAction
-  // whether this revision of the query is CURRENT: served by the server with no local pending
-  // writes. for the full-account query this is what makes the hidden-item index authoritative
-  // (a cache-initialized account may be partial: uniquely keyed creates must re-confirm and
-  // provisionally-classified invalid items must not be deleted until an authoritative revision);
-  // a metadata-only cache-to-server confirmation carries no data but DOES establish authority
-  authoritative: boolean
+// the AUTHORITY POLICY for a snapshot callback's lease (see the ingress coordinator design,
+// notes/design/mind_page_hidden_ingress_coordinator.md in the vault repo):
+// - `candidate`: a current full-account server revision — may advance the authority basis;
+// - `revoke`: any cached revision invalidates synchronously at receipt (the cache may be partial
+//   or stale). `fromCache && hasPendingWrites` is REVOKE: cached-ness takes precedence over the
+//   own-overlay case;
+// - `preserve`: a server pending-write overlay (this client's own writes), or a current
+//   fixed/anonymous revision — neither advances nor invalidates the basis.
+// the sync-disabled action carries NO policy: it routes to the sticky ingress stop, and a policy
+// there would be the meaningless combination the discriminated union exists to remove
+export type AuthorityPolicy = 'candidate' | 'revoke' | 'preserve'
+
+export type SnapshotDecision =
+  | { action: 'ignore_sync_disabled' }
+  | { action: Exclude<SnapshotAction, 'ignore_sync_disabled'>; policy: AuthorityPolicy }
+
+// one policy table for every non-sync-disabled action
+function authorityPolicy(facts: SnapshotFacts): AuthorityPolicy {
+  if (facts.fromCache) return 'revoke'
+  if (facts.hasPendingWrites) return 'preserve'
+  if (facts.anonymous || facts.fixed) return 'preserve'
+  return 'candidate'
 }
 
 export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
-  const authoritative = !facts.syncDisabled && !facts.fromCache && !facts.hasPendingWrites
-  if (facts.syncDisabled) return { action: 'ignore_sync_disabled', authoritative }
+  if (facts.syncDisabled) return { action: 'ignore_sync_disabled' }
+  const policy = authorityPolicy(facts)
   if (facts.initializationStarted && !facts.firstSnapshot && facts.changeCount == 0)
-    return { action: 'ignore_metadata_only', authoritative }
+    return { action: 'ignore_metadata_only', policy }
   if (facts.firstSnapshot) {
+    // a SUCCESSFUL hidden prefetch waits through a cached first snapshot for the first non-cache
+    // snapshot, which supersedes prefetched copies of the same id — a fixed page could otherwise
+    // initialize from a stale cached snapshot even though the prefetch just came from the
+    // server. today's listener always passes prefetchSucceeded: false; the cutover's
+    // prefetch-before-listener startup turns this row on
+    if (facts.prefetchSucceeded && facts.fromCache) return { action: 'wait_for_server', policy }
     if (
       !facts.initializationStarted &&
       facts.fromCache &&
       (facts.empty || (!facts.anonymous && !facts.fixed && !facts.hasStoredSecret))
     )
-      return { action: 'wait_for_server', authoritative } // see the note on the action above; a
+      return { action: 'wait_for_server', policy } // see the note on the action above; a
     // returning device with the stored secret still initializes offline from its complete cache
-    return { action: 'initialize', authoritative }
+    return { action: 'initialize', policy }
   }
-  return { action: 'apply_changes', authoritative }
+  return { action: 'apply_changes', policy }
 }
+

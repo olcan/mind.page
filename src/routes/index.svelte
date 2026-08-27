@@ -7617,7 +7617,7 @@
           snapshot => {
             // the gating decisions are extracted and table-tested (see snapshotDecision in
             // src/snapshot.ts); this listener owns the effects and the firstSnapshot bookkeeping
-            const { action, authoritative } = snapshotDecision({
+            const decision = snapshotDecision({
               syncDisabled: !!window['_disable_sync'],
               initializationStarted: !!initTime,
               firstSnapshot,
@@ -7628,7 +7628,19 @@
               anonymous,
               fixed,
               hasStoredSecret: !!localStorage.getItem('mindpage_secret'),
+              prefetchSucceeded: false, // the cutover's prefetch-before-listener startup sets this
             })
+            const action = decision.action
+            // BEHAVIOR-EQUIVALENT derivation of the old boolean: authoritative was exactly
+            // "sync enabled, server revision, no pending writes". under the policy union that is
+            // policy != 'revoke' (revoke IS fromCache) minus the pending-write overlay — the
+            // 'preserve' policy also covers current fixed/anonymous revisions, which the old
+            // boolean treated as authoritative and the account-mode facts never gated. the
+            // cutover replaces this read with the lease mapping (candidate/revoke/preserve)
+            const authoritative =
+              action != 'ignore_sync_disabled' &&
+              decision.policy != 'revoke' &&
+              !snapshot.metadata.hasPendingWrites
             // authority (a current, server, no-pending-writes revision of the full-account
             // query) is settled INSIDE the serialized application chain, never on receipt: a
             // receipt-time grant let a save skip confirmation while the revision's own changes

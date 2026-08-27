@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { snapshotDecision, type SnapshotFacts } from '../../src/snapshot.js'
+import { snapshotDecision, type SnapshotFacts, type AuthorityPolicy } from '../../src/snapshot.js'
 
 // table tests for the items-listener gate (see src/snapshot.ts); each case documents an incident
 // or a policy the e2e cache tests exercise end-to-end (empty cache, partial cache, complete
-// cache with a metadata-only confirmation). the decision carries the data action AND whether the
-// revision is authoritative (current: server-served, no pending writes) — a cache-initialized
-// account may be partial, so authority gates hidden-item creates and invalid-item deletion
+// cache with a metadata-only confirmation). the decision carries the data action AND the
+// authority POLICY for the callback's lease (see the ingress coordinator design): candidate may
+// advance the basis, revoke invalidates synchronously at receipt, preserve does neither. the
+// sync-disabled action carries NO policy — the discriminated union removes that combination
 
 const base: SnapshotFacts = {
   syncDisabled: false,
@@ -18,49 +19,69 @@ const base: SnapshotFacts = {
   anonymous: false,
   fixed: false,
   hasStoredSecret: false,
+  prefetchSucceeded: false,
 }
 
-type Expected = [ReturnType<typeof snapshotDecision>['action'], boolean /* authoritative */]
-const cases: [string, Partial<SnapshotFacts>, Expected][] = [
+type Action = ReturnType<typeof snapshotDecision>['action']
+const cases: [string, Partial<SnapshotFacts>, Action, AuthorityPolicy][] = [
   // fresh personal sign-in: an empty cached first snapshot must wait (initializing would copy
   // the welcome item and prompt for a NEW phrase over an existing account)
-  ['cached empty first snapshot waits', { fromCache: true, empty: true }, ['wait_for_server', false]],
+  ['cached empty first snapshot waits', { fromCache: true, empty: true }, 'wait_for_server', 'revoke'],
   // partial cache: only plaintext shared items cached by a shared-page visit; without a stored
   // secret this must also wait
-  ['cached nonempty personal first snapshot without a stored secret waits', { fromCache: true }, ['wait_for_server', false]],
-  // a returning device holds the secret and initializes offline from its cache — WITHOUT
-  // authority: the cache may be partial, so creates re-confirm and no invalid item is deleted
-  ['cached personal first snapshot with a stored secret initializes, not authoritative', { fromCache: true, hasStoredSecret: true }, ['initialize', false]],
-  // the server snapshot that follows a wait initializes with authority — including the
+  ['cached nonempty personal first snapshot without a stored secret waits', { fromCache: true }, 'wait_for_server', 'revoke'],
+  // a returning device holds the secret and initializes offline from its cache — the cached
+  // revision still REVOKES authority: the cache may be partial, so creates re-confirm and no
+  // invalid item is deleted
+  ['cached personal first snapshot with a stored secret initializes; cached revokes', { fromCache: true, hasStoredSecret: true }, 'initialize', 'revoke'],
+  // the server snapshot that follows a wait initializes as a candidate — including the
   // metadata-only cache-to-server confirmation when the cache was already complete (changeCount
   // 0 does not suppress a FIRST snapshot; the wait outcome left firstSnapshot true)
-  ['server first snapshot initializes with authority', {}, ['initialize', true]],
-  ['metadata-only server confirmation of a complete cache initializes with authority', { changeCount: 0 }, ['initialize', true]],
-  // pending local writes keep a server revision non-authoritative
-  ['server first snapshot with pending writes initializes without authority', { hasPendingWrites: true }, ['initialize', false]],
-  // anonymous and fixed pages keep their cache-friendly behavior (only empty caches wait)
-  ['anonymous cached first snapshot initializes', { fromCache: true, anonymous: true }, ['initialize', false]],
-  ['fixed cached first snapshot initializes', { fromCache: true, fixed: true }, ['initialize', false]],
-  ['anonymous cached EMPTY first snapshot still waits', { fromCache: true, anonymous: true, empty: true }, ['wait_for_server', false]],
-  ['fixed cached EMPTY first snapshot still waits', { fromCache: true, fixed: true, empty: true }, ['wait_for_server', false]],
+  ['server first snapshot initializes as a candidate', {}, 'initialize', 'candidate'],
+  ['metadata-only server confirmation of a complete cache initializes as a candidate', { changeCount: 0 }, 'initialize', 'candidate'],
+  // this client's own pending-write overlay neither advances nor invalidates the basis
+  ['server first snapshot with pending writes preserves', { hasPendingWrites: true }, 'initialize', 'preserve'],
+  // CACHED-NESS TAKES PRECEDENCE over the overlay case (the design's fromCache && hasPendingWrites row)
+  ['cached WITH pending writes still revokes', { fromCache: true, hasPendingWrites: true, hasStoredSecret: true }, 'initialize', 'revoke'],
+  // anonymous and fixed pages keep their cache-friendly behavior (only empty caches wait), and a
+  // CURRENT fixed/anonymous revision preserves — it is not the full-account query, so it can
+  // neither advance nor discredit the basis
+  ['anonymous cached first snapshot initializes; cached revokes', { fromCache: true, anonymous: true }, 'initialize', 'revoke'],
+  ['fixed cached first snapshot initializes; cached revokes', { fromCache: true, fixed: true }, 'initialize', 'revoke'],
+  ['anonymous cached EMPTY first snapshot still waits', { fromCache: true, anonymous: true, empty: true }, 'wait_for_server', 'revoke'],
+  ['fixed cached EMPTY first snapshot still waits', { fromCache: true, fixed: true, empty: true }, 'wait_for_server', 'revoke'],
+  ['current anonymous revision preserves', { anonymous: true }, 'initialize', 'preserve'],
+  ['current fixed revision preserves', { fixed: true }, 'initialize', 'preserve'],
   // after initialization, metadata-only snapshots are ignored as data — but a server-confirmed
-  // one still establishes authority (e.g. the server catching up after a cache initialization)
-  ['metadata-only after init is ignored as data but can grant authority', { initializationStarted: true, firstSnapshot: false, changeCount: 0 }, ['ignore_metadata_only', true]],
-  ['metadata-only pending-write ack after init grants nothing', { initializationStarted: true, firstSnapshot: false, changeCount: 0, hasPendingWrites: true }, ['ignore_metadata_only', false]],
-  ['changes after init apply, with authority when current', { initializationStarted: true, firstSnapshot: false, changeCount: 2 }, ['apply_changes', true]],
-  ['cached changes after init apply without authority', { initializationStarted: true, firstSnapshot: false, changeCount: 2, fromCache: true }, ['apply_changes', false]],
-  // _disable_sync drops everything and grants nothing
-  ['sync disabled ignores and grants nothing', { syncDisabled: true, initializationStarted: true, firstSnapshot: false }, ['ignore_sync_disabled', false]],
+  // one is still a candidate (e.g. the server catching up after a cache initialization)
+  ['metadata-only after init is ignored as data but is a candidate', { initializationStarted: true, firstSnapshot: false, changeCount: 0 }, 'ignore_metadata_only', 'candidate'],
+  ['metadata-only pending-write ack after init preserves', { initializationStarted: true, firstSnapshot: false, changeCount: 0, hasPendingWrites: true }, 'ignore_metadata_only', 'preserve'],
+  ['changes after init apply, as a candidate when current', { initializationStarted: true, firstSnapshot: false, changeCount: 2 }, 'apply_changes', 'candidate'],
+  ['cached changes after init apply and revoke', { initializationStarted: true, firstSnapshot: false, changeCount: 2, fromCache: true }, 'apply_changes', 'revoke'],
+  // THE STARTUP-PREFETCH ROWS (design: prefetchSucceeded + cached first snapshot waits for the
+  // first non-cache snapshot, which supersedes prefetched same-id copies)
+  ['successful prefetch + cached first snapshot waits', { prefetchSucceeded: true, fromCache: true, fixed: true, hasStoredSecret: true }, 'wait_for_server', 'revoke'],
+  ['successful prefetch + the following current snapshot initializes', { prefetchSucceeded: true, fixed: true }, 'initialize', 'preserve'],
+  // ... and a cached POST-initialization change still applies ordinarily: no overly broad
+  // prefetchSucceeded && fromCache guard
+  ['successful prefetch + cached post-init change applies ordinarily', { prefetchSucceeded: true, fromCache: true, initializationStarted: true, firstSnapshot: false, changeCount: 1 }, 'apply_changes', 'revoke'],
 ]
 
-for (const [name, overrides, [action, authoritative]] of cases)
+for (const [name, overrides, action, policy] of cases)
   test(name, () => {
-    expect(snapshotDecision({ ...base, ...overrides })).toEqual({ action, authoritative })
+    expect(snapshotDecision({ ...base, ...overrides })).toEqual({ action, policy })
   })
 
+test('sync disabled carries NO policy — the union removes the combination', () => {
+  const d = snapshotDecision({ ...base, syncDisabled: true, initializationStarted: true, firstSnapshot: false })
+  expect(d).toEqual({ action: 'ignore_sync_disabled' })
+  expect('policy' in d, 'no policy key at all').toBe(false)
+})
+
 test('waiting is stable: the same cached snapshot keeps waiting until the server answers', () => {
+  // firstSnapshot stays true after a wait outcome (the caller does not consume it), so the same
+  // facts must keep producing wait_for_server, never oscillate into initialize
   const facts = { ...base, fromCache: true, empty: true }
   expect(snapshotDecision(facts).action).toBe('wait_for_server')
-  expect(snapshotDecision(facts).action).toBe('wait_for_server') // wait does not consume the first snapshot
-  expect(snapshotDecision({ ...facts, fromCache: false })).toEqual({ action: 'initialize', authoritative: true })
+  expect(snapshotDecision(facts).action).toBe('wait_for_server')
 })
