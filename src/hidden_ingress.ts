@@ -1,5 +1,5 @@
 // the hidden INGRESS COORDINATOR — stage 2 of the design in the vault repo,
-// notes/design/mind_page_hidden_ingress_coordinator.md (revision 11; cleared as revision 10 by
+// notes/design/mind_page_hidden_ingress_coordinator.md (revision 12; cleared as revision 10 by
 // review round 42, lifecycle rules added by rounds 43-45). that document is normative; this
 // module implements its pure surface and adds nothing beyond it.
 //

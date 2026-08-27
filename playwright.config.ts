@@ -28,7 +28,9 @@ export default defineConfig({
   // overlaps — chromium in particular is NOT read-only: its server tests mutate anonymous and
   // prerender state that its render tests then inspect, which is why it stays serial
   projects: [
-    { name: 'unit', testDir: 'tests/unit', workers: 1 }, // capped like the rest: the comment above says every project is
+    // timeout 5s as in the standalone unit config: these tests finish in milliseconds, and a
+    // deadlock should fail fast inside the full gate too; browser projects keep the long default
+    { name: 'unit', testDir: 'tests/unit', workers: 1, timeout: 5_000 }, // capped like the rest: the comment above says every project is
     {
       name: 'chromium',
       testDir: 'tests/e2e',

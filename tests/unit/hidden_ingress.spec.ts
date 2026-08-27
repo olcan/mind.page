@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createHiddenIngress, type Apply, type Outcome } from '../../src/hidden_ingress.js'
 
 // STAGE 2 of the hidden ingress coordinator (see notes/design/mind_page_hidden_ingress_coordinator
-// in the vault repo, revision 11): the PURE schedules, with literal ids and ciphers, exact
+// in the vault repo, revision 12): the PURE schedules, with literal ids and ciphers, exact
 // handles, deferred Apply closures, and no real timers. synchronization is DeliveryHandle.done and
 // AuthorityLease.done — never microtask-count loops. one fresh coordinator per test.
 
@@ -381,12 +381,17 @@ test('a cancelled echo waiter ignores a later match; a non-matching cipher never
   const echoSibling = c.armEcho('d', 'cipher-w') // FIRST, so a positional splice would hit it
   const echo = c.armEcho('d', 'cipher-w')
   let resolved = false
+  let siblingOutcome: Outcome | undefined
   void echo.promise.then(() => (resolved = true))
+  void echoSibling.promise.then(o => (siblingOutcome = o))
   echo.cancel()
   const match = c.open('d', 'cipher-w')
   match.ready(applied)
+  // echo settlement precedes done, so ONE causal microtask after done suffices: a wrongly removed
+  // sibling fails HERE immediately instead of spending the runner timeout as control flow
   expect(await match.done).toBe('applied')
-  expect(await echoSibling.promise, 'the live sibling still resolved').toBe('applied')
+  await Promise.resolve()
+  expect(siblingOutcome, 'the live sibling resolved, as applied').toBe('applied')
   const other = c.armEcho('d', 'cipher-w')
   let otherResolved = false
   void other.promise.then(() => (otherResolved = true))
@@ -457,7 +462,7 @@ test('receipt-ordered invalidation: C1 fails LATE, newer sealed C2 still makes a
   expect(c.authorityUsable(), "C2's basis (receipt 2) survives invalidatedThrough = 1").toBe(true)
 })
 
-test('the basis survives a transient gate: usability returns when the noncandidate delivery applies', async () => {
+test('the basis survives a transient gate: pending suppresses then applies; blocked suppresses then heals', async () => {
   const c = createHiddenIngress()
   const c1 = c.reserveAuthority(true)
   // noncandidate C2 (a hasPendingWrites snapshot) has an admitted delivery still pending
@@ -469,15 +474,21 @@ test('the basis survives a transient gate: usability returns when the noncandida
   await c1.done
   expect(c.authorityUsable(), 'suppressed by the pending delivery, but the BASIS advanced').toBe(false)
   c2.seal()
-  // the delivery BLOCKS first: usability must be suppressed by a blocked gate too, not only a
-  // pending one (round 45)
-  g.gate.reject(new Error('application failed'))
-  expect(await delivery.done).toBe('blocked')
+  // PATH 1 (round 44's original): the gated delivery APPLIES — usability returns with no third
+  // callback
+  g.gate.resolve()
+  expect(await delivery.done).toBe('applied')
+  expect(c.authorityUsable(), 'usable when the noncandidate delivery applies').toBe(true)
+  // PATH 2 (round 45): a separate delivery BLOCKS — a blocked gate suppresses too, and healing
+  // restores usability
+  const bad = c.open('d')
+  bad.ready(failing)
+  expect(await bad.done).toBe('blocked')
   expect(c.authorityUsable(), 'unusable while the gate is blocked').toBe(false)
   const heal = c.open('d')
   heal.ready(applied)
   expect(await heal.done).toBe('applied')
-  expect(c.authorityUsable(), 'usable once the block heals — no third callback needed').toBe(true)
+  expect(c.authorityUsable(), 'usable once the block heals').toBe(true)
 })
 
 test('cached policy primitives: a noncandidate that revokes invalidates; one that does not preserves the basis', async () => {
