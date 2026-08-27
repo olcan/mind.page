@@ -8013,46 +8013,47 @@
                   const dropped = hiddenPersistence.noteRemote(undefined, doc.id, true)
                   // its completion record keeps the lease unsettled: authority must not declare
                   // the revision applied while this removal is still queued
-                  // THE DELIVERY'S OWN APPLY: its resolution IS this handle's terminal outcome,
-                  // and a success heals every strictly older block for this id — replacing the
-                  // hand-rolled heal that needed a captured sequence to be safe
+                  // ONE OWNED OPERATION for the whole hidden-to-visible transition: the
+                  // hidden-side removal AND the visible-side installation happen in this
+                  // delivery's reserved turn, on the affected name chain. they used to be split —
+                  // the drop ran here on the handle, and the visible half fell through to the
+                  // ordinary branch — which left the first destructive half owned by the delivery
+                  // and the second half owned by nobody, observable in between by same-id work.
+                  // its resolution IS this handle's terminal outcome, and a success heals every
+                  // strictly older block for this id
                   const dropHandle = record.handle
+                  const visibleChange = change.type == 'modified' ? ({ ...change, type: 'added', doc } as any) : change
                   const dropApply = () =>
-                    hiddenPersistence.applyRemote([hiddenName], () => void removeHidden(hiddenIndex(), doc.id)).then(
-                      () => {
-                        hiddenApplyOk.set(doc.id, true)
-                        hiddenPersistence.releaseRemote(doc.id, dropped)
-                      },
-                      e => {
-                        hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
-                        console.error('could not drop stale hidden representation:', doc.id, e)
-                        revokeThisRevision('hidden representation could not be dropped')
-                        throw e // REJECT: the coordinator records this delivery as blocked
-                      }
-                    )
-                  // handed to the handle BEHIND the blind lane position captured at this
-                  // record's receipt: an ordinary change received earlier must still mutate
-                  // first. a LATER blind change is deliberately not waited on
+                    hiddenPersistence
+                      .applyRemote([hiddenName], () => {
+                        if (ingressStopped) return // sticky, immediately before the mutation
+                        removeHidden(hiddenIndex(), doc.id)
+                        hiddenCleanupPending = true // validity may have changed
+                        // the record now belongs to the VISIBLE world, where it has no
+                        // representation yet: the original 'modified' would find no row for this
+                        // id and return, leaving the document in NEITHER world
+                        applyRemoteChangeAndSupersede(visibleChange, doc, savedItem)
+                      })
+                      .then(
+                        () => {
+                          hiddenApplyOk.set(doc.id, true)
+                          hiddenPersistence.releaseRemote(doc.id, dropped)
+                        },
+                        e => {
+                          hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
+                          console.error('could not complete hidden-to-visible transition:', doc.id, e)
+                          revokeThisRevision('hidden representation could not be dropped')
+                          throw e // REJECT: the coordinator records this delivery as blocked
+                        }
+                      )
                   if (dropHandle) record.handoff = record.blindPredecessor!.then(() => dropHandle.ready(dropApply))
                   else void dropApply().catch(() => {})
-
-                  hiddenCleanupPending = true
-                  // the record now belongs to the VISIBLE world, where it has no representation
-                  // yet: passing the original 'modified' on would hit the ordinary branch, find
-                  // no row for this id and return, leaving the document in neither world
-                  if (change.type == 'modified') change = { ...change, type: 'added', doc } as any
+                  continue // the transition is COMPLETE in that one operation
                 }
-                if (savedItem.hidden) removeVisibleForHidden(doc)
-
                 if (savedItem.hidden) {
                   const removed = change.type == 'removed'
                   let wrapper = null
-                  let names = []
-                  if (removed) {
-                    // covers a document being ADOPTED, whose server id is not in byId until
-                    // finalization: its removal must still serialize on the adopting name
-                    names = [hiddenPersistence.nameForDocument(doc.id)]
-                  } else {
+                  if (!removed) {
                     wrapper = parseHiddenWrapper(doc.id, savedItem.text)
                     if (!wrapper) {
                       // a valid -> MALFORMED server modification: the record is quarantined
@@ -8066,13 +8067,12 @@
                       }
                       continue
                     }
-                    // a RENAME must also join the in-flight write on the OLD name, which could
-                    // otherwise complete and write the old name back. nameForDocument, not
-                    // hiddenItems: a document being ADOPTED is absent from byId until finalization,
-                    // so reading byId directly missed the adopter's chain and let the rename apply
-                    // and release outside it (removal already routes this way)
-                    names = [hiddenPersistence.nameForDocument(doc.id), wrapper.name]
                   }
+                  // NOTE the affected names are chosen inside the Apply below, not here. a RENAME
+                  // must join the in-flight write on its OLD name too, and a REMOVAL must
+                  // serialize on the adopting name of a document absent from byId until
+                  // finalization — both read nameForDocument, which is exactly the lookup that
+                  // must reflect the index as it stands in the reserved turn
                   // receipt-time intent: a create/adopt decision must see this record even though
                   // its application is queued — possibly behind that very create
                   const receipt = hiddenPersistence.noteRemote(wrapper, doc.id, removed)
@@ -8083,8 +8083,20 @@
                   const hiddenApply = () =>
                     hiddenPersistence
                       .applyRemote(
-                        names,
+                        // IN-TURN: the affected name chains are decided HERE, from the index as
+                        // it stands in this delivery's reserved turn. decided during preparation,
+                        // an overlapping same-id B->C transition could capture A/C while its
+                        // predecessor had not yet installed B, and omit the B chain entirely
+                        removed
+                          ? [hiddenPersistence.nameForDocument(doc.id)]
+                          : [hiddenPersistence.nameForDocument(doc.id), wrapper!.name],
                         () => {
+                          if (ingressStopped) return // sticky, immediately before the mutation
+                          // the VISIBLE PRELUDE, inside the owned turn: the destructive half of a
+                          // visible-to-hidden transition used to run during preparation, so a
+                          // later throw left it half applied and same-id work could observe the
+                          // unowned intermediate state
+                          removeVisibleForHidden(doc)
                           // own-pending classification uses EXECUTION-time wrapper state: by the
                           // time this runs, in-flight work for the name has settled
                           if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
