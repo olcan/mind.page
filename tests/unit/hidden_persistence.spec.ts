@@ -2524,3 +2524,62 @@ test('a reentrant same-name operation is not overwritten by its outer publicatio
   expect(innerDone).toBe(true)
   expect(followerRan).toBe(true)
 })
+
+test('stop cancels a REGISTERED coordinator wake, and later healing resumes nothing', async () => {
+  // the round-60 row that was still missing: previous stop tests never registered a real wake, so
+  // nothing pinned the cancellation. this one waits for the actual subscription before stopping
+  let acquisitions = 0
+  let registered = 0
+  let cancelled = 0
+  const wakeRegistered = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => void ++acquisitions,
+    whenActionable: () => {
+      if (++registered == 1) wakeRegistered.resolve()
+      const sub = h.ingress.whenActionable()
+      return {
+        promise: sub.promise,
+        cancel() {
+          cancelled++
+          sub.cancel()
+        },
+      }
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const held = h.ingress.open('d2', 'cipher:d2') // the gate is pending: the writer parks
+  controller.save('n', { mine: 1 })
+  await wakeRegistered.promise
+  controller.stop()
+  // the SUBSCRIPTION itself is released, not merely ignored: a stopped page must not retain a
+  // coordinator waiter for the rest of its life
+  expect(cancelled, 'stop cancelled the registered wake').toBe(1)
+  // healing after stop must wake nobody
+  held.ready(async () => {})
+  expect(await held.done).toBe('applied')
+  for (let i = 0; i < 6; i++) await flush()
+  expect(acquisitions, 'no secret work after stop, even once the gate opens').toBe(0)
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'and no write').toHaveLength(0)
+  expect(controller.owes('n'), 'the intent is retained').toBe(true)
+})
+
+test('stop before a queued name-chain turn runs: the chain-entry check does no secret work', async () => {
+  // the OTHER round-60 row: a turn already sitting in the chain queue when stop lands. the
+  // predecessor is a real applyRemote tail, not an SDK acknowledgement (round 63)
+  let acquisitions = 0
+  const predecessor = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, acquireSecret: async () => void ++acquisitions })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  void controller.applyRemote(['n'], () => predecessor.promise) // holds the 'n' chain
+  controller.save('n', { mine: 1 })
+  await checkpoint()
+  expect(acquisitions, 'the writer is queued behind the held chain').toBe(0)
+  controller.stop()
+  predecessor.resolve() // the queued persistOwed turn now runs
+  for (let i = 0; i < 6; i++) await flush()
+  expect(acquisitions, 'and refuses at chain entry, before acquiring anything').toBe(0)
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+})
