@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { createRecordAllocator, type RecordHandle } from '../../src/hidden_listener_records.js'
+import { createHiddenIngress } from '../../src/hidden_ingress.js'
 
 // the record/lane schedules for the items listener (see src/hidden_listener_records.ts). this is
 // the EXACT module production imports, not a copy of its shape — the round-58 lesson. everything
@@ -56,19 +57,19 @@ function fakeHandle() {
 function allocator() {
   const blindErrors: string[] = []
   const revoked: string[] = []
-  const a = createRecordAllocator({
-    onBlindError: id => void blindErrors.push(id),
-    onAdmittedBlocked: id => void revoked.push(id),
-  })
-  return { a, blindErrors, revoked }
+  const a = createRecordAllocator({ onBlindError: id => void blindErrors.push(id) })
+  // the revocation is BATCH-scoped: production passes the callback's own state-only
+  // revokeThisRevision, never a fresh outside-callback ordinal
+  const allocate = (reqs: Parameters<typeof a.allocate>[0]) => a.allocate(reqs, r => void revoked.push(r))
+  return { a, allocate, blindErrors, revoked }
 }
 
 test('same-callback [admitted x, blind h]: x does not wait on the LATER blind h', async () => {
   // the normative row. x can be awaiting a candidate that only h's completion can release, so an
   // admitted record must never be ordered behind a blind one received after it
-  const { a } = allocator()
+  const { allocate } = allocator()
   const x = fakeHandle()
-  const batch = a.allocate([{ id: 'x', handle: x.handle }, { id: 'h' }])
+  const batch = allocate([{ id: 'x', handle: x.handle }, { id: 'h' }])
   const [xr, hr] = batch.records
   expect(xr.kind).toBe('admitted')
   expect(hr.kind).toBe('blind')
@@ -87,11 +88,14 @@ test('same-callback [admitted x, blind h]: x does not wait on the LATER blind h'
 })
 
 test('[blind h, admitted x]: x IS held behind the earlier blind h', async () => {
-  const { a } = allocator()
+  const { allocate } = allocator()
   const x = fakeHandle()
-  const batch = a.allocate([{ id: 'h' }, { id: 'x', handle: x.handle }])
+  const batch = allocate([{ id: 'h' }, { id: 'x', handle: x.handle }])
   const [hr, xr] = batch.records
   ;(xr as any).schedule(async () => {})
+  // ... and x's PREPARATION finalizes while h is still held. that is the hazardous order: a
+  // scheduled record must survive its own finalization while its handoff is still waiting
+  xr.finish()
   await checkpoint()
   expect(x.isReady(), 'x waits: h was received first').toBe(false)
   let hRan = false
@@ -105,9 +109,9 @@ test('[blind h, admitted x]: x IS held behind the earlier blind h', async () => 
 test('a newer same-id handle still queued behind an older one is NOT aborted by finalization', async () => {
   // round 58, and again in round 65: preparation finalization must leave a scheduled record alone.
   // a handle whose Apply is scheduled but still waiting is `ready`, and block() converts `ready`
-  const { a } = allocator()
+  const { allocate } = allocator()
   const s2 = fakeHandle()
-  const batch = a.allocate([{ id: 'd', handle: s2.handle }])
+  const batch = allocate([{ id: 'd', handle: s2.handle }])
   const [r] = batch.records
   let ran = false
   ;(r as any).schedule(async () => void (ran = true))
@@ -120,19 +124,19 @@ test('a newer same-id handle still queued behind an older one is NOT aborted by 
 })
 
 test('an admitted record with NOTHING scheduled is blocked by finalization, and rejects', async () => {
-  const { a, revoked } = allocator()
+  const { allocate, revoked } = allocator()
   const h = fakeHandle()
-  const batch = a.allocate([{ id: 'd', handle: h.handle }])
+  const batch = allocate([{ id: 'd', handle: h.handle }])
   const [r] = batch.records
   r.finish()
   await expect(r.done).rejects.toThrow(/could not be applied/)
-  expect(revoked, 'the lease is revoked BEFORE the record rejects').toEqual(['d'])
+  expect(revoked.length, 'the lease is revoked BEFORE the record rejects').toBe(1)
   expect(batch.failed(await batch.landed), 'an admitted rejection fails the callback').toBe(true)
 })
 
 test('a blind body rejects its OWN record while the lane runs the next slot, and the lease stays fail-soft', async () => {
-  const { a, blindErrors } = allocator()
-  const batch = a.allocate([{ id: 'h1' }, { id: 'h2' }])
+  const { allocate, blindErrors } = allocator()
+  const batch = allocate([{ id: 'h1' }, { id: 'h2' }])
   const [r1, r2] = batch.records
   let secondRan = false
   ;(r1 as any).run(() => {
@@ -146,31 +150,40 @@ test('a blind body rejects its OWN record while the lane runs the next slot, and
   expect(batch.failed(await batch.landed), 'but a blind failure never fails the callback').toBe(false)
 })
 
-test('abort terminalizes a hung preparation: landed settles and late work is inert', async () => {
-  // stop, while one record has been given nothing because its decrypt never returned
-  const { a } = allocator()
-  const h = fakeHandle()
-  const batch = a.allocate([{ id: 'x', handle: h.handle }, { id: 'h' }])
+test('abort terminalizes a SCHEDULED record held behind a predecessor, not just an unstarted one', async () => {
+  // round 66: abort reused finish(), which deliberately preserves scheduled work. so a record
+  // scheduled behind a held blind predecessor stayed open, and `landed` — with its context and
+  // every consumer of that boundary — remained pending until the predecessor eventually released
+  const { allocate } = allocator()
+  const x = fakeHandle()
+  const batch = allocate([{ id: 'h' }, { id: 'x', handle: x.handle }])
+  const [hr, xr] = batch.records
+  let ran = false
+  ;(xr as any).schedule(async () => void (ran = true))
+  xr.finish() // preparation over; the handoff is still behind h
   let landedSettled = false
   void batch.landed.then(() => (landedSettled = true))
   await checkpoint()
-  expect(landedSettled, 'nothing has terminalized yet').toBe(false)
-  batch.abort()
+  expect(landedSettled, 'nothing has terminalized: h is still held').toBe(false)
+  batch.abort() // STOP, with h never released
   const results = await batch.landed
-  expect(results.map(r => r.status)).toEqual(['rejected', 'fulfilled'])
+  expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected'])
   expect(batch.failed(results), 'the aborted admitted record fails the callback').toBe(true)
-  // a late continuation that tries to schedule after the abort is inert: the handle is terminal
+  expect(x.isReady(), 'x is blocked, not left ready').toBe(false)
+  // late calls on BOTH records are inert
   let late = false
-  ;(batch.records[0] as any).schedule(async () => void (late = true))
+  ;(xr as any).schedule(async () => void (late = true))
+  ;(hr as any).run(() => void (late = true))
   await checkpoint()
-  expect(late, 'the late Apply never runs').toBe(false)
+  expect(late, 'no late work runs').toBe(false)
+  expect(ran, 'and the scheduled Apply never ran').toBe(false)
 })
 
 test('the global lane spans callbacks: an earlier batch body runs before a later one', async () => {
-  const { a } = allocator()
+  const { allocate } = allocator()
   const order: string[] = []
-  const first = a.allocate([{ id: 'a' }])
-  const second = a.allocate([{ id: 'b' }])
+  const first = allocate([{ id: 'a' }])
+  const second = allocate([{ id: 'b' }])
   // the SECOND batch is given its body first; the lane still runs them in receipt order
   ;(second.records[0] as any).run(() => void order.push('b'))
   await checkpoint()
@@ -181,9 +194,9 @@ test('the global lane spans callbacks: an earlier batch body runs before a later
 })
 
 test('a batch whose records all settle reports no failure', async () => {
-  const { a } = allocator()
+  const { allocate } = allocator()
   const h = fakeHandle()
-  const batch = a.allocate([{ id: 'x', handle: h.handle }, { id: 'h' }])
+  const batch = allocate([{ id: 'x', handle: h.handle }, { id: 'h' }])
   ;(batch.records[0] as any).schedule(async () => {})
   ;(batch.records[1] as any).run(() => {})
   await checkpoint()
@@ -191,4 +204,39 @@ test('a batch whose records all settle reports no failure', async () => {
   const results = await batch.landed
   expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled'])
   expect(batch.failed(results)).toBe(false)
+})
+
+// ---- composition with the REAL coordinator (round 66) ----
+
+test('S1/S2/S3 for one id: finalization preserves S2, S2 blocks, S3 heals', async () => {
+  // the fakeHandle rows pin the record contract; this one pins the exact composition with
+  // createHiddenIngress, which is what production wires. no coordinator behaviour is duplicated
+  // here — only the crossing
+  const { allocate } = allocator()
+  const ingress = createHiddenIngress()
+  const s1 = ingress.open('d', 'c1')
+  const s2 = ingress.open('d', 'c2')
+  const b1 = allocate([{ id: 'd', handle: s1 }])
+  const b2 = allocate([{ id: 'd', handle: s2 }])
+  const held = deferred()
+  ;(b1.records[0] as any).schedule(() => held.promise)
+  b1.records[0].finish()
+  // S2 schedules a FAILING Apply and finalizes while S1 is still running
+  ;(b2.records[0] as any).schedule(async () => {
+    throw new Error('S2 failed')
+  })
+  b2.records[0].finish()
+  await checkpoint()
+  expect(ingress.gate(), 'both deliveries are outstanding').toBe('pending')
+  held.resolve()
+  await b1.records[0].done // S1 applied
+  await expect(b2.records[0].done, 'S2 was preserved by finalization, ran, and blocked').rejects.toThrow()
+  expect(ingress.gate(), 'and its block gates every writer').toBe('blocked')
+  // S3 for the same id succeeds and heals it
+  const s3 = ingress.open('d', 'c3')
+  const b3 = allocate([{ id: 'd', handle: s3 }])
+  ;(b3.records[0] as any).schedule(async () => {})
+  b3.records[0].finish()
+  await b3.records[0].done
+  expect(ingress.gate(), 'healed').toBe('writable')
 })

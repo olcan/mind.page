@@ -490,37 +490,125 @@ test('global-store updates and deletions reach a second tab of the same account'
       })
       .toBeNull()
 
-    // THE OLD-SIDE EFFECT of a hidden-to-visible transition (round 65): when a global_store
-    // document becomes an ordinary visible item, the owner's store must be updated and its
-    // change notification raised — a bare index removal leaves both stale. the store document is
-    // overwritten in the clear, and the owner's store must lose the key on BOTH tabs
-    const storeDoc = (
-      await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
-    ).docs.find(d => d.id)
-    if (storeDoc) {
-      await page.evaluate(() => void (window._item('#e2e_xstore')!.global_store._old = 7))
-      await expect
-        .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
-          timeout: 30_000,
-        })
-        .toBe(7)
-      await firestore().collection('items').doc(storeDoc.id).set({
-        user: ALICE.uid,
-        time: Date.now(),
-        text: '#e2e_was_a_store now visible',
-        attr: null,
+    // THE OLD-SIDE EFFECT of a hidden-to-visible transition (rounds 65-66): when a global_store
+    // document becomes an ordinary visible item, the owner's store must be updated through the
+    // REAL reducer — a bare index removal leaves it stale. round 66: the earlier version picked
+    // an arbitrary hidden document with `.find(d => d.id)` before the value was even saved, and
+    // an `if (storeDoc)` let it pass vacuously. the exact wrapper is identified by DECRYPTING
+    await page.evaluate(() => void (window._item('#e2e_xstore')!.global_store._old = 7))
+    await expect
+      .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
+        timeout: 30_000,
       })
-      // the hidden representation is dropped THROUGH the real reducer, so the owner's store is
-      // synchronized rather than left holding a value whose document no longer backs it
-      await expect
-        .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
-          timeout: 30_000,
-        })
-        .toBeNull()
-    }
+      .toBe(7)
+    const ownerId = await savedId(page, '#e2e_xstore')
+    const { decryptWithSecret } = await import('../../src/crypto.js')
+    const storeDocId = await expect
+      .poll(
+        async () => {
+          const snap = await firestore()
+            .collection('items')
+            .where('user', '==', ALICE.uid)
+            .where('hidden', '==', true)
+            .get()
+          for (const d of snap.docs) {
+            const text = await decryptWithSecret(d.data().cipher, secretFor(ALICE, PHRASE))
+            if (text.includes(`global_store_${ownerId}`)) return d.id
+          }
+          return null
+        },
+        { timeout: 30_000 }
+      )
+      .not.toBeNull()
+      .then(async () => {
+        const snap = await firestore()
+          .collection('items')
+          .where('user', '==', ALICE.uid)
+          .where('hidden', '==', true)
+          .get()
+        for (const d of snap.docs) {
+          const text = await decryptWithSecret(d.data().cipher, secretFor(ALICE, PHRASE))
+          if (text.includes(`global_store_${ownerId}`)) return d.id
+        }
+        throw new Error('store wrapper vanished')
+      })
+    // overwrite THAT id with visible content: the hidden side is dropped through the real
+    // reducer, so the owner's store loses the value on BOTH tabs
+    await firestore().collection('items').doc(storeDocId).set({
+      user: ALICE.uid,
+      time: Date.now(),
+      text: '#e2e_was_a_store now visible',
+      attr: null,
+    })
+    await expect
+      .poll(() => other.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
+        timeout: 30_000,
+      })
+      .toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => (window._item('#e2e_xstore') as any)._global_store._old ?? null), {
+        timeout: 30_000,
+      })
+      .toBeNull()
   } finally {
     await other.close()
   }
+})
+
+// NOT YET DISCRIMINATING, and recorded as such rather than presented as coverage. Removing the
+// local-intent check from the admitted Apply leaves this row GREEN: the delivery still blocks and
+// the visible row is still untouched, so something else refuses it first. Ruled out: a wrapper
+// naming a nonexistent owner (fixed — it now names a real one). NOT ruled out: whether the held
+// saveTask blocks the delivery through another path entirely. The row documents the intended
+// boundary and is worth keeping, but it does not yet prove the mechanism.
+test('an admitted transition is REFUSED while local intent is held, and heals once it clears', async ({ page }) => {
+  // the fail-closed local-intent boundary (round 66). an admitted transition may not defer: the
+  // deferral path is owned by ordinary reconciliation, which holds no coordinator handle and
+  // could never heal the delivery. so it rejects, the delivery blocks, and a LATER admitted
+  // delivery for the same id performs the complete repair once intent has cleared
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
+  await expect.poll(authority, { timeout: 15_000 }).toBe(true)
+  // a REAL owner for the store the transition will carry: with a nonexistent owner the delivery
+  // blocks for an unrelated reason and the row stops telling the intent check apart from nothing
+  await page.evaluate(() => void window._create('#e2e_intent_owner store owner'))
+  await expect.poll(() => savedId(page, '#e2e_intent_owner'), { timeout: 30_000 }).toBeTruthy()
+  const ownerId = (await savedId(page, '#e2e_intent_owner'))!
+  await page.evaluate(() => void window._create('#e2e_intent visible text'))
+  await expect.poll(() => savedId(page, '#e2e_intent'), { timeout: 30_000 }).toBeTruthy()
+  const id = (await savedId(page, '#e2e_intent'))!
+  const text = () => page.evaluate(() => window._item('#e2e_intent', true)?.text ?? null)
+  expect(await text()).toContain('visible text')
+  // HOLD local intent deterministically, through a real field hasLocalIntent reads
+  await page.evaluate(docId => {
+    const raw = (window.__items as any[]).find(i => i.savedId == docId)
+    raw.saveTask = new Promise(() => {}) // never settles
+  }, id)
+  // that id becomes HIDDEN server-side: an admitted transition, which must refuse
+  const { encryptWithSecret } = await import('../../src/crypto.js')
+  const wrapper = JSON.stringify({ name: `global_store_${ownerId}`, item: { held: 1 } })
+  await firestore()
+    .collection('items')
+    .doc(id)
+    .set({ user: ALICE.uid, time: Date.now(), hidden: true, attr: null, text: null, cipher: await encryptWithSecret(wrapper, secretFor(ALICE, PHRASE)) })
+  // the delivery blocks: authority is revoked and the visible row is UNCHANGED — no half
+  // transition, and no deferral consumed
+  await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+  expect(await text(), 'the visible representation is untouched').toContain('visible text')
+  // clear the intent, then deliver a visible revision for the same id. the retained block makes
+  // it admitted, and the complete repair runs
+  await page.evaluate(docId => {
+    const raw = (window.__items as any[]).find(i => i.savedId == docId)
+    raw.saveTask = null
+  }, id)
+  await firestore()
+    .collection('items')
+    .doc(id)
+    .set({ user: ALICE.uid, time: Date.now(), text: '#e2e_intent repaired text', attr: null })
+  await expect.poll(text, { timeout: 30_000 }).toContain('repaired text')
+  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
 })
 
 test('a corrupt hidden change revokes authority until healed, and invalid records are reported not deleted', async ({
@@ -559,19 +647,11 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   // removing the corrupt document heals its block (removal applies by plaintext hidden + id, no
   // decrypt needed) and the same authoritative revision re-grants; the grant recomputes invalidity
   // from CURRENT state
-  await firestore().collection('items').doc('e2e-corrupt-hidden').delete()
-  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
-  // the now-orphaned store is REPORTED and quarantined, not deleted: a classification describes
-  // one moment while the delete it used to queue landed later, after another client could have
-  // renamed or updated that very document into a valid record. nothing is destroyed from a
-  // render-time client any more (see reportInvalidHiddenCandidates)
-  await page.waitForTimeout(3_000)
-  expect(await hiddenDocs()).toBe(base)
-
-  // ... and the ADMISSION-OVERLAP branch, on the same loaded page (round 65): the corrupt id is
-  // still known to the coordinator, so a VISIBLE document written to it is admitted by
-  // hasOutstanding(id) rather than by the raw hidden flag. that delivery used to fall through to
-  // the ordinary path, run detached from its record, and leave the id blocked forever
+  // ... but FIRST, the admission-overlap branch, while the block is STILL RETAINED (round 66: an
+  // earlier version deleted the corrupt document first, which healed and PRUNED the block — so
+  // hasOutstanding(id) was already false and the visible write took the ordinary blind route,
+  // proving nothing). a visible document written to that id is admitted by hasOutstanding alone,
+  // and its full transition must both install the visible row and heal the retained block
   await firestore().collection('items').doc('e2e-corrupt-hidden').set({
     user: ALICE.uid,
     time: Date.now(),
@@ -582,6 +662,16 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     .poll(() => page.evaluate(() => window._item('#e2e_healed_visible', true)?.id ?? null), { timeout: 30_000 })
     .not.toBeNull()
   await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+  // removing it heals nothing further (already healed) and leaves the orphan accounting below
+  await firestore().collection('items').doc('e2e-corrupt-hidden').delete()
+  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+  // the now-orphaned store is REPORTED and quarantined, not deleted: a classification describes
+  // one moment while the delete it used to queue landed later, after another client could have
+  // renamed or updated that very document into a valid record. nothing is destroyed from a
+  // render-time client any more (see reportInvalidHiddenCandidates)
+  await page.waitForTimeout(3_000)
+  expect(await hiddenDocs()).toBe(base)
+
 })
 
 // NOTE this test used to SIGN IN on the shared page itself. That route no longer exists: a

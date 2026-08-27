@@ -38,9 +38,15 @@ type Base = {
   // corpus operation that captured it must be able to abort) but is deliberately NOT allowed to
   // fail the lease — plaintext ingress is fail-soft
   done: Promise<void>
-  // the terminal path for a record no branch scheduled work for. an admitted record blocks its
-  // handle; a blind record releases its reserved slot so the lane continues
+  // PREPARATION finalization: the terminal path for a record no branch scheduled work for. an
+  // admitted record with an Apply scheduled is deliberately left alone here — it is owned by its
+  // handle, including while its handoff still waits on the lane position
   finish(): void
+  // STOP. unconditional: an admitted record is blocked whether or not it scheduled work, because
+  // a scheduled record can still be sitting open behind a held predecessor and would otherwise
+  // keep `landed` — and its context — pending until that predecessor eventually released. the
+  // coordinator's CAS makes this a no-op for a running or terminal handle
+  cancel(): void
 }
 
 export type AdmittedRecord = Base & {
@@ -55,8 +61,11 @@ export type AdmittedRecord = Base & {
 
 export type BlindRecord = Base & {
   kind: 'blind'
-  // hands this record's reserved lane slot its mutation body
-  run(body: () => void): void
+  // hands this record's reserved lane slot its mutation body. `undefined` rather than `void`
+  // deliberately: TypeScript accepts an async function where `() => void` is expected, and the
+  // lane does NOT await the result — corpus code about to treat `record.done` as a causal
+  // boundary must not be able to hand it a promise it silently drops
+  run(body: () => undefined): void
 }
 
 export type ListenerRecord = AdmittedRecord | BlindRecord
@@ -85,11 +94,6 @@ export function createRecordAllocator(deps: {
   // an unexpected blind body failure. the lane consumes it so later slots still run, but the
   // record keeps its rejection
   onBlindError: (id: string, error: unknown) => void
-  // called with a blocked admitted delivery BEFORE its record rejects, so the callback's authority
-  // lease is invalidated at the earliest possible point. a branch-local revoke misses the abort
-  // and orchestration paths, and a higher same-cell success could otherwise heal the gate and
-  // briefly expose an older basis as usable before the aggregate settles
-  onAdmittedBlocked: (id: string) => void
 }) {
   // ONE lane for the page, across callbacks
   let blindTail: Promise<void> = Promise.resolve()
@@ -97,7 +101,11 @@ export function createRecordAllocator(deps: {
   return {
     // allocate every record for one callback, SYNCHRONOUSLY and in document order, before any
     // preparation starts
-    allocate(requests: AllocationRequest[]): Batch {
+    // `revoke` is the CALLBACK's own state-only revocation, passed per batch. it must not be a
+    // fresh outside-callback ordinal: if C1 reserves first, C2 reserves a newer candidate and C1
+    // fails late, a fresh ordinal would stale C2 — the design requires C1 to invalidate only
+    // through its OWN receipt so C2 can heal it
+    allocate(requests: AllocationRequest[], revoke: (reason: string) => void): Batch {
       const records: ListenerRecord[] = []
       for (const { id, handle } of requests) {
         let settled = false
@@ -116,8 +124,16 @@ export function createRecordAllocator(deps: {
             if (settled) return
             settled = true
             if (outcome == 'applied') return resolve()
-            deps.onAdmittedBlocked(id) // revoke FIRST, then reject
-            reject(new Error(`hidden ingress: ${id} could not be applied`))
+            // EXACTLY ONE lease effect for a blocked delivery, at the record boundary — branch
+            // local calls miss the abort and orchestration paths. try/finally so a throwing hook
+            // cannot leave `done` pending
+            try {
+              revoke(`hidden change for ${id} could not be applied`)
+            } catch (e) {
+              console.error('revocation hook failed:', id, e)
+            } finally {
+              reject(new Error(`hidden ingress: ${id} could not be applied`))
+            }
           })
           records.push({
             kind: 'admitted',
@@ -135,12 +151,15 @@ export function createRecordAllocator(deps: {
               // position — blocking it there is what silently discarded valid work in round 58
               if (!scheduled) handle.block()
             },
+            cancel() {
+              handle.block() // unconditional: see the type
+            },
           })
         } else {
           // BLIND. its slot is reserved NOW, at this position, so a record that never receives a
           // body still settles its slot and the lane continues
-          let giveBody!: (body: (() => void) | null) => void
-          const bodyGiven = new Promise<(() => void) | null>(res => (giveBody = res))
+          let giveBody!: (body: (() => undefined) | null) => void
+          const bodyGiven = new Promise<(() => undefined) | null>(res => (giveBody = res))
           // the RAW result carries the body's failure to the record; the lane takes the caught
           // continuation, so one bad body cannot stop every later ordinary change
           const rawResult = blindTail.then(async () => {
@@ -172,6 +191,9 @@ export function createRecordAllocator(deps: {
             finish() {
               giveBody(null) // release an unused slot: the lane must continue
             },
+            cancel() {
+              giveBody(null)
+            },
           })
         }
       }
@@ -184,7 +206,7 @@ export function createRecordAllocator(deps: {
         // fail-soft by design and must not invalidate hidden authority
         failed: results => results.some((r, i) => r.status == 'rejected' && records[i].kind == 'admitted'),
         abort() {
-          for (const r of records) r.finish()
+          for (const r of records) r.cancel()
         },
       }
     },

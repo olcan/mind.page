@@ -6450,10 +6450,6 @@
   // the listener's completion records and the global blind lane (see hidden_listener_records.ts)
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
-    // revoke the callback's lease the MOMENT an admitted delivery is blocked, not when the
-    // aggregate settles: a higher same-cell success could otherwise heal the gate first and
-    // briefly expose an older authority basis as usable
-    onAdmittedBlocked: id => revokeHiddenAuthority(`hidden change for ${id} could not be applied`),
   })
   // ACTIVE callback contexts: each snapshot callback's lease with the handles it opened, removed
   // when the callback terminalizes. not a subscription registry — stop needs exactly this to fail
@@ -7475,10 +7471,15 @@
         // the call site would leave the destructive half of the transition outside the delivery
         // slot that owns the outcome, and duplicating it would create two discriminator
         // contracts. synchronous, returns undefined
+        // the visible half of a visible-to-hidden transition. it uses the RAW reducer, NOT the
+        // superseding wrapper: a pre-existing deferral must survive until the WHOLE transition
+        // commits, and the wrapper deletes it as soon as this half succeeds — so a hidden
+        // installation that then threw left the delivery blocked with its deferral already gone.
+        // the final hidden application performs the one superseding delete
         function removeVisibleForHidden(doc): undefined {
           if (!indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)) return
           console.warn(`item ${doc.id} became hidden; removing its visible representation`)
-          applyRemoteChangeAndSupersede({ type: 'removed' }, doc, { hidden: false, text: '' })
+          applyRemoteChange({ type: 'removed' }, doc, { hidden: false, text: '' })
           return undefined
         }
 
@@ -7824,7 +7825,11 @@
                     ? hiddenIngress.open(id, live ? change.doc.data().cipher : undefined)
                     : undefined,
                 }
-              })
+              }),
+              // this callback's OWN state-only revocation, not a fresh outside-callback ordinal:
+              // a fresh one would stale a NEWER callback's candidate that should be able to heal
+              // this failure
+              revokeThisRevision
             )
             const records = batch.records
             // this callback is ACTIVE until every one of its records terminalizes. AGGREGATE
@@ -7863,6 +7868,11 @@
                   console.error('could not apply remote change:', doc.id, e)
                   return null
                 })
+                // AFTER THE DECRYPT AWAIT, before any parse, quarantine, receipt or handoff: a
+                // stop while decrypt was held may already have aborted the batch and released this
+                // record's entry receipt, and a late continuation would then install a NEW legacy
+                // receipt after that cleanup
+                if (ingressStopped) return
                 if (!savedItem) {
                   // removal is id-driven: the plaintext `hidden` field plus the id suffices, so a
                   // corrupt record can still be REMOVED (leaving it stale forever is worse); the
@@ -7923,9 +7933,8 @@
                           if (savedItem!.hidden) {
                             // VISIBLE -> HIDDEN, both halves in this turn
                             removeVisibleForHidden(doc)
-                            // own-pending classification uses EXECUTION-time state: by the time
-                            // this runs, in-flight work for the name has settled
-                            if (doc.metadata.hasPendingWrites && isOwnPendingChange(change, doc, savedItem)) return
+                            // NOTE no own-pending check: isOwnPendingChange returns false for a
+                            // hidden saved item by construction, so the branch could never fire
                             applyRemoteChangeAndSupersede(change, doc, savedItem)
                             hiddenCleanupPending = true // validity may have changed
                             return
@@ -7962,7 +7971,8 @@
                         e => {
                           hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this
                           console.error('could not apply remote change:', doc.id, e)
-                          revokeThisRevision('hidden change could not be applied')
+                          // NO revocation here: the record's blocked outcome performs exactly one,
+                          // and it covers the abort and orchestration paths this branch cannot see
                           throw e // REJECT: the coordinator records this delivery as blocked
                         }
                       )
