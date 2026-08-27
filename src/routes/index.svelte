@@ -6312,10 +6312,10 @@
   // discriminated contract (the allocation call below)
   import type { DocumentChange } from 'firebase/firestore'
   import { createHiddenIngress } from '../hidden_ingress'
-  import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
+  import { createRecordAllocator } from '../hidden_listener_records'
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
   import { adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
-  import { needsFinalStateEvidence, snapshotDecision } from '../snapshot'
+  import { snapshotDecision } from '../snapshot'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -6332,10 +6332,11 @@
   import { classifyHiddenDocument } from '../hidden_confirm'
   import { scanHiddenDocuments, type ScanDeps, type ScanRow as HiddenScanRow } from '../hidden_scan'
   import {
-    applyAdmittedDelivery,
     createStopWaiters,
     readHiddenMembership,
-    receiveChange,
+    receiveChanges,
+    scheduleDelivery,
+    type Delivery,
   } from '../hidden_delivery'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
@@ -7987,35 +7988,22 @@
             // read once HERE, and iterated in lockstep with the allocated records below (the
             // decision above reads its own length separately, before this branch)
             const changes: DocumentChange[] = snapshot.docChanges()
-            // ONE RECEIPT ENVELOPE PER CHANGE (see receiveChange in src/hidden_delivery.ts): the
-            // admission decision, the captured corpus boundary and the needsEvidence bit, decided
-            // in THIS turn and carried positionally — allocate() preserves order, so record i is
-            // envelope i is change i. an id-keyed map silently collapsed two changes for one id
-            const envelopes = changes.map(change =>
-              receiveChange(
-                {
-                  id: change.doc.id,
-                  removed: change.type == 'removed',
-                  rawHidden: !!change.doc.data().hidden,
-                  cipher: change.doc.data().cipher,
-                },
-                {
-                  mode: { fixed, readonly, anonymous },
-                  pendingBoundary: id => hiddenCorpus.pendingBoundary(id),
-                  tracksDocument: id => !!hiddenPersistence.nameForDocument(id),
-                  hasOutstanding: id => hiddenIngress.hasOutstanding(id),
-                  open: (id, cipher) => hiddenIngress.open(id, cipher),
-                }
-              )
-            )
-            const batch = recordAllocator.allocate(
-              envelopes.map(envelope => envelope.request),
+            // ONE RECEIPT STEP (see receiveChanges in src/hidden_delivery.ts): admission decided
+            // per change, every record allocated in the same order, and each change BOUND to its
+            // own record, captured boundary and needsEvidence bit — the helper owns the
+            // correlation, so no caller re-zips parallel arrays by index
+            const { batch, deliveries } = receiveChanges(changes, {
+              mode: { fixed, readonly, anonymous },
+              pendingBoundary: id => hiddenCorpus.pendingBoundary(id),
+              tracksDocument: id => !!hiddenPersistence.nameForDocument(id),
+              hasOutstanding: id => hiddenIngress.hasOutstanding(id),
+              open: (id, cipher) => hiddenIngress.open(id, cipher),
+              allocate: (requests, revoke) => recordAllocator.allocate(requests, revoke),
               // this callback's OWN state-only revocation, not a fresh outside-callback ordinal:
               // a fresh one would stale a NEWER callback's candidate that should be able to heal
               // this failure
-              revokeThisRevision
-            )
-            const records = batch.records
+              revoke: revokeThisRevision,
+            })
             // this callback is ACTIVE until every one of its records terminalizes. AGGREGATE
             // FINALIZATION is the sole remover: a stop aborts the records but must not delete a
             // context whose work is still live
@@ -8035,13 +8023,8 @@
             const applied: string[] = [] // labels of applied changes, logged in aggregate below
             let ownSkipped = 0
             let deferred = 0 // changes held back behind unsettled local intent (reconciled later)
-            const prepare = async (
-              change: DocumentChange,
-              record: (typeof records)[number],
-              // this change's OWN receipt envelope, passed beside it rather than looked up: the
-              // captured boundary and the needsEvidence bit must be the ones ITS receipt computed
-              envelope: (typeof envelopes)[number]
-            ) => {
+            const prepare = async (delivery: Delivery) => {
+              const { change, record } = delivery
               await initialization
               if (!initialized) {
                 // initialization failed, we should be signing out ...
@@ -8082,7 +8065,7 @@
                 // and taking the ordinary path on a miss left the delivery running detached from
                 // its record and lease
                 if (record.kind == 'admitted') {
-                  const removed = envelope.removed
+                  const removed = change.type == 'removed'
                   const wrapper = savedItem.hidden && !removed ? parseHiddenWrapper(doc.id, savedItem.text) : null
                   if (savedItem.hidden && !removed && !wrapper) {
                     // a valid -> MALFORMED server modification: the record is quarantined (never
@@ -8091,57 +8074,47 @@
                     // authority on a view that includes the stale record
                     return // finish() blocks the handle, whose blocked outcome revokes exactly once
                   }
-                  applied.push(`${change.type} ${savedItem.hidden ? 'hidden ' : ''}${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
-                  const saved = savedItem
-                  record.schedule(() =>
-                    // the ORDER — captured boundary, liveness, final-state evidence, name
-                    // selection, the routed synchronous body — lives in applyAdmittedDelivery
-                    // (src/hidden_delivery.ts, schedule-tested); the effects are the injected
-                    // reducers below. a rejection blocks the handle, and the coordinator records
-                    // this delivery as blocked
-                    applyAdmittedDelivery(
-                      {
-                        change: change as any,
-                        item: saved,
-                        wrapper,
-                        boundary: envelope.boundary,
-                        needsEvidence: envelope.needsEvidence,
-                      },
-                      {
-                        stopped: () => ingressStopped,
-                        stopWaiters: ingressStopWaiters,
-                        readMembership: () =>
-                          readHiddenMembership(doc.id, {
-                            queryHiddenSet,
-                            stopped: () => ingressStopped,
-                            decrypt: decryptHiddenDoc,
-                          }),
-                        nameForDocument: () => hiddenPersistence.nameForDocument(doc.id),
-                        hiddenIndexed: () => hiddenIndex().byId.has(doc.id),
-                        visiblePresent: () => indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id),
-                        applyRemote: (names, body) => hiddenPersistence.applyRemote(names, body),
-                        hasLocalIntent: () => {
-                          const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
-                          return !!local?.savedId && hasLocalIntent(local)
-                        },
-                        removeVisibleForHidden: snap => removeVisibleForHidden(snap as { id: string }),
-                        applyVisible: (applyChange, snap, item) =>
-                          void applyRemoteChangeAndSupersede(applyChange as any, snap as { id: string }, item),
-                        removeHiddenRecord: () => ({
-                          droppedName: removeHidden(hiddenIndex(), doc.id).removed?.name,
+                  applied.push(`${change.type} ${savedItem.hidden ? 'hidden ' : ''}${doc.id}${change.doc.metadata.hasPendingWrites ? ' pending' : ''}`)
+                  // scheduleDelivery binds THIS delivery's application to THIS delivery's record —
+                  // the ORDER (captured boundary, liveness, final-state evidence, name selection,
+                  // the routed synchronous body) lives in applyAdmittedDelivery
+                  // (src/hidden_delivery.ts, schedule-tested); the effects are the injected
+                  // reducers below. a rejection blocks the handle
+                  scheduleDelivery(
+                    { ...delivery, record },
+                    { item: savedItem, wrapper },
+                    {
+                      stopped: () => ingressStopped,
+                      stopWaiters: ingressStopWaiters,
+                      readMembership: () =>
+                        readHiddenMembership(doc.id, {
+                          queryHiddenSet,
+                          stopped: () => ingressStopped,
+                          decrypt: decryptHiddenDoc,
                         }),
-                        hiddenChanged: (name, changeType) => void hiddenItemChangedRemotely(name, changeType),
-                        markCleanupPending: () => void (hiddenCleanupPending = true),
-                        onEvidenceError: e =>
-                          // the ORIGINAL cause: this rejection blocks the handle before applyRemote,
-                          // so it never reaches the diagnostic arm that logs application failures
-                          void console.error('could not establish final state for remote change:', doc.id, e),
-                      }
-                    ).catch(e => {
-                      console.error('could not apply remote change:', doc.id, e)
+                      nameForDocument: () => hiddenPersistence.nameForDocument(doc.id),
+                      hiddenIndexed: () => hiddenIndex().byId.has(doc.id),
+                      visiblePresent: () => indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id),
+                      applyRemote: (names, body) => hiddenPersistence.applyRemote(names, body),
+                      hasLocalIntent: () => {
+                        const local = items[indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id) ?? -1]
+                        return !!local?.savedId && hasLocalIntent(local)
+                      },
+                      removeVisibleForHidden: snap => removeVisibleForHidden(snap as { id: string }),
+                      applyUnified: (applyChange, snap, item) =>
+                        void applyRemoteChangeAndSupersede(applyChange, snap as { id: string }, item),
+                      removeHiddenRecord: () => ({
+                        droppedName: removeHidden(hiddenIndex(), doc.id).removed?.name,
+                      }),
+                      hiddenChanged: (name, changeType) => void hiddenItemChangedRemotely(name, changeType),
+                      markCleanupPending: () => void (hiddenCleanupPending = true),
+                      onEvidenceError: e =>
+                        // the ORIGINAL cause: this rejection blocks the handle before applyRemote,
+                        // so it never reaches the application diagnostic below
+                        void console.error('could not establish final state for remote change:', doc.id, e),
                       // NO revocation here: the record's blocked outcome performs exactly one
-                      throw e // REJECT: the coordinator records this delivery as blocked
-                    })
+                      onApplyError: e => void console.error('could not apply remote change:', doc.id, e),
+                    }
                   )
                   return
                 }
@@ -8179,9 +8152,9 @@
             // an admitted record with no Apply scheduled blocks its handle, a blind one with no
             // body releases its slot. there is no callback-wide sweep, which is what used to
             // abort another record's scheduled work
-            for (const [i, change] of changes.entries()) {
-              const record = records[i]
-              void prepare(change, record, envelopes[i])
+            for (const delivery of deliveries) {
+              const record = delivery.record
+              void prepare(delivery)
                 .catch(e => {
                   // an UNOWNED preparation escape: firestore will not replay this change, so the
                   // page can no longer claim to track the server. expected blind body failures

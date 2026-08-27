@@ -12,7 +12,13 @@
 // its captured corpus boundary, its `needsEvidence` bit — are exactly the ones its RECEIPT
 // computed, positionally, never recomputed from state that may have moved.
 
-import type { AllocationRequest, RecordHandle } from './hidden_listener_records.js'
+import type {
+  AdmittedRecord,
+  AllocationRequest,
+  Batch,
+  ListenerRecord,
+  RecordHandle,
+} from './hidden_listener_records.js'
 import { classifyHiddenDocument, type ParsedWrapper } from './hidden_confirm.js'
 import { needsFinalStateEvidence } from './snapshot.js'
 
@@ -65,7 +71,7 @@ export type Membership =
   // the hidden side. this is NOT a claim the document is gone from the world
   | { kind: 'not-hidden' }
   // it is hidden NOW: the CURRENT document, decrypted and classified
-  | { kind: 'hidden'; snap: unknown; item: any; wrapper: ParsedWrapper }
+  | { kind: 'hidden'; snap: ListenerChange['doc']; item: any; wrapper: ParsedWrapper }
 
 export async function readHiddenMembership(
   id: string,
@@ -87,8 +93,12 @@ export async function readHiddenMembership(
   const c = classifyHiddenDocument(id, !!item.hidden, item.text)
   // FAIL CLOSED, twice over: an indeterminate classification is not absence, and a row in the
   // hidden set that classifies not-hidden is a server contradiction this delivery cannot resolve.
-  // either way it must not heal an older same-cell block on evidence it does not have
-  if (c.kind != 'hidden') throw new Error(`hidden document ${id} could not be classified`)
+  // either way it must not heal an older same-cell block on evidence it does not have. the REASON
+  // rides in the message — this error is the diagnostic (round 77)
+  if (c.kind != 'hidden')
+    throw new Error(
+      `hidden document ${id} could not be classified: ${c.kind == 'indeterminate' ? c.reason : 'not hidden inside the hidden set'}`
+    )
   return { kind: 'hidden', snap, item, wrapper: c.wrapper }
 }
 
@@ -96,23 +106,30 @@ export async function readHiddenMembership(
 
 export type PageMode = { fixed: boolean; readonly: boolean; anonymous: boolean }
 
-export type ReceiptEnvelope = {
-  id: string
-  removed: boolean
-  rawHidden: boolean
-  // the allocation this receipt decided — handed to the allocator verbatim
-  request: AllocationRequest
-  // the pending corpus producer's boundary, captured IN THIS TURN. looked up later, the producer
-  // may have finished and an unrelated one become active
+// the STRUCTURAL change shape the boundary needs — deliberately not the full Firestore type, so
+// the core logic imports no SDK surface and a test change is the same kind of value production
+// hands over. `doc.data()` is the raw (possibly old) payload the change carried
+export type ListenerChange = { type: string; doc: { id: string; data: () => any; [key: string]: any } }
+
+// ONE delivery: the change, the record its receipt allocated, and the facts its application will
+// consume — bound POSITIONALLY inside receiveChanges, so a receipt cannot be paired with a
+// different change's document, envelope or record (round 77: three parallel arrays zipped by
+// index in the component were exactly that hazard, and nothing could drive them)
+export type Delivery = {
+  change: ListenerChange
+  record: ListenerRecord
+  // the pending corpus producer's boundary, captured AT RECEIPT. looked up later, the producer may
+  // have finished and an unrelated one become active
   boundary: Promise<void> | undefined
   // whether this delivery must establish its document's CURRENT state before acting (see
-  // needsFinalStateEvidence). captured HERE and carried, so admission and the delivery-time read
-  // cannot disagree — not on the formula, and not on the inputs either
+  // needsFinalStateEvidence). computed ONCE at receipt from that turn's inputs and carried, so
+  // admission and the delivery-time read cannot disagree — not on the formula, not on the inputs
   needsEvidence: boolean
 }
 
 /**
- * The ONE receipt decision for a change: what to allocate, and the facts its delivery will consume.
+ * The ONE receipt step for a snapshot callback's changes: decides admission per change, allocates
+ * every record in the same order, and returns each change BOUND to its own record and facts.
  *
  * An AMBIGUOUS OWNER-FIXED REMOVAL is admitted on its own: its payload is the OLD visible document,
  * so `rawHidden` is false, and an ordinary visible-to-hidden transition has no wrapper, no
@@ -121,8 +138,8 @@ export type ReceiptEnvelope = {
  * fixed page is deliberately NOT admitted this way: it neither owns nor can decrypt the sharer's
  * hidden corpus, and must never prompt a visitor for the owner's secret.
  */
-export function receiveChange(
-  change: { id: string; removed: boolean; rawHidden: boolean; cipher: string | undefined },
+export function receiveChanges(
+  changes: ListenerChange[],
   deps: {
     mode: PageMode
     pendingBoundary: (id: string) => Promise<void> | undefined
@@ -130,27 +147,69 @@ export function receiveChange(
     tracksDocument: (id: string) => boolean
     hasOutstanding: (id: string) => boolean
     open: (id: string, cipher: string | undefined) => RecordHandle
+    // the record allocator (createRecordAllocator), with the callback's own revocation
+    allocate: (requests: AllocationRequest[], revoke: (reason: string) => void) => Batch
+    revoke: (reason: string) => void
   }
-): ReceiptEnvelope {
-  const { id, removed, rawHidden } = change
-  const boundary = deps.pendingBoundary(id)
-  const needsEvidence = needsFinalStateEvidence({ ...deps.mode, removed })
-  const admitted = rawHidden || needsEvidence || deps.tracksDocument(id) || deps.hasOutstanding(id) || !!boundary
-  // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own echo failed to
-  // decrypt rather than waiting forever. ONLY for a live raw-hidden delivery: firestore hands a
-  // REMOVED change its old data, so forwarding that cipher would let a deletion satisfy the exact
-  // echo waiter of the write it deleted
-  const live = !removed && rawHidden
+): { batch: Batch; deliveries: Delivery[] } {
+  const facts = changes.map(change => {
+    const id = change.doc.id
+    const removed = change.type == 'removed'
+    const rawHidden = !!change.doc.data().hidden
+    const boundary = deps.pendingBoundary(id)
+    const needsEvidence = needsFinalStateEvidence({ ...deps.mode, removed })
+    const admitted = rawHidden || needsEvidence || deps.tracksDocument(id) || deps.hasOutstanding(id) || !!boundary
+    // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own echo failed
+    // to decrypt rather than waiting forever. ONLY for a live raw-hidden delivery: firestore hands
+    // a REMOVED change its old data, so forwarding that cipher would let a deletion satisfy the
+    // exact echo waiter of the write it deleted
+    const request: AllocationRequest = admitted
+      ? { kind: 'admitted', id, handle: deps.open(id, !removed && rawHidden ? change.doc.data().cipher : undefined) }
+      : { kind: 'blind', id }
+    return { change, request, boundary, needsEvidence }
+  })
+  const batch = deps.allocate(
+    facts.map(f => f.request),
+    deps.revoke
+  )
+  // allocate() preserves order, so record i belongs to change i — bound HERE, once, and never
+  // re-zipped by a caller
   return {
-    id,
-    removed,
-    rawHidden,
-    request: admitted
-      ? { kind: 'admitted', id, handle: deps.open(id, live ? change.cipher : undefined) }
-      : { kind: 'blind', id },
-    boundary,
-    needsEvidence,
+    batch,
+    deliveries: facts.map((f, i) => ({
+      change: f.change,
+      record: batch.records[i],
+      boundary: f.boundary,
+      needsEvidence: f.needsEvidence,
+    })),
   }
+}
+
+/**
+ * Hands one admitted delivery's application to its own record. The schedule call lives HERE so a
+ * caller cannot schedule delivery A's application onto delivery B's record.
+ */
+export function scheduleDelivery(
+  delivery: Delivery & { record: AdmittedRecord },
+  prepared: { item: any; wrapper: ParsedWrapper | null },
+  deps: AdmittedDeliveryDeps
+): undefined {
+  delivery.record.schedule(() =>
+    applyAdmittedDelivery(
+      {
+        change: delivery.change,
+        item: prepared.item,
+        wrapper: prepared.wrapper,
+        boundary: delivery.boundary,
+        needsEvidence: delivery.needsEvidence,
+      },
+      deps
+    ).catch(e => {
+      deps.onApplyError(e)
+      throw e // REJECT: the coordinator records this delivery as blocked
+    })
+  )
+  return undefined
 }
 
 // ---- the admitted delivery ---------------------------------------------------------------------
@@ -175,8 +234,12 @@ export type AdmittedDeliveryDeps = {
   // ---- the real reducers, injected ----
   // remove the visible representation of a document that is now hidden
   removeVisibleForHidden: (snap: unknown) => undefined
-  // apply one change through the ordinary visible reducers (with supersession)
-  applyVisible: (change: { type: string; doc: unknown }, snap: unknown, item: any) => undefined
+  // the UNIFIED remote-change reducer (production: applyRemoteChangeAndSupersede). it routes
+  // INTERNALLY on the change type and the item's hidden flag — a hidden item takes the hidden
+  // reducers, including hidden removal on a removed change. it does NOT remove a visible row for a
+  // hidden item, which is why the hidden branch above sweeps the visible side first; the old name
+  // `applyVisible` invited exactly that wrong assumption (round 77)
+  applyUnified: (change: { type: string; doc: unknown }, snap: unknown, item: any) => undefined
   // remove the hidden record, reporting the dropped name if one was indexed
   removeHiddenRecord: () => { droppedName: string | undefined }
   // downstream notification for a dropped hidden name
@@ -185,6 +248,10 @@ export type AdmittedDeliveryDeps = {
   markCleanupPending: () => undefined
   // diagnostics: the evidence read failed (blocks the handle before the application's own arm)
   onEvidenceError: (error: unknown) => undefined
+  // diagnostics: the application failed (the handle is still blocked by the rethrow). production
+  // logs the document id here, and a browser row waits on that exact line — round 77's rewiring
+  // dropped it and the delivery blocked silently
+  onApplyError: (error: unknown) => undefined
 }
 
 /**
@@ -198,7 +265,7 @@ export type AdmittedDeliveryDeps = {
  */
 export async function applyAdmittedDelivery(
   delivery: {
-    change: { type: string; doc: unknown }
+    change: ListenerChange
     // the payload as delivered (decrypted; a removal fabricates `{ hidden, text: '' }`)
     item: any
     // the payload's parsed wrapper for a live hidden change, if any
@@ -236,10 +303,17 @@ export async function applyAdmittedDelivery(
     // not-hidden: the removal stands, and the hidden-side removal below is backed by evidence
   }
 
-  const hidden = !!saved?.hidden && !gone
+  // TWO predicates, deliberately distinct (round 77): the NAME selection cares whether the
+  // document is hidden NOW (a removal's target name comes from the applied index alone, since the
+  // record is leaving), while the BODY routes on the payload/evidence's own hidden flag — a
+  // raw-hidden REMOVAL still carries hidden data and must take the hidden branch, whose unified
+  // reducer performs the hidden removal, WITH the visible sweep first. collapsing them routed
+  // hidden deletions down the nonhidden body, whose unified-reducer call saw a hidden item, took
+  // its hidden branch, and never touched the stale visible row
+  const currentHidden = !!saved?.hidden && !gone
   // IN-TURN: the affected name chains are read here, from the index as it stands in this
   // delivery's reserved turn. a rename must join the in-flight write on its OLD name
-  const names = hidden ? [deps.nameForDocument(), target?.name] : [deps.nameForDocument()]
+  const names = currentHidden ? [deps.nameForDocument(), target?.name] : [deps.nameForDocument()]
   return deps.applyRemote(names, () => {
     // STOP REJECTS rather than returning: a running handle cannot be blocked, and returning
     // successfully would publish `applied` for a delivery that mutated nothing
@@ -248,26 +322,30 @@ export async function applyAdmittedDelivery(
     // heal this delivery, so deferring would strand it and clearing a deferral would lose the
     // local change. recovery is a reload or an independently later delivery
     if (deps.hasLocalIntent()) throw new Error('local intent held')
-    if (hidden) {
-      // VISIBLE -> HIDDEN, both halves in this turn
+    if (saved?.hidden) {
+      // a HIDDEN payload/evidence: a visible-to-hidden transition, or a hidden document's own
+      // removal. BOTH halves in this turn — the visible sweep, then the unified reducer, which
+      // routes internally on the change type and the item's hidden flag (installing on
+      // added/modified, removing the hidden representation on removed)
       deps.removeVisibleForHidden(applySnap)
-      deps.applyVisible(applyChange, applySnap, saved)
+      deps.applyUnified(applyChange, applySnap, saved)
       deps.markCleanupPending()
       return undefined
     }
-    // HIDDEN -> VISIBLE, a removal, or a redelivery for an id the hidden index still depends on.
-    // the old side uses the real reducer and its downstream notification — and it is always backed
-    // by evidence now: an ambiguous payload was replaced by the fresh read above
+    // a NOT-HIDDEN payload/evidence: hidden -> visible, a visible removal, or a redelivery for an
+    // id the hidden index still depends on. the old side uses the real reducer and its downstream
+    // notification — and it is always backed by evidence now: an ambiguous payload was replaced by
+    // the fresh read above
     const { droppedName } = deps.removeHiddenRecord()
     if (droppedName) {
       deps.hiddenChanged(droppedName, applyChange.type)
       deps.markCleanupPending()
     }
-    if (gone) return deps.applyVisible(applyChange, applySnap, saved)
+    if (gone) return deps.applyUnified(applyChange, applySnap, saved)
     // NORMALIZE the visible half from CURRENT presence, so a redelivery repairs an absent row and
     // a partially installed one identically
     const type = deps.visiblePresent() ? 'modified' : 'added'
     const visible = applyChange.type == type ? applyChange : { ...applyChange, type, doc: applySnap }
-    return deps.applyVisible(visible, applySnap, saved)
+    return deps.applyUnified(visible, applySnap, saved)
   })
 }

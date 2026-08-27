@@ -13,6 +13,7 @@ import {
   documentId,
   getDoc,
   getDocs,
+  getDocsFromServer,
   query,
   setDoc,
   updateDoc,
@@ -122,7 +123,12 @@ test('the OWNER HIDDEN-SET query answers TARGET-ID absence in a NONEMPTY set, th
   const membership = (id: string) =>
     readHiddenMembership(id, {
       queryHiddenSet: async () =>
-        (await getDocs(query(collection(db, 'items'), where('user', '==', 'alice'), where('hidden', '==', true)))).docs,
+        // getDocsFromServer, as production's adapter uses: the answer must be server-confirmed
+        (
+          await getDocsFromServer(
+            query(collection(db, 'items'), where('user', '==', 'alice'), where('hidden', '==', true))
+          )
+        ).docs,
       stopped: () => false,
       // the emulator documents are not really encrypted; classification needs a hidden wrapper
       decrypt: async data => ({ ...data, text: JSON.stringify({ name: 'global_store_x' }) }),
