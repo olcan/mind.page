@@ -7880,8 +7880,9 @@
                   // removals, which also apply purely by id
                   if (change.type == 'removed') savedItem = { hidden: couldBeHidden, text: '' }
                   else {
-                    // finish() blocks an admitted handle; a blind record just releases its slot
-                    if (couldBeHidden) revokeThisRevision('hidden change could not be decrypted')
+                    // finish() blocks an admitted handle, and the record's blocked outcome
+                    // performs the ONE lease revocation — a call here would duplicate it and
+                    // would sit outside the allocator's hook guard
                     return
                   }
                 }
@@ -7899,8 +7900,7 @@
                     // indexed), but the previously valid wrapper is still in the index and would
                     // be treated as this document's current state. fail closed so nothing grants
                     // authority on a view that includes the stale record
-                    if (hiddenItems.has(doc.id)) revokeThisRevision('hidden record became malformed')
-                    return // finish() blocks the handle
+                    return // finish() blocks the handle, whose blocked outcome revokes exactly once
                   }
                   // receipt-time intent: a create/adopt decision must see this record even though
                   // its application is queued — possibly behind that very create

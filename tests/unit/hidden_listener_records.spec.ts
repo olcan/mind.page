@@ -150,6 +150,31 @@ test('a blind body rejects its OWN record while the lane runs the next slot, and
   expect(batch.failed(await batch.landed), 'but a blind failure never fails the callback').toBe(false)
 })
 
+test('a THROWING blind-error diagnostic does not strand the record or the lane', async () => {
+  // round 67: the hook ran before the rejection, so a throwing diagnostic left record.done pending
+  // forever — stranding batch.landed, its context and lease, and every corpus consumer
+  const calls: string[] = []
+  const a = createRecordAllocator({
+    onBlindError: id => {
+      calls.push(id)
+      throw new Error('diagnostic failed')
+    },
+  })
+  const batch = a.allocate([{ id: 'h1' }, { id: 'h2' }], () => {})
+  const [r1, r2] = batch.records
+  let secondRan = false
+  ;(r1 as any).run(() => {
+    throw new Error('blind body failed')
+  })
+  ;(r2 as any).run(() => void (secondRan = true))
+  await expect(r1.done, 'rejected with the BODY error, not the hook error').rejects.toThrow('blind body failed')
+  await r2.done
+  expect(calls, 'the hook did run').toEqual(['h1'])
+  expect(secondRan, 'and the lane still ran the next slot').toBe(true)
+  const results = await batch.landed
+  expect(results.map(r => r.status), 'landed settles').toEqual(['rejected', 'fulfilled'])
+})
+
 test('abort terminalizes a SCHEDULED record held behind a predecessor, not just an unstarted one', async () => {
   // round 66: abort reused finish(), which deliberately preserves scheduled work. so a record
   // scheduled behind a held blind predecessor stayed open, and `landed` — with its context and

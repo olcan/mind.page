@@ -555,62 +555,6 @@ test('global-store updates and deletions reach a second tab of the same account'
   }
 })
 
-// NOT YET DISCRIMINATING, and recorded as such rather than presented as coverage. Removing the
-// local-intent check from the admitted Apply leaves this row GREEN: the delivery still blocks and
-// the visible row is still untouched, so something else refuses it first. Ruled out: a wrapper
-// naming a nonexistent owner (fixed — it now names a real one). NOT ruled out: whether the held
-// saveTask blocks the delivery through another path entirely. The row documents the intended
-// boundary and is worth keeping, but it does not yet prove the mechanism.
-test('an admitted transition is REFUSED while local intent is held, and heals once it clears', async ({ page }) => {
-  // the fail-closed local-intent boundary (round 66). an admitted transition may not defer: the
-  // deferral path is owned by ordinary reconciliation, which holds no coordinator handle and
-  // could never heal the delivery. so it rejects, the delivery blocks, and a LATER admitted
-  // delivery for the same id performs the complete repair once intent has cleared
-  await withSecret(page)
-  await loadUser(page, ALICE)
-  await waitForApp(page)
-  const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
-  await expect.poll(authority, { timeout: 15_000 }).toBe(true)
-  // a REAL owner for the store the transition will carry: with a nonexistent owner the delivery
-  // blocks for an unrelated reason and the row stops telling the intent check apart from nothing
-  await page.evaluate(() => void window._create('#e2e_intent_owner store owner'))
-  await expect.poll(() => savedId(page, '#e2e_intent_owner'), { timeout: 30_000 }).toBeTruthy()
-  const ownerId = (await savedId(page, '#e2e_intent_owner'))!
-  await page.evaluate(() => void window._create('#e2e_intent visible text'))
-  await expect.poll(() => savedId(page, '#e2e_intent'), { timeout: 30_000 }).toBeTruthy()
-  const id = (await savedId(page, '#e2e_intent'))!
-  const text = () => page.evaluate(() => window._item('#e2e_intent', true)?.text ?? null)
-  expect(await text()).toContain('visible text')
-  // HOLD local intent deterministically, through a real field hasLocalIntent reads
-  await page.evaluate(docId => {
-    const raw = (window.__items as any[]).find(i => i.savedId == docId)
-    raw.saveTask = new Promise(() => {}) // never settles
-  }, id)
-  // that id becomes HIDDEN server-side: an admitted transition, which must refuse
-  const { encryptWithSecret } = await import('../../src/crypto.js')
-  const wrapper = JSON.stringify({ name: `global_store_${ownerId}`, item: { held: 1 } })
-  await firestore()
-    .collection('items')
-    .doc(id)
-    .set({ user: ALICE.uid, time: Date.now(), hidden: true, attr: null, text: null, cipher: await encryptWithSecret(wrapper, secretFor(ALICE, PHRASE)) })
-  // the delivery blocks: authority is revoked and the visible row is UNCHANGED — no half
-  // transition, and no deferral consumed
-  await expect.poll(authority, { timeout: 30_000 }).toBe(false)
-  expect(await text(), 'the visible representation is untouched').toContain('visible text')
-  // clear the intent, then deliver a visible revision for the same id. the retained block makes
-  // it admitted, and the complete repair runs
-  await page.evaluate(docId => {
-    const raw = (window.__items as any[]).find(i => i.savedId == docId)
-    raw.saveTask = null
-  }, id)
-  await firestore()
-    .collection('items')
-    .doc(id)
-    .set({ user: ALICE.uid, time: Date.now(), text: '#e2e_intent repaired text', attr: null })
-  await expect.poll(text, { timeout: 30_000 }).toContain('repaired text')
-  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
-})
-
 test('a corrupt hidden change revokes authority until healed, and invalid records are reported not deleted', async ({
   page,
 }) => {
@@ -661,6 +605,59 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   await expect
     .poll(() => page.evaluate(() => window._item('#e2e_healed_visible', true)?.id ?? null), { timeout: 30_000 })
     .not.toBeNull()
+  await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+
+  // THE FAIL-CLOSED LOCAL-INTENT BOUNDARY, on the same loaded page and the same id. an admitted
+  // transition may not defer: ordinary deferral is owned by reconciliation, which holds no
+  // coordinator handle and could never heal the delivery. so it REJECTS, and a later admitted
+  // delivery performs the complete repair once intent has cleared.
+  // the barrier is the exact Apply error, not `authority == false`: opening the handle makes the
+  // gate pending immediately, so an authority poll can finish before the Apply even runs (round
+  // 67). and the payload is a SAVED-ITEM ENVELOPE — encrypting the wrapper directly leaves
+  // decrypted.text undefined, so parseHiddenWrapper fails and the record blocks long before the
+  // local-intent check
+  await page.evaluate(() => {
+    const raw = (window.__items as any[]).find(i => i.name == '#e2e_healed_visible')
+    raw.saveTask = new Promise(() => {}) // never settles: hasLocalIntent is now true
+  })
+  const { encryptWithSecret } = await import('../../src/crypto.js')
+  const envelope = JSON.stringify({
+    hidden: true,
+    attr: null,
+    text: JSON.stringify({ name: 'e2e_intent_hidden', item: { held: 1 } }),
+  })
+  const intentError = page.waitForEvent('console', {
+    predicate: m => m.text().includes('e2e-corrupt-hidden') && m.text().includes('local intent held'),
+    timeout: 30_000,
+  })
+  await firestore().collection('items').doc('e2e-corrupt-hidden').set({
+    user: ALICE.uid,
+    time: Date.now(),
+    hidden: true,
+    attr: null,
+    text: null,
+    cipher: await encryptWithSecret(envelope, secretFor(ALICE, PHRASE)),
+  })
+  await intentError // the Apply reached hasLocalIntent and refused
+  expect(
+    await page.evaluate(() => window._item('#e2e_healed_visible', true)?.text ?? null),
+    'the visible representation is untouched: no half transition'
+  ).toContain('ordinary item')
+  // clear the intent and deliver a visible revision for that id: the retained block admits it and
+  // the complete repair runs
+  await page.evaluate(() => {
+    const raw = (window.__items as any[]).find(i => i.name == '#e2e_healed_visible')
+    raw.saveTask = null
+  })
+  await firestore().collection('items').doc('e2e-corrupt-hidden').set({
+    user: ALICE.uid,
+    time: Date.now(),
+    text: '#e2e_healed_visible repaired text',
+    attr: null,
+  })
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_healed_visible', true)?.text ?? null), { timeout: 30_000 })
+    .toContain('repaired text')
   await expect.poll(authority, { timeout: 30_000 }).toBe(true)
   // removing it heals nothing further (already healed) and leaves the orphan accounting below
   await firestore().collection('items').doc('e2e-corrupt-hidden').delete()

@@ -177,8 +177,16 @@ export function createRecordAllocator(deps: {
             e => {
               if (settled) return
               settled = true
-              deps.onBlindError(id, e)
-              reject(e) // RETAINED on the record even though the lane consumed it
+              // the DIAGNOSTIC is guarded and the record is rejected regardless: a throwing hook
+              // used to leave `done` pending forever, which strands batch.landed, its context and
+              // lease, snapshotApply, and every corpus consumer of that boundary
+              try {
+                deps.onBlindError(id, e)
+              } catch (hookError) {
+                console.error('blind error hook failed:', id, hookError)
+              } finally {
+                reject(e) // RETAINED on the record even though the lane consumed it
+              }
             }
           )
           records.push({
