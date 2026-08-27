@@ -430,9 +430,24 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const op = currentOwed(name, generation)
     if (!op) return false // superseded before issue: no write, no finalization
     op.phase = 'issued' // ... which is where isSaving() stops being true (see its derivation)
+    // THE OWN-UNACKNOWLEDGED-CREATE MARKER, retained until this SDK promise settles and
+    // INDEPENDENTLY of any later owed generation: the server has not published this document yet,
+    // so a complete read legitimately omits it, and a confirmation must not remove it from that
+    // stale negative. wrapper-exact, so a fresh same-id observation or a same-id rename cannot be
+    // mistaken for it
+    const issuedMarker: Marker | undefined = create
+      ? { id, wrapper: deps.index().byId.get(id) ?? op, token: ++markerSeq }
+      : undefined
+    if (issuedMarker) marker = issuedMarker
     const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
+    // COMPARE-AND-SET on the token: a newer create may already have replaced the marker, and this
+    // settlement must not clear that one. it never reinserts or finalizes the old wrapper either
+    const clearMarker = () => {
+      if (issuedMarker && marker && marker.token === issuedMarker.token) marker = undefined
+    }
     write.then(
       () => {
+        clearMarker()
         if (!currentOwed(name, generation)) return // superseded: a newer generation owns the name
         // settle ON THE NAME'S CHAIN, behind transitions already received. reconciliation reads
         // the APPLIED index, so settling straight from the acknowledgement could put the owner
@@ -454,6 +469,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         })
       },
       e => {
+        clearMarker()
         const current = currentOwed(name, generation)
         if (!current) return // superseded: this outcome no longer matters
         if (!isNotFound(e)) {

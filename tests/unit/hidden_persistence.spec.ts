@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
 import { createHiddenIngress } from '../../src/hidden_ingress.js'
+import { planTargetSlice, type Marker } from '../../src/hidden_confirm.js'
 import {
   applyRemoteAdded,
   applyRemoteModified,
@@ -2653,4 +2654,36 @@ test('applyRemote with NO affected name still starts asynchronously and rejects 
       throw boom
     })
   ).rejects.toBe(boom)
+})
+
+// ---- the own-unacknowledged-create marker ----
+
+// THE MARKER'S CONTROLLER-LEVEL EFFECT IS NOT YET OBSERVABLE, and no test here claims it.
+// confirmTarget is wired into the CREATE path only; a second save for the same name finds the
+// holder finalizeCreate registered at ISSUE time and takes the UPDATE path, which does not
+// confirm. So a controller row for "the marker preserved our unacknowledged create through a
+// confirmation" passes with the marker never set at all -- I wrote one, mutated it, and deleted
+// it rather than ship it. The marker's DECISION is pinned purely in hidden_confirm.spec.ts; its
+// wiring becomes observable when confirmTarget-before-update lands for fixed pages.
+
+// NOTE the UPDATE path does not confirm yet. The design scopes confirmTarget-before-update to
+// FIXED PAGES, and the controller has no fixed-page input; wiring that is the remaining half of
+// this cut. So "the marker stops protecting once the create is acknowledged" has no observable
+// consequence to assert here yet, and is deliberately NOT claimed.
+
+test('the marker protects only its OWN id: another stale row is still removed', () => {
+  // the exemption is an exact-target confirmation exemption and never overrides name selection.
+  // a blanket or name-wide exemption would preserve records the read genuinely disproved
+  const marker: Marker = { id: 'mine', wrapper: { m: 1 }, token: 1 }
+  const plan = planTargetSlice({
+    name: 'n',
+    local: [
+      { id: 'mine', name: 'n', wrapper: marker.wrapper },
+      { id: 'stale', name: 'n', wrapper: {} },
+    ],
+    answer: new Map(),
+    marker,
+  })
+  expect(plan.remove, 'only the unprotected row goes').toEqual(['stale'])
+  expect(plan.preservedMarker).toBe(marker)
 })
