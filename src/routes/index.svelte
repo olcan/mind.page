@@ -3878,13 +3878,28 @@
       // unit tests); it fails closed on fetch errors, validates the phrase against
       // server-confirmed ciphertext, and registers the account's hidden items BEFORE the secret
       // is published here (a concurrent encrypted save must adopt, not duplicate)
-      const validated = await resolveFixedOwnerSecret({
-        fetchAccountDocs: async () =>
-          (
+      // THROUGH THE CORPUS SEAM: this is a complete account read that REGISTERS hidden records, so
+      // it is a corpus producer like confirmTarget. its membership window admits a delivery for
+      // one of these ids that arrives mid-scan, and its boundary orders that delivery behind the
+      // registration rather than letting it mutate the pre-rebuild index. a second startup-only
+      // membership set would duplicate the state the corpus primitive already owns
+      let published = false
+      const validated = await hiddenCorpus.run(async run =>
+        resolveFixedOwnerSecret({
+        fetchAccountDocs: async () => {
+          const docs = (
             await getDocsFromServer(
               query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
             )
-          ).docs,
+          ).docs
+          // BEFORE the phrase prompt and the registrations that follow it. once only: the
+          // validation flow refetches on retry, and membership is published per operation
+          if (!published) {
+            published = true
+            run.publishMembership(docs.filter(d => d.data().hidden).map(d => d.id))
+          }
+          return docs
+        },
         promptPhrase: async () => {
           await tick() // wait until modal is rendered on page
           return modal.show({
@@ -3910,10 +3925,21 @@
             background: 'confirm',
           }),
         hashPhrase: phrase => hashSecretPhrase(phrase),
-        registerHiddenItem,
+        // a late registration after stop must not touch the index
+        registerHiddenItem: item => {
+          if (run.cancelled()) return
+          registerHiddenItem(item)
+        },
         signOut,
+        })
+      ).catch(e => {
+        // a stopped corpus rejects; anything else is the validation flow's own failure and keeps
+        // its existing fail-closed behaviour
+        if (e instanceof CorpusStopped) return null
+        throw e
       })
       if (validated != null) {
+        hiddenPrefetched = true // a completed owner scan: the first cached snapshot must wait
         secret = validated
         localStorage.setItem('mindpage_secret', secret)
         return secret
@@ -6282,7 +6308,7 @@
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator } from '../hidden_listener_records'
-  import { createHiddenCorpus } from '../hidden_corpus'
+  import { createHiddenCorpus, CorpusStopped } from '../hidden_corpus'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6460,6 +6486,8 @@
   // the same cross-scope handle idiom used elsewhere in this file. inert before the listener
   // installs, which is correct: there is no visible representation to remove yet
   let removeVisibleForHiddenId: (id: string) => undefined = () => undefined
+  // whether a fixed-owner hidden prefetch has completed (see resolveFixedOwnerSecret)
+  let hiddenPrefetched = false
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
   })
@@ -7692,7 +7720,9 @@
               anonymous,
               fixed,
               hasStoredSecret: !!localStorage.getItem('mindpage_secret'),
-              prefetchSucceeded: false, // the cutover's prefetch-before-listener startup sets this
+              // TRUE once the fixed-owner scan has completed: a cached first snapshot must then
+              // wait for the server, because prefetched same-id copies are superseded by it
+              prefetchSucceeded: hiddenPrefetched,
             })
             const action = decision.action
             // authority (a current, server, no-pending-writes revision of the full-account
