@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
 import {
   applyRemoteAdded,
+  applyRemoteModified,
   invalidateAdopters,
   registerHidden,
   removeHidden,
@@ -1583,8 +1584,9 @@ test('non-JSON state fails through notifyFailure at save time, mutating nothing'
   expect(controller.owes('n'), 'the rejected save creates no owed generation').toBe(false)
   expect(calls.filter(c => c.op == 'create' || c.op == 'update')).toHaveLength(0)
 
-  // a legal toJSON can throw a SYMBOL, which String() rethrows on — the hook must receive the raw
-  // value and adapters must format it guardedly (round 38; the production adapter is guarded)
+  // a legal toJSON can throw a SYMBOL. the controller passes the RAW value to the hook — that is
+  // all this pins; production's modal formatter is guarded separately (template interpolation of a
+  // Symbol throws, and hostile coercion can too — String(Symbol) itself is fine)
   expect(
     controller.save('n', {
       toJSON: () => {
@@ -1596,24 +1598,52 @@ test('non-JSON state fails through notifyFailure at save time, mutating nothing'
   expect(typeof errors.at(-1), 'the raw thrown value reaches the hook').toBe('symbol')
 })
 
-test('rejecting a NEW invalid value does not erase an older valid owed generation', async () => {
-  // round-38 scoping: "creates no owed generation" must not read as "clears owed" — the older
-  // valid work is still owed, still retryable, and remote application stays suppressed for it
-  const gate = deferred<void>()
+test('rejecting a NEW invalid value keeps the older owed generation AND rolls the owner back to it', async () => {
+  // round-39: the rollback baseline must be the last ACCEPTED local view. while D is owed, owes()
+  // suppresses owner synchronization, so the applied index can hold remote C the owner never saw —
+  // restoring C would discard the accepted owed D, and the local-change callback could then save C
+  // and supersede D. the SDK acknowledgement (not encryption, which owns the name chain) is held
+  // so D stays owed while C applies
+  const ack = deferred<void>()
+  const published: any[] = []
   const h = harness()
+  const { idx, calls } = h
   const controller = createHiddenPersistence({
     ...h.deps,
-    encryptState: async state => {
-      await gate.promise
-      return { cipher: 'cipher:' + state.text }
+    createDoc: async (id, data) => {
+      calls.push({ op: 'create', id, text: data.cipher ?? data.text })
+      await ack.promise
     },
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
   })
-  expect(controller.save('n', { mine: 1 }), 'valid save accepted').toBe(true)
-  await flush()
-  expect(controller.owes('n'), 'the valid generation is owed').toBe(true)
-  expect(controller.save('n', { bad: BigInt(1) }), 'later invalid value rejected').toBe(false)
-  expect(controller.owes('n'), 'the OLDER generation is still owed').toBe(true)
-  gate.resolve()
+  expect(controller.save('n', { mine: 'D' }), 'valid save accepted').toBe(true)
   for (let i = 0; i < 6; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'create'), 'and it still lands').toHaveLength(1)
+  expect(calls.filter(c => c.op == 'create'), 'D was issued').toHaveLength(1)
+  expect(controller.owes('n'), 'D is still owed (unacknowledged)').toBe(true)
+  // remote C applies to the index while D is owed (owner sync is suppressed by owes())
+  applyRemoteModified(idx, { id: idx.byName.get('n')!.id, name: 'n', item: { mine: 'C' } })
+  expect(idx.byName.get('n')!.item, 'the applied index holds C').toEqual({ mine: 'C' })
+
+  expect(controller.save('n', { bad: BigInt(1) }), 'invalid E rejected').toBe(false)
+  expect(controller.owes('n'), 'the OLDER generation is still owed').toBe(true)
+  expect(published.at(-1), 'rollback publishes owed D, never applied C').toEqual({ mine: 'D' })
+  // ... and the issued payload was D, not merely "one create occurred"
+  expect(itemOf(calls.find(c => c.op == 'create')!.text)).toEqual({ mine: 'D' })
+  ack.resolve()
+})
+
+test('rejection with NOTHING owed rolls the owner back to the applied state', async () => {
+  const published: any[] = []
+  const h = harness()
+  const { idx } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
+  })
+  idx.byId.set('a1', { id: 'a1', name: 'n', item: { applied: true } })
+  idx.byName.set('n', idx.byId.get('a1')!)
+  expect(controller.save('n', { bad: BigInt(1) })).toBe(false)
+  expect(published.at(-1), 'the applied index is the fallback baseline').toEqual({ applied: true })
+  expect(controller.save('fresh', { bad: BigInt(1) })).toBe(false)
+  expect(published.at(-1), 'and {} when the name has nothing at all').toEqual({})
 })

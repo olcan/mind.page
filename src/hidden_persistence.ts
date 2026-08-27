@@ -73,8 +73,9 @@ export type HiddenPersistenceDeps = {
   // reports a save failure to something the user can see. TWO shapes now reach it (round 38): a
   // TERMINAL write failure (a settled permission/validation error, not an offline retry), where
   // the record stays retryable; and a PRE-ACCEPTANCE validation rejection from save() — non-JSON
-  // state — where no owed record exists at all and save() returned false. `error` is an arbitrary
-  // thrown JavaScript value: the adapter must format it guardedly (String() of a Symbol throws)
+  // state — where the rejected save created no owed record and save() returned false. `error` is
+  // an arbitrary thrown JavaScript value: the adapter must format it guardedly (template
+  // interpolation of a Symbol throws, as does hostile coercion — String(Symbol) itself is fine)
   notifyFailure: (name: string, error: unknown) => void
   // whether the latest hidden application for this document SUCCEEDED. the write barrier is
   // settle-only by design (an unrelated listener failure must never turn a committed firestore
@@ -525,7 +526,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // BigInt, a throwing toJSON) must fail through the same user-visible hook as a settled
       // write failure — not synchronously out of save() after the index was already mutated
       // (round 37). the rejection creates NO owed generation; an older valid generation already
-      // owed stays owed, so remote application is not suppressed and prior work still lands.
+      // owed stays owed and still lands. (owes() DOES keep suppressing owner synchronization and
+      // remote-change notification for that name meanwhile — index application is what is never
+      // skipped — which is exactly why the rollback above must prefer the owed localIntent.)
       // returns false so the OWNER boundary can settle the rejection (roll its state back or
       // suppress the repeat) — the index stays truthful and unchanged, and without that
       // settlement the same invalid value would re-trigger invalidation and this hook on every
@@ -536,6 +539,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           intent = cloneState(item)
         } catch (e) {
           console.error(`hidden save for '${name}' rejected: state is not JSON-serializable:`, e)
+          // ROLL BACK THE OWNER HERE, where both inputs live (round 39). the last ACCEPTED local
+          // view is what must be restored, and that is NOT always the applied index: while an
+          // older valid generation is owed, owes() deliberately suppresses owner synchronization,
+          // so the applied index may hold a remote value the owner never saw — restoring THAT
+          // would discard the accepted owed view, and the local-change callback running after the
+          // replacement could save it and supersede the owed work. the owed localIntent wins;
+          // the applied index (or {}) is the fallback when nothing is owed
+          const op = owed.get(name)
+          deps.syncOwner(name, cloneState(op ? op.localIntent : (deps.index().byName.get(name)?.item ?? {})))
           deps.notifyFailure(name, e)
           return false
         }

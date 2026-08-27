@@ -761,13 +761,14 @@
             // never existed is simply not created
             if (modified) {
               if (_.isEmpty(__item.global_store) && !hiddenItemsByName.has(name)) return // nothing to record
-              // a REJECTED save (non-JSON state) is settled HERE, at the owner boundary: the
-              // applied index is truthful and unchanged, so leaving the invalid value in the
-              // owner's store would re-run this whole modified branch — invalidation, listeners,
-              // the failure modal — on every later automatic save pass. restoring the last
-              // applied state makes the rejection one notification/change cycle (round 38)
-              if (!saveHiddenItem(name, _.cloneDeep(__item.global_store)))
-                __item.global_store = _.cloneDeep(hiddenItemsByName.get(name)?.item ?? {})
+              // a REJECTED save (non-JSON state) already rolled the owner back INSIDE the
+              // controller, which owns the choice of baseline — the owed localIntent when a valid
+              // generation is still owed (the applied index may hold remote state the owner never
+              // saw while owes() suppresses sync), else the applied state. RETURN, deliberately:
+              // rejection means "not accepted", so the local-change listeners below must not run
+              // for it — they would observe the restored baseline and could immediately resave it
+              // (round 39; this early return is the pinned product behavior, not an accident)
+              if (!saveHiddenItem(name, _.cloneDeep(__item.global_store))) return
             }
           }
 
@@ -8775,9 +8776,10 @@
     echoApplied: id => hiddenApplyOk.get(id) !== false,
     notifyFailure: (name, error) => {
       const owner = name.match(/^global_store_(.+)$/)?.[1] ?? name
-      // GUARDED formatter: `error` is an arbitrary thrown value, and String() of a Symbol (a
-      // legal toJSON throw) itself throws — which would let save() escape synchronously despite
-      // its contract (round 38)
+      // GUARDED formatter: `error` is an arbitrary thrown value. String(Symbol) is fine — the
+      // real hazards are TEMPLATE INTERPOLATION of a Symbol (which throws) and hostile coercion
+      // (a `message` getter or toString that throws), either of which would let save() escape
+      // synchronously despite its contract (rounds 38-39)
       let detail = 'unknown error'
       try {
         detail = String((error as any)?.message ?? error)

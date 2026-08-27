@@ -4,6 +4,10 @@ import { defineConfig } from '@playwright/test'
 // full config (playwright.config.ts) also runs these as its `unit` project inside the e2e stack
 export default defineConfig({
   testDir: 'tests/unit',
+  // WITH fullyParallel a focused run of one large file uses all four workers (round 39: the
+  // hidden-persistence file alone drops ~40%); these tests share no state. the full e2e config
+  // keeps its serialized lanes unchanged
+  fullyParallel: true,
   // a FIXED small cap, not undefined: these tests share no state, so four workers cut the fast
   // loop ~25-30% (round 37), while unbounded workers would let a large machine oversubscribe for
   // no gain at this suite size. the full e2e config keeps its serialized `unit` project unchanged
