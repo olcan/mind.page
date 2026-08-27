@@ -6,6 +6,13 @@ import { createHiddenIngress, type Apply, type Outcome } from '../../src/hidden_
 // handles, deferred Apply closures, and no real timers. synchronization is DeliveryHandle.done and
 // AuthorityLease.done — never microtask-count loops. one fresh coordinator per test.
 
+// an explicit event-loop checkpoint: drains enough microtask turns that any settled promise
+// chain in the module (tail hops included) has fully propagated. used ONLY to assert that
+// something did NOT happen — positive progress always awaits the real done promises
+async function checkpoint() {
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+}
+
 function deferred<T = void>() {
   let resolve!: (v: T) => void, reject!: (e: any) => void
   const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)))
@@ -64,19 +71,6 @@ test('S1 blocks, then strictly higher same-cell S2 applied heals it', async () =
   expect(await s2.done).toBe('applied')
   expect(c.gate(), 'healed').toBe('writable')
   expect(c.hasOutstanding('d'), 'the healed block is gone, the success is pruned').toBe(false)
-})
-
-test("S3 blocks after S2 was received; S2's later success does NOT heal newer S3", async () => {
-  const c = createHiddenIngress()
-  const s2gate = gatedApply()
-  const s2 = c.open('d')
-  const s3 = c.open('d')
-  s2.ready(s2gate.apply)
-  s3.ready(failing) // S3 will block once its slot runs (behind S2)
-  s2gate.gate.resolve() // S2 succeeds AFTER S3 was received
-  expect(await s2.done).toBe('applied')
-  expect(await s3.done).toBe('blocked')
-  expect(c.gate(), 'the NEWER block survives an older success').toBe('blocked')
 })
 
 test('a success in an UNRELATED cell heals nothing', async () => {
@@ -158,7 +152,10 @@ test('blocking a ready handle behind an older running slot: its closure no-ops A
   expect(c.gate(), 'S3 healed the S2 block').toBe('writable')
 })
 
-test("READY-ABORT under the global gate: S1 running, S2 ready then blocked, S1 applied and pruned — S2's block still gates", async () => {
+test("a NEWER block survives an older success (ready-abort): S1 running, S2 ready then blocked, S1 applied — S2 still gates", async () => {
+  // covers BOTH design labels: "S3 blocks after S2 was received; S2's later success does not heal
+  // newer S3" and the ready-abort row — the newer retained block here exists BEFORE the older
+  // success completes, which the deleted weaker variant never established (round 43)
   const c = createHiddenIngress()
   const g = gatedApply()
   const s1 = c.open('d')
@@ -235,16 +232,15 @@ test('whenActionable delivers writable and blocked, never pending; whenWritable 
   expect(await c.whenActionable().promise, 'immediate on an empty coordinator').toBe('writable')
 
   const h = c.open('d')
-  const actionable = c.whenActionable()
+  const actionable = c.whenActionable() // registered SYNCHRONOUSLY...
   const writable = c.whenWritable()
   let actionableResolved: string | undefined
   let writableResolved = false
   void actionable.promise.then(g => (actionableResolved = g))
   void writable.promise.then(() => (writableResolved = true))
-  await Promise.resolve()
-  expect(actionableResolved, 'pending resolves neither').toBe(undefined)
-
-  h.ready(failing) // pending -> blocked
+  // ... and the transition happens in the SAME turn, before any yield: only synchronous
+  // registration (no deferred push) can observe it (round 43)
+  h.block()
   expect(await h.done).toBe('blocked')
   await Promise.resolve()
   expect(actionableResolved, 'blocked IS deliverable to the initial wait').toBe('blocked')
@@ -269,17 +265,29 @@ test('whenActionable while already blocked resolves immediately; whenWritable do
   expect(resolved, 'writable-only keeps waiting while blocked — no immediate spin').toBe(false)
 })
 
-test('a wait cancelled while pending ignores every later transition', async () => {
+test('a wait cancelled while pending ignores every later transition — both levels', async () => {
   const c = createHiddenIngress()
+  expect(await c.whenWritable().promise, 'immediate on an initially writable coordinator').toBe(undefined)
   const h = c.open('d')
   const sub = c.whenActionable()
   let resolved = false
   void sub.promise.then(() => (resolved = true))
   sub.cancel()
-  h.ready(applied)
-  expect(await h.done).toBe('applied')
+  h.ready(failing) // pending -> blocked: the cancelled actionable wait must stay silent
+  expect(await h.done).toBe('blocked')
+  // cancel a whenWritable WHILE BLOCKED, before healing — the round-43 leak shape: the design
+  // promises cancellation for both levels, and this waiter would otherwise be retained until a
+  // writable that a permanently corrupt record can prevent forever
+  const healingWait = c.whenWritable()
+  let healed = false
+  void healingWait.promise.then(() => (healed = true))
+  healingWait.cancel()
+  const heal = c.open('d')
+  heal.ready(applied)
+  expect(await heal.done).toBe('applied')
   await Promise.resolve()
-  expect(resolved, 'cancelled: never resolves').toBe(false)
+  expect(resolved, 'cancelled actionable: never resolves').toBe(false)
+  expect(healed, 'cancelled writable: never resolves either').toBe(false)
 })
 
 // ---- pruning and compaction ----
@@ -288,10 +296,16 @@ test('a blocked delivery is compacted after its echo waiter resolves, and later 
   const c = createHiddenIngress()
   const echo = c.armEcho('d', 'cipher-w')
   const h = c.open('d', 'cipher-w')
+  // ordered observers attached BEFORE the application runs: awaiting done first would prove both
+  // settle, not that the echo settles first (round 43)
+  const order: string[] = []
+  void echo.promise.then(() => order.push('echo'))
+  void h.done.then(() => order.push('done'))
   h.ready(failing)
   expect(await h.done).toBe('blocked')
-  // the echo resolved FIRST (as blocked), from the matching handle's terminal outcome
-  expect(await echo.promise).toBe('blocked')
+  expect(await echo.promise, 'resolved from the matching handle, as blocked').toBe('blocked')
+  await Promise.resolve()
+  expect(order, 'the echo resolves BEFORE done (and before compaction)').toEqual(['echo', 'done'])
   // the observable half of compaction: the retained block still heals normally afterward. that
   // the cipher/apply references were cleared is reviewed at the two clearing assignments — a
   // behavioral test cannot prove a reference was dropped
@@ -461,29 +475,41 @@ test('invalidateAuthority takes a fresh ordinal, staling every earlier basis', a
   c.invalidateAuthority()
   expect(c.authorityUsable(), 'the outside revocation is newer than the basis').toBe(false)
   const next = c.reserveAuthority(true)
+  // the outside revocation CONSUMED an ordinal: without one, equality with the old basis would
+  // also read unusable and this test would pass vacuously (round 43)
+  expect(next.receipt, 'a fresh ordinal was taken between the two leases').toBe(lease.receipt + 2)
   next.seal()
   await next.done
   expect(c.authorityUsable(), 'and a newer candidate recovers').toBe(true)
 })
 
-test('done order: an unsettled older slot holds a sealed newer candidate, basis observable at resolution', async () => {
+test('done order: an unsettled older slot holds a sealed newer candidate; revoke() does not settle', async () => {
   const c = createHiddenIngress()
   const c1 = c.reserveAuthority(false)
   const c2 = c.reserveAuthority(true)
   c2.seal()
+  let c1done = false
   let resolvedUsable: boolean | undefined
+  void c1.done.then(() => (c1done = true))
   void c2.done.then(() => (resolvedUsable = c.authorityUsable()))
-  await Promise.resolve()
-  await Promise.resolve()
-  expect(resolvedUsable, "C2's ordered effect waits for C1").toBe(undefined)
+  // the older lease REVOKES — twice, pinning idempotence — but does NOT seal: revoke() is
+  // nonterminal and must not settle the slot (round 43: a revoke that resolved settlement passed
+  // every earlier row, because they always sealed in the same turn)
+  c1.revoke()
+  c1.revoke()
+  await checkpoint()
+  expect(c1done, "revoke() did not settle C1's slot").toBe(false)
+  expect(resolvedUsable, "C2's ordered effect still waits for C1").toBe(undefined)
   c1.seal()
   await c2.done
-  expect(resolvedUsable, 'the basis decision was already observable when done resolved').toBe(true)
+  expect(c1done).toBe(true)
+  // C1 revoked at receipt 1; C2's basis is receipt 2 > invalidatedThrough 1 — usable, and the
+  // decision was already observable when done resolved
+  expect(resolvedUsable, 'the basis decision was observable at resolution').toBe(true)
 })
 
 test('authority overtaking: an older candidate cannot make authority usable after a newer invalidation', async () => {
   const c = createHiddenIngress()
-  const g = gatedApply()
   const older = c.reserveAuthority(true) // slow: will seal last
   const newer = c.reserveAuthority(false)
   newer.revoke() // a fromCache-shaped invalidation, newer by receipt
@@ -492,5 +518,4 @@ test('authority overtaking: an older candidate cannot make authority usable afte
   await older.done
   await newer.done
   expect(c.authorityUsable(), 'basis (receipt 1) <= invalidatedThrough (receipt 2)').toBe(false)
-  void g // unused gate silences no-unused lint in this schedule
 })

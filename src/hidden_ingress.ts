@@ -84,11 +84,10 @@ type EchoWaiter = {
   cipher: string
   minSeq: number // armed against the per-id receipt frontier: an older already-open matching
   // cipher must not satisfy a newly armed waiter
-  cancelled: boolean
   resolve: (outcome: Outcome) => void
 }
 
-type Waiter<T> = { cancelled: boolean; resolve: (value: T) => void }
+type Waiter<T> = { resolve: (value: T) => void }
 
 export function createHiddenIngress() {
   // cells persist for the page lifetime once created: proving no writer or waiter still
@@ -129,15 +128,15 @@ export function createHiddenIngress() {
   function notifyWaiters() {
     const g = gate()
     if (g == 'pending') return
-    for (const w of actionableWaiters.splice(0)) if (!w.cancelled) w.resolve(g)
-    if (g == 'writable') for (const w of writableWaiters.splice(0)) if (!w.cancelled) w.resolve()
+    for (const w of actionableWaiters.splice(0)) w.resolve(g)
+    if (g == 'writable') for (const w of writableWaiters.splice(0)) w.resolve()
   }
 
   function settleEchoWaiters(delivery: Delivery, id: string) {
     if (delivery.cipher === undefined) return // no ciphertext, no echo (removals, transitions)
     for (let i = echoWaiters.length - 1; i >= 0; i--) {
       const w = echoWaiters[i]
-      if (w.cancelled || w.id !== id || w.cipher !== delivery.cipher || delivery.seq <= w.minSeq) continue
+      if (w.id !== id || w.cipher !== delivery.cipher || delivery.seq <= w.minSeq) continue
       echoWaiters.splice(i, 1)
       w.resolve(delivery.outcome!)
     }
@@ -172,6 +171,8 @@ export function createHiddenIngress() {
     const done = new Promise<Outcome>(res => (resolveDone = res))
     const delivery: Delivery = { seq, phase: 'open', cipher, resolveDone }
     cell.deliveries.set(seq, delivery)
+    // no waiter notification here: opening leaves the gate pending unless an existing block
+    // already dominates, and neither state can satisfy a stored waiter (round 43)
 
     // reserve THIS delivery's application slot on the tail at receipt. the slot waits for
     // ready()/block() to release it, runs the closure if one arrived, and NEVER rejects — a
@@ -190,8 +191,6 @@ export function createHiddenIngress() {
         finalize(cell!, id, delivery, 'blocked')
       }
     })
-    notifyWaiters() // an open delivery makes the gate pending (a no-op notification, kept for shape)
-
     return {
       ready(apply: Apply) {
         if (delivery.phase != 'open') return // CAS: late ready after block() no-ops
@@ -213,13 +212,24 @@ export function createHiddenIngress() {
   // ---- waits ----
   // `immediate` returns [value] when the wait should resolve NOW (level-triggered), undefined to
   // register. the one-element tuple lets void-valued waits resolve immediately without a sentinel
+  // cancellation SPLICES the exact waiter out (as armEcho's does): a flag-only cancel retained
+  // the waiter, its resolver, its promise and any attached save continuation until the gate next
+  // satisfied its level — which a permanently corrupt record can prevent forever (round 43). with
+  // removal, no cancelled flag is needed: cancellation and the synchronous splice-drain cannot
+  // interleave in single-threaded JS
   function subscribe<T>(list: Waiter<T>[], immediate: () => [T] | undefined): Subscription<T> {
     const now = immediate()
     if (now) return { promise: Promise.resolve(now[0]), cancel() {} }
-    const waiter: Waiter<T> = { cancelled: false, resolve: () => {} }
+    const waiter: Waiter<T> = { resolve: () => {} }
     const promise = new Promise<T>(res => (waiter.resolve = res))
     list.push(waiter)
-    return { promise, cancel: () => void (waiter.cancelled = true) }
+    return {
+      promise,
+      cancel() {
+        const i = list.indexOf(waiter)
+        if (i >= 0) list.splice(i, 1)
+      },
+    }
   }
 
   // the INITIAL wait: resolves when the gate is writable OR blocked (the writer's required
@@ -241,13 +251,12 @@ export function createHiddenIngress() {
   // already-open matching cipher cannot satisfy a newly armed waiter. arming neither advances
   // lastSeq nor allocates a cell
   function armEcho(id: string, cipher: string): Subscription<Outcome> {
-    const waiter: EchoWaiter = { id, cipher, minSeq: receiptFrontier(id), cancelled: false, resolve: () => {} }
+    const waiter: EchoWaiter = { id, cipher, minSeq: receiptFrontier(id), resolve: () => {} }
     const promise = new Promise<Outcome>(res => (waiter.resolve = res))
     echoWaiters.push(waiter)
     return {
       promise,
       cancel() {
-        waiter.cancelled = true
         const i = echoWaiters.indexOf(waiter)
         if (i >= 0) echoWaiters.splice(i, 1)
       },
