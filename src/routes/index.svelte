@@ -324,6 +324,32 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
+    // ONE worker deriver per tab (lazy: the worker exists only after the first derivation)
+    const kdfWorkerDeriver = createWorkerDeriver()
+    // KDF spike hooks (design: notes/design/mind_page_kdf_migration.md). __kdfSmoke proves the
+    // WORKER path — Vite bundling, WASM load, round trip — with the CHEAP TEST parameters (this
+    // is a smoke, not the resolver; the production resolver maps versions only through the
+    // code-owned table). __kdfBenchmark runs the REAL v1 parameters once and reports ms — the
+    // fleet benchmark, opt-in, never asserted
+    window['__kdfSmoke'] = async () => {
+      const salt = new Uint8Array(16).fill(7)
+      const key = await kdfWorkerDeriver({
+        password: new TextEncoder().encode('smoke'),
+        salt,
+        params: { memorySize: 8 * 1024, iterations: 1, parallelism: 1, hashLength: 32 },
+      })
+      return { length: key.length, head: Array.from(key.slice(0, 4)) }
+    }
+    window['__kdfBenchmark'] = async () => {
+      const { KDF_VERSIONS } = await import('../kdf')
+      const start = performance.now()
+      const key = await kdfWorkerDeriver({
+        password: new TextEncoder().encode('benchmark phrase'),
+        salt: new Uint8Array(16).fill(9),
+        params: KDF_VERSIONS[1],
+      })
+      return { ms: Math.round(performance.now() - start), length: key.length }
+    }
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
     window['_exists'] = _exists
@@ -6338,6 +6364,7 @@
     scheduleDelivery,
     type Delivery,
   } from '../hidden_delivery'
+  import { createWorkerDeriver } from '../kdf_client'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'

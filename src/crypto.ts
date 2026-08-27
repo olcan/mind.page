@@ -72,3 +72,110 @@ export async function decryptBytesWithSecret(
   // backwards compatibility mode: convert utf8-decoded text to uint8 array (code points <= 255 only)
   return byteStringToArray(new TextDecoder().decode(text_buffer))
 }
+
+// ---- v1: versioned, KDF-keyed ciphertext -------------------------------------------------------
+// (See the KDF migration design, notes/design/mind_page_kdf_migration.md revision 2, in the vault
+// repo.) The v0 functions above stay FROZEN — they hash their string input again, so a derived key
+// passed through them would silently become SHA-256(base64(Argon2(...))). The v1 API takes the 32
+// RAW key bytes from src/kdf.ts and imports them directly.
+//
+// Frame: text `'1!'` + iv hex (24) + base64(cipher); bytes `'~1!'` + iv hex + raw cipher bytes.
+// '!' is outside both hex and base64, so v0/v1 detection is one prefix test and v0 remains the
+// untagged form. AAD is one EXACT code-owned domain string per mode — it authenticates the regime
+// the reader selected from the frame, and keeps the same key/ciphertext from crossing API domains.
+// Neither uid nor salt is repeated in AAD: the per-account salt already makes the key distinct.
+
+const V1_TEXT_AAD = new TextEncoder().encode('mindpage.v1.text')
+const V1_BYTES_AAD = new TextEncoder().encode('mindpage.v1.bytes')
+
+// the OBSERVABLE failure taxonomy (design: "what is actually observable"). AES-GCM cannot say WHY
+// authentication failed — wrong key, modified cipher/tag and wrong AAD are one OperationError —
+// so the codec distinguishes only what it can see. "Wrong phrase" is an interpretation SECRET
+// ACQUISITION makes before a candidate is validated, never a fact this layer returns
+export type CipherFailure = 'malformed-frame' | 'unsupported-version' | 'authentication-failed'
+export class CipherError extends Error {
+  constructor(
+    public readonly kind: CipherFailure,
+    detail: string
+  ) {
+    super(`${kind}: ${detail}`)
+  }
+}
+
+/** Imports 32 raw derived key bytes as a non-extractable AES-GCM key (cache the result). */
+export async function importV1Key(keyBytes: Uint8Array<ArrayBuffer>, usages: KeyUsage[] = ['encrypt', 'decrypt']) {
+  if (keyBytes.length != 32) throw new CipherError('malformed-frame', `v1 key must be 32 bytes, got ${keyBytes.length}`)
+  return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, usages)
+}
+
+const IV_HEX = /^[0-9a-f]{24}$/
+
+export async function encryptV1Text(text: string, key: CryptoKey): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: V1_TEXT_AAD },
+    key,
+    new TextEncoder().encode(text)
+  )
+  return '1!' + ivToHex(iv) + btoa(byteArrayToString(new Uint8Array(cipher)))
+}
+
+export async function decryptV1Text(cipher: string, key: CryptoKey): Promise<string> {
+  if (!cipher.startsWith('1!')) throw new CipherError('unsupported-version', `not a v1 text cipher`)
+  const ivHex = cipher.slice(2, 26)
+  if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
+  let bytes: Uint8Array<ArrayBuffer>
+  try {
+    bytes = byteStringToArray(atob(cipher.slice(26)))
+  } catch {
+    throw new CipherError('malformed-frame', 'bad base64')
+  }
+  try {
+    const text = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_TEXT_AAD },
+      key,
+      bytes
+    )
+    return new TextDecoder().decode(text)
+  } catch {
+    // cause unknowable by construction: wrong key, modified cipher/tag, or wrong AAD
+    throw new CipherError('authentication-failed', 'v1 text')
+  }
+}
+
+export async function encryptV1Bytes(bytes: Uint8Array<ArrayBuffer>, key: CryptoKey): Promise<Uint8Array<ArrayBuffer>> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: V1_BYTES_AAD }, key, bytes)
+  return concatByteArrays(byteStringToArray('~1!' + ivToHex(iv)), new Uint8Array(cipher))
+}
+
+export async function decryptV1Bytes(
+  cipher: Uint8Array<ArrayBuffer>,
+  key: CryptoKey
+): Promise<Uint8Array<ArrayBuffer>> {
+  const prefix = byteArrayToString(cipher.subarray(0, 3))
+  if (prefix != '~1!') throw new CipherError('unsupported-version', 'not a v1 bytes cipher')
+  const ivHex = byteArrayToString(cipher.subarray(3, 27))
+  if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
+  try {
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_BYTES_AAD },
+      key,
+      cipher.subarray(27)
+    )
+    return new Uint8Array(plain)
+  } catch {
+    throw new CipherError('authentication-failed', 'v1 bytes')
+  }
+}
+
+// what regime a stored TEXT value selects: '1!'-tagged v1; an untagged 24-hex-iv v0; a tagged
+// value from a FUTURE version ('<digits>!' that is not '1'); or a malformed frame. the reader
+// dispatches on this ONE test, and the unsupported-version answer is what a too-old build shows
+// as "reload this tab" — for builds that HAVE this code; a genuinely old build has no recognizer,
+// which is why the rollout gate is the owner checklist, not this message
+export function classifyTextCipher(cipher: string): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
+  const tagged = cipher.match(/^(\d+)!/)
+  if (tagged) return tagged[1] == '1' ? 'v1' : 'unsupported-version'
+  return IV_HEX.test(cipher.slice(0, 24)) ? 'v0' : 'malformed-frame'
+}
