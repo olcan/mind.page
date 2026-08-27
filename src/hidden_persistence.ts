@@ -207,8 +207,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     owed.get(name)?.generation == generation ? owed.get(name) : undefined
 
   // enqueue work for the name; failures settle inside each task, so the chain always continues.
-  // saving state is NOT mirrored here any more: it belongs to the name (see `saving`), because a
-  // wrapper can be replaced, renamed or removed while its write is still owed
+  // saving state is NOT mirrored here: it is DERIVED per name (see isSaving), because a wrapper
+  // can be replaced, renamed or removed while its write is still owed
   function enqueue(name: string, task: () => Promise<void>) {
     const next = (chains.get(name) ?? Promise.resolve()).then(task, task)
     chains.set(name, next)
@@ -264,11 +264,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const isPending = (_id: string) => !gateWritable()
 
 
-  // NAMES CURRENTLY SAVING: set when save() accepts an intent, cleared when that generation's
-  // write is issued (or the work is abandoned). ONE boolean per name, read by isSaving — no
-  // promise, no wrapper identity, nothing to transfer when the holder changes underneath
-  const saving = new Set<string>()
-
   // THE NAME-OWNED WAKE: at most one live subscription per name, REUSED across supersession —
   // `Owed` already represents the latest intent for the name, so a parked waiter serves whatever
   // the name owes when it fires. only stop cancels one. reporting is separately GENERATION-scoped
@@ -300,22 +295,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // waiting is reported rather than silently waited through
       const sub: { promise: Promise<unknown>; cancel(): void } =
         g == 'blocked' ? deps.whenWritable() : deps.whenActionable()
-      // RACE against our own cancellation. the coordinator's cancel() splices the waiter and
-      // deliberately does NOT settle its promise — correct for it, but it means a parked schedule
-      // would never resume, never reach its finally, and leave a placeholder mirror standing
-      // forever. this signal is writer-owned; the coordinator keeps its contract
-      let resolveCancelled!: () => void
-      const cancelled = new Promise<void>(res => (resolveCancelled = res))
-      const entry = {
-        cancel() {
-          sub.cancel()
-          resolveCancelled()
-        },
-      }
-      wakes.set(name, entry)
+      // no cancellation race any more: it existed ONLY so a cancelled park could reach its finally
+      // and settle the wrapper placeholder. isSaving() is derived, so a cancelled schedule has
+      // nothing to clean up and simply never resumes — which is the right outcome for a page whose
+      // writer is permanently stopped. the coordinator's cancel() keeps its own contract
+      wakes.set(name, sub)
       if (g == 'blocked') reportBlocked(name)
-      await Promise.race([sub.promise, cancelled])
-      if (wakes.get(name) === entry) wakes.delete(name)
+      await sub.promise
+      if (wakes.get(name) === sub) wakes.delete(name)
       // LOOP rather than trust the level: the wake resolved for the gate at that instant, and a
       // new delivery can open before this continuation runs
     }
@@ -325,26 +312,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // application enqueues on that same chain, so a writer that waits while holding it deadlocks
   // against the very delivery that would release it
   function scheduleOwed(name: string) {
-    // SAVING, SYNCHRONOUSLY: saving_global_store must be true the moment the user saves (this
-    // file's window contract), and the gate wait below happens before the chain is taken. one
-    // name-owned boolean needs no placeholder promise and nothing to transfer when the holder is
-    // replaced, renamed or removed while we are parked
-    saving.add(name)
+    // nothing to mark: isSaving() is DERIVED from the owed phase and the gate, so the observable
+    // is already true the moment save() accepted this intent, and stays true across a refusal and
+    // its requeue without a scheduler continuation having to maintain it
     void (async () => {
-      try {
-        if (!owed.has(name)) return
-        if (!(await awaitWritable(name))) return
-        // RECHECK AFTER THE AWAIT: awaitWritable can return true from an immediately fulfilled
-        // wake, and stop can land in the continuation gap. without this the writer enqueues, and
-        // persistOwed then prompts for a phrase for a page that can never write again
-        if (stopped || !owed.has(name)) return
-        await enqueue(name, () => persistOwed(name))
-      } finally {
-        // the name stops saving when this scheduled attempt is over, however it ended. a retry
-        // schedules again and marks it saving again, synchronously, so the observable cannot
-        // flicker false between a refusal and its requeue
-        if (!owed.has(name) || owed.get(name)!.phase != 'queued') saving.delete(name)
-      }
+      if (!owed.has(name)) return
+      if (!(await awaitWritable(name))) return
+      // RECHECK AFTER THE AWAIT: awaitWritable can return true from an immediately fulfilled
+      // wake, and stop can land in the continuation gap. without this the writer enqueues, and
+      // persistOwed then prompts for a phrase for a page that can never write again
+      if (stopped || !owed.has(name)) return
+      void enqueue(name, () => persistOwed(name))
     })()
   }
 
@@ -356,7 +334,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const op = owed.get(name)
     if (!op || op.reportedBlocked) return
     op.reportedBlocked = true
-    saving.delete(name) // it is not saving, and will not be until a later delivery heals the block
     try {
       deps.notifyFailure(name, new Error(`hidden ingress blocked: '${name}' cannot be written until a later change for the affected document applies`))
     } catch (e) {
@@ -402,11 +379,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   function issueWrite(name: string, generation: number, id: string, data: Record<string, any>, create: boolean) {
     const op = currentOwed(name, generation)
     if (!op) return false // superseded before issue: no write, no finalization
-    op.phase = 'issued'
-    // ISSUED: it is in the SDK'"'"'s durable queue, which is where saving ends. the scheduler'"'"'s finally
-    // also clears it, but one microtask later (persistOwed awaits attemptWrite), and a reactive
-    // read in that gap would see a stale true
-    saving.delete(name)
+    op.phase = 'issued' // ... which is where isSaving() stops being true (see its derivation)
     const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
     write.then(
       () => {
@@ -445,7 +418,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const index = deps.index()
         if (index.byId.get(id)) removeHidden(index, id) // it does not exist server-side
         current.phase = 'queued'
-        void enqueue(name, () => persistOwed(name))
+        scheduleOwed(name) // the ONE gate-aware entry: taking the chain first only to find the
+        // gate shut and schedule again is the polling this replaced
       },
     )
     return true
@@ -669,12 +643,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       now.phase = 'queued'
       scheduleOwed(name)
     } catch (e) {
+      // STOP FIRST. acquireSecret() and ordinary-update encryption reject into THIS catch, not
+      // attemptCreate's — so a held prompt or encryption that rejects after stop would change the
+      // phase and report a SECOND failure for a generation stop already reported. there is no
+      // useful late outcome for a page whose ingress is terminal; the intent stays owed
+      if (stopped) return
       const now = current()
       if (now) now.phase = 'failed' // retryable: a later save schedules it again
       // an intentional phrase cancellation is an expected outcome: neither reported to the user
       // nor logged as an error. everything else is a terminal BUILD failure (secret, confirmation,
       // encryption) and is just as invisible as a terminal WRITE failure was — owes() stays true,
-      // the saving mirror clears, and owner notifications stay suppressed
+      // isSaving() goes false with the phase, and owner notifications stay suppressed
       if (isCancellation(e)) return
       console.error(`persisting hidden item '${name}' failed:`, e)
       if (now) deps.notifyFailure(name, e)
@@ -699,11 +678,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       for (const name of [...wakes.keys()]) cancelWake(name)
       const notifications: Array<[string, unknown]> = []
       for (const [name, op] of owed) {
-        // ORDER MATTERS: the issued exclusion comes FIRST. an issued generation is owned by its
-        // SDK result, and clearing its mirror here contradicted that ownership (and this block's
-        // own comment) — the write is still in flight, so the name is still saving
+        // an issued generation is owned by its SDK result: it is not reported as a stopped build,
+        // and isSaving() already answers false for it by derivation
         if (op.phase == 'issued') continue
-        saving.delete(name) // it stops saving immediately
         if (op.reportedStop) continue
         op.reportedStop = true
         notifications.push([name, stoppedError()])
@@ -849,12 +826,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       return owed.has(name)
     },
 
-    // whether this NAME has a change being built or waiting to be built. true from the moment
-    // save() accepts an intent until that generation's write reaches the SDK queue; false again
-    // while a blocked gate holds it, since it is not saving then and cannot until healing.
-    // read by _Item.saving_global_store
+    // whether this NAME has a change being built or waiting to be built. DERIVED from the state
+    // that already owns the answer rather than tracked separately: a parallel set diverged three
+    // ways (a healed block never re-added the name, a re-block shared the report-once early
+    // return, and not-found recovery enqueued without it), and every one of those was a lie to
+    // _Item.saving_global_store. queued is saving while the gate can still progress; building is
+    // saving; issued and failed are not; stop wins over all of them
     isSaving(name: string) {
-      return saving.has(name)
+      const phase = owed.get(name)?.phase
+      return !stopped && (phase == 'building' || (phase == 'queued' && deps.gate() != 'blocked'))
     },
 
     // applies a remote transition (add/modify/remove) for the name ON ITS CHAIN, so it can

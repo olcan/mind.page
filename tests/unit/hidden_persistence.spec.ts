@@ -487,9 +487,9 @@ test('remote transitions are not delayed by an unacknowledged local write', asyn
   ack.resolve()
 })
 test('saving belongs to the NAME: a wrapper replaced mid-write does not disturb it', async () => {
-  // the mirror used to live on the wrapper, so a replacement mid-write meant the object the owner
-  // reads had no mirror while a write for its name was in flight. it is one name-owned boolean
-  // now, so a replacement is simply irrelevant to it (round 60)
+  // saving used to live on the wrapper, so a replacement mid-write meant the object the owner
+  // reads had no saving state while a write for its name was in flight. it is DERIVED per name
+  // now (rounds 60-61), so a replacement is simply irrelevant to it
   const gate = deferred<void>()
   let gated = true
   const h = harness()
@@ -1260,7 +1260,7 @@ test('an error whose message merely contains "cancel" is still reported', async 
 
 test('a terminal BUILD failure is reported, not only a terminal write failure', async () => {
   // round-20 finding 3: notifyFailure covered the asynchronous write rejection only. a rejecting
-  // confirmIndex produced no write, left owes() true, cleared the saving mirror and suppressed
+  // confirmIndex produced no write, left owes() true, made isSaving() false and suppressed
   // owner notifications indefinitely — with nothing but a console line to show for it
   const failures: string[] = []
   const h = harness()
@@ -2059,11 +2059,10 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
 })
 
 // ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
-// these three isolate the per-id receipt frontier and the global gate. NOT the wrapper half of
-// TargetToken: no current row pins that in isolation, and the adoption row often cited for it
-// arrives through a real delivery (advancing the frontier) and rebases the projection, so it
-// would pass without the wrapper comparison. that field is retained deliberately — the corpus
-// seam's same-id replacement is what will finally judge it (round 60)
+// these isolate each half of the issue token in turn: the per-id receipt frontier, the global
+// gate, and (in the adoption row below) the WRAPPER identity — whose only load-bearing site is
+// the adoption path, where the companion guards are a lower-id survivor check and the
+// pointer/projection CAS, none of which notice a same-id replacement (round 61)
 
 test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
   // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
@@ -2154,6 +2153,10 @@ test('a delivery opening during confirmation stops the create: no adoption, no p
   for (let i = 0; i < 8; i++) await flush()
   expect(published, 'no owner publication behind a shut gate').toEqual([])
   expect(encrypted, 'and no encryption').toEqual([])
+  expect(
+    [...h.idx.byId.values()].filter(w => w.adopt_id),
+    'and no adoption pointer was set'
+  ).toEqual([])
   expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
   // once the gate heals the create completes normally
   held.ready(async () => {})
@@ -2171,6 +2174,7 @@ for (const [label, settle] of [
     const published: string[] = []
     const confirming = deferred<void>()
     const confirmStarted = deferred<void>()
+    const encrypted: string[] = []
     const h = harness()
     const controller = createHiddenPersistence({
       ...h.deps,
@@ -2179,6 +2183,13 @@ for (const [label, settle] of [
         await confirming.promise
       },
       syncOwner: n => void published.push(n),
+      encryptState: async state => {
+        encrypted.push(state.text)
+        const e: any = state
+        e.cipher = 'cipher:' + state.text
+        e.text = null
+        return e
+      },
       notifyFailure: n => void failures.push(n),
     })
     // a same-name SURVIVOR exists but does not hold the name, so a confirmation that returns
@@ -2189,14 +2200,153 @@ for (const [label, settle] of [
     controller.save('n', { mine: 1 })
     await confirmStarted.promise
     const before = [...h.idx.byId.keys()]
+    // the KEYS alone are too weak: without the fulfil guard, adoption mutates the pending
+    // wrapper's pointer and projection while preserving them. capture those directly, and count
+    // encryptions, so this row proves what its name says
+    const pendingBefore = [...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item] as const)
     controller.stop()
     expect(failures, 'stop reported this generation once').toEqual(['n'])
     published.length = 0
     settle(confirming)
     for (let i = 0; i < 10; i++) await flush()
     expect([...h.idx.byId.keys()], 'the late continuation mutated no index state').toEqual(before)
+    expect(
+      [...h.idx.byId.values()].map(w => [w.id, w.adopt_id, w.item] as const),
+      'no adoption pointer moved and no projection was rebased'
+    ).toEqual(pendingBefore)
+    expect(encrypted, 'and nothing was encrypted').toEqual([])
     expect(published, 'and published nothing').toEqual([])
     expect(failures, 'and reported nothing further').toEqual(['n'])
     expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
     expect(controller.owes('n'), 'the intent is still retained').toBe(true)
   })
+
+// ---- isSaving is DERIVED, so it cannot drift from the writer state (round 61) ----
+// each row is a case where the previous parallel Set said the wrong thing
+
+test('a blocked generation that HEALS is saving again through its build', async () => {
+  const encrypting = deferred<void>()
+  const encryptStarted = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      encryptStarted.resolve()
+      await encrypting.promise
+      const e: any = state
+      e.cipher = 'cipher:' + state.text
+      e.text = null
+      return e
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const bad = h.ingress.open('d2', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { mine: 1 })
+  expect(controller.isSaving('n'), 'a blocked gate is not saving').toBe(false)
+  const heal = h.ingress.open('d2', 'cipher:good')
+  heal.ready(async () => {})
+  expect(await heal.done).toBe('applied')
+  expect(controller.isSaving('n'), 'saving again the INSTANT the gate heals').toBe(true)
+  await encryptStarted.promise
+  expect(controller.isSaving('n'), 'and through the build').toBe(true)
+  encrypting.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(controller.isSaving('n'), 'false once issued').toBe(false)
+})
+
+test('a generation that heals and RE-BLOCKS is not saving, and is not reported twice', async () => {
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  const bad = h.ingress.open('d2', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 4; i++) await flush()
+  expect(failures, 'reported once').toEqual(['n'])
+  // a second corrupt cell blocks again
+  const bad2 = h.ingress.open('d3', 'cipher:bad2')
+  bad2.ready(() => Promise.reject(new Error('decrypt failed')))
+  expect(await bad2.done).toBe('blocked')
+  expect(controller.isSaving('n'), 'blocked means not saving, regardless of the report token').toBe(false)
+  expect(failures, 'and no second notification').toEqual(['n'])
+})
+
+test('not-found RECOVERY is saving through its rebuild', async () => {
+  const encrypting = deferred<void>()
+  const encryptStarted = deferred<void>()
+  let builds = 0
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async () => {
+      throw Object.assign(new Error('No document to update'), { code: 'not-found' })
+    },
+    encryptState: async state => {
+      const e: any = state
+      e.cipher = 'cipher:' + state.text
+      e.text = null
+      if (++builds > 1) {
+        encryptStarted.resolve()
+        await encrypting.promise
+      }
+      return e
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  await encryptStarted.promise // the RECOVERY build, after the not-found rejection
+  expect(controller.isSaving('n'), 'recovery is a build, so it is saving').toBe(true)
+  encrypting.resolve()
+  for (let i = 0; i < 8; i++) await flush()
+  expect(controller.isSaving('n'), 'false once the recovery write is issued').toBe(false)
+})
+
+// ---- stop through the OUTER build catch (round 61 section 2) ----
+for (const [label, hold] of [
+  ['acquireSecret', 'secret'],
+  ['ordinary encryption', 'encrypt'],
+] as const)
+  test(`a held ${label} rejecting AFTER stop reports nothing further`, async () => {
+    const failures: string[] = []
+    const held = deferred<void>()
+    const started = deferred<void>()
+    const h = harness()
+    const controller = createHiddenPersistence({
+      ...h.deps,
+      acquireSecret: hold == 'secret' ? () => (started.resolve(), held.promise) : async () => {},
+      encryptState:
+        hold == 'encrypt'
+          ? async () => {
+              started.resolve()
+              await held.promise
+              return {} as any
+            }
+          : h.deps.encryptState,
+      notifyFailure: n => void failures.push(n),
+    })
+    registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+    controller.save('n', { mine: 1 })
+    await started.promise
+    controller.stop()
+    expect(failures, 'stop reported this generation once').toEqual(['n'])
+    held.reject(new Error('rejected after stop'))
+    for (let i = 0; i < 8; i++) await flush()
+    expect(failures, 'the late catch reports nothing further').toEqual(['n'])
+    expect(controller.owes('n'), 'and the intent stays owed').toBe(true)
+    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  })
+
+// TargetToken.wrapper: I claimed in tmp/mind_page_sametarget_correction that the adoption path
+// makes this half load-bearing, and could NOT demonstrate it. Built through the real registration
+// path the row does not discriminate: the frontier is unmoved and the pointer/projection guards
+// do compare equal, but the write still carries the pre-replacement state, so the refusal this
+// row is supposed to prove is not the one that happens. Review 61 forbids substituting a raw
+// byId.set() fixture that production cannot perform merely to make the mutation red, and I agree.
+// So the claim in that correction is WITHDRAWN, review 60's section 5 disposition stands, and the
+// field is retained until the corpus seam's own same-id replacement can judge it. Removing the
+// wrapper comparison from sameTarget() currently leaves every test green -- recorded here so the
+// next person does not mistake that for proof either way.

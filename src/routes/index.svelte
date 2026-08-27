@@ -6549,7 +6549,7 @@
     void lease.done.then(() => {
       if (hiddenCleanupPending && hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
     })
-    const settle = async ({ failed }: { failed: boolean; hiddenChanged?: boolean }) => {
+    const settle = async ({ failed }: { failed: boolean }) => {
       if (settled) return
       settled = true
       await initialization
@@ -6577,12 +6577,6 @@
   //   failed hidden application — creates then re-confirm against the server, failing closed
   // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
   // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
-  // the NOW-current state and only then deleted (see cleanupInvalidHidden).
-  // settleHiddenAuthority() lived here and is DELETED: the lease's own `done` continuation in
-  // reserveHiddenAuthority does its work, and its `fixed || anonymous` guard is subsumed by the
-  // policy union — those revisions are never 'candidate', so the basis never advances for them
-  // and hiddenAuthorityUsable() is false regardless. its `hiddenChanged` condition is subsumed
-  // too: every hidden application sets hiddenCleanupPending
   // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
   // serialized snapshot chain on a false -> true authority grant, so classification cannot race
   // remote applications. startup candidates are not deleted from their (stale) provisional
@@ -7886,10 +7880,7 @@
                 hiddenFrontier = hiddenFrontier.then(async () => void (await landed)) // settle-only: allSettled never rejects
                 void landed.then(() => {
                   activeIngressContexts.delete(context)
-                  settleApplied({
-                    failed: threw || hiddenApplyFailed,
-                    hiddenChanged: !!hiddenApplied.length,
-                  })
+                  settleApplied({ failed: threw || hiddenApplyFailed })
                 })
               }
             }
