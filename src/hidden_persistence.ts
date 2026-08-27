@@ -142,6 +142,11 @@ export type HiddenPersistenceDeps = {
   invalidateAuthority: (reason: string) => void
   newTempId: () => string
   readonly: () => boolean
+  // FIXED PAGES confirm before an UPDATE as well as before a create: only there can a stale
+  // lower-id holder win re-resolution against a server that no longer has it. an ordinary page's
+  // full-account listener already keeps the index current, so confirming every update would buy
+  // nothing for a complete server read per write
+  confirmsUpdates: () => boolean
 }
 
 // JSON-NORMALIZING deep clone, in the payload's STRUCTURAL POSITION: the state is persisted as
@@ -426,7 +431,18 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // createDoc/updateDoc and still finalizing index transitions, so an obsolete create could land
   // after a newer update. returns whether the write was issued, so callers finalize only what
   // actually went out
-  function issueWrite(name: string, generation: number, id: string, data: Record<string, any>, create: boolean) {
+  function issueWrite(
+    name: string,
+    generation: number,
+    id: string,
+    data: Record<string, any>,
+    create: boolean,
+    // the wrapper the caller is about to finalize onto `id`. it must be captured HERE rather than
+    // read from the index: finalizeCreate runs AFTER this returns, so byId.get(id) is still empty
+    // and the marker would carry an object that never becomes the canonical holder — defeating
+    // the wrapper-exact bypass entirely
+    markerWrapper?: HiddenWrapper
+  ) {
     const op = currentOwed(name, generation)
     if (!op) return false // superseded before issue: no write, no finalization
     op.phase = 'issued' // ... which is where isSaving() stops being true (see its derivation)
@@ -435,9 +451,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // so a complete read legitimately omits it, and a confirmation must not remove it from that
     // stale negative. wrapper-exact, so a fresh same-id observation or a same-id rename cannot be
     // mistaken for it
-    const issuedMarker: Marker | undefined = create
-      ? { id, wrapper: deps.index().byId.get(id) ?? op, token: ++markerSeq }
-      : undefined
+    const issuedMarker: Marker | undefined =
+      create && markerWrapper ? { id, wrapper: markerWrapper, token: ++markerSeq } : undefined
     if (issuedMarker) marker = issuedMarker
     const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
     // COMPARE-AND-SET on the token: a newer create may already have replaced the marker, and this
@@ -538,6 +553,31 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // costs a secret acquisition and a full encryption per retry, and a slow decode turns that into
     // repeated builds. (this is still polling — see the requeue below — but cheap polling)
     if (isPending(holder.id)) return false
+    // FIXED PAGES: confirm the target before UPDATING it, unless the direct bypass applies. a
+    // stale lower-id holder the server no longer has would otherwise keep winning re-resolution
+    // and receive the very update confirmation exists to prevent
+    let requiredMarker: Marker | undefined
+    if (deps.confirmsUpdates() && !bypassesConfirmation(holder)) {
+      const outcome = await deps.confirmTarget(name, {
+        captureReadMarker: () => marker,
+        commit: (answer, readMarker) => {
+          const result = commitTargetSlice(name, answer, readMarker)
+          if (result.kind == 'committed') requiredMarker = result.requiredMarker
+          return result
+        },
+      })
+      // it awaited: recheck everything the await could have invalidated
+      if (!current()) return true
+      if (stopped) return true
+      if (outcome == 'inconclusive') return false // zero mutation: release the chain and retry
+      if (!gateWritable()) return false
+      // RE-RESOLVE from the committed index: the confirmation may have replaced the whole slice
+      const confirmed = canonicalHolder(name)
+      if (!confirmed) return false // the name has no holder now: the retry re-enters the create
+      if (confirmed.pending_create || confirmed.adopt_id) return await attemptCreate(confirmed, generation)
+      holder = confirmed
+      if (isPending(holder.id)) return false
+    }
     // build the payload for a target WITHOUT mutating it unless it is live in the index: a record
     // that has only been received is about to be applied, and writing our state into that object
     // would make its own application carry our change instead of what arrived
@@ -561,6 +601,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
     if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
+    // the carried marker must still be LIVE: settlement during encryption invalidates this
+    // attempt, and the retry confirms normally
+    if (requiredMarker && marker !== requiredMarker) return false
     if (stopped) return true // rechecked in the no-await token: a write already encrypting when
     // the listener died must not issue afterwards
     issueWrite(name, generation, holder.id, data, false)
@@ -650,7 +693,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // them could be the same-name record that would make this create a duplicate
       if (findSurvivor(wrapper) || hasPendingReceipts()) return false // requeue: the retry adopts it
       if (stopped) return true // see the ordinary path's no-await recheck
-      if (issueWrite(name, generation, id, data, true)) finalizeCreate(deps.index(), wrapper, id)
+      if (issueWrite(name, generation, id, data, true, wrapper)) finalizeCreate(deps.index(), wrapper, id)
       return true
     } catch (e) {
       // a STALE generation must not mutate the index on its way out either: the current one owns
@@ -675,6 +718,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       throw e // persistOwed marks the record failed (and therefore retryable)
     }
   }
+
+  // THE DIRECT BYPASS: skip confirmation only when the preliminarily selected target IS the
+  // create this writer issued and has not seen acknowledged. WRAPPER-EXACT and token-current, all
+  // three fields — same id and token with a DIFFERENT canonical wrapper does not qualify, because
+  // registerHidden replaces the indexed object on a fresh same-id observation and a same-id rename
+  // does too. a lower-id competitor currently canonical is NOT covered by an exemption for a
+  // different target: this compares the SELECTED target, not the name
+  const bypassesConfirmation = (holder: HiddenWrapper) =>
+    !!marker && marker.id === holder.id && marker.wrapper === holder && !!marker.token
 
   // THE ONE COMMIT ALGORITHM, run synchronously inside the corpus turn (see the confirmTarget
   // dep). the whole affected closure applies in ONE JavaScript turn

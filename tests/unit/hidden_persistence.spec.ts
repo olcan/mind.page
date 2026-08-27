@@ -83,6 +83,8 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
     newTempId: () => 'temp' + ++ids,
     readonly: () => false,
+    // OFF by default: most schedules are ordinary pages. the fixed-page rows turn it on
+    confirmsUpdates: () => false,
     // A REAL COORDINATOR, exactly as production wires it: the writer's staleness, refusal and
     // requeue decisions read this gate and frontier, so the arrival helpers below open real
     // deliveries rather than driving a fake predicate
@@ -2686,4 +2688,84 @@ test('the marker protects only its OWN id: another stale row is still removed', 
   })
   expect(plan.remove, 'only the unprotected row goes').toEqual(['stale'])
   expect(plan.preservedMarker).toBe(marker)
+})
+
+// ---- fixed pages confirm before UPDATING, and the marker exempts the exact target ----
+
+test('a fixed page confirms before an update, and writes to the CONFIRMED target', async () => {
+  // a stale lower-id holder the server no longer has would otherwise keep winning re-resolution
+  // and receive the very update confirmation exists to prevent
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    // the server has 'srv' under this name; local 'stale' is gone
+    confirmTarget: (name, hooks) =>
+      serverAnswer([{ id: 'srv', name: 'n', item: { server: 1 } }], h.calls, () => h.ingress.gate())(name, hooks),
+  })
+  registerHidden(h.idx, { id: 'stale', name: 'n', item: { old: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'confirm'), 'it confirmed').toHaveLength(1)
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(updates.map(c => c.id), 'and wrote to the confirmed target, never the stale one').toEqual(['srv'])
+  expect(h.idx.byId.has('stale'), 'the disproved row was removed').toBe(false)
+})
+
+test('the direct bypass skips confirmation for our own unacknowledged create — and only for it', async () => {
+  // the exemption is exact-target: same id and token with a DIFFERENT canonical wrapper does not
+  // qualify, because registerHidden replaces the indexed object on a fresh same-id observation
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise // unacknowledged: the marker stands
+    },
+    confirmTarget: (name, hooks) => serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks),
+  })
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  const created = h.calls.find(c => c.op == 'create')!.id!
+  const confirmsAfterCreate = h.calls.filter(c => c.op == 'confirm').length
+  // a SECOND save updates that same unacknowledged create: the bypass applies, so no confirmation
+  controller.save('n', { v: 2 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'confirm').length, 'bypassed: no second confirmation').toBe(confirmsAfterCreate)
+  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'and it updated the create').toEqual([created])
+  expect(h.idx.byId.has(created), 'which an unbypassed empty answer would have deleted').toBe(true)
+  ack.resolve()
+})
+
+test('a fresh same-id observation defeats the bypass: the wrapper is no longer ours', async () => {
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise
+    },
+    // the FIRST confirmation answers empty so a real create happens; later ones show a server row
+    confirmTarget: (name, hooks) =>
+      serverAnswer(
+        h.calls.some(c => c.op == 'create') ? [{ id: 'replaced', name: 'n', item: { server: 1 } }] : [],
+        h.calls,
+        () => h.ingress.gate()
+      )(name, hooks),
+  })
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  const created = h.calls.find(c => c.op == 'create')!.id!
+  const before = h.calls.filter(c => c.op == 'confirm').length
+  // the indexed object for that id is REPLACED — a fresh same-id observation. the marker's id and
+  // token are unchanged, but its wrapper is not the canonical object any more
+  registerHidden(h.idx, { id: created, name: 'n', item: { fresh: 1 } }, () => {})
+  controller.save('n', { v: 2 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'confirm').length, 'NOT bypassed: it confirmed').toBeGreaterThan(before)
+  ack.resolve()
 })

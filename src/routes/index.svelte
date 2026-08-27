@@ -8961,6 +8961,9 @@
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,
+    // a FIXED page has no full-account listener keeping the hidden index current, so an update
+    // must confirm its target the same way a create does
+    confirmsUpdates: () => fixed,
   })
 
   // the ONE definition of what counts as an input block. the runnable flag (which shows the run
