@@ -6449,7 +6449,7 @@
   // ACTIVE callback contexts: each snapshot callback's lease with the handles it opened, removed
   // when the callback terminalizes. not a subscription registry — stop needs exactly this to fail
   // and block what is still in flight
-  const activeIngressContexts = new Set<{ lease: { fail: () => void }; handles: Map<string, any> }>()
+  const activeIngressContexts = new Set<{ lease: { fail: () => void }; records: { admitted: boolean; handle?: any; settle: (failed?: boolean) => void }[] }>()
   // STICKY, page-lifetime: firestore does not replay an ignored callback's docChanges, so a
   // dropped callback (sync disabled) or a terminal listener error means this page can never
   // again claim to track the server. reload is the only recovery
@@ -6482,7 +6482,10 @@
     for (const ctx of activeIngressContexts) {
       try {
         ctx.lease.fail()
-        for (const handle of ctx.handles.values()) handle.block()
+        for (const r of ctx.records) {
+          if (r.admitted) r.handle?.block()
+          else r.settle() // a blind record whose preparation is hung still terminalizes
+        }
       } catch (e) {
         console.error('ingress context cleanup failed:', e)
       }
@@ -7768,7 +7771,7 @@
             applyRemoteChangeRef = applyRemoteChange
             // handle changes in non-first snapshot, waiting for init if necessary. the APPLY TASKS
             // are serialized, but hidden applications are enqueued onto name chains and outlive the
-            // task that scheduled them (see hiddenApplied below), so two deliveries for one document
+            // task that scheduled them (see the completion records below), so two deliveries for one document
             // routed through different names can land out of receipt order — an open blocker
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
@@ -7786,40 +7789,39 @@
             // because a later callback arrived: a hidden delivery that is itself only pending is
             // absent from hiddenItems and invisible to nameForDocument, so a following
             // hidden-to-visible change for the same id would have been marked as irrelevant
-            const entryReceipts = new Map()
-            // ... and this revision's DELIVERY HANDLES, opened synchronously at receipt for every
-            // ADMITTED document, before any decrypt. admission is the conservative receipt-time
-            // predicate: the raw hidden flag, OR hidden/adopted in the applied index, OR
-            // outstanding coordinator work for the id — the last two catch a visible-to-hidden
-            // round trip whose second change looks ordinary (raw hidden:false, absent from the
-            // index) and would otherwise leave a phantom hidden representation, or strand an
-            // unhealable block. an admitted handle makes the gate pending until its full
-            // application settles, which is what keeps a create's confirmation from missing data
-            // already on this client
-            const handles = new Map<string, ReturnType<typeof hiddenIngress.open>>()
-            // HANDED OFF: a handle whose Apply was given to ready(). its slot is reserved on the
-            // coordinator's per-id tail and may legitimately still be waiting behind an OLDER
-            // same-id slot when this callback's task returns — the applications below are awaited
-            // DETACHED. block() converts `ready` as well as `open` (that is what makes abort
-            // work), so sweeping every handle on the success path silently discarded valid work
-            // and left the gate blocked forever. the sweep must skip these; a handed-off handle
-            // owns its own outcome
-            const handedOff = new Set<ReturnType<typeof hiddenIngress.open>>()
-            // a failed hidden decrypt or application keeps this revision from granting
-            // authority, and the document id stays DIRTY (blocking later grants) until a
-            // successful change for it applies
-            let hiddenApplyFailed = false
-            // hidden transitions apply ON THE NAME'S CONTROLLER CHAIN so they can never
-            // interleave with an in-flight write for the same name (a remote replacement
-            // applied mid-write could displace the wrapper the write targets); authority
-            // settles only after every queued transition of this revision lands. CALLBACK-SCOPED
-            // so the task's finally owns the same lifetime on every exit, including a throw
-            const hiddenApplied: Promise<unknown>[] = []
+            // ONE COMPLETION RECORD PER CHANGED DOCUMENT, allocated synchronously at receipt,
+            // in document order, BEFORE any decode. three things depend on that:
+            //  - Promise.allSettled SNAPSHOTS its iterable, so a record pushed later during
+            //    preparation can be missed by an aggregate that already ran — which terminalized
+            //    the context and settled the lease while that work could still mutate;
+            //  - each record owns its OWN entry receipt and releases it on its own terminal path.
+            //    a callback-level finally releasing every barrier at once is the wrong lifetime
+            //    once tasks detach and overlap; and
+            //  - a stop must be able to terminalize a record whose preparation is still in
+            //    flight, which needs the record to exist before preparation starts.
+            // ADMISSION is the conservative receipt-time predicate: the raw hidden flag, OR
+            // hidden/adopted in the applied index, OR outstanding coordinator work for the id —
+            // the last two catch a visible-to-hidden round trip whose second change looks
+            // ordinary (raw hidden:false, absent from the index) and would otherwise leave a
+            // phantom hidden representation, or strand an unhealable block
+            type CallbackRecord = {
+              id: string
+              admitted: boolean
+              handle?: ReturnType<typeof hiddenIngress.open>
+              receipt: number
+              // REJECTS for an admitted failure, RESOLVES for blind work (which stays fail-soft
+              // by design — plaintext ingress is outside this coordinator). admitted failure is
+              // therefore DERIVED from the aggregate rather than tracked in a second boolean
+              done: Promise<void>
+              settle: (failed?: boolean) => void
+            }
+            const records: CallbackRecord[] = []
+            const recordById = new Map<string, CallbackRecord>()
             for (const change of snapshot.docChanges()) {
               const id = change.doc.id
-              entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
+              const receipt = hiddenPersistence.noteRemotePending(id)
               const rawHidden = !!change.doc.data().hidden
-              const relevant =
+              const admitted =
                 rawHidden || !!hiddenPersistence.nameForDocument(id) || hiddenIngress.hasOutstanding(id)
               // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own
               // echo failed to decrypt rather than waiting forever. ONLY for a live raw-hidden
@@ -7829,41 +7831,67 @@
               // hidden record at all. the coordinator contract is that removals and transitions
               // have no ciphertext and can never match
               const live = change.type != 'removed' && rawHidden
-              if (relevant) handles.set(id, hiddenIngress.open(id, live ? change.doc.data().cipher : undefined))
+              const handle = admitted
+                ? hiddenIngress.open(id, live ? change.doc.data().cipher : undefined)
+                : undefined
+              let settled = false
+              let resolve!: () => void
+              let reject!: (e: unknown) => void
+              const done = new Promise<void>((res, rej) => ((resolve = res), (reject = rej)))
+              done.catch(() => {}) // observable through the aggregate, never unhandled
+              const record: CallbackRecord = {
+                id,
+                admitted,
+                handle,
+                receipt,
+                done,
+                settle(failed = false) {
+                  if (settled) return // exactly once, on whichever path gets there first
+                  settled = true
+                  hiddenPersistence.releaseRemote(id, receipt) // ITS receipt, on ITS path
+                  if (failed) reject(new Error(`hidden ingress: ${id} could not be applied`))
+                  else resolve()
+                },
+              }
+              records.push(record)
+              recordById.set(id, record)
+              // an ADMITTED record is settled by its handle's terminal outcome, whatever produces
+              // it — a normal application, an abort, or a stop. handle.done FULFILLS with
+              // 'blocked', so the mapping to a rejecting record is explicit
+              if (handle) void handle.done.then(outcome => record.settle(outcome != 'applied'))
             }
-            // this callback is ACTIVE until it terminalizes: a sticky stop fails its lease and
-            // blocks every handle that has not started applying
-            const context = { lease, handles }
+            // this callback is ACTIVE until every one of its records settles: a sticky stop fails
+            // its lease and blocks every handle that has not started applying
+            const context = { lease, records }
             activeIngressContexts.add(context)
 
             const applyTask = async () => {
-              // GUARANTEED release: a write REFUSES and requeues while a marker stands for its
-              // target, so one left behind makes that document's saves poll without ever issuing.
-              // the per-change finally below releases them as they are handled; this covers every
-              // early return
               let threw = true
               try {
                 await applyChanges()
                 threw = false
               } finally {
-                for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
-                // every handle that was NEVER handed off must terminalize, or the gate stays
-                // pending forever and no hidden write can ever issue again. block() is a
-                // compare-and-set: it converts open and ready alike, so the handed-off ones are
-                // skipped — theirs is not an abandoned slot, it is a queued one
-                for (const handle of handles.values()) if (!handedOff.has(handle)) handle.block()
-                // ONE aggregate, created on the GUARANTEED path, for all three consumers: the
-                // context lifetime, lease settlement, and the legacy acknowledgement frontier.
-                // building it at the normal bottom of applyChanges instead meant an early change
-                // could hand off a hidden Apply, a later one throw, and snapshotFrontier() then
-                // observe the OLD frontier — letting an acknowledgement reconcile while that
-                // application was still pending. hiddenApplyOk defaults to success, so that is a
-                // wrong owner state, not merely a short wait
-                const landed = Promise.allSettled(hiddenApplied)
-                hiddenFrontier = hiddenFrontier.then(async () => void (await landed)) // settle-only: allSettled never rejects
-                void landed.then(() => {
+                // every record that no branch reached settles here. an ADMITTED one settles by
+                // blocking its handle (which rejects the record through the mapping above); a
+                // blind one simply resolves, since blind work is fail-soft. a handed-off handle
+                // is untouched: block() is a compare-and-set that converts open and ready alike,
+                // so sweeping indiscriminately used to discard valid work queued behind an older
+                // same-id slot and leave the gate blocked forever
+                for (const r of records) {
+                  if (r.admitted) r.handle!.block() // no-op once running or terminal
+                  else r.settle()
+                }
+                // ONE aggregate over the FIXED record array, feeding all three consumers: context
+                // lifetime, lease settlement, and the legacy frontier bridge. built on the
+                // guaranteed path, so an early handoff plus a later throw cannot let an
+                // acknowledgement reconcile while an application is still pending
+                const landed = Promise.allSettled(records.map(r => r.done))
+                hiddenFrontier = hiddenFrontier.then(async () => void (await landed))
+                void landed.then(results => {
                   activeIngressContexts.delete(context)
-                  settleApplied({ failed: threw || hiddenApplyFailed })
+                  // admitted failure is DERIVED: a rejected record is an admitted delivery that
+                  // did not apply. blind bodies resolve either way and cannot fail the lease
+                  settleApplied({ failed: threw || results.some(r => r.status == 'rejected') })
                 })
               }
             }
@@ -7882,7 +7910,7 @@
               for (let change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
-                const entering = entryReceipts.get(doc.id) ?? null
+                const record = recordById.get(doc.id)!
                 try {
                 // a change that cannot be decrypted is logged and skipped: it must not break the
                 // chain for later snapshots (destructive reconciliation stays init-gated)
@@ -7898,8 +7926,7 @@
                   if (change.type == 'removed') savedItem = { hidden: couldBeHidden, text: '' }
                   else {
                     if (couldBeHidden) {
-                      hiddenApplyFailed = true
-                      handles.get(doc.id)?.block() // this exact delivery is terminally blocked
+                      record.handle?.block() // this exact delivery is terminally blocked
                       revokeThisRevision('hidden change could not be decrypted') // as soon as known
                     }
                     continue
@@ -7923,12 +7950,12 @@
                   // unchanged target; then ENQUEUE the application rather than awaiting it, since a
                   // local write for that name may own the chain it goes on
                   const dropped = hiddenPersistence.noteRemote(undefined, doc.id, true)
-                  // tracked in hiddenApplied: authority must not declare the revision applied while
-                  // this removal is still queued
+                  // its completion record keeps the lease unsettled: authority must not declare
+                  // the revision applied while this removal is still queued
                   // THE DELIVERY'S OWN APPLY: its resolution IS this handle's terminal outcome,
                   // and a success heals every strictly older block for this id — replacing the
                   // hand-rolled heal that needed a captured sequence to be safe
-                  const dropHandle = handles.get(doc.id)
+                  const dropHandle = record.handle
                   const dropApply = () =>
                     hiddenPersistence.applyRemote([hiddenName], () => void removeHidden(hiddenIndex(), doc.id)).then(
                       () => {
@@ -7938,16 +7965,14 @@
                       e => {
                         hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
                         console.error('could not drop stale hidden representation:', doc.id, e)
-                        hiddenApplyFailed = true
                         revokeThisRevision('hidden representation could not be dropped')
                         throw e // REJECT: the coordinator records this delivery as blocked
                       }
                     )
-                  if (dropHandle) {
-                    dropHandle.ready(dropApply)
-                    handedOff.add(dropHandle) // the task's sweep must not abort a queued slot
-                    hiddenApplied.push(dropHandle.done)
-                  } else hiddenApplied.push(dropApply().catch(() => {}))
+                  // handed to the handle: its resolution IS the record's outcome (see the
+                  // allocation pass). an unadmitted document has no handle and runs inline
+                  if (dropHandle) dropHandle.ready(dropApply)
+                  else void dropApply().catch(() => {})
 
                   hiddenCleanupPending = true
                   // the record now belongs to the VISIBLE world, where it has no representation
@@ -7974,8 +7999,7 @@
                       // not a clean skip — mark it dirty and fail closed so nothing grants
                       // authority (or deletes anything) on a view that includes the stale record
                       if (hiddenItems.has(doc.id)) {
-                        hiddenApplyFailed = true
-                        handles.get(doc.id)?.block() // terminal for this exact delivery
+                        record.handle?.block() // terminal for this exact delivery
                         revokeThisRevision('hidden record became malformed')
                       }
                       continue
@@ -7993,7 +8017,7 @@
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
                   // THIS DELIVERY'S APPLY, owned by its handle: the full listener operation, whose
                   // resolution is the terminal outcome the gate, healing and the echo waiter read
-                  const hiddenHandle = handles.get(doc.id)
+                  const hiddenHandle = record.handle
                   const hiddenApply = () =>
                     hiddenPersistence
                       .applyRemote(
@@ -8026,16 +8050,12 @@
                         e => {
                           hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this
                           console.error('could not apply remote change:', doc.id, e)
-                          hiddenApplyFailed = true
                           revokeThisRevision('hidden change could not be applied') // as soon as known
                           throw e // REJECT: the coordinator records this delivery as blocked
                         }
                       )
-                  if (hiddenHandle) {
-                    hiddenHandle.ready(hiddenApply)
-                    handedOff.add(hiddenHandle) // the task's sweep must not abort a queued slot
-                    hiddenApplied.push(hiddenHandle.done)
-                  } else hiddenApplied.push(hiddenApply().catch(() => {}))
+                  if (hiddenHandle) hiddenHandle.ready(hiddenApply)
+                  else void hiddenApply().catch(() => {})
                   continue
                 }
                 try {
@@ -8075,10 +8095,13 @@
                   console.error('could not apply remote change:', doc.id, e)
                 }
                 } finally {
-                  // the entry receipt has done its job: either a real receipt superseded it (in
-                  // which case this release is a no-op, since the token no longer matches) or the
-                  // change turned out not to concern the hidden index
-                  if (entering != null) hiddenPersistence.releaseRemote(doc.id, entering)
+                  // a BLIND record is done once its body has run: it owns its own receipt release
+                  // (a real receipt may already have superseded the entry token, in which case
+                  // that release is a no-op) and resolves, because blind plaintext work is
+                  // fail-soft. an ADMITTED record is settled by its handle's outcome instead —
+                  // resolving it here would heal older blocks for an application that may not
+                  // even have started
+                  if (!record.admitted) record.settle()
                 }
               }
               // release this revision's reserved authority slot once every hidden transition it
