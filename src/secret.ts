@@ -77,3 +77,53 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // duplicating a record registration has not reached yet
   return candidate
 }
+
+// ---- adopting the validated candidate --------------------------------------------------------
+// The other half of the flow, and the half whose ORDER is the contract. `resolveFixedOwnerSecret`
+// deliberately registers nothing (its documents are as old as the prompt), so everything between a
+// validated candidate and a published secret lives here rather than inline in the component:
+//
+// - the fresh candidate-keyed scan and its registration run as ONE corpus operation, so a delivery
+//   for one of those ids is admitted and ordered behind the registration;
+// - the registration BATCH is inside the fatal boundary. Registration, the adoption merge and the
+//   owner publication all mutate, so a throw partway through leaves a PARTIALLY APPLIED index —
+//   and without the boundary the caller rejects as if this had been a pre-application read
+//   failure, leaving ingress live and queued corpus work running over a half-built index;
+// - stop is rechecked AFTER the corpus await, because it can win in that continuation gap after
+//   the corpus turn has already settled; and
+// - the secret is published and persisted LAST. A save that saw it earlier could create a
+//   duplicate of a record the scan had not registered yet.
+
+// generic over the corpus run handle so the scan receives it DIRECTLY. threading it through a
+// mutable closure variable instead is how a later caller ends up reading a different operation's
+// handle
+export type AdoptSecretDeps<Row, Run> = {
+  // runs one corpus operation, rejecting with the body's own error
+  runCorpus: (body: (run: Run) => Promise<void>) => Promise<void>
+  // the fresh candidate-keyed scan, inside that operation
+  scan: (run: Run) => Promise<Row[]>
+  // ONE synchronous registration batch. `undefined`, not `void`: an async implementation would
+  // type-check and then register after the boundary that is supposed to contain it
+  register: (rows: Row[]) => undefined
+  // the fatal boundary (see commitOrStop in hidden_corpus.ts), passed in so this module stays free
+  // of the coordinator
+  commit: (batch: () => undefined) => undefined
+  // sticky ingress stop
+  stopped: () => boolean
+  // publish to the session AND persist. only reached when everything above succeeded
+  publish: (secret: string) => undefined
+}
+
+export async function adoptValidatedSecret<Row, Run>(
+  candidate: string,
+  deps: AdoptSecretDeps<Row, Run>
+): Promise<string> {
+  await deps.runCorpus(async run => {
+    const rows = await deps.scan(run)
+    if (deps.stopped()) return // a late registration after stop must not touch the index
+    deps.commit(() => deps.register(rows))
+  })
+  if (deps.stopped()) throw new Error('hidden ingress stopped: reload to recover')
+  deps.publish(candidate)
+  return candidate
+}

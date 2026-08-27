@@ -82,9 +82,7 @@ export type Batch = {
 
 // DISCRIMINATED on the same key as the records it produces: an admitted document MUST carry its
 // handle and a blind one MUST NOT, and an optional field let a caller pass neither or both
-export type AllocationRequest =
-  | { kind: 'admitted'; id: string; handle: RecordHandle }
-  | { kind: 'blind'; id: string }
+export type AllocationRequest = { kind: 'admitted'; id: string; handle: RecordHandle } | { kind: 'blind'; id: string }
 
 // the BOUNDED LISTENER PREFIX: the records that overlap a corpus read. it is seeded from the
 // records live at fresh-read START and collects newly allocated ones only until raw membership
@@ -199,7 +197,7 @@ export function createRecordAllocator(deps: {
               settled = true
               // the DIAGNOSTIC is guarded and the record is rejected regardless: a throwing hook
               // used to leave `done` pending forever, which strands batch.landed, its context and
-              // lease, snapshotApply, and every corpus consumer of that boundary
+              // lease, and every corpus consumer of that boundary
               try {
                 deps.onBlindError(id, e)
               } catch (hookError) {

@@ -415,18 +415,22 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // the coordinator's frontier for the id (advanced by the newest delivery) plus the live object,
   // whose IDENTITY changes when an application replaces it. a spurious mismatch costs one requeue;
   // issuing wrongly does not.
-  // TWO facts, captured together so a caller cannot compare one and forget the other: the
-  // coordinator's per-id RECEIPT FRONTIER (advanced by every open() for this document; zero for
-  // an id with no cell, and reading it never allocates one) AND the live wrapper's exact object
-  // IDENTITY.
-  // the WRAPPER half is PROVISIONAL and currently unpinned, pending the corpus-seam mutation
-  // (the recipe and the history are in the test)
-  type TargetToken = { seq: number; wrapper: unknown }
-  const targetStamp = (id: string): TargetToken => ({
-    seq: deps.receiptFrontier(id),
-    wrapper: deps.index().byId.get(id) ?? 'absent',
-  })
-  const sameTarget = (a: TargetToken, b: TargetToken) => a.seq === b.seq && a.wrapper === b.wrapper
+  // ONE fact: the coordinator's per-id RECEIPT FRONTIER, advanced by every open() for this document
+  // (zero for an id with no cell, and reading it never allocates one).
+  //
+  // THE WRAPPER HALF IS DELETED (review 73 asked for the decision, and this is it). It guarded
+  // "the indexed object for this id was REPLACED while we built", and every route to that is
+  // already covered by a check the caller cannot forget:
+  // - a DELIVERY replacing it advances the frontier, which is this token;
+  // - a CORPUS registration replacing it (a confirmation, or a post-prompt candidate scan landing
+  //   mid-encryption, neither of which opens a delivery) goes through registerHidden, which sets
+  //   byId — so the ordinary path's `canonicalHolder(name) !== holder` identity check sees it, and
+  //   the adoption path's does too, because registerHidden calls invalidateAdopters() before every
+  //   non-quarantined replacement and that clears `wrapper.adopt_id`.
+  // The corpus-registration schedule is driven in the tests, and the seq-only mutation stays green
+  // against it BECAUSE those checks catch it — which is the evidence for deleting rather than the
+  // absence of a test.
+  const targetFrontier = (id: string) => deps.receiptFrontier(id)
 
   // the minimum-id record a create could adopt instead of creating alongside it
   function findSurvivor(wrapper: HiddenWrapper): HiddenWrapper | undefined {
@@ -652,7 +656,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     deps.adopt({ ...merged, item: state }, merged) // may hold fields the owner never saw
     deps.syncOwner(name, cloneState(state))
     if (deps.index().byId.get(holder.id) === holder) holder.item = state // live: keep in step
-    const stamp = targetStamp(holder.id) // what we believe the target is, before we build for it
+    const stamp = targetFrontier(holder.id) // what we believe the target is, before we build for it
     const data = await deps.encryptState(payload({ ...holder, item: state }))
     if (!current()) return true
     // REFUSE, do not await: awaiting the entry promise deadlocks. a valid hidden-to-visible
@@ -662,7 +666,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     if (!gateWritable()) return false
     // moved, or CHANGED under us — including a change that has entered the listener and is still
     // decrypting, which the stamp sees and canonical resolution deliberately does not
-    if (canonicalHolder(name) !== holder || !sameTarget(targetStamp(holder.id), stamp)) return false
+    if (canonicalHolder(name) !== holder || targetFrontier(holder.id) !== stamp) return false
     // the carried marker must still be LIVE: settlement during encryption invalidates this
     // attempt, and the retry confirms normally
     if (requiredMarker && markers.get(name) !== requiredMarker) return false
@@ -722,7 +726,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // selection version (round 36): a re-adoption while we encrypt changes it, and the stale
         // attempt must not issue its already-encrypted old payload against the newer selection
         const projection = wrapper.item
-        const stamp = targetStamp(adoptId) // what we believe the target is, before we build for it
+        const stamp = targetFrontier(adoptId) // what we believe the target is, before we build for it
         const data = await deps.encryptState(payload(wrapper)) // merged state (see deps.adopt)
         if (!current()) return true
         if (!gateWritable()) return false // refuse, do not await (see the ordinary path)
@@ -733,7 +737,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // noncanonical, and a change to the target itself (removed, renamed, replaced under the
         // same id) makes the payload we just built wrong for it. clear our selection and re-choose
         const better = findSurvivor(wrapper)
-        if ((better && compareIds(better.id, adoptId) < 0) || !sameTarget(targetStamp(adoptId), stamp)) {
+        if ((better && compareIds(better.id, adoptId) < 0) || targetFrontier(adoptId) !== stamp) {
           wrapper.adopt_id = null // ours, still current — see the identity check above
           return false
         }

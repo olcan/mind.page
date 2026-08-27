@@ -45,8 +45,8 @@ test('S2 ready before S1, but applications still run S1 then S2', async () => {
   const s1 = c.open('d')
   const s2 = c.open('d')
   // S2 becomes ready FIRST; its slot still waits behind S1's reserved slot
-  s2.ready(() => ((order.push('s2'), Promise.resolve()) as any))
-  s1.ready(() => ((order.push('s1'), Promise.resolve()) as any))
+  s2.ready(() => (order.push('s2'), Promise.resolve()) as any)
+  s1.ready(() => (order.push('s1'), Promise.resolve()) as any)
   expect(await s1.done).toBe('applied')
   expect(await s2.done).toBe('applied')
   expect(order).toEqual(['s1', 's2'])
@@ -99,7 +99,7 @@ test('a duplicate delivery invokes its WHOLE Apply closure; only its newer succe
   // as already done
   let reran = 0
   const s2 = c.open('d')
-  s2.ready(() => ((reran++, Promise.resolve()) as any))
+  s2.ready(() => (reran++, Promise.resolve()) as any)
   expect(await s2.done).toBe('applied')
   expect(reran, 'the complete repair ran').toBe(1)
   expect(c.gate()).toBe('writable')
@@ -157,7 +157,7 @@ test('blocking a ready handle behind an older running slot: its closure no-ops A
   expect(c.gate(), 'S3 healed the S2 block').toBe('writable')
 })
 
-test("a NEWER block survives an older success (ready-abort): S1 running, S2 ready then blocked, S1 applied — S2 still gates", async () => {
+test('a NEWER block survives an older success (ready-abort): S1 running, S2 ready then blocked, S1 applied — S2 still gates', async () => {
   // covers BOTH design labels: "S3 blocks after S2 was received; S2's later success does not heal
   // newer S3" and the ready-abort row — the newer retained block here exists BEFORE the older
   // success completes, which the deleted weaker variant never established (round 43)

@@ -34,6 +34,12 @@ export type CorpusRun = {
   // whether the corpus has stopped. every await-crossing continuation rechecks it, and the body
   // must perform no mutation after it turns true
   cancelled(): boolean
+  // THE ACTIVE CANCELLATION AS A SIGNAL. it never fulfils; it REJECTS when this operation is
+  // cancelled. a body holding an unresolvable await — a network read that never settles — cannot
+  // observe `cancelled()` at all, so its own cleanup (`finally`) would never run even though the
+  // caller, the boundary and the tail have all been released. race it to reach that cleanup.
+  // this is the SAME cancellation the caller is released by, not a second one
+  cancellation: Promise<never>
 }
 
 export function createHiddenCorpus() {
@@ -94,6 +100,7 @@ export function createHiddenCorpus() {
                 membership = new Set(ids)
               },
               cancelled: () => stopped,
+              cancellation: cancelled,
             }),
             cancelled,
           ])

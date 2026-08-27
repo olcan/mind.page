@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { resolveFixedOwnerSecret, type AccountDoc, type FixedOwnerSecretDeps } from '../../src/secret.js'
+import {
+  adoptValidatedSecret,
+  resolveFixedOwnerSecret,
+  type AccountDoc,
+  type AdoptSecretDeps,
+  type FixedOwnerSecretDeps,
+} from '../../src/secret.js'
+import { commitOrStop, createHiddenCorpus, CorpusStopped } from '../../src/hidden_corpus.js'
 import { hashSecretPhrase, encryptWithSecret } from '../../src/crypto.js'
 
 // transition tests for the fixed-owner secret flow (see src/secret.ts): fail-closed fetch retry and
@@ -115,4 +122,75 @@ test('the candidate is returned WITHOUT touching hidden documents: registration 
   expect(await resolveFixedOwnerSecret(d)).toBe(secret)
   // exactly one fetch, one prompt, no repeated pass over the (prompt-aged) documents
   expect(d.calls).toEqual(['fetch', 'prompt'])
+})
+
+// ---- adopting the validated candidate --------------------------------------------------------
+// the ORDER is the contract (see adoptValidatedSecret): scan and register as one corpus operation,
+// the batch inside the fatal boundary, stop rechecked in the post-await continuation gap, and the
+// secret published LAST
+
+function adoptHarness(
+  overrides: Partial<AdoptSecretDeps<{ id: string }, { cancelled: () => boolean }>> & { stopped?: () => boolean } = {}
+) {
+  const log: string[] = []
+  let stopped = false
+  const corpus = createHiddenCorpus()
+  const deps: AdoptSecretDeps<{ id: string }, { cancelled: () => boolean }> = {
+    runCorpus: body => corpus.run(async run => void (await body(run))),
+    scan: async () => [{ id: 'a' }, { id: 'b' }],
+    register: rows => void log.push('register:' + rows.map(r => r.id).join(',')),
+    commit: batch =>
+      commitOrStop(batch, active => {
+        log.push('stop')
+        stopped = true
+        corpus.stop(active)
+      }),
+    stopped: () => stopped,
+    publish: s => void log.push('publish:' + s),
+    ...overrides,
+  }
+  return { log, corpus, deps, stop: () => (stopped = true), isStopped: () => stopped }
+}
+
+test('the happy path registers BEFORE it publishes', async () => {
+  const h = adoptHarness()
+  expect(await adoptValidatedSecret('sec', h.deps)).toBe('sec')
+  expect(h.log).toEqual(['register:a,b', 'publish:sec'])
+})
+
+test('a throw partway through the batch enters sticky stop BEFORE the caller rejects, and never publishes', async () => {
+  // registration, the adoption merge and the owner publication all mutate: row one lands and row
+  // two throws, so the index is partially applied and ingress must not stay live over it
+  const boom = new Error('adoption merge failed')
+  const h = adoptHarness({
+    register: rows => {
+      for (const row of rows) {
+        if (row.id == 'b') throw boom
+        // row one has already mutated the index
+      }
+      return undefined
+    },
+  })
+  const adopting = adoptValidatedSecret('sec', h.deps) // takes the tail FIRST
+  let queuedRan = false
+  const queuedState = h.corpus.run(async () => void (queuedRan = true)).catch(e => e)
+  await expect(adopting, 'the caller keeps the exact error').rejects.toBe(boom)
+  expect(h.isStopped(), 'and stop was observable first').toBe(true)
+  expect(await queuedState, 'the queued corpus operation is stopped').toBeInstanceOf(CorpusStopped)
+  expect(queuedRan, 'and its body never ran').toBe(false)
+  expect(h.log, 'nothing is published from a partially applied index').toEqual(['stop'])
+})
+
+test('a stop winning the post-scan continuation gap publishes nothing and persists nothing', async () => {
+  // the corpus turn has already SETTLED by then, so nothing inside it can see this stop
+  let stopped = false
+  const h = adoptHarness({
+    register: rows => {
+      stopped = true // the stop lands while this turn is settling
+      return void rows
+    },
+    stopped: () => stopped,
+  })
+  await expect(adoptValidatedSecret('sec', h.deps)).rejects.toThrow(/hidden ingress stopped/)
+  expect(h.log, 'registration ran; publication did not').toEqual([])
 })

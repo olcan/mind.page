@@ -1,5 +1,5 @@
 // the hidden INGRESS COORDINATOR — the design in the vault repo,
-// notes/design/mind_page_hidden_ingress_coordinator.md (revision 22). that document is normative;
+// notes/design/mind_page_hidden_ingress_coordinator.md. that document is normative;
 // this module implements its pure surface and adds nothing beyond it.
 //
 // PURE: no firestore, no index, no owner, no crypto. the listener feeds it deliveries and the
@@ -150,7 +150,8 @@ export function createHiddenIngress() {
     if (outcome == 'applied') {
       // heal STRICTLY OLDER same-cell blocks, then prune this delivery: healing compares seq and
       // the echo waiter holds its own result, so no future operation needs it
-      for (const [seq, d] of cell.deliveries) if (seq < delivery.seq && d.outcome == 'blocked') cell.deliveries.delete(seq)
+      for (const [seq, d] of cell.deliveries)
+        if (seq < delivery.seq && d.outcome == 'blocked') cell.deliveries.delete(seq)
       cell.deliveries.delete(delivery.seq)
     } else {
       // retained for healing, COMPACTED: a permanent corrupt record must not hold a listener

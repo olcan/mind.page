@@ -31,7 +31,6 @@ export type SnapshotFacts = {
   prefetchSucceeded: boolean
 }
 
-
 export type SnapshotAction =
   // window._disable_sync: warn and drop the snapshot
   | 'ignore_sync_disabled'
@@ -85,8 +84,8 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
     // a SUCCESSFUL hidden prefetch waits through a cached first snapshot for the first non-cache
     // snapshot, which supersedes prefetched copies of the same id — a fixed page could otherwise
     // initialize from a stale cached snapshot even though the prefetch just came from the
-    // server. today's listener always passes prefetchSucceeded: false; the cutover's
-    // prefetch-before-listener startup turns this row on
+    // server. the listener supplies this from its RETAINED pre-listener prefetch result (see
+    // prefetchThenInstall in src/startup.ts): an array — including an empty one — is success
     if (facts.prefetchSucceeded && facts.fromCache) return { action: 'wait_for_server', policy }
     if (
       !facts.initializationStarted &&
@@ -98,4 +97,26 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
     return { action: 'initialize', policy }
   }
   return { action: 'apply_changes', policy }
+}
+
+/**
+ * Whether one delivery's payload is evidence about the HIDDEN side of its document.
+ *
+ * Firestore hands a `removed` change the document's **old** data. On the full-account listener that
+ * is harmless: the query IS the account, so leaving it can only mean deletion and both
+ * representations go. A fixed (shared) page's query is a strict subset —
+ * `attr.shared.keys array-contains <key>` — and a hidden document can never be in it, because
+ * hidden documents are written with `attr` null. So a removal there means the document left the
+ * SHARED SET, which has three causes and only one is deletion: deleted, unshared, or **turned
+ * hidden**, whose `removed` payload describes the old, visible side.
+ *
+ * Acting on it would drop the hidden record a candidate scan or a target confirmation just
+ * registered, leaving the page with neither representation while the server row is hidden.
+ *
+ * The converse is bounded and already covered: a hidden document genuinely deleted on a fixed page
+ * produces no listener event at all (it was never in the shared query), and every fixed-page write
+ * re-confirms its target against the server, which is what disproves a stale row.
+ */
+export function speaksForHiddenSide(facts: { fixed: boolean; removed: boolean }): boolean {
+  return !(facts.fixed && facts.removed)
 }

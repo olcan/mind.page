@@ -43,7 +43,9 @@ function harness(overrides: Partial<ReconcileDeps> = {}) {
 test('a differing server copy is applied and the marker cleared', async () => {
   const { deps, item, applied, deferrals } = harness()
   expect(await reconcileDeferred(deps, item, 1)).toBe(true)
-  expect(applied).toEqual([{ type: 'modified', id: 'd1', savedItem: { text: 'server', time: 2, attr: null, id: 'd1' } }])
+  expect(applied).toEqual([
+    { type: 'modified', id: 'd1', savedItem: { text: 'server', time: 2, attr: null, id: 'd1' } },
+  ])
   expect(deferrals.has('d1')).toBe(false) // terminal
 })
 
@@ -178,10 +180,9 @@ test('a THROWING application stays retryable, with its marker intact', async () 
 test('a live delivery supersedes the deferral only AFTER it applies', async () => {
   const deferrals = new Map([['d1', 1]])
   const order: string[] = []
-  const applier = supersedingApplier(
-    () => order.push('applied'),
-    { delete: id => void (order.push('cleared'), deferrals.delete(id)) }
-  )
+  const applier = supersedingApplier(() => order.push('applied'), {
+    delete: id => void (order.push('cleared'), deferrals.delete(id)),
+  })
   applier('modified', { id: 'd1' }, {})
   expect(order).toEqual(['applied', 'cleared'])
   expect(deferrals.has('d1')).toBe(false)
@@ -190,17 +191,12 @@ test('a live delivery supersedes the deferral only AFTER it applies', async () =
 test('a THROWING live delivery leaves the marker for reconciliation', async () => {
   // clearing first dropped the change entirely: nothing redelivers a deferred remote change
   const deferrals = new Map([['d1', 1]])
-  const applier = supersedingApplier(
-    () => {
-      throw new Error('reducer failed')
-    },
-    deferrals
-  )
+  const applier = supersedingApplier(() => {
+    throw new Error('reducer failed')
+  }, deferrals)
   expect(() => applier('modified', { id: 'd1' }, {})).toThrow('reducer failed')
   expect(deferrals.get('d1'), 'still deferred, so it is still reconcilable').toBe(1)
 })
-
-
 
 test('a later step throwing does not rerun an already-successful attribute hook on retry', async () => {
   // THE REAL RETRY BOUNDARY (round 36, replacing two earlier shapes that each proved the wrong

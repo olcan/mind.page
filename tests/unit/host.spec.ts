@@ -15,7 +15,14 @@ import {
 // which pages move there is pinned directly rather than inferred from browser behavior
 
 const decide = (over = {}) =>
-  sharedOriginRedirect({ host: 'mind.page', shared: 'alice/notes', uid: undefined, path: '/', search: '?shared=alice/notes', ...over })
+  sharedOriginRedirect({
+    host: 'mind.page',
+    shared: 'alice/notes',
+    uid: undefined,
+    path: '/',
+    search: '?shared=alice/notes',
+    ...over,
+  })
 
 test("someone else's shared page moves to the isolated origin, with its url intact", () => {
   expect(decide()).toBe(`https://${SHARED_HOST}/?shared=alice/notes`)
@@ -126,7 +133,12 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
     'ipv6 literal, matching'
   ).toBe(true)
   expect(
-    isProxyRequestAllowed({ address: '127.0.0.1', host: 'local.dev:443', secure: true, origin: 'https://local.dev:443' }),
+    isProxyRequestAllowed({
+      address: '127.0.0.1',
+      host: 'local.dev:443',
+      secure: true,
+      origin: 'https://local.dev:443',
+    }),
     'https dev alias, matching'
   ).toBe(true)
   // shared.localhost is the LOCAL ISOLATED ORIGIN for foreign shared pages (see SHARED_LOCAL_HOST):

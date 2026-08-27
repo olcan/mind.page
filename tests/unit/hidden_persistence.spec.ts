@@ -2427,14 +2427,53 @@ for (const [label, hold] of [
     ).toHaveLength(0)
   })
 
-// TargetToken.wrapper is PROVISIONAL and currently unpinned. Removing the wrapper comparison
-// from sameTarget() leaves every test green. It is not obviously needed either: registerHidden()
-// calls invalidateAdopters() before every non-quarantined replacement, so an adoption target
-// replaced under the same id is refused by the pointer guard (if it does not re-adopt) or by the
-// projection guard (if it does, since mergeAdopted assigns a fresh object) — and ordinary updates
-// already compare exact canonicalHolder identity. It is retained only until the corpus seam can
-// judge it against a real stale-write schedule: run the wrapper-only mutation there FIRST, and if
-// it stays green, delete the field rather than adding a special case to defend it.
+// THE `TargetToken.wrapper` DECISION, settled (review 73 asked for it). The wrapper-only mutation
+// stayed green against the whole suite INCLUDING the landed corpus seam — but that only meant no
+// test drove the schedule it exists for. The schedule is below, and with it the mutation fails.
+//
+// What the seq half cannot see: a CORPUS registration replaces the indexed object for an id
+// WITHOUT advancing that id's receipt frontier, because no delivery was opened. The reachable case
+// is a phrase prompt: name A is mid-encryption when name B's acquireSecret runs the post-prompt
+// candidate scan, which registers fresh rows for MANY names — A's id among them. Its adoption merge
+// may have rebased A's projection onto server state A's in-flight payload never saw, so issuing
+// against the stale object overwrites it. The frontier is unchanged throughout.
+
+test('a CORPUS registration replaces the target object without a delivery, and the write refuses', async () => {
+  const encrypting = deferred<void>()
+  const encryptStarted = deferred<void>()
+  let encryptions = 0
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    encryptState: async state => {
+      if (++encryptions == 1) {
+        encryptStarted.resolve()
+        await encrypting.promise
+      }
+      return h.deps.encryptState(state)
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => undefined)
+  controller.save('n', { mine: 1 })
+  await encryptStarted.promise
+  const frontierBefore = h.ingress.receiptFrontier('d1')
+  // A CORPUS REGISTRATION, mid-encryption: a fresh same-id observation REPLACES the indexed object
+  // (registerHidden does byId.set). no delivery is opened, so the frontier does not move — the seq
+  // half of the token is blind to this
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 2 } }, () => undefined)
+  expect(h.ingress.receiptFrontier('d1'), 'no delivery, so no frontier movement').toBe(frontierBefore)
+  encrypting.resolve()
+  for (let i = 0; i < 14; i++) await flush()
+  expect(encryptions, 'the stale-target attempt REFUSED and the retry built again').toBe(2)
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(updates, 'exactly one write').toHaveLength(1)
+  // WITHOUT the wrapper half the first attempt issues, carrying `server: 1` — the state the
+  // registration had just replaced, silently reverting it
+  expect(itemOf(updates[0].text), 'built against the CURRENT record, not the replaced one').toEqual({
+    mine: 1,
+    server: 2,
+  })
+})
 
 test('a generation that heals, builds, and RE-BLOCKS is not saving and is reported only once', async () => {
   // round 62: my previous version of this row never executed the path it named -- it left the
@@ -3008,10 +3047,20 @@ test('a SYNCHRONOUS sdk throw disposes the waiter and clears the create marker',
   for (let i = 0; i < 10; i++) await flush()
   expect(spy.armedCount(), 'the waiter was armed immediately before the sdk call').toBe(1)
   expect(spy.cancelled, 'and disposed when it threw').toHaveLength(1)
-  // the marker would otherwise exempt a document that was never written from every confirmation.
-  // an ordinary update for the same name proves it is gone: it re-resolves the target rather than
-  // trusting a retained create
   expect(controller.owes('n'), 'the intent is retained for a page that can still write').toBe(true)
+  // THE MARKER is cleared here too, but that is HYGIENE, not a load-bearing rule, and this row does
+  // not pretend otherwise (round 73 asked for the pin and this is the answer). issueWrite installs
+  // the marker before the SDK call and `finalizeCreate` runs only AFTER it returns, so a
+  // synchronous throw leaves the marker pointing at a wrapper that never entered the index at all:
+  // it is absent from `local`, so the plan can never preserve it; `bypassesConfirmation` compares
+  // object identity against the current holder, which is a different object; and the next create
+  // for this name overwrites it. Every reader is covered, and none of them can see it.
+  expect(
+    [...h.idx.byId.values()].filter(w => w.name == 'n'),
+    'the never-written create left nothing in the index for a marker to exempt'
+  ).toEqual([])
+  // what IS load-bearing is asserted by the marker table above: clearing on fulfilment and on
+  // rejection, where the wrapper HAS finalized and a retained marker really would exempt it
 })
 
 test('a BLOCKED echo does not reconcile: the index may still hold the pre-write state', async () => {
@@ -3423,12 +3472,13 @@ for (const [what, rows, expected] of [
   test(`commit effects: ${what}`, async () => {
     const registered: string[] = []
     const publishedInCommit: string[] = []
+    const publishedState: any[] = []
     let inCommit = false
     const h = harness()
     const controller = createHiddenPersistence({
       ...h.deps,
       registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
-      syncOwner: n => void (inCommit && publishedInCommit.push(n)),
+      syncOwner: (n, state) => void (inCommit && (publishedInCommit.push(n), publishedState.push(state))),
       confirmTarget: async (name, hooks) => {
         const answer = new Map(
           rows.map(r => [
@@ -3456,6 +3506,10 @@ for (const [what, rows, expected] of [
     for (let i = 0; i < 10; i++) await flush()
     expect(registered, 'the EXACT rows registerTargetRow received').toEqual(expected.register)
     expect(publishedInCommit.length, 'owner publications inside the commit turn').toBe(expected.published)
+    // and the RESET branch publishes the immutable local-intent BASELINE, not whatever the index
+    // happened to hold: a publication count proves one happened, not that it carried the right
+    // state, and the owner writes full-state clones over what it sees
+    if (!expected.register.length) expect(publishedState[0]).toEqual({ mine: 1 })
   })
 
 test('commit effects: a RELEVANT indeterminate answer produces zero effects, and a later read succeeds', async () => {

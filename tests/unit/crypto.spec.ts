@@ -46,7 +46,8 @@ test('bytes round-trip in uint8 mode, marked with the ~ prefix', async () => {
 // verified end-to-end by the personal spec — must decrypt forever; a failure here means a format
 // break (kdf, iv layout, base64 framing), not a bug to fix by regenerating the vectors
 test('frozen ciphers from 2026-08-24 decrypt (persisted-data compatibility)', async () => {
-  const FROZEN_TEXT = '1a6a8aced06c5d2df4e692f8e7wWhRUEF5e0127YeqVm5zPSYjEJPgtjk9zjq8OXsQ0tWtX/3X/xvB2BXGA273WcBrDy9FpZRNtm'
+  const FROZEN_TEXT =
+    '1a6a8aced06c5d2df4e692f8e7wWhRUEF5e0127YeqVm5zPSYjEJPgtjk9zjq8OXsQ0tWtX/3X/xvB2BXGA273WcBrDy9FpZRNtm'
   expect(await decryptWithSecret(FROZEN_TEXT, SECRET)).toBe('frozen vector: item text with unicode ✓')
   const FROZEN_BYTES = 'fjNiNjhmOTk0YTI5NTMyMjRhZWM3NGRlYROLOeEVtgH6Wj9CS2fi44yciA9cbSfY' // base64 of the uint8-mode cipher
   const bytes_cipher = byteStringToArray(atob(FROZEN_BYTES))

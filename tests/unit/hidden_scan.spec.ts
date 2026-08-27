@@ -64,8 +64,13 @@ function harness(
   const query = deferred<{ id: string; data: unknown }[]>()
   const published: string[][] = []
   const pointReads: string[] = []
+  const classifies: string[] = []
   let closes = 0
   let live = true
+  // the corpus's ACTIVE CANCELLATION, modelled exactly as createHiddenCorpus supplies it: it never
+  // fulfils and rejects when the operation is cancelled
+  const cancellation = deferred<never>()
+  cancellation.promise.catch(() => {}) // raced, not always observed
   const deps: ScanDeps = {
     // WRAPPED so closure is directly observable: a leaked collector retains every later record,
     // and that leak has no other public consequence to assert on
@@ -84,7 +89,11 @@ function harness(
     assertLive: () => {
       if (!live) throw new Error('cancelled')
     },
-    classify: async id => (options.classify ?? (i => hidden(i, 'n')))(id),
+    cancellation: cancellation.promise,
+    classify: async id => {
+      classifies.push(id)
+      return (options.classify ?? (i => hidden(i, 'n')))(id)
+    },
     pointRead: async id => {
       pointReads.push(id)
       return (options.point ?? (i => hidden(i, 'n')))(id)
@@ -94,8 +103,14 @@ function harness(
     allocator,
     published,
     pointReads,
+    classifies,
     closes: () => closes,
-    stop: () => void (live = false),
+    // the corpus's stop: it releases the caller through the active cancellation AND flips the
+    // sticky bit, in that order
+    stop: () => {
+      live = false
+      cancellation.reject(new Error('cancelled'))
+    },
     answerQuery: (ids: string[]) => query.resolve(ids.map(id => ({ id, data: {} }))),
     failQuery: (e: unknown) => query.reject(e),
     scan: () => scanHiddenDocuments(deps),
@@ -116,7 +131,6 @@ test('a blind intersection is awaited, point-read once, and its answer replaces 
   expect(h.pointReads).toEqual(['a'])
   expect(result.apply.map(r => `${r.id}:${r.name}`)).toEqual(['a:fresh', 'b:n'])
   expect(result.admittedIds).toEqual([])
-  expect(result.skippedIds).toEqual([])
 })
 
 test('an ADMITTED intersection is reported even after its delivery has already settled', async () => {
@@ -163,7 +177,7 @@ test('an INDETERMINATE point answer fails closed instead of synthesizing absence
   await expect(scan).rejects.toThrow('could not be classified')
 })
 
-test('a not-hidden point answer suppresses its raw row and is reported as skipped', async () => {
+test('a not-hidden point answer SUPPRESSES its raw row, without classifying it', async () => {
   const h = harness({ point: () => notHidden })
   const scan = h.scan()
   const batch = h.allocator.allocate([{ kind: 'blind', id: 'b' }], () => {})
@@ -171,7 +185,7 @@ test('a not-hidden point answer suppresses its raw row and is reported as skippe
   h.answerQuery(['a', 'b'])
   const result = await scan
   expect(result.apply.map(r => r.id)).toEqual(['a'])
-  expect(result.skippedIds).toEqual(['b'])
+  expect(h.classifies, 'the replaced row is never classified: the point answer is the evidence').toEqual(['a'])
 })
 
 test('OVERLAPPING records for one id are ONE point read, and independent ids read in parallel', async () => {
@@ -196,25 +210,116 @@ test('OVERLAPPING records for one id are ONE point read, and independent ids rea
   expect(h.pointReads).toEqual(['a', 'b']) // two records for 'a', one read
 })
 
-test('the prefix CLOSES on every outcome, not only a successful body continuation', async () => {
+test('the prefix CLOSES on every outcome, INCLUDING while the query is still held', async () => {
   const rejected = harness()
   const scan = rejected.scan()
   rejected.failQuery(new Error('offline'))
   await expect(scan).rejects.toThrow('offline')
   expect(rejected.closes()).toBe(1)
 
-  const cancelled = harness()
-  const scan2 = cancelled.scan()
-  cancelled.stop()
-  cancelled.answerQuery(['a'])
-  await expect(scan2).rejects.toThrow('cancelled')
-  expect(cancelled.closes()).toBe(1)
+  // THE ONE THAT MATTERS. the corpus releases the caller, the boundary and the tail through its
+  // active cancellation while the network read is STILL PENDING — so a scan that only rechecks
+  // between awaits never reaches its own cleanup, and its prefix collector goes on retaining every
+  // later listener record, potentially for the page's lifetime
+  const held = harness()
+  const scan2 = held.scan()
+  await checkpoint()
+  expect(held.closes(), 'nothing is closed while the query is genuinely in flight').toBe(0)
+  held.stop() // the query is NEVER resolved
+  await expect(scan2, 'the caller is released').rejects.toThrow('cancelled')
+  expect(held.closes(), 'and the prefix closed exactly once, with the query still held').toBe(1)
+  // only NOW does the read come back. nothing may follow it
+  held.answerQuery(['a'])
+  const batch = held.allocator.allocate([{ kind: 'blind', id: 'a' }], () => {})
+  batch.records[0].finish()
+  await checkpoint()
+  expect(held.published, 'no late membership').toEqual([])
+  expect(held.pointReads, 'no late point read').toEqual([])
+  expect(held.classifies, 'and no late classification').toEqual([])
 
   const ok = harness()
   const scan3 = ok.scan()
   ok.answerQuery(['a'])
   await scan3
   expect(ok.closes()).toBe(1) // closed at membership, and the exit is idempotent
+})
+
+test('EVIDENCE PRECEDENCE: a definitive point answer beats a stale raw row that cannot be read', async () => {
+  // classifying every raw row first and filtering afterwards let stale evidence decide the whole
+  // scan: an undecryptable or malformed row rejected it even though a fresh point read had already
+  // said what that document definitively is
+  for (const [label, point, expected] of [
+    ['hidden', hidden('b', 'fresh'), ['a', 'b']],
+    ['not-hidden', notHidden, ['a']],
+  ] as const) {
+    const h = harness({
+      classify: id => {
+        if (id == 'b') throw new Error('undecryptable')
+        return hidden(id, 'n')
+      },
+      point: () => point,
+    })
+    const scan = h.scan()
+    const batch = h.allocator.allocate([{ kind: 'blind', id: 'b' }], () => {})
+    batch.records[0].finish()
+    h.answerQuery(['a', 'b'])
+    const result = await scan
+    expect(
+      result.apply.map(r => r.id),
+      `${label} point answer`
+    ).toEqual(expected)
+    expect(h.classifies, `${label}: the replaced row was never classified`).toEqual(['a'])
+  }
+})
+
+test('EVIDENCE PRECEDENCE: an ADMITTED id is never classified, however broken its stale raw row', async () => {
+  // the scan already promised never to apply an admitted id — classifying it anyway let its stale
+  // row reject the whole operation on behalf of a document its real delivery owns
+  const h = harness({
+    classify: id => {
+      if (id == 'a') throw new Error('undecryptable')
+      return hidden(id, 'n')
+    },
+  })
+  const scan = h.scan()
+  const cell = fakeHandle()
+  const batch = h.allocator.allocate([{ kind: 'admitted', id: 'a', handle: cell.handle }], () => {})
+  const record = batch.records[0]
+  if (record.kind != 'admitted') throw new Error('expected an admitted record')
+  record.schedule(async () => {})
+  await checkpoint()
+  h.answerQuery(['a', 'b'])
+  const result = await scan
+  expect(result.admittedIds).toEqual(['a'])
+  expect(result.apply.map(r => r.id)).toEqual(['b'])
+  expect(h.classifies, "the admitted id's stale row is never read").toEqual(['b'])
+  await cell.apply()
+})
+
+test('an ADMITTED record owns the whole id, including a blind record for it in the same group', async () => {
+  // the group is skipped as a unit and this scan will not touch that id at all, so there is nothing
+  // for the blind rejection to abort — and awaiting it would add a dependency on a callback whose
+  // other admitted changes may be waiting on this very scan
+  const h = harness()
+  const scan = h.scan()
+  const cell = fakeHandle()
+  const batch = h.allocator.allocate(
+    [
+      { kind: 'blind', id: 'a' },
+      { kind: 'admitted', id: 'a', handle: cell.handle },
+    ],
+    () => {}
+  )
+  const blindRecord = batch.records[0]
+  if (blindRecord.kind != 'blind') throw new Error('expected a blind record')
+  blindRecord.run(() => {
+    throw new Error('boom') // its failure is the listener's fail-soft concern, not this scan's
+  })
+  h.answerQuery(['a'])
+  const result = await scan
+  expect(result.admittedIds, 'the id is owned by its delivery').toEqual(['a'])
+  expect(result.apply, 'and nothing is applied for it').toEqual([])
+  batch.abort() // the handle never had an Apply scheduled
 })
 
 test('the prefix closes at MEMBERSHIP, so a record allocated afterwards is not point-read', async () => {

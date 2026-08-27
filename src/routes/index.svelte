@@ -3307,14 +3307,6 @@
   let deferredRemoteSeq = 0
   const deferRemoteChange = id => deferredRemoteChanges.set(id, ++deferredRemoteSeq)
   let applyRemoteChangeRef = null // set by the items listener (applyRemoteChange is closure-scoped)
-  // the items listener's remote-application frontier, exposed the same way. a hidden write's
-  // acknowledgement crosses it before it resolves to the persistence controller: settlement
-  // reconciles the owner from the APPLIED index, so an ack that overtook a delivered-but-not-yet
-  // decrypted echo reconciled the owner from state that echo was about to replace — and then
-  // cleared owes(), letting the echo through as a spurious "changed remotely"
-  // the outcome of the LATEST hidden application per document. settlement reconciles the owner
-  // only from an index that actually took this write's echo (see echoApplied in the controller);
-  // absent means nothing has failed for it
 
   // true while anything local is still going to write this item: an in-flight write, a queued
   // save task, or a save in progress. replaying under any of these loses the later intent —
@@ -3912,39 +3904,46 @@
         signOut,
       })
       if (candidate != null) {
-        // ONE FRESH CANDIDATE-KEYED SCAN, through the corpus seam, BEFORE the secret is published
-        // or stored. it is a corpus producer like confirmTarget: its membership window admits a
-        // delivery for one of these ids arriving mid-scan, and its boundary orders that delivery
-        // behind the registration rather than letting it mutate the pre-rebuild index.
-        // CANDIDATE-KEYED because `secret` is not published yet — and must not be until this
-        // completes, or a concurrent encrypted save could duplicate a record not yet registered
-        await hiddenCorpus.run(async run => {
-          const scan = await scanHiddenDocuments(
-            hiddenScanDeps(run, async (data, id) => {
-              const item: Record<string, any> = Object.assign(data, { id })
-              if (!item.cipher) return item
-              const decrypted = JSON.parse(await decryptWithSecret(item.cipher, candidate))
-              return Object.assign(item, { text: decrypted.text, attr: decrypted.attr, cipher: null })
-            })
-          )
-          // canonical id order, so a pending create adopts the MINIMUM-id duplicate (the index
-          // invariant). an ADMITTED id is left to its own delivery, which is what the scan already
-          // withholds from `apply`
-          for (const row of scan.apply) {
-            if (run.cancelled()) return // a late registration after stop must not touch the index
-            registerHidden(hiddenIndex(), row.wrapper as HiddenWrapper, mergeAdoptedStore)
-          }
-        })
-        // NOTE a CorpusStopped rejection is NOT converted to null here any more: that value means
-        // server-confirmed EMPTY, so returning it after a sticky stop let execution fall into the
-        // choose-new-phrase path and publish and store a secret over an account it could no longer
-        // see. it propagates, exactly like a cancelled prompt.
+        // THE ADOPTION ORDER IS THE CONTRACT, and it lives in src/secret.ts (table-tested): one
+        // corpus operation for the fresh candidate-keyed scan and its registration, the batch
+        // inside the fatal boundary, stop rechecked in the post-await continuation gap, and the
+        // secret published LAST — a save that saw it earlier could duplicate a record the scan had
+        // not registered yet.
+        // CANDIDATE-KEYED because `secret` is not published yet; the corpus membership window
+        // admits a delivery for one of these ids arriving mid-scan and orders it behind the
+        // registration rather than letting it mutate the pre-rebuild index.
+        // NOTE a CorpusStopped rejection is NOT converted to null: that value means server-confirmed
+        // EMPTY, so returning it after a sticky stop let execution fall into the choose-new-phrase
+        // path and publish and store a secret over an account it could no longer see.
         // NOTE nor is `prefetchedHiddenDocs` assigned: this path runs from an encrypted save on an
-        // already-initialized page, so the first snapshot was consumed long ago and a prefetch
-        // fact recorded here could never reach the decision that reads it
-        secret = candidate
-        localStorage.setItem('mindpage_secret', secret)
-        return secret
+        // already-initialized page, so the first snapshot was consumed long ago and a prefetch fact
+        // recorded here could never reach the decision that reads it
+        return await adoptValidatedSecret<HiddenScanRow, CorpusRun>(candidate, {
+          runCorpus: body => hiddenCorpus.run(body),
+          scan: async run =>
+            (
+              await scanHiddenDocuments(
+                hiddenScanDeps(run, async (data, id) => {
+                  const item: Record<string, any> = Object.assign(data, { id })
+                  if (!item.cipher) return item
+                  const decrypted = JSON.parse(await decryptWithSecret(item.cipher, candidate))
+                  return Object.assign(item, { text: decrypted.text, attr: decrypted.attr, cipher: null })
+                })
+              )
+            ).apply,
+          // canonical id order, so a pending create adopts the MINIMUM-id duplicate (the invariant)
+          register: rows => {
+            for (const row of rows) registerHidden(hiddenIndex(), row.wrapper as HiddenWrapper, mergeAdoptedStore)
+            return undefined
+          },
+          commit: batch => commitOrStop(batch, active => stopIngress('hidden candidate registration failed', active)),
+          stopped: () => ingressStopped,
+          publish: validated => {
+            secret = validated
+            localStorage.setItem('mindpage_secret', validated)
+            return undefined
+          },
+        })
       }
       new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
     }
@@ -6314,9 +6313,9 @@
   import type { DocumentChange } from 'firebase/firestore'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
-  import { createHiddenCorpus, commitOrStop } from '../hidden_corpus'
-  import { resolveFixedOwnerSecret } from '../secret'
-  import { snapshotDecision } from '../snapshot'
+  import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
+  import { adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
+  import { snapshotDecision, speaksForHiddenSide } from '../snapshot'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -6331,7 +6330,7 @@
     type HiddenWrapper,
   } from '../hidden'
   import { classifyHiddenDocument } from '../hidden_confirm'
-  import { scanHiddenDocuments, type ScanDeps } from '../hidden_scan'
+  import { scanHiddenDocuments, type ScanDeps, type ScanRow as HiddenScanRow } from '../hidden_scan'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -6511,7 +6510,7 @@
   // account's hidden documents exactly this way; the ordering, grouping and fail-closed rules live
   // in the module
   function hiddenScanDeps(
-    run: { publishMembership: (ids: Iterable<string>) => void; cancelled: () => boolean },
+    run: { publishMembership: (ids: Iterable<string>) => void; cancelled: () => boolean; cancellation: Promise<never> },
     // decrypts ONE raw document. the session `secret` is not always the right key: the post-prompt
     // scan runs BEFORE the validated phrase is published (a save that saw it early could duplicate
     // a record this scan has not registered yet), so it supplies a candidate-keyed decryptor
@@ -6537,6 +6536,7 @@
       assertLive: () => {
         if (run.cancelled()) throw new Error('hidden corpus stopped')
       },
+      cancellation: run.cancellation,
       classify,
       pointRead: async id => {
         const fresh = await getDocFromServer(doc(getFirestore(firebase), 'items', id))
@@ -7449,7 +7449,6 @@
       visualViewport.addEventListener('resize', onResize)
 
       let firstSnapshot = true
-      let snapshotApply = Promise.resolve() // serializes remote-change application across snapshots
       function initFirebaseRealtime() {
         if (!user) return // need user.uid
 
@@ -7937,10 +7936,10 @@
             // the PLAIN form: reconciliation clears only its own generation, through settle.
             // superseding here would clear a NEWER deferral's marker as a side effect
             applyRemoteChangeRef = applyRemoteChange
-            // handle changes in non-first snapshot, waiting for init if necessary. the APPLY TASKS
-            // are serialized, but hidden applications are enqueued onto name chains and outlive the
-            // task that scheduled them (see the completion records below), so two deliveries for one document
-            // routed through different names can land out of receipt order — an open blocker
+            // handle changes in non-first snapshot, waiting for init if necessary. ORDER for one
+            // document is the coordinator's per-id delivery tail, not this callback: two deliveries
+            // for one id routed through different names cannot overtake each other there, which is
+            // what the name-chain-only model could not prevent
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
             const { settle: settleApplied, revoke: revokeThisRevision, lease } = reserveHiddenAuthority({
@@ -7963,7 +7962,9 @@
             // discriminant and EVERY record became blind. this one annotation, plus the explicit
             // return type below, restores checking exactly where an SDK `any` enters a
             // discriminated contract. it is a TYPE-ONLY import: nothing is added to the bundle
-            const changes: DocumentChange[] = snapshot.docChanges() // read ONCE
+            // read once HERE, and iterated in lockstep with the allocated records below (the
+            // decision above reads its own length separately, before this branch)
+            const changes: DocumentChange[] = snapshot.docChanges()
             // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary). one entry
             // PER CHANGE, positionally: allocate() preserves order, so record i is change i — an
             // id-keyed map silently collapsed two changes for the same id in one callback
@@ -8042,10 +8043,10 @@
                   console.error('could not apply remote change:', doc.id, e)
                   return null
                 })
-                // AFTER THE DECRYPT AWAIT, before any parse, quarantine, receipt or handoff: a
-                // stop while decrypt was held may already have aborted the batch and released this
-                // record's entry receipt, and a late continuation would then install a NEW legacy
-                // receipt after that cleanup
+                // AFTER THE DECRYPT AWAIT, before any parse, quarantine or handoff: a stop while
+                // decrypt was held may already have aborted this batch and terminalized this
+                // record, and a late continuation would then schedule work onto a handle whose
+                // outcome is already published
                 if (ingressStopped) return
                 if (!savedItem) {
                   // removal is id-driven: the plaintext `hidden` field plus the id suffices, so a
@@ -8120,8 +8121,16 @@
                           // hidden index still depends on. the old side uses the REAL reducer and
                           // its downstream notification, not a bare index mutation: a
                           // global_store_<owner> document that becomes visible must not leave the
-                          // owner's store and its change notification stale
-                          const { removed: dropped } = removeHidden(hiddenIndex(), doc.id)
+                          // owner's store and its change notification stale.
+                          //
+                          // ... EXCEPT when the delivery does not speak for the hidden side at all
+                          // (see speaksForHiddenSide in src/snapshot.ts and the design's "What a
+                          // removal is evidence OF"): a fixed page's removal means the document
+                          // left the SHARED SET, which includes TURNING HIDDEN, so acting on it
+                          // would drop the very record a scan or confirmation just registered
+                          const { removed: dropped } = speaksForHiddenSide({ fixed, removed })
+                            ? removeHidden(hiddenIndex(), doc.id)
+                            : { removed: undefined }
                           if (dropped) {
                             hiddenItemChangedRemotely(dropped.name, change.type)
                             hiddenCleanupPending = true
@@ -8210,12 +8219,10 @@
               if (!initTime) init_log(summary)
               else console.debug(`applied ${summary}:`, applied.slice(0, 10).join('; ') + (applied.length > 10 ? ` … +${applied.length - 10} more` : ''))
             })
-            // snapshotApply TRACKS `landed`, which already means every body or handle of this
-            // callback has terminalized — so the separate hiddenFrontier chain and the raw
-            // preparation task carried no extra information and are gone. it no longer gates when
-            // a callback begins: that serialization is what deadlocked an admitted change behind
-            // a LATER callback's blind change the candidate scan was itself waiting for
-            snapshotApply = Promise.allSettled([snapshotApply, batch.landed]).then(() => {})
+            // NOTE there is no cross-snapshot application chain any more. `batch.landed` already
+            // means every body and handle of this callback has terminalized, and NOTHING read the
+            // chain built from it — while chaining callbacks is exactly what deadlocked an admitted
+            // change behind a LATER callback's blind change that the candidate scan was waiting for
           },
           error => {
             console.error(error)

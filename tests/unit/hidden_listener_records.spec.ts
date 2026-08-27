@@ -86,20 +86,23 @@ test('same-callback [admitted x, blind h]: x does not wait on the LATER blind h'
   // admitted record must never be ordered behind a blind one received after it
   const { allocate } = allocator()
   const x = fakeHandle()
-  const batch = allocate([{ kind: 'admitted' as const, id: 'x', handle: x.handle }, { kind: 'blind' as const, id: 'h' }])
+  const batch = allocate([
+    { kind: 'admitted' as const, id: 'x', handle: x.handle },
+    { kind: 'blind' as const, id: 'h' },
+  ])
   const [xr, hr] = batch.records
   expect(xr.kind).toBe('admitted')
   expect(hr.kind).toBe('blind')
   // x schedules while h has NOT been given a body yet
   const applied = deferred()
-  ;admitted(xr).schedule(async () => void applied.resolve())
+  admitted(xr).schedule(async () => void applied.resolve())
   await checkpoint()
   expect(x.isReady(), 'x reached the handle without waiting for later h').toBe(true)
   await x.run()
   await applied.promise
   // ... and h still runs afterwards
   let hRan = false
-  ;blind(hr).run(() => void (hRan = true))
+  blind(hr).run(() => void (hRan = true))
   await hr.done
   expect(hRan).toBe(true)
 })
@@ -107,16 +110,19 @@ test('same-callback [admitted x, blind h]: x does not wait on the LATER blind h'
 test('[blind h, admitted x]: x IS held behind the earlier blind h', async () => {
   const { allocate } = allocator()
   const x = fakeHandle()
-  const batch = allocate([{ kind: 'blind' as const, id: 'h' }, { kind: 'admitted' as const, id: 'x', handle: x.handle }])
+  const batch = allocate([
+    { kind: 'blind' as const, id: 'h' },
+    { kind: 'admitted' as const, id: 'x', handle: x.handle },
+  ])
   const [hr, xr] = batch.records
-  ;admitted(xr).schedule(async () => {})
+  admitted(xr).schedule(async () => {})
   // ... and x's PREPARATION finalizes while h is still held. that is the hazardous order: a
   // scheduled record must survive its own finalization while its handoff is still waiting
   xr.finish()
   await checkpoint()
   expect(x.isReady(), 'x waits: h was received first').toBe(false)
   let hRan = false
-  ;blind(hr).run(() => void (hRan = true))
+  blind(hr).run(() => void (hRan = true))
   await hr.done
   await checkpoint()
   expect(hRan).toBe(true)
@@ -131,7 +137,7 @@ test('a newer same-id handle still queued behind an older one is NOT aborted by 
   const batch = allocate([{ kind: 'admitted' as const, id: 'd', handle: s2.handle }])
   const [r] = batch.records
   let ran = false
-  ;admitted(r).schedule(async () => void (ran = true))
+  admitted(r).schedule(async () => void (ran = true))
   r.finish() // preparation is over for this record; its Apply is still queued
   await checkpoint()
   expect(s2.isReady(), 'still ready, not blocked').toBe(true)
@@ -153,13 +159,16 @@ test('an admitted record with NOTHING scheduled is blocked by finalization, and 
 
 test('a blind body rejects its OWN record while the lane runs the next slot, and the lease stays fail-soft', async () => {
   const { allocate, blindErrors } = allocator()
-  const batch = allocate([{ kind: 'blind' as const, id: 'h1' }, { kind: 'blind' as const, id: 'h2' }])
+  const batch = allocate([
+    { kind: 'blind' as const, id: 'h1' },
+    { kind: 'blind' as const, id: 'h2' },
+  ])
   const [r1, r2] = batch.records
   let secondRan = false
-  ;blind(r1).run(() => {
+  blind(r1).run(() => {
     throw new Error('blind body failed')
   })
-  ;blind(r2).run(() => void (secondRan = true))
+  blind(r2).run(() => void (secondRan = true))
   await expect(r1.done, 'the record RETAINS its rejection').rejects.toThrow('blind body failed')
   await r2.done
   expect(secondRan, 'the lane consumed it so the next slot still ran').toBe(true)
@@ -177,19 +186,28 @@ test('a THROWING blind-error diagnostic does not strand the record or the lane',
       throw new Error('diagnostic failed')
     },
   })
-  const batch = a.allocate([{ kind: 'blind' as const, id: 'h1' }, { kind: 'blind' as const, id: 'h2' }], () => {})
+  const batch = a.allocate(
+    [
+      { kind: 'blind' as const, id: 'h1' },
+      { kind: 'blind' as const, id: 'h2' },
+    ],
+    () => {}
+  )
   const [r1, r2] = batch.records
   let secondRan = false
-  ;blind(r1).run(() => {
+  blind(r1).run(() => {
     throw new Error('blind body failed')
   })
-  ;blind(r2).run(() => void (secondRan = true))
+  blind(r2).run(() => void (secondRan = true))
   await expect(r1.done, 'rejected with the BODY error, not the hook error').rejects.toThrow('blind body failed')
   await r2.done
   expect(calls, 'the hook did run').toEqual(['h1'])
   expect(secondRan, 'and the lane still ran the next slot').toBe(true)
   const results = await batch.landed
-  expect(results.map(r => r.status), 'landed settles').toEqual(['rejected', 'fulfilled'])
+  expect(
+    results.map(r => r.status),
+    'landed settles'
+  ).toEqual(['rejected', 'fulfilled'])
 })
 
 test('abort terminalizes a SCHEDULED record held behind a predecessor, not just an unstarted one', async () => {
@@ -198,10 +216,13 @@ test('abort terminalizes a SCHEDULED record held behind a predecessor, not just 
   // every consumer of that boundary — remained pending until the predecessor eventually released
   const { allocate } = allocator()
   const x = fakeHandle()
-  const batch = allocate([{ kind: 'blind' as const, id: 'h' }, { kind: 'admitted' as const, id: 'x', handle: x.handle }])
+  const batch = allocate([
+    { kind: 'blind' as const, id: 'h' },
+    { kind: 'admitted' as const, id: 'x', handle: x.handle },
+  ])
   const [hr, xr] = batch.records
   let ran = false
-  ;admitted(xr).schedule(async () => void (ran = true))
+  admitted(xr).schedule(async () => void (ran = true))
   xr.finish() // preparation over; the handoff is still behind h
   let landedSettled = false
   void batch.landed.then(() => (landedSettled = true))
@@ -214,8 +235,8 @@ test('abort terminalizes a SCHEDULED record held behind a predecessor, not just 
   expect(x.isReady(), 'x is blocked, not left ready').toBe(false)
   // late calls on BOTH records are inert
   let late = false
-  ;admitted(xr).schedule(async () => void (late = true))
-  ;blind(hr).run(() => void (late = true))
+  admitted(xr).schedule(async () => void (late = true))
+  blind(hr).run(() => void (late = true))
   await checkpoint()
   expect(late, 'no late work runs').toBe(false)
   expect(ran, 'and the scheduled Apply never ran').toBe(false)
@@ -227,10 +248,10 @@ test('the global lane spans callbacks: an earlier batch body runs before a later
   const first = allocate([{ kind: 'blind' as const, id: 'a' }])
   const second = allocate([{ kind: 'blind' as const, id: 'b' }])
   // the SECOND batch is given its body first; the lane still runs them in receipt order
-  ;blind(second.records[0]).run(() => void order.push('b'))
+  blind(second.records[0]).run(() => void order.push('b'))
   await checkpoint()
   expect(order, 'b waits: its slot is behind a').toEqual([])
-  ;blind(first.records[0]).run(() => void order.push('a'))
+  blind(first.records[0]).run(() => void order.push('a'))
   await second.records[0].done
   expect(order).toEqual(['a', 'b'])
 })
@@ -238,9 +259,12 @@ test('the global lane spans callbacks: an earlier batch body runs before a later
 test('a batch whose records all settle reports no failure', async () => {
   const { allocate } = allocator()
   const h = fakeHandle()
-  const batch = allocate([{ kind: 'admitted' as const, id: 'x', handle: h.handle }, { kind: 'blind' as const, id: 'h' }])
-  ;admitted(batch.records[0]).schedule(async () => {})
-  ;blind(batch.records[1]).run(() => {})
+  const batch = allocate([
+    { kind: 'admitted' as const, id: 'x', handle: h.handle },
+    { kind: 'blind' as const, id: 'h' },
+  ])
+  admitted(batch.records[0]).schedule(async () => {})
+  blind(batch.records[1]).run(() => {})
   await checkpoint()
   await h.run()
   const results = await batch.landed
@@ -261,10 +285,10 @@ test('S1/S2/S3 for one id: finalization preserves S2, S2 blocks, S3 heals', asyn
   const b1 = allocate([{ kind: 'admitted' as const, id: 'd', handle: s1 }])
   const b2 = allocate([{ kind: 'admitted' as const, id: 'd', handle: s2 }])
   const held = deferred()
-  ;admitted(b1.records[0]).schedule(() => held.promise)
+  admitted(b1.records[0]).schedule(() => held.promise)
   b1.records[0].finish()
   // S2 schedules a FAILING Apply and finalizes while S1 is still running
-  ;admitted(b2.records[0]).schedule(async () => {
+  admitted(b2.records[0]).schedule(async () => {
     throw new Error('S2 failed')
   })
   b2.records[0].finish()
@@ -277,7 +301,7 @@ test('S1/S2/S3 for one id: finalization preserves S2, S2 blocks, S3 heals', asyn
   // S3 for the same id succeeds and heals it
   const s3 = ingress.open('d', 'c3')
   const b3 = allocate([{ kind: 'admitted' as const, id: 'd', handle: s3 }])
-  ;admitted(b3.records[0]).schedule(async () => {})
+  admitted(b3.records[0]).schedule(async () => {})
   b3.records[0].finish()
   await b3.records[0].done
   expect(ingress.gate(), 'healed').toBe('writable')
@@ -291,14 +315,28 @@ test('the prefix captures records live at open AND those allocated before it clo
   const { allocate, a } = allocator()
   const before = allocate([{ kind: 'blind' as const, id: 'early' }])
   const prefix = a.openPrefix()
-  expect(prefix.records().map(r => r.id), 'seeded from live records').toEqual(['early'])
+  expect(
+    prefix.records().map(r => r.id),
+    'seeded from live records'
+  ).toEqual(['early'])
   // a callback arriving DURING the read
   const during = allocate([{ kind: 'blind' as const, id: 'racing' }])
-  expect(prefix.records().map(r => r.id).sort()).toEqual(['early', 'racing'])
+  expect(
+    prefix
+      .records()
+      .map(r => r.id)
+      .sort()
+  ).toEqual(['early', 'racing'])
   prefix.close()
   // ... and one arriving after membership published is NOT in the prefix: membership admits it
   allocate([{ kind: 'blind' as const, id: 'later' }])
-  expect(prefix.records().map(r => r.id).sort(), 'closed').toEqual(['early', 'racing'])
+  expect(
+    prefix
+      .records()
+      .map(r => r.id)
+      .sort(),
+    'closed'
+  ).toEqual(['early', 'racing'])
   blind(before.records[0]).run(() => undefined)
   blind(during.records[0]).run(() => undefined)
   await before.landed

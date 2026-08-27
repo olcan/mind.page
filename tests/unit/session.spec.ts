@@ -21,9 +21,17 @@ const cases: [string, Partial<AuthStateFacts>, ReturnType<typeof authStateAction
   ['events during sign-out are ignored', { signingOut: true, hasUser: false }, 'ignore_transition'],
   // any auth change after this page load initialized is external (another tab): re-enter clean
   ['a second auth state reloads', { authStateReceived: true }, 'reload'],
-  ['a second auth state reloads even without a user', { authStateReceived: true, hasUser: false, anonymous: true }, 'reload'],
+  [
+    'a second auth state reloads even without a user',
+    { authStateReceived: true, hasUser: false, anonymous: true },
+    'reload',
+  ],
   // the in-tab flows win over staleness: a mid-sign-out event never triggers the reload branch
-  ['sign-out in progress beats the external-change reload', { signingOut: true, authStateReceived: true }, 'ignore_transition'],
+  [
+    'sign-out in progress beats the external-change reload',
+    { signingOut: true, authStateReceived: true },
+    'ignore_transition',
+  ],
 ]
 
 for (const [name, overrides, expected] of cases)

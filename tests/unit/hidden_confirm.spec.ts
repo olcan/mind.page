@@ -11,8 +11,20 @@ import {
 // PURE tables for confirmTarget's planning (see src/hidden_confirm.ts). No timers, no promises,
 // no fakes — these are decisions, and the point of extracting them is that they can be tabled
 
-const hidden = (id: string, name: string, wrapper: unknown = { id }): ClassifiedRow => ({ id, kind: 'hidden', name, wrapper, eligible: true })
-const ineligible = (id: string, name: string): ClassifiedRow => ({ id, kind: 'hidden', name, wrapper: { id }, eligible: false })
+const hidden = (id: string, name: string, wrapper: unknown = { id }): ClassifiedRow => ({
+  id,
+  kind: 'hidden',
+  name,
+  wrapper,
+  eligible: true,
+})
+const ineligible = (id: string, name: string): ClassifiedRow => ({
+  id,
+  kind: 'hidden',
+  name,
+  wrapper: { id },
+  eligible: false,
+})
 const absent = (id: string): ClassifiedRow => ({ id, kind: 'absent' })
 const answerOf = (...rows: ClassifiedRow[]) => new Map(rows.map(r => [r.id, r]))
 
@@ -31,7 +43,10 @@ test('the whole nonpending slice is replaced: every local row the answer disprov
     answer: answerOf(hidden('k', 'n'), hidden('l', 'n'), absent('h'), absent('j')),
   })
   expect(plan.remove, 'destructive rows in canonical id order').toEqual(['h', 'j'])
-  expect(plan.register.map(r => r.id), 'fresh rows in canonical id order').toEqual(['k', 'l'])
+  expect(
+    plan.register.map(r => r.id),
+    'fresh rows in canonical id order'
+  ).toEqual(['k', 'l'])
 })
 
 test('a local row the answer places under ANOTHER name projects to target-side absence only', () => {
@@ -53,7 +68,10 @@ test('an unrelated row in the answer produces no effect at all', () => {
     answer: answerOf(hidden('h', 'n'), hidden('u', 'other')),
   })
   expect(plan.remove).toEqual([])
-  expect(plan.register.map(r => r.id), 'only n rows').toEqual(['h'])
+  expect(
+    plan.register.map(r => r.id),
+    'only n rows'
+  ).toEqual(['h'])
 })
 
 test('a local row the answer still confirms is neither removed nor duplicated', () => {
@@ -206,7 +224,10 @@ test('rows with no point answer stand, and everything applies in CANONICAL id or
     ['m', { kind: 'not-hidden' }],
   ])
   const out = normalizeScan(raw, answers)
-  expect(out.apply.map(r => r.id), 'canonical, not point-read completion order').toEqual(['a', 'z'])
+  expect(
+    out.apply.map(r => r.id),
+    'canonical, not point-read completion order'
+  ).toEqual(['a', 'z'])
   expect(out.apply[0].wrapper, 'exact wrapper identity').toBe(freshWrapper)
   // 'm' is simply absent from apply
 })
@@ -223,7 +244,9 @@ test('classification is complete and side-effect free, and fails closed on an un
   // belongs to, so a confirmation must fail closed rather than synthesize target-side absence
   expect(classifyHiddenDocument('d', true, 'not json').kind).toBe('indeterminate')
   expect(classifyHiddenDocument('d', true, JSON.stringify({ item: {} })).kind, 'missing name').toBe('indeterminate')
-  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: '', item: {} })).kind, 'empty name').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: '', item: {} })).kind, 'empty name').toBe(
+    'indeterminate'
+  )
   expect(classifyHiddenDocument('d', true, JSON.stringify('scalar')).kind, 'not an object').toBe('indeterminate')
   expect(classifyHiddenDocument('d', true, null).kind, 'no text').toBe('indeterminate')
 })
@@ -239,7 +262,10 @@ test('a quarantined LOWER row is skipped, and the eligible row registers', () =>
     answer: answerOf(ineligible('a', 'n'), hidden('k', 'n')),
   })
   expect(plan.remove).toEqual([])
-  expect(plan.register.map(r => r.id), 'only the eligible row registers').toEqual(['k'])
+  expect(
+    plan.register.map(r => r.id),
+    'only the eligible row registers'
+  ).toEqual(['k'])
 })
 
 test('a stale local row with only a quarantined fresh row: removed, and no fresh registration', () => {
