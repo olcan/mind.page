@@ -1,6 +1,7 @@
 // the hidden INGRESS COORDINATOR — stage 2 of the design in the vault repo,
-// notes/design/mind_page_hidden_ingress_coordinator.md (revision 10, cleared by review round 42).
-// that document is normative; this module implements it and adds nothing beyond it.
+// notes/design/mind_page_hidden_ingress_coordinator.md (revision 11; cleared as revision 10 by
+// review round 42, lifecycle rules added by rounds 43-45). that document is normative; this
+// module implements its pure surface and adds nothing beyond it.
 //
 // PURE and wired to nothing: no firestore, no index, no owner, no crypto. the listener will feed
 // it deliveries and the writer will consume its gate, waits, echo waiters and authority in the

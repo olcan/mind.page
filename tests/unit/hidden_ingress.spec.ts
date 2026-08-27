@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createHiddenIngress, type Apply, type Outcome } from '../../src/hidden_ingress.js'
 
 // STAGE 2 of the hidden ingress coordinator (see notes/design/mind_page_hidden_ingress_coordinator
-// in the vault repo, revision 10): the PURE schedules, with literal ids and ciphers, exact
+// in the vault repo, revision 11): the PURE schedules, with literal ids and ciphers, exact
 // handles, deferred Apply closures, and no real timers. synchronization is DeliveryHandle.done and
 // AuthorityLease.done — never microtask-count loops. one fresh coordinator per test.
 
@@ -228,6 +228,16 @@ test('hasOutstanding: nonterminal true, retained block true, healed false — wh
   expect(await heal.done).toBe('applied')
   expect(c.hasOutstanding('d'), 'healed and pruned').toBe(false)
   expect(c.receiptFrontier('d'), 'the cell persists: the frontier survives').toBe(2)
+  // frontiers are PER ID (round 45): advancing an unrelated cell must not move this one
+  const unrelated = c.open('other')
+  unrelated.ready(applied)
+  const unrelated2 = c.open('other')
+  unrelated2.ready(applied)
+  const unrelated3 = c.open('other')
+  unrelated3.ready(applied)
+  expect(await unrelated3.done).toBe('applied')
+  expect(c.receiptFrontier('other')).toBe(3)
+  expect(c.receiptFrontier('d'), 'unchanged by unrelated traffic').toBe(2)
 })
 
 // ---- waits ----
@@ -264,6 +274,17 @@ test('whenActionable delivers writable and blocked, never pending; whenWritable 
   expect(await heal.done).toBe('applied')
   await Promise.resolve()
   expect(resolved.sort(), 'BOTH healing waits resolved on writable').toEqual(['a1:blocked', 'a2:blocked', 'w1', 'w2'])
+
+  // pending -> WRITABLE must wake a stored actionable wait too (round 45: a drain keyed only to
+  // the blocked transition would strand a writer whose delivery simply succeeded)
+  const h2 = c.open('d')
+  const straight = c.whenActionable()
+  let straightResolved: string | undefined
+  void straight.promise.then(g => (straightResolved = g))
+  h2.ready(applied)
+  expect(await h2.done).toBe('applied')
+  await Promise.resolve()
+  expect(straightResolved, 'woken by the successful transition').toBe('writable')
 })
 
 test('whenActionable while already blocked resolves immediately; whenWritable does not', async () => {
@@ -291,9 +312,14 @@ test('a wait cancelled while pending ignores every later transition — both lev
   // cancel a whenWritable WHILE BLOCKED, before healing — the round-43 leak shape: the design
   // promises cancellation for both levels, and this waiter would otherwise be retained until a
   // writable that a permanently corrupt record can prevent forever
+  // the sibling registers FIRST: a sloppy positional splice would remove IT rather than the
+  // cancelled subscription, which registered second (round 45 mutation)
+  const sibling = c.whenWritable()
   const healingWait = c.whenWritable()
   let healed = false
+  let siblingHealed = false
   void healingWait.promise.then(() => (healed = true))
+  void sibling.promise.then(() => (siblingHealed = true))
   healingWait.cancel()
   const heal = c.open('d')
   heal.ready(applied)
@@ -301,6 +327,9 @@ test('a wait cancelled while pending ignores every later transition — both lev
   await Promise.resolve()
   expect(resolved, 'cancelled actionable: never resolves').toBe(false)
   expect(healed, 'cancelled writable: never resolves either').toBe(false)
+  // cancellation removed the EXACT subscription (round 45): an index-sloppy splice that removed a
+  // neighbor would silence the live sibling instead
+  expect(siblingHealed, 'the live sibling still resolved').toBe(true)
 })
 
 // ---- pruning and compaction ----
@@ -349,6 +378,7 @@ test('an older matching cipher already open when a waiter is armed does not sati
 
 test('a cancelled echo waiter ignores a later match; a non-matching cipher never resolves it', async () => {
   const c = createHiddenIngress()
+  const echoSibling = c.armEcho('d', 'cipher-w') // FIRST, so a positional splice would hit it
   const echo = c.armEcho('d', 'cipher-w')
   let resolved = false
   void echo.promise.then(() => (resolved = true))
@@ -356,6 +386,7 @@ test('a cancelled echo waiter ignores a later match; a non-matching cipher never
   const match = c.open('d', 'cipher-w')
   match.ready(applied)
   expect(await match.done).toBe('applied')
+  expect(await echoSibling.promise, 'the live sibling still resolved').toBe('applied')
   const other = c.armEcho('d', 'cipher-w')
   let otherResolved = false
   void other.promise.then(() => (otherResolved = true))
@@ -438,9 +469,15 @@ test('the basis survives a transient gate: usability returns when the noncandida
   await c1.done
   expect(c.authorityUsable(), 'suppressed by the pending delivery, but the BASIS advanced').toBe(false)
   c2.seal()
-  g.gate.resolve()
-  expect(await delivery.done).toBe('applied')
-  expect(c.authorityUsable(), 'usable when C2 applies — no third callback needed').toBe(true)
+  // the delivery BLOCKS first: usability must be suppressed by a blocked gate too, not only a
+  // pending one (round 45)
+  g.gate.reject(new Error('application failed'))
+  expect(await delivery.done).toBe('blocked')
+  expect(c.authorityUsable(), 'unusable while the gate is blocked').toBe(false)
+  const heal = c.open('d')
+  heal.ready(applied)
+  expect(await heal.done).toBe('applied')
+  expect(c.authorityUsable(), 'usable once the block heals — no third callback needed').toBe(true)
 })
 
 test('cached policy primitives: a noncandidate that revokes invalidates; one that does not preserves the basis', async () => {
