@@ -8,6 +8,37 @@
 
 import { compareIds } from './hidden.js'
 
+// ---- pure classification -----------------------------------------------------------------
+// production's parseHiddenWrapper LOGS and pushes onto the invalid list, so it cannot be used in
+// the collect/classify-before-first-mutation phase: classification has to be complete and
+// side-effect free before any plan effect, and FAIL CLOSED when an answer cannot be established.
+
+export type ParsedWrapper = { id: string; name: string; item?: unknown }
+
+export type Classification =
+  | { kind: 'hidden'; wrapper: ParsedWrapper }
+  // unparseable, or missing a usable name. NOT the same as absent: the document exists and this
+  // read simply cannot say which name it belongs to, so a confirmation must fail closed rather
+  // than treat it as target-side absence
+  | { kind: 'indeterminate'; reason: string }
+  // definitely not part of any hidden name
+  | { kind: 'not-hidden' }
+
+/** Pure counterpart of parseHiddenWrapper: no logging, no quarantine list, no index. */
+export function classifyHiddenDocument(id: string, hidden: boolean, text: unknown): Classification {
+  if (!hidden) return { kind: 'not-hidden' }
+  if (typeof text != 'string' || !text) return { kind: 'indeterminate', reason: 'no text' }
+  let parsed: any
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    return { kind: 'indeterminate', reason: `unparseable: ${(e as Error).message}` }
+  }
+  if (!parsed || typeof parsed != 'object') return { kind: 'indeterminate', reason: 'not an object' }
+  if (typeof parsed.name != 'string' || !parsed.name) return { kind: 'indeterminate', reason: 'missing name' }
+  return { kind: 'hidden', wrapper: { ...parsed, id } }
+}
+
 // the writer's own unacknowledged create, retained until its SDK promise settles. WRAPPER-EXACT,
 // never id-exact: registerHidden replaces the indexed object on a fresh same-id observation, and
 // an id-only exemption would mistake that independent replacement — or a same-id rename — for the
@@ -16,7 +47,12 @@ export type Marker = { id: string; wrapper: unknown; token: number }
 
 // what a fresh complete read said about ONE document
 export type ClassifiedRow =
-  | { id: string; kind: 'hidden'; name: string; wrapper: unknown }
+  // `eligible: false` is a row that IS hidden under this name but must not be registered — an
+  // already-quarantined duplicate, say. it still carries definite evidence about the name, so it
+  // is not absence; but counting it as a survivor would let registration skip that first row and
+  // leave a stale adoption selection, or prevent a later eligible row from performing the one
+  // rebase/publication
+  | { id: string; kind: 'hidden'; name: string; wrapper: unknown; eligible?: boolean }
   // the server does not have it, or has it as a non-hidden document. both mean the same thing to
   // a name slice: this id is not part of any hidden name any more
   | { id: string; kind: 'absent' }
@@ -98,6 +134,7 @@ export function planTargetSlice({
   // ---- the FRESH side: rows the answer says belong to this name ----
   for (const row of answer.values()) {
     if (row.kind != 'hidden' || row.name != name) continue // outside the affected closure
+    if (row.eligible === false) continue // definite evidence about the name, but not registrable
     register.push({ id: row.id, name: row.name, wrapper: row.wrapper })
   }
 

@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { planTargetSlice, normalizeScan, type ClassifiedRow, type PointAnswer, type Marker } from '../../src/hidden_confirm.js'
+import {
+  planTargetSlice,
+  normalizeScan,
+  classifyHiddenDocument,
+  type ClassifiedRow,
+  type PointAnswer,
+  type Marker,
+} from '../../src/hidden_confirm.js'
 
 // PURE tables for confirmTarget's planning (see src/hidden_confirm.ts). No timers, no promises,
 // no fakes — these are decisions, and the point of extracting them is that they can be tabled
@@ -201,4 +208,48 @@ test('rows with no point answer stand, and everything applies in CANONICAL id or
   expect(out.apply.map(r => r.id), 'canonical, not point-read completion order').toEqual(['a', 'z'])
   expect(out.apply[0].wrapper).toEqual({ fresh: true })
   expect(out.suppress).toEqual(['m'])
+})
+
+// ---- pure classification ----
+
+test('classification is complete and side-effect free, and fails closed on an unusable answer', () => {
+  expect(classifyHiddenDocument('d', false, 'anything'), 'not hidden').toEqual({ kind: 'not-hidden' })
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: 'n', item: { v: 1 } }))).toEqual({
+    kind: 'hidden',
+    wrapper: { id: 'd', name: 'n', item: { v: 1 } },
+  })
+  // INDETERMINATE is not absence: the document exists and this read cannot say which name it
+  // belongs to, so a confirmation must fail closed rather than synthesize target-side absence
+  expect(classifyHiddenDocument('d', true, 'not json').kind).toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ item: {} })).kind, 'missing name').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify({ name: '', item: {} })).kind, 'empty name').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, JSON.stringify('scalar')).kind, 'not an object').toBe('indeterminate')
+  expect(classifyHiddenDocument('d', true, null).kind, 'no text').toBe('indeterminate')
+})
+
+test('an INELIGIBLE same-name row is definite evidence but is not registered', () => {
+  // counting a quarantined duplicate as a survivor would let registration skip that first row,
+  // leaving a stale adoption selection or preventing a later eligible row from performing the one
+  // rebase/publication
+  const plan = planTargetSlice({
+    name: 'n',
+    local: [{ id: 'h', name: 'n', wrapper: {} }],
+    answer: new Map<string, ClassifiedRow>([
+      ['h', { id: 'h', kind: 'hidden', name: 'n', wrapper: {}, eligible: false }],
+      ['k', { id: 'k', kind: 'hidden', name: 'n', wrapper: {} }],
+    ]),
+  })
+  expect(plan.remove, 'h is still ours, so it is not removed from the slice').toEqual([])
+  expect(plan.register.map(r => r.id), 'but only the eligible row registers').toEqual(['k'])
+})
+
+test('an ineligible row alone leaves no fresh registration, so the baseline resets', () => {
+  const plan = planTargetSlice({
+    name: 'n',
+    local: [{ id: 'h', name: 'n', wrapper: {} }],
+    answer: new Map<string, ClassifiedRow>([
+      ['h', { id: 'h', kind: 'hidden', name: 'n', wrapper: {}, eligible: false }],
+    ]),
+  })
+  expect(plan.register, 'nothing eligible to perform the rebase/publication').toEqual([])
 })
