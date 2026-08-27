@@ -6280,6 +6280,7 @@
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
+  import { createHiddenIngress } from '../hidden_ingress'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6437,40 +6438,15 @@
 
   let hiddenQuarantined = new Set<string>()
   const hiddenIndex = () => ({ byId: hiddenItems, byName: hiddenItemsByName, quarantined: hiddenQuarantined })
-  // whether the hidden-item index is confirmed against the server: on a fixed page the shared
-  // query cannot see the account's hidden documents, so until the dedicated hidden query has a
-  // SERVER answer, uniquely keyed hidden creates must re-confirm first (see saveHiddenItem) or a
-  // partial cache could hide an existing document and a create would duplicate it
-  let hiddenIndexAuthoritative = false
-  // every revocation bumps the epoch: a grant decided at snapshot RECEIPT (and queued behind
-  // the serialized applications) must not be able to re-grant into a state that a NEWER
-  // synchronous revocation (sync disabled, a firestore error, the listener's
-  // error callback) already invalidated — the queued grant carries its receipt epoch and
-  // no-ops if the epoch moved
-  let hiddenAuthorityEpoch = 0
-  // hidden documents whose change could not be applied (undecryptable or a throwing application):
-  // the index cannot claim completeness while any are unresolved, so grants are blocked until a
-  // later successfully applied change for the same id heals it. there is NO rebuild that heals the
-  // whole map — confirmIndex answers one name, can return early, and never touches this — so a
-  // document with no further deliveries stays dirty for the session (an open blocker)
-  let hiddenDirtyIds = new Map() // document id -> the generation at which it was marked dirty
-  let hiddenDirtySeq = 0 // monotonic: healing may only clear failures its own generation proves
-  const markHiddenDirty = id => hiddenDirtyIds.set(id, ++hiddenDirtySeq)
-  // heals `id` only if it has not been marked dirty AGAIN since `seen` (renames put one document
-  // on different name chains, so an older success can settle after a newer failure)
-  const healHiddenDirty = (id, seen) => {
-    if (hiddenDirtyIds.get(id) <= seen) hiddenDirtyIds.delete(id)
-  }
+  // THE HIDDEN INGRESS COORDINATOR owns delivery lifecycle, the global write gate and
+  // receipt-ordered authority (src/hidden_ingress.ts, implementing the normative design in the
+  // vault repo's notes/design/mind_page_hidden_ingress_coordinator.md). It replaces four pieces
+  // of state this listener used to keep itself: the authority flag and its epoch (now a durable
+  // receipt basis compared against an invalidation frontier), the received/applied generation
+  // pair (now open/terminal deliveries, which the gate reads directly), and the dirty-id map
+  // (now retained blocked deliveries, healed by a strictly higher same-cell success)
+  const hiddenIngress = createHiddenIngress()
 
-  // RECEIVED/APPLIED frontier: a revision carrying hidden changes is counted at RECEIPT (from
-  // the plaintext `hidden` field, before any decrypt) and only counted as applied once every one
-  // of its transitions has landed. authority is USABLE only when the two agree — otherwise data
-  // that is already on this client, but still queued behind a name chain or a phrase prompt,
-  // would be invisible to a create's confirmation (duplicate) or to invalid-record reporting (which
-  // could delete a name's last surviving record). ordering the settlement callbacks is NOT
-  // enough on its own: a later revision can begin applying while an earlier one is still queued
-  let hiddenReceivedGen = 0
-  let hiddenAppliedGen = 0
   // sticky: any event that can change hidden VALIDITY marks cleanup owed, and it stays owed
   // until a run actually happens. a non-authoritative hidden revision can introduce a duplicate
   // and be followed only by a metadata-only acknowledgement, and removing a VISIBLE item orphans
@@ -6482,12 +6458,13 @@
     if (hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
   }
 
-  // the flag alone never authorizes anything: it means "a current revision granted at some
-  // point", while USABLE additionally requires that nothing received is still unapplied and no
-  // skipped hidden record is unresolved
-  function hiddenAuthorityUsable() {
-    return hiddenIndexAuthoritative && hiddenReceivedGen == hiddenAppliedGen && hiddenDirtyIds.size == 0
-  }
+  // DERIVED, never granted at a moment: a sealed candidate's receipt basis must exceed the
+  // invalidation frontier AND the delivery gate must be writable — nothing open, ready or
+  // running (data already on this client but queued behind a name chain or a phrase prompt
+  // would otherwise be invisible to a create's confirmation, duplicating it) and no unhealed
+  // block (a skipped hidden record leaves the index unable to claim completeness)
+  const hiddenAuthorityUsable = () => hiddenIngress.authorityUsable()
+
 
   // authority settles on its OWN receipt-ordered chain, separate from snapshotApply: snapshot
   // ingestion must not block on a phrase prompt, but no grant may pass an EARLIER unsettled
@@ -6496,42 +6473,48 @@
   // later metadata revision therefore cannot overtake an earlier queued hidden transition and
   // grant into a state that transition is about to change (which could delete both records of
   // a name at cleanup — see deleteInvalidHiddenCandidates)
-  let hiddenAuthoritySettle = Promise.resolve()
-  function reserveHiddenAuthority({ authoritative, fromCache, hiddenReceived = false }) {
-    // a cached (non-current) revision revokes IMMEDIATELY at receipt: authority must not stay
-    // usable — a create could skip confirmation — while the queue drains
-    const slot = { revoked: false }
-    const revoke = reason => {
-      if (slot.revoked) return // this revision already revoked: a second epoch bump would
-      slot.revoked = true //     invalidate a NEWER revision's grant that captured the epoch
-      revokeHiddenAuthority(reason) //  between the two (a liveness bug, not a safety one)
+  // reserves this callback's AUTHORITY LEASE at receipt, in listener order, and returns the
+  // settle/revoke pair the application already expects. the coordinator owns the ordering: a
+  // sealed candidate advances the durable basis only after every EARLIER lease settles, so a
+  // later metadata revision cannot overtake an earlier queued hidden transition and authorize
+  // into a state that transition is about to change. `policy` comes from the one snapshot seam
+  // (src/snapshot.ts): `revoke` invalidates synchronously at receipt — authority must not stay
+  // usable while a cached queue drains — `candidate` may advance the basis, `preserve` neither
+  function reserveHiddenAuthority({ policy }: { policy: 'candidate' | 'revoke' | 'preserve' }) {
+    const lease = hiddenIngress.reserveAuthority(policy == 'candidate')
+    if (policy == 'revoke') {
+      console.warn('hidden-index authority revoked: cached revision')
+      lease.revoke() // synchronously, in the receipt turn, before any await
     }
-    if (!authoritative && fromCache) revoke('cached revision')
-    // count the revision as received BEFORE anything is decrypted or applied: from here until
-    // its transitions land, authority is not usable (see hiddenAuthorityUsable)
-    if (hiddenReceived) hiddenReceivedGen++
-    const epoch = hiddenAuthorityEpoch // captured at receipt: a later revocation must beat this grant
-    let applied
-    const done: Promise<{ failed: boolean; hiddenChanged: boolean }> = new Promise(resolve => (applied = resolve))
-    hiddenAuthoritySettle = hiddenAuthoritySettle.then(async () => {
-      await initialization
-      const { failed, hiddenChanged } = await done
-      if (hiddenReceived) hiddenAppliedGen++ // this revision has now crossed the frontier
-      if (initialized) settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged, revoke })
-      // a cleanup deferred because the frontier was behind runs as soon as it catches up
+    let settled = false
+    // the lease's own revoke is handed to the application: a failure path records ITS revocation
+    // through this lease (idempotent, and never invalidating a newer lease's basis)
+    const revoke = (reason = '') => {
+      console.warn(`hidden-index authority revoked${reason ? `: ${reason}` : ''}`)
+      lease.revoke()
+    }
+    // settlement still runs behind initialization and in receipt order; `done` resolves only
+    // after this lease's ordered effect is consumed, which is when a deferred cleanup may run
+    void lease.done.then(() => {
       if (hiddenCleanupPending && hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
     })
-    // the slot's own revoke is handed to the application: failure paths must record their
-    // revocation HERE rather than bumping the global epoch directly, or settlement bumps a
-    // second time and invalidates a newer revision's already-captured grant
-    return { settle: applied, revoke }
+    const settle = async ({ failed }: { failed: boolean; hiddenChanged?: boolean }) => {
+      if (settled) return
+      settled = true
+      await initialization
+      if (failed || !initialized) lease.fail()
+      else lease.seal()
+    }
+    return { settle, revoke }
   }
 
+  // an OUTSIDE-callback revocation (a firestore error, sync disabled, a shutdown): it takes a
+  // fresh receipt ordinal, so it stales every earlier basis
   function revokeHiddenAuthority(reason = '') {
-    if (hiddenIndexAuthoritative || reason) console.warn(`hidden-index authority revoked${reason ? `: ${reason}` : ''}`)
-    hiddenIndexAuthoritative = false
-    hiddenAuthorityEpoch++
+    if (reason) console.warn(`hidden-index authority revoked: ${reason}`)
+    hiddenIngress.invalidateAuthority()
   }
+
 
   // settles the hidden-index authority for one revision, INSIDE the serialized snapshot chain
   // and in RECEIPT order (every revision — first, metadata-only, data — queues its settlement
@@ -6544,19 +6527,17 @@
   // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
   // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
   // the NOW-current state and only then deleted (see cleanupInvalidHidden)
-  function settleHiddenAuthority({ authoritative, fromCache, failed, epoch, hiddenChanged, revoke }) {
+  // recomputes invalid candidates once this lease's ordered effect is consumed. the GRANT
+  // decision itself is no longer made here — the coordinator's receipt-ordered basis and the
+  // delivery gate decide usability (see hiddenAuthorityUsable) — so this only has to notice
+  // that a usable moment arrived with work owed
+  function settleHiddenAuthority({ hiddenChanged }: { hiddenChanged?: boolean }) {
     if (fixed || anonymous) return
-    if (failed) revoke('hidden change failed to apply')
-    else if (authoritative) {
-      if (epoch != hiddenAuthorityEpoch) return // a newer revocation invalidated this grant
-      if (hiddenDirtyIds.size) return // skipped hidden changes unresolved: not complete
-      const granting = !hiddenIndexAuthoritative
-      hiddenIndexAuthoritative = true
-      // recompute on the grant AND on any later authoritative revision that changed hidden
-      // records: duplicates and orphans arriving while authority is already true would
-      // otherwise wait for an unrelated revoke/re-grant that may never come
-      if (granting || hiddenChanged || hiddenCleanupPending) reportInvalidHiddenCandidates()
-    } else if (fromCache) revoke('cached revision')
+    // recompute on any usable revision that changed hidden records, as well as on owed cleanup:
+    // duplicates and orphans arriving while authority is already usable would otherwise wait
+    // for an unrelated revoke/re-grant that may never come
+    if (hiddenAuthorityUsable() && (hiddenChanged || hiddenCleanupPending)) reportInvalidHiddenCandidates()
+
   }
 
   // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
@@ -6696,7 +6677,10 @@
     // fixed pages (shared-subset query) never hold durable authority — their creates re-confirm
     // per save (see saveHiddenItem)
     revokeHiddenAuthority()
-    hiddenDirtyIds = new Map() // initialization rebuilds the index from scratch
+    // initialization rebuilds the index from scratch; the coordinator's retained blocks belong
+    // to deliveries, which initialization does not open (see the design's first-snapshot
+    // boundary) — nothing to clear here
+
 
     // NOTE: no attempt is made to restrict what owner code can do on the isolated origin. that
     // is not a boundary anything inside an origin can provide — a same-origin realm recreates the
@@ -7671,10 +7655,8 @@
               // server catching up after a cache initialization): it takes its receipt-ordered
               // slot and settles immediately — it carries no transitions of its own, but cannot
               // overtake an earlier revision that does
-              reserveHiddenAuthority({ authoritative, fromCache: snapshot.metadata.fromCache }).settle({
-                failed: false,
-                hiddenChanged: false,
-              })
+              reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: false })
+
               return
             }
             if (action == 'initialize' || action == 'wait_for_server') {
@@ -7707,10 +7689,8 @@
                   // the FIRST revision takes the first slot on the authority chain: revisions
                   // received while initialization runs reserve theirs behind it, so an old
                   // authoritative first snapshot can never grant after a later revision revoked
-                  reserveHiddenAuthority({ authoritative, fromCache: false }).settle({
-                    failed: false,
-                    hiddenChanged: false,
-                  })
+                  reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: false })
+
                 }
               }
               // set up callback to complete init (or "sync")
@@ -7770,14 +7750,9 @@
             // reserve this revision's authority slot NOW (receipt order); its application
             // settles it once every hidden transition of this revision has landed
             const { settle: settleApplied, revoke: revokeThisRevision } = reserveHiddenAuthority({
-              authoritative,
-              fromCache: snapshot.metadata.fromCache,
-              // CONSERVATIVE: every data revision suspends usable authority, matching the entry
-              // pre-scan below. a plaintext predicate cannot classify this exactly — a pending
-              // hidden add is absent from hiddenItems, so a following hidden:false change for that
-              // id would not be counted as affecting hidden completeness
-              hiddenReceived: snapshot.docChanges().length > 0,
+              policy: decision.policy,
             })
+
             // ENTRY receipts, taken SYNCHRONOUSLY for the whole snapshot before anything is
             // queued: a write already encrypting for one of these documents must not issue while a
             // change for it is in flight. taking them inside the per-change loop left every later
@@ -7789,8 +7764,27 @@
             // absent from hiddenItems and invisible to nameForDocument, so a following
             // hidden-to-visible change for the same id would have been marked as irrelevant
             const entryReceipts = new Map()
-            for (const change of snapshot.docChanges())
-              entryReceipts.set(change.doc.id, hiddenPersistence.noteRemotePending(change.doc.id))
+            // ... and this revision's DELIVERY HANDLES, opened synchronously at receipt for every
+            // ADMITTED document, before any decrypt. admission is the conservative receipt-time
+            // predicate: the raw hidden flag, OR hidden/adopted in the applied index, OR
+            // outstanding coordinator work for the id — the last two catch a visible-to-hidden
+            // round trip whose second change looks ordinary (raw hidden:false, absent from the
+            // index) and would otherwise leave a phantom hidden representation, or strand an
+            // unhealable block. an admitted handle makes the gate pending until its full
+            // application settles, which is what keeps a create's confirmation from missing data
+            // already on this client
+            const handles = new Map<string, ReturnType<typeof hiddenIngress.open>>()
+            for (const change of snapshot.docChanges()) {
+              const id = change.doc.id
+              entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
+              const rawHidden = !!change.doc.data().hidden
+              const relevant =
+                rawHidden || !!hiddenPersistence.nameForDocument(id) || hiddenIngress.hasOutstanding(id)
+              // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own
+              // echo failed to decrypt rather than waiting forever; a removal carries none
+              if (relevant) handles.set(id, hiddenIngress.open(id, change.doc.data().cipher))
+            }
+
             const applyTask = async () => {
               // GUARANTEED release: a write REFUSES and requeues while a marker stands for its
               // target, so one left behind makes that document's saves poll without ever issuing.
@@ -7800,6 +7794,12 @@
                 await applyChanges()
               } finally {
                 for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
+                // EVERY opened handle must terminalize, or the gate stays pending forever and no
+                // hidden write can ever issue again. block() is a compare-and-set: it converts
+                // only handles still open or ready — one already running owns its own outcome,
+                // and one already terminal is untouched. this covers every early return and
+                // every throw out of applyChanges
+                for (const handle of handles.values()) handle.block()
               }
             }
             const applyChanges = async () => {
@@ -7843,7 +7843,7 @@
                   else {
                     if (couldBeHidden) {
                       hiddenApplyFailed = true
-                      markHiddenDirty(doc.id)
+                      handles.get(doc.id)?.block() // this exact delivery is terminally blocked
                       revokeThisRevision('hidden change could not be decrypted') // as soon as known
                     }
                     continue
@@ -7861,10 +7861,6 @@
                 const hiddenName =
                   !savedItem.hidden && change.type != 'removed' ? hiddenPersistence.nameForDocument(doc.id) : undefined
                 if (hiddenName) {
-                  // BEST-EFFORT guard, not a guarantee: this is captured when the newer delivery
-                  // DECODES, while a failing application receives its generation later, so completion
-                  // order and delivery order can disagree. the versioned coordinator replaces it
-                  const seenDirtySeqForDrop = hiddenDirtySeq
                   console.warn(`hidden record ${doc.id} is no longer hidden; removing its hidden representation`)
                   // PUBLISH the hidden-side removal before the entry marker can be released, or the
                   // marker appears and disappears inside a single encryption and a writer sees an
@@ -7873,27 +7869,29 @@
                   const dropped = hiddenPersistence.noteRemote(undefined, doc.id, true)
                   // tracked in hiddenApplied: authority must not declare the revision applied while
                   // this removal is still queued
-                  hiddenApplied.push(
-                    hiddenPersistence
-                      .applyRemote([hiddenName], () => removeHidden(hiddenIndex(), doc.id))
-                      .then(
-                        () => {
-                          hiddenApplyOk.set(doc.id, true)
-                          // the server holds no hidden record for this id any more, so no later
-                          // hidden delivery is guaranteed to heal it — without this, one earlier
-                          // undecryptable revision left authority unusable for the whole session
-                          healHiddenDirty(doc.id, seenDirtySeqForDrop)
-                          hiddenPersistence.releaseRemote(doc.id, dropped)
-                        },
-                        e => {
-                          hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
-                          console.error('could not drop stale hidden representation:', doc.id, e)
-                          hiddenApplyFailed = true
-                          markHiddenDirty(doc.id)
-                          revokeThisRevision('hidden representation could not be dropped')
-                        }
-                      )
-                  )
+                  // THE DELIVERY'S OWN APPLY: its resolution IS this handle's terminal outcome,
+                  // and a success heals every strictly older block for this id — replacing the
+                  // hand-rolled heal that needed a captured sequence to be safe
+                  const dropHandle = handles.get(doc.id)
+                  const dropApply = () =>
+                    hiddenPersistence.applyRemote([hiddenName], () => removeHidden(hiddenIndex(), doc.id)).then(
+                      () => {
+                        hiddenApplyOk.set(doc.id, true)
+                        hiddenPersistence.releaseRemote(doc.id, dropped)
+                      },
+                      e => {
+                        hiddenApplyOk.set(doc.id, false) // symmetric with the ordinary branch
+                        console.error('could not drop stale hidden representation:', doc.id, e)
+                        hiddenApplyFailed = true
+                        revokeThisRevision('hidden representation could not be dropped')
+                        throw e // REJECT: the coordinator records this delivery as blocked
+                      }
+                    )
+                  if (dropHandle) {
+                    dropHandle.ready(dropApply)
+                    hiddenApplied.push(dropHandle.done)
+                  } else hiddenApplied.push(dropApply().catch(() => {}))
+
                   hiddenCleanupPending = true
                   // the record now belongs to the VISIBLE world, where it has no representation
                   // yet: passing the original 'modified' on would hit the ordinary branch, find
@@ -7903,7 +7901,6 @@
                 if (savedItem.hidden) removeVisibleForHidden(doc)
 
                 if (savedItem.hidden) {
-                  const seenDirtySeq = hiddenDirtySeq // best-effort: see the note on the drop path above
                   const removed = change.type == 'removed'
                   let wrapper = null
                   let names = []
@@ -7921,7 +7918,7 @@
                       // authority (or deletes anything) on a view that includes the stale record
                       if (hiddenItems.has(doc.id)) {
                         hiddenApplyFailed = true
-                        markHiddenDirty(doc.id)
+                        handles.get(doc.id)?.block() // terminal for this exact delivery
                         revokeThisRevision('hidden record became malformed')
                       }
                       continue
@@ -7937,7 +7934,10 @@
                   // its application is queued — possibly behind that very create
                   const receipt = hiddenPersistence.noteRemote(wrapper, doc.id, removed)
                   applied.push(`${change.type} hidden ${doc.id}${doc.metadata.hasPendingWrites ? ' pending' : ''}`)
-                  hiddenApplied.push(
+                  // THIS DELIVERY'S APPLY, owned by its handle: the full listener operation, whose
+                  // resolution is the terminal outcome the gate, healing and the echo waiter read
+                  const hiddenHandle = handles.get(doc.id)
+                  const hiddenApply = () =>
                     hiddenPersistence
                       .applyRemote(
                         names,
@@ -7952,7 +7952,10 @@
                       .then(
                         () => {
                           hiddenApplyOk.set(doc.id, true)
-                          healHiddenDirty(doc.id, seenDirtySeq) // best-effort (completion order)
+                          // no hand-rolled healing: this delivery's success IS its terminal
+                          // outcome, and the coordinator heals every strictly older block for
+                          // this id from it — the captured-sequence guard existed only because
+                          // completion order and delivery order could disagree
                           // released HERE, inside the success handler, and only if this is still
                           // the latest receipt. chaining a second .then after a rejection handler
                           // released it on failure too, because the handler returns normally and
@@ -7967,11 +7970,14 @@
                           hiddenApplyOk.set(doc.id, false) // settlement must not reconcile from this
                           console.error('could not apply remote change:', doc.id, e)
                           hiddenApplyFailed = true
-                          markHiddenDirty(doc.id)
                           revokeThisRevision('hidden change could not be applied') // as soon as known
+                          throw e // REJECT: the coordinator records this delivery as blocked
                         }
                       )
-                  )
+                  if (hiddenHandle) {
+                    hiddenHandle.ready(hiddenApply)
+                    hiddenApplied.push(hiddenHandle.done)
+                  } else hiddenApplied.push(hiddenApply().catch(() => {}))
                   continue
                 }
                 try {
