@@ -1928,6 +1928,42 @@ test('a BLOCKED gate is reported once and waits for healing, instead of polling 
   expect(failures, 'and no second report').toEqual(['n'])
 })
 
+test('a failed Apply on the WRITE TARGET blocks, then a strictly newer same-id delivery resumes it', async () => {
+  // the blocked cell is the very document the writer is targeting, which is the migration case:
+  // proving permanent blockage alone would pass a controller that never resumes after healing. the
+  // retained local intent must survive the block and reach the server exactly once
+  const failures: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => undefined)
+  const bad = h.ingress.open('d1', 'cipher:bad')
+  bad.ready(() => Promise.reject(new Error('apply failed')))
+  expect(await bad.done).toBe('blocked')
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'nothing issues over an unhealed block'
+  ).toHaveLength(0)
+  expect(controller.owes('n'), 'the intent is RETAINED, not dropped').toBe(true)
+  expect(failures, 'reported once').toEqual(['n'])
+  // a strictly HIGHER delivery in d1's own cell succeeds: only that heals it
+  const heal = h.ingress.open('d1', 'cipher:good')
+  heal.ready(async () => void applyRemoteModified(h.idx, { id: 'd1', name: 'n', item: { server: 2 } }))
+  expect(await heal.done).toBe('applied')
+  for (let i = 0; i < 12; i++) await flush()
+  const updates = h.calls.filter(c => c.op == 'update')
+  expect(
+    updates.map(u => u.id),
+    'EXACTLY ONE write, to the healed document'
+  ).toEqual(['d1'])
+  // the retained local intent WINS, and the healed server revision is merged beneath it: the
+  // owner writes full-state clones, so dropping `server: 2` here would erase what healing restored
+  expect(itemOf(updates[0].text), 'carrying the intent retained across the block').toEqual({ mine: 1, server: 2 })
+  expect(controller.owes('n'), 'and nothing is left owed').toBe(false)
+  expect(failures, 'no second report').toEqual(['n'])
+})
+
 test('a NEW generation inheriting a parked wake is still reported blocked', async () => {
   // round 59: the deleted token was NOT unfalsifiable, and my argument for deleting it was wrong.
   // generation 1 reports and parks; a superseding save returns through the queued shortcut and
@@ -3077,8 +3113,193 @@ test('markers are PER NAME: a concurrent create for another name does not clobbe
     h.calls.filter(c => c.op == 'create' && c.text!.includes('"A')),
     'no duplicate for A'
   ).toHaveLength(1)
+  // "no second create" is the weak half: the save must UPDATE A's ORIGINAL document, carrying the
+  // new payload. a bypass that issued nothing at all would also produce no second create
+  const updatesA = h.calls.filter(c => c.op == 'update' && c.id == createdA)
+  expect(
+    updatesA.map(u => u.text),
+    "the second save updated A's own id with its new state"
+  ).toEqual(['cipher:{"name":"nameA","item":{"v":"A2"}}'])
   ackA.resolve()
   ackB.resolve()
+})
+
+test('the PRECOMMIT marker CAS runs before the first effect, even when a fresh lower row would win', async () => {
+  // preservation of the omitted create used the read-start proof, so if that proof settled while
+  // the answer was in flight the whole result is inconclusive with ZERO effects — the plan was
+  // built on a fact that is no longer true. this holds EVEN THOUGH fresh lower `a` would have won
+  // selection: it is the plan as a whole that is void, not just its marker dependency
+  const ack = deferred<void>()
+  const removed: string[] = []
+  const registered: string[] = []
+  // the effect log AT THE MOMENT the refused attempt requeues and confirms again — the window the
+  // CAS is about. a whole-test count cannot be used: the retry legitimately does mutate
+  let atRequeue: { registered: string[]; removed: string[] } | undefined
+  let attempt = 0
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise // `m` stays unacknowledged, so its marker is live at read start
+    },
+    registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
+    confirmTarget: async (name, hooks) => {
+      // (1) resolves the create itself: nothing is owed a marker yet
+      if (++attempt == 1) return serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks)
+      if (attempt > 2) {
+        atRequeue ??= { registered: [...registered], removed: [...removed] }
+        return serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks)
+      }
+      // (2) THE SCHEDULE. the marker is live at read start ...
+      const marker = hooks.captureReadMarker()
+      expect(marker, 'the unacknowledged create is the read-start proof').toBeTruthy()
+      // ... and SETTLES while the answer is in flight
+      ack.resolve()
+      for (let i = 0; i < 8; i++) await flush()
+      // the answer omits the create (legitimately: the server has not published it) and carries
+      // fresh lower `a`, which WOULD win selection
+      const answer = new Map([
+        ['a', { id: 'a', kind: 'hidden' as const, name, wrapper: { id: 'a', name, item: {} }, eligible: true }],
+      ])
+      return hooks.commit(answer, marker)
+    },
+  })
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  const m = h.calls.find(c => c.op == 'create')!.id!
+  // a stale LOWER row is canonical locally, so the next save CONFIRMS rather than taking the
+  // direct marker bypass — the bypass never reaches the plan, and a schedule without this row
+  // proves nothing about the CAS at all
+  registerHidden(h.idx, { id: 'a', name: 'n', item: { stale: 1 } }, () => undefined)
+  expect(h.idx.byName.get('n')!.id, '`a` sorts below the created id and wins selection').toBe('a')
+  const realRemove = h.idx.byId.delete.bind(h.idx.byId)
+  h.idx.byId.delete = (id: string) => (removed.push(id), realRemove(id))
+  controller.save('n', { mine: 2 })
+  for (let i = 0; i < 24; i++) await flush()
+  expect(attempt, 'the refused attempt requeued and confirmed again').toBeGreaterThan(2)
+  // WITHOUT the CAS, fresh `a` is registered from a plan whose preservation of `m` rested on a
+  // proof that had already settled
+  expect(atRequeue, 'ZERO effects from the plan built on a settled proof').toEqual({ registered: [], removed: [] })
+  // the retry is a DIFFERENT question and legitimately mutates: by then the create has
+  // acknowledged, so a complete read that omits it really does disprove it
+  void m
+})
+
+test('a create marker is cleared on FULFILMENT and on REJECTION, so neither exempts a later read', async () => {
+  // the marker is an exemption from confirmation. left installed after the sdk settles, it exempts
+  // a document that either already exists on the server (fulfilment: the read can see it) or was
+  // never written at all (rejection) — the second is how a stale wrapper survives every complete
+  // read that legitimately disproves it
+  for (const outcome of ['fulfil', 'reject'] as const) {
+    const ack = deferred<void>()
+    const h = harness()
+    const removed: string[] = []
+    const controller = createHiddenPersistence({
+      ...h.deps,
+      confirmsUpdates: () => true,
+      notifyFailure: () => {},
+      createDoc: async (id, data) => {
+        h.calls.push({ op: 'create', id, text: data.cipher })
+        await ack.promise
+        if (outcome == 'reject') throw Object.assign(new Error('permission denied'), { code: 'permission-denied' })
+      },
+      // EMPTY, always: only a live marker can preserve the create's wrapper through this
+      confirmTarget: (name, hooks) => serverAnswer([], h.calls, () => h.ingress.gate())(name, hooks),
+    })
+    controller.save('n', { mine: 1 })
+    for (let i = 0; i < 8; i++) await flush()
+    const created = h.calls.find(c => c.op == 'create')!.id!
+    expect(h.idx.byId.has(created), `${outcome}: the create's wrapper is indexed`).toBe(true)
+    ack.resolve() // the sdk promise settles: the marker must clear either way
+    for (let i = 0; i < 10; i++) await flush()
+    const realRemove = h.idx.byId.delete.bind(h.idx.byId)
+    h.idx.byId.delete = (id: string) => (removed.push(id), realRemove(id))
+    controller.save('n', { mine: 2 })
+    for (let i = 0; i < 14; i++) await flush()
+    expect(removed, `${outcome}: the empty answer disproves the wrapper, with no marker to exempt it`).toContain(
+      created
+    )
+  }
+})
+
+test('a CONFIRMED update refuses when its requiredMarker settles in the continuation gap', async () => {
+  // the other half of the same rule. the confirmation RETURNED a marker dependency, meaning the
+  // selected target is a wrapper only that marker preserved — so if it settles between the
+  // confirmation returning and the re-resolution, the whole answer rests on a fact that no longer
+  // holds and the attempt must requeue with zero post-confirmation effects
+  const ack = deferred<void>()
+  let attempt = 0
+  let confirmsAtFirstWrite = -1
+  let encryptions = 0
+  let publications = 0
+  // the effect counters at the two ends of the refused attempt: everything it would have done —
+  // re-resolution, owner publication, a full encryption — happens between them
+  let afterCommit: { encryptions: number; publications: number } | undefined
+  let atRequeue: { encryptions: number; publications: number } | undefined
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmsUpdates: () => true,
+    encryptState: async state => {
+      encryptions++
+      return h.deps.encryptState(state)
+    },
+    syncOwner: () => void publications++,
+    createDoc: async (id, data) => {
+      h.calls.push({ op: 'create', id, text: data.cipher })
+      await ack.promise
+    },
+    updateDoc: async (id, data) => {
+      if (confirmsAtFirstWrite < 0) confirmsAtFirstWrite = attempt
+      h.calls.push({ op: 'update', id, text: data.cipher })
+    },
+    confirmTarget: async (name, hooks) => {
+      h.calls.push({ op: 'confirm' })
+      attempt++
+      if (attempt == 1) return hooks.commit(new Map(), hooks.captureReadMarker()) // resolves the create
+      const marker = hooks.captureReadMarker()
+      // ATTEMPT 2 disproves stale lower `a` and OMITS the create, so the preserved wrapper is the
+      // only survivor — which is exactly when a requiredMarker is returned. LATER attempts see the
+      // create published, as the server would once it acknowledged
+      const created = h.idx.byId.get(h.calls.find(c => c.op == 'create')!.id!)
+      const answer = new Map<string, any>([['a', { id: 'a', kind: 'absent' as const }]])
+      if (attempt > 2 && created)
+        answer.set(created.id, {
+          id: created.id,
+          kind: 'hidden' as const,
+          name,
+          wrapper: created,
+          eligible: true,
+        })
+      const result = hooks.commit(answer, marker)
+      if (attempt == 2) {
+        // ... and it settles in the CONTINUATION GAP, after commit and before the caller resumes
+        ack.resolve()
+        for (let i = 0; i < 8; i++) await flush()
+        afterCommit = { encryptions, publications }
+      }
+      if (attempt > 2) atRequeue ??= { encryptions, publications }
+      return result
+    },
+  })
+  controller.save('n', { v: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  const m = h.calls.find(c => c.op == 'create')!.id!
+  // a stale LOWER row, so the DIRECT bypass cannot apply and the confirmation path is taken
+  registerHidden(h.idx, { id: 'a', name: 'n', item: { stale: 1 } }, () => undefined)
+  controller.save('n', { v: 2 })
+  for (let i = 0; i < 24; i++) await flush()
+  expect(
+    h.calls.filter(c => c.op == 'update').map(c => c.id),
+    'the write eventually goes out, to the preserved document'
+  ).toEqual([m])
+  expect(confirmsAtFirstWrite, 'the refused attempt re-confirmed before writing').toBeGreaterThan(2)
+  // and it refused with ZERO POST-CONFIRMATION EFFECTS. the check before the ISSUE would catch the
+  // settled marker either way; this one is what makes the refusal a cheap retry rather than a
+  // wasted re-resolution, owner publication and full encryption
+  expect(atRequeue, 'the refused attempt did nothing after its commit').toEqual(afterCommit)
 })
 
 test('a bypassed update REFUSES when the create settles during its encryption', async () => {
@@ -3109,11 +3330,30 @@ test('a bypassed update REFUSES when the create settles during its encryption', 
   controller.save('n', { v: 2 }) // bypasses, and is now held in encryption
   for (let i = 0; i < 6; i++) await flush()
   const updatesBefore = h.calls.filter(c => c.op == 'update').length
+  // taken while the bypassed attempt is still held in encryption: it skipped confirmation, so
+  // this is the count the refusal has to move
+  const confirmsBefore = h.calls.filter(c => c.op == 'confirm').length
   ack.resolve() // the create settles: the marker clears
   for (let i = 0; i < 4; i++) await flush()
   encrypting.resolve()
   for (let i = 0; i < 6; i++) await flush()
   expect(h.calls.filter(c => c.op == 'update').length, 'the exempted payload did not issue').toBe(updatesBefore)
+  // REFUSING is only half the contract: the change is still owed, so the attempt must RETRY
+  // through a fresh confirmation. a controller that refused and then sat idle would also pass the
+  // assertion above, and the save would be silently lost
+  for (let i = 0; i < 14; i++) await flush()
+  expect(
+    h.calls.filter(c => c.op == 'confirm').length,
+    'the refused attempt RE-CONFIRMED instead of trusting the settled marker'
+  ).toBeGreaterThan(confirmsBefore)
+  // and it wrote what was owed. this harness answers EMPTY every time, so a fresh confirmation
+  // legitimately resolves to a new document; what matters is that v: 2 reached the server through
+  // a re-resolved target rather than being dropped
+  expect(
+    h.calls.filter(c => c.op != 'confirm').map(c => c.text),
+    'the owed state was written through the re-resolved target'
+  ).toEqual(['cipher:{"name":"n","item":{"v":1}}', 'cipher:{"name":"n","item":{"v":2}}'])
+  expect(controller.owes('n'), 'and nothing is left owed').toBe(false)
 })
 
 // ---- the a/m schedule, and one effect-log table for the commit's call counts ----
@@ -3156,27 +3396,39 @@ test('the a/m schedule: stale lower `a` is removed, unacknowledged `m` is preser
   ack.resolve()
 })
 
-// the four controller acceptance properties as ONE effect-log table, per review 71
+// the controller acceptance properties as ONE effect table, per review 71. THE COMMIT WINDOW IS
+// ISOLATED: `hooks.commit` is synchronous, so a flag raised around it in the confirmTarget dep
+// attributes each effect exactly. syncOwner has several callers in a save (the name claim, the
+// adopt path), and an account-wide count could not tell the commit's baseline publication apart
+// from any of them — which is why the earlier version of this table asserted registration LENGTH
+// only and discarded its publication fields
 for (const [what, rows, expected] of [
-  ['an empty answer', [], { register: 0, published: 1 }],
-  ['an ineligible-only answer', [{ id: 'q', name: 'n', eligible: false }], { register: 0, published: 1 }],
+  // no eligible fresh registration, so no registration performs the rebase/publication — the
+  // pending projection must still reset and publish its immutable local-intent baseline ONCE
+  ['an empty answer', [], { register: [] as string[], published: 1 }],
+  ['an ineligible-only answer', [{ id: 'q', name: 'n', eligible: false }], { register: [] as string[], published: 1 }],
   [
+    // the quarantined LOWER row must be skipped and the eligible one registered — asserting a
+    // count of one cannot tell which of the two it was. that ONE eligible registration is also
+    // what performs the single rebase/adoption/publication, so the count matches the rows above
+    // while the route to it differs
     'a quarantined lower row beside an eligible one',
     [
       { id: 'a', name: 'n', eligible: false },
       { id: 'k', name: 'n', eligible: true },
     ],
-    { register: 1, published: 0 },
+    { register: ['k'], published: 1 },
   ],
 ] as const)
   test(`commit effects: ${what}`, async () => {
     const registered: string[] = []
-    const published: string[] = []
+    const publishedInCommit: string[] = []
+    let inCommit = false
     const h = harness()
     const controller = createHiddenPersistence({
       ...h.deps,
       registerTargetRow: (wrapper, merge) => void (registered.push(wrapper.id), registerHidden(h.idx, wrapper, merge)),
-      syncOwner: n => void published.push(n),
+      syncOwner: n => void (inCommit && publishedInCommit.push(n)),
       confirmTarget: async (name, hooks) => {
         const answer = new Map(
           rows.map(r => [
@@ -3190,22 +3442,20 @@ for (const [what, rows, expected] of [
             },
           ])
         )
-        return hooks.commit(answer, hooks.captureReadMarker())
+        inCommit = true
+        try {
+          return hooks.commit(answer, hooks.captureReadMarker())
+        } finally {
+          inCommit = false
+        }
       },
     })
     registerHidden(h.idx, { id: 'stale', name: 'n', item: {} }, () => {})
     h.idx.byName.delete('n')
-    published.length = 0
     controller.save('n', { mine: 1 })
     for (let i = 0; i < 10; i++) await flush()
-    expect(registered.length, 'registerTargetRow calls').toBe(expected.register)
-    // NOTE the baseline-publication half is NOT pinned here and is not claimed: syncOwner has
-    // several callers in a save (the name claim, the adopt path), so a publication count cannot
-    // isolate the commit's reset — deleting the reset leaves this row green. The registration
-    // count IS the discriminating property, and `register.length == 0` is what selects the reset
-    // branch, so that branch is reached exactly when this asserts zero registrations
-    void published
-    void expected.published
+    expect(registered, 'the EXACT rows registerTargetRow received').toEqual(expected.register)
+    expect(publishedInCommit.length, 'owner publications inside the commit turn').toBe(expected.published)
   })
 
 test('commit effects: a RELEVANT indeterminate answer produces zero effects, and a later read succeeds', async () => {
