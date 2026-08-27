@@ -6295,7 +6295,10 @@
     applyRemoteAdded,
     applyRemoteModified,
     removeHidden,
+    isQuarantined,
+    type HiddenWrapper,
   } from '../hidden'
+  import { classifyHiddenDocument } from '../hidden_confirm'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
@@ -6452,6 +6455,11 @@
   // the corpus seam: one settle-only tail, one active-producer boundary, one pending-hidden-id
   // membership window (see src/hidden_corpus.ts)
   const hiddenCorpus = createHiddenCorpus()
+  // the ONE visible-to-hidden removal, reachable from the persistence deps. the function itself is
+  // scoped inside the realtime listener (it needs the item indices and the reducer), so this is
+  // the same cross-scope handle idiom used elsewhere in this file. inert before the listener
+  // installs, which is correct: there is no visible representation to remove yet
+  let removeVisibleForHiddenId: (id: string) => undefined = () => undefined
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
   })
@@ -7500,6 +7508,9 @@
           applyRemoteChange({ type: 'removed' }, doc, { hidden: false, text: '' })
           return undefined
         }
+        // confirmation's registerTargetRow reaches the SAME operation by id (it has a wrapper, not
+        // a document): one discriminator contract, never two
+        removeVisibleForHiddenId = id => removeVisibleForHidden({ id })
 
         function applyRemoteChange(change, doc, savedItem) {
 
@@ -8892,32 +8903,61 @@
       if (_exists(local)) item(local).global_store = state
     },
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
-    confirmIndex: async pendingName => {
-      // answers ONE question for ONE caller: does a record for `pendingName` already exist
-      // server-side? the full-account query is unavoidable (names live inside the ciphertext),
-      // but every caller runs its own and uses only its own answer.
-      // sharing one in-flight query across callers looked like an obvious saving and was not: a
-      // create for B could join a query that had already been fixed BEFORE B's record was
-      // committed, be told the name was free, and duplicate it. per-name chains already
-      // serialize same-name callers, so the only thing the sharing saved was a duplicate read
-      // for genuinely concurrent DIFFERENT names — at the cost of answering one of them from a
-      // snapshot older than its own operation
-      if (hiddenAuthorityUsable()) return
-      const hidden_docs = await getDocsFromServer(
-        query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
-      )
-      // ascending id order so the MINIMUM-id record wins the name; any failure rejects (failing
-      // the create), since a server read proves query completeness, not a usable name index
-      for (const doc of [...hidden_docs.docs].sort((a, b) => compareIds(a.id, b.id))) {
-        const hidden_item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
-        if (!hidden_item.hidden || !hidden_item.text) continue
-        const wrapper = parseHiddenWrapper(hidden_item.id, hidden_item.text)
-        if (wrapper?.name != pendingName) continue // not this caller's question
-        // a quarantined record is not an answer: keep looking, or a stale duplicate sorting
-        // before an eligible record would make the caller create alongside a live one
-        if (registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore) == 'quarantined') continue
-        return // the minimum-id ELIGIBLE match is the answer
-      }
+    // ONE fresh complete hidden read for `name`, through the serialized corpus seam. the ADAPTER
+    // fetches, decrypts and purely classifies; the CONTROLLER commits synchronously inside this
+    // same turn (see the confirmTarget dep). the full-account query is unavoidable — names live
+    // inside the ciphertext — and is deliberately NOT shared between callers: a create for B could
+    // otherwise join a query fixed BEFORE B's record was committed, be told the name was free, and
+    // duplicate it
+    confirmTarget: async (name, hooks) => {
+      return hiddenCorpus.run(async run => {
+        // GATE CHECK ONE, after the corpus predecessor. a cheap early return: a delivery pending
+        // by now already makes the server query and full-account decrypt unusable
+        if (hiddenIngress.gate() != 'writable') return 'inconclusive' as const
+        // the read-start proof, captured immediately before the query
+        const readMarker = hooks.captureReadMarker()
+        const docs = await getDocsFromServer(
+          query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
+        )
+        if (run.cancelled()) throw new Error('hidden corpus stopped')
+        // RAW MEMBERSHIP published before any further await, so a delivery for one of these ids
+        // arriving mid-operation is admitted rather than classified as ordinary
+        run.publishMembership(docs.docs.map(d => d.id))
+        const classified: { id: string; name?: string; wrapper?: HiddenWrapper }[] = []
+        for (const doc of docs.docs) {
+          const item = await decryptItem(Object.assign(doc.data(), { id: doc.id }))
+          const c = classifyHiddenDocument(doc.id, !!item.hidden, item.text)
+          // FAIL CLOSED: an indeterminate row exists and this read cannot say which name it
+          // belongs to, so treating it as target-side absence could remove a live record from a
+          // stale negative
+          if (c.kind == 'indeterminate') throw new Error(`hidden document ${doc.id} could not be classified: ${c.reason}`)
+          classified.push(c.kind == 'hidden' ? { id: doc.id, name: c.wrapper.name, wrapper: c.wrapper as HiddenWrapper } : { id: doc.id })
+        }
+        if (run.cancelled()) throw new Error('hidden corpus stopped')
+        // ---- from here to the commit is ONE synchronous turn ----
+        // GATE CHECK TWO, immediately before the commit: nothing can open between them
+        if (hiddenIngress.gate() != 'writable') return 'inconclusive' as const
+        const index = hiddenIndex()
+        const answer = new Map(
+          classified.map(row => [
+            row.id,
+            row.wrapper
+              ? // ELIGIBILITY from the CURRENT quarantine set, in this turn: that is the state
+                // whose registration is about to run
+                { id: row.id, kind: 'hidden' as const, name: row.name!, wrapper: row.wrapper, eligible: !isQuarantined(index, row.id) }
+              : { id: row.id, kind: 'absent' as const },
+          ])
+        )
+        return hooks.commit(answer, readMarker).kind == 'committed' ? ('committed' as const) : ('inconclusive' as const)
+      })
+    },
+    // the visible-to-hidden discriminator prelude plus EXACTLY ONE registerHidden, whose first
+    // eligible registration performs the single rebase/adoption/publication. notification-free:
+    // confirmation runs for an owed name, and a live delivery keeps its own notification
+    registerTargetRow: (wrapper, mergeAdoptedFor) => {
+      removeVisibleForHiddenId(wrapper.id)
+      registerHidden(hiddenIndex(), wrapper, mergeAdoptedFor)
+      return undefined
     },
     newTempId: () => (Date.now() + sessionCounter++).toString(),
     readonly: () => readonly,

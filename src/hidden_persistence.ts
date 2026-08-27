@@ -24,6 +24,8 @@
 // replaced, renamed or removed while the writer was parked on the gate (round 60): the intent,
 // the wake and the blocked report already belong to the name, and so does this.
 
+import type { ClassifiedRow, Marker } from './hidden_confirm.js'
+import { planTargetSlice } from './hidden_confirm.js'
 import {
   compareIds,
   isQuarantined,
@@ -35,6 +37,11 @@ import {
 } from './hidden.js'
 
 export type HiddenDocData = { hidden: true; time: number; attr: null; text: string }
+
+// the confirmation commit's synchronous result. a top-level `undefined` callback cannot report
+// inconclusive or a marker dependency without an output cell or a sentinel throw — and a throw is
+// specified to stop ingress
+export type CommitResult = { kind: 'inconclusive' } | { kind: 'committed'; requiredMarker?: Marker }
 
 export type HiddenPersistenceDeps = {
   index: () => HiddenIndex
@@ -60,7 +67,33 @@ export type HiddenPersistenceDeps = {
   // server re-confirmation of the hidden index before an unconfirmed create (registration may
   // adopt the pending wrapper); resolves immediately when the index is authoritative, rejects
   // to FAIL the create (a partial index must never lead to a duplicate document)
-  confirmIndex: (pendingName: string) => Promise<void>
+  // ONE fresh complete hidden server read for `name`, through the serialized corpus seam. the
+  // ADAPTER fetches, decrypts and purely classifies; the CONTROLLER commits through the callback
+  // below, synchronously, inside that same corpus turn. an adapter-only commit reproduces the a/m
+  // schedule: create `m` issued and unacknowledged, stale lower `a` canonical, an answer
+  // containing neither, adapter slice-replacement removing BOTH, and re-resolution creating a
+  // second id instead of updating `m` behind its own create.
+  // resolves 'inconclusive' when a gate check refused with ZERO mutation; rejects to fail the
+  // attempt (a server read proves query completeness, not a usable name index)
+  confirmTarget: (
+    name: string,
+    hooks: {
+      // captured AFTER the corpus predecessor and immediately BEFORE the query: the create's
+      // settlement can clear the marker while the answer is in flight, and a plan built from a
+      // later lookup would see nothing, synthesize absence, and remove a record that exists
+      captureReadMarker: () => Marker | undefined
+      // REQUIRED SYNCHRONOUS: the corpus tail serializes corpus operations, not independent
+      // writers, so an await between two index mutations exposes a transient prefix with neither
+      // the gate nor a frontier predicting the remainder
+      commit: (answer: Map<string, ClassifiedRow>, readMarker: Marker | undefined) => CommitResult
+    }
+  ) => Promise<'committed' | 'inconclusive'>
+  // the ADAPTER-owned synchronous registration for one fresh target row: it runs the
+  // visible-to-hidden discriminator prelude and then calls registerHidden EXACTLY ONCE, whose
+  // first eligible registration performs the single rebase/adoption/publication. NOTIFICATION-FREE:
+  // confirmation runs for an OWED name, so the live remote-change notification would suppress on
+  // owes() anyway, and a live delivery keeps its own
+  registerTargetRow: (wrapper: HiddenWrapper, mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => undefined) => undefined
   // MERGE ONLY: merges the found document's state under the pending wrapper's changes, in place
   // (production: _.defaultsDeep(pending.item, found.item)). rebasing the wrapper first and
   // publishing the result to the owner are the CONTROLLER's job (see mergeAdopted): keeping merge
@@ -168,6 +201,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // reported at all
   type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean; reportedBlocked?: boolean }
   const owed = new Map<string, Owed>()
+  // THE OWN-UNACKNOWLEDGED-CREATE MARKER. the writer retains the exact id it issued a create for
+  // until that SDK promise settles, INDEPENDENTLY of any later owed generation. it is an
+  // exact-target confirmation EXEMPTION that never overrides name selection, and it is
+  // WRAPPER-EXACT: registerHidden replaces the indexed object on a fresh same-id observation, and
+  // a same-id rename does too, so an id-only exemption would mistake either for this create
+  let marker: Marker | undefined
+  let markerSeq = 0
+
   // sticky for the controller's lifetime; every await-crossing continuation rechecks it
   let stopped = false
   // one message for both stop paths — the terminal transition and a save that arrives after it
@@ -199,11 +240,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // result to the owner. rebasing here — at selection time, not at the next write attempt — is
   // what makes an invalidate-then-readopt discard the stale merge: defaultsDeep never overwrites a
   // filled-in key, so merging into an old projection would keep the replaced document's values
-  function mergeAdopted(pending: HiddenWrapper, found: HiddenWrapper) {
+  function mergeAdopted(pending: HiddenWrapper, found: HiddenWrapper): undefined {
     const op = owed.get(pending.name)
     if (op) pending.item = cloneState(op.localIntent)
     deps.adopt(pending, found)
     deps.syncOwner(pending.name, cloneState(pending.item)) // a CLONE: no adapter may alias the projection
+    return undefined
   }
 
   // true while `generation` is still the record the name owes
@@ -519,10 +561,17 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // as in the ordinary path: refuse before confirming the index or allocating an id, not after
       if (wrapper.adopt_id ? isPending(wrapper.adopt_id) : hasPendingReceipts()) return false
       if (!wrapper.adopt_id) {
-        // the pending name is passed so the caller can register THAT name inline (the adoption
-        // decision) while routing every other name through its own chain (see confirmIndex)
-        await deps.confirmIndex(name) // rejects to fail the create
+        // CONFIRMATION, updates included: one attempt never performs both a create-only index
+        // confirmation and an update. the controller commits the name slice synchronously inside
+        // the corpus turn through this callback, so the whole affected closure applies at once
+        const outcome = await deps.confirmTarget(name, {
+          captureReadMarker: () => marker,
+          commit: (answer, readMarker) => commitTargetSlice(name, answer, readMarker),
+        })
         if (!current()) return true // superseded: the newer generation redoes this
+        // INCONCLUSIVE means a gate check refused with zero mutation: release the chain and let
+        // the delivery that made the gate non-writable apply, then retry
+        if (outcome == 'inconclusive') return false
         // THE SAME CONTINUATION RULE as after acquireSecret: confirmation is an await, so a
         // delivery can open or ingress can stop across it. checking only generation ownership let
         // this go on to select an adopter, publish to the owner through mergeAdopted, and start a
@@ -609,6 +658,48 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       }
       throw e // persistOwed marks the record failed (and therefore retryable)
     }
+  }
+
+  // THE ONE COMMIT ALGORITHM, run synchronously inside the corpus turn (see the confirmTarget
+  // dep). the whole affected closure applies in ONE JavaScript turn
+  function commitTargetSlice(name: string, answer: Map<string, ClassifiedRow>, readMarker: Marker | undefined): CommitResult {
+    // STOP, checked HERE and not only after confirmTarget returns: the commit runs INSIDE the
+    // corpus turn, so by the time the controller could recheck, the mutation would already have
+    // happened. production's corpus cancels a stopped run before this is reached; this is the
+    // controller's own invariant, and it must not depend on the adapter enforcing it
+    if (stopped) return { kind: 'inconclusive' }
+    const index = deps.index()
+    // the NONPENDING, SERVER-BACKED slice: a pending create or adoption target is preserved by
+    // this controller, never judged by the read (an adoption target is absent from byId until
+    // finalization, so slice removal could not touch it anyway)
+    const local = [...index.byId.values()]
+      .filter(w => w.name == name && !w.pending_create && !w.adopt_id)
+      .map(w => ({ id: w.id, name: w.name, wrapper: w as unknown }))
+    const plan = planTargetSlice({ name, local, answer, marker: readMarker })
+    // THE PRECOMMIT COMPARE-AND-SET. if preservation used the proof and it settled while the
+    // answer was in flight, the whole result is inconclusive with ZERO effects — even when a
+    // fresh lower row would eventually have been selected
+    if (plan.preservedMarker && !(marker && marker === plan.preservedMarker && marker.token === plan.preservedMarker.token))
+      return { kind: 'inconclusive' }
+    // (3) destructive rows once, in canonical id order
+    for (const id of plan.remove) removeHidden(index, id)
+    // (4) clear a pending wrapper's stale adopt_id when it differs from the canonical fresh target
+    const pending = index.byName.get(name)
+    const canonicalFresh = plan.register[0]?.id
+    if (pending?.adopt_id && pending.adopt_id !== canonicalFresh) pending.adopt_id = null
+    // (5) with no eligible fresh target the pending projection resets to its immutable baseline
+    // ONCE; otherwise the adapter registers each fresh row, and registerHidden's first eligible
+    // registration performs the single rebase/adoption/publication
+    if (!plan.register.length) {
+      const op = owed.get(name)
+      if (op && pending) {
+        pending.item = cloneState(op.localIntent)
+        deps.syncOwner(name, cloneState(op.localIntent))
+      }
+    } else {
+      for (const row of plan.register) deps.registerTargetRow(row.wrapper as HiddenWrapper, mergeAdopted)
+    }
+    return { kind: 'committed', requiredMarker: plan.requiredMarker }
   }
 
   // persists whatever the name currently owes, on whichever record holds it

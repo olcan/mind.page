@@ -63,7 +63,20 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
     reconcileOwner: () => {},
     notifyFailure: () => {},
     echoApplied: () => true,
-    confirmIndex: async _name => void calls.push({ op: 'confirm' }),
+    // the DEFAULT models "the server has exactly what the applied index has", so the plan is a
+    // no-op and confirmation is behaviour-preserving for schedules that do not exercise it. a
+    // test that cares supplies its own answer
+    confirmTarget: async (name, hooks) => {
+      calls.push({ op: 'confirm' })
+      const answer = new Map(
+        [...idx.byId.values()]
+          .filter(w => !w.pending_create && !w.adopt_id)
+          .map(w => [w.id, { id: w.id, kind: 'hidden' as const, name: w.name, wrapper: w, eligible: true }])
+      )
+      if (ingress.gate() != 'writable') return 'inconclusive'
+      return hooks.commit(answer, hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+    },
+    registerTargetRow: (wrapper, mergeAdoptedFor) => void registerHidden(idx, wrapper, mergeAdoptedFor),
     adopt: (pending, found) => Object.assign(pending.item, { ...found.item, ...pending.item }),
     syncOwner: () => {}, // owner publication is index.svelte's side; schedules assert via calls
     invalidateAuthority: reason => void calls.push({ op: 'invalidate', id: reason }),
@@ -122,6 +135,24 @@ function arriveRemoval(controller: any, idx: HiddenIndex, id: string, ingress?: 
   if (!handle) return apply()
   handle.ready(apply)
   return handle.done
+}
+
+// a confirmTarget whose answer is exactly these server rows. the old confirmIndex overrides
+// expressed the same thing by calling registerHidden directly; now the answer goes through the
+// plan, which is what makes slice replacement and the marker rules apply
+function serverAnswer(rows: { id: string; name: string; item?: any }[], calls?: Call[], gate?: () => string) {
+  return async (_name: string, hooks: any) => {
+    calls?.push({ op: 'confirm' })
+    // BOTH GATE CHECKS live in the adapter in production (see the confirmTarget dep): one after
+    // the corpus predecessor, one immediately before the synchronous commit. a harness that skips
+    // them commits behind a shut gate and cannot exercise the inconclusive path at all
+    if (gate && gate() != 'writable') return 'inconclusive'
+    const answer = new Map(
+      rows.map(r => [r.id, { id: r.id, kind: 'hidden' as const, name: r.name, wrapper: r, eligible: true }])
+    )
+    if (gate && gate() != 'writable') return 'inconclusive'
+    return hooks.commit(answer, hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
+  }
 }
 
 const itemOf = (text?: string) => JSON.parse(String(text).replace(/^cipher:/, '')).item
@@ -210,14 +241,9 @@ test('not-found recovery adopts a surviving same-name document instead of creati
       }
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
     },
-    confirmIndex: async _name => {
-      calls.push({ op: 'confirm' })
-      // the server read finds a surviving same-name document (e.g. a duplicate another client
-      // kept): registration adopts it into the recovering (pending) wrapper
-      registerHidden(idx, { id: 'srv7', name: 'n', item: { theirs: 1 } }, (pending, found) =>
-        Object.assign(pending.item, { ...found.item, ...pending.item })
-      )
-    },
+    // the server read finds a surviving same-name document (e.g. a duplicate another client
+    // kept): the plan registers it, adopting the recovering (pending) wrapper
+    confirmTarget: (name, hooks) => serverAnswer([{ id: 'srv7', name: 'n', item: { theirs: 1 } }], calls)(name, hooks),
   })
   idx.byId.set('gone1', { id: 'gone1', name: 'n' })
   idx.byName.set('n', idx.byId.get('gone1')!)
@@ -268,7 +294,7 @@ test('a save after a create does not wait for the create to be acknowledged', as
 })
 test('a failed confirmation fails the create: no document is written and the name is released', async () => {
   const { idx, calls, controller } = harness({
-    confirmIndex: async _name => {
+    confirmTarget: async () => {
       throw new Error('server unavailable')
     },
   })
@@ -280,12 +306,8 @@ test('a failed confirmation fails the create: no document is written and the nam
 
 test('adoption found during confirmation updates the existing document with merged state and settles', async () => {
   const { idx, calls, controller } = harness({
-    confirmIndex: async _name => {
-      // the server confirmation registers an existing document, adopting the pending wrapper
-      registerHidden(idx, { id: 'srv1', name: 'n', item: { theirs: 1 } }, (pending, found) =>
-        Object.assign(pending.item, { ...found.item, ...pending.item })
-      )
-    },
+    // the server confirmation finds an existing document, adopting the pending wrapper
+    confirmTarget: serverAnswer([{ id: 'srv1', name: 'n', item: { theirs: 1 } }]),
   })
   controller.save('n', { mine: 2 })
   await flush()
@@ -302,9 +324,7 @@ test('adoption found during confirmation updates the existing document with merg
 test('a failed adopted update still settles onto the document: the next save updates, never creates', async () => {
   let fail = true
   const { idx, calls, controller } = harness({
-    confirmIndex: async _name => {
-      registerHidden(idx, { id: 'srv1', name: 'n', item: {} }, () => {})
-    },
+    confirmTarget: serverAnswer([{ id: 'srv1', name: 'n', item: {} }]),
     updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       if (fail) throw new Error('unavailable')
@@ -325,9 +345,10 @@ test('a failed adopted update still settles onto the document: the next save upd
 test('a save queued during a pending create is dropped when the create fails (never an unconfirmed create)', async () => {
   const confirm = deferred<void>()
   const { idx, calls, controller } = harness({
-    confirmIndex: async _name => {
+    confirmTarget: async (_name, hooks) => {
       calls.push({ op: 'confirm' })
       await confirm.promise // hold the create in confirmation while the second save queues
+      return hooks.commit(new Map(), hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
     },
   })
   controller.save('n', { v: 1 })
@@ -346,11 +367,9 @@ test('a save queued during a pending create is dropped when the create fails (ne
 test('a save queued across an adoption still persists the merged state (adopted fields survive)', async () => {
   const confirm = deferred<void>()
   const { idx, calls, controller } = harness({
-    confirmIndex: async _name => {
-      registerHidden(idx, { id: 'srv1', name: 'n', item: { theirs: 1 } }, (pending, found) =>
-        Object.assign(pending.item, { ...found.item, ...pending.item })
-      )
+    confirmTarget: async (_name, hooks) => {
       await confirm.promise
+      return serverAnswer([{ id: 'srv1', name: 'n', item: { theirs: 1 } }])(_name, hooks)
     },
   })
   controller.save('n', { mine: 2 })
@@ -415,7 +434,8 @@ test('not-found recovery with an authoritative no-op confirmation adopts the ret
       }
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
     },
-    confirmIndex: async _name => void calls.push({ op: 'confirm' }), // authoritative: registers nothing
+    // authoritative, and the read finds NOTHING for the name: the slice is replaced with nothing
+    confirmTarget: (name, hooks) => serverAnswer([], calls)(name, hooks),
   })
   const canonical: HiddenWrapper = { id: 'gone1', name: 'n', item: { v: 0 } }
   const survivor: HiddenWrapper = { id: 'srv0', name: 'n', item: { theirs: 1 } } // retained duplicate
@@ -554,9 +574,7 @@ test('a removal arriving during an adopted create serializes on the adopting nam
   const { idx, calls } = h
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async _name => {
-      registerHidden(idx, { id: 'srv1', name: 'n', item: {} }, () => {})
-    },
+    confirmTarget: serverAnswer([{ id: 'srv1', name: 'n', item: {} }]),
     updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       await update.promise
@@ -681,13 +699,9 @@ test('an adopted write rejected as not-found does not leave the wrapper on a van
   const { idx, calls } = h
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async name => {
-      // the same merge production passes (mergeAdoptedStore): pending changes win
-      if (updates == 0)
-        registerHidden(idx, { id: 'gone1', name, item: { theirs: 1 } }, (pending, found) =>
-          Object.assign(pending.item, { ...found.item, ...pending.item })
-        )
-    },
+    // the server read finds the survivor only on the FIRST confirmation
+    confirmTarget: async (name, hooks) =>
+      serverAnswer(updates == 0 ? [{ id: 'gone1', name, item: { theirs: 1 } }] : [])(name, hooks),
     updateDoc: async (id, data) => {
       calls.push({ op: 'update', id, text: data.cipher ?? data.text })
       if (++updates == 1) {
@@ -809,9 +823,10 @@ test('a build that fails is retried by the next save, not left idle forever', as
   // next save read it as "already queued" and returned — so the work sat idle for the page's life
   let failConfirm = true
   const { calls, controller } = harness({
-    confirmIndex: async () => {
+    confirmTarget: async (_name, hooks) => {
       calls.push({ op: 'confirm' })
       if (failConfirm) throw new Error('server unavailable')
+      return hooks.commit(new Map(), hooks.captureReadMarker()).kind == 'committed' ? 'committed' : 'inconclusive'
     },
   })
   controller.save('n', { v: 1 })
@@ -1253,7 +1268,7 @@ test('an error whose message merely contains "cancel" is still reported', async 
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async () => {
+    confirmTarget: async () => {
       throw new Error('operation cancelled by server')
     },
     notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
@@ -1271,7 +1286,7 @@ test('a terminal BUILD failure is reported, not only a terminal write failure', 
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async () => {
+    confirmTarget: async () => {
       throw new Error('index unavailable')
     },
     notifyFailure: (name, error) => void failures.push(`${name}: ${(error as Error).message}`),
@@ -1462,12 +1477,13 @@ test('an adoption invalidated DURING encryption neither issues nor finalizes aga
     ...h.deps,
     // register the target ONCE: a later confirm must not re-offer it, or the retry would freshly
     // and legitimately re-adopt and the schedule could no longer tell stale from fresh
-    confirmIndex: async name => {
-      if (wrapperRef) return
-      registerHidden(idx, { id: 'target1', name, item: { theirs: 1 } }, (p, f) => {
-        wrapperRef = p
-        Object.assign(p.item, { ...f.item, ...p.item })
-      })
+    confirmTarget: async (name, hooks) => {
+      const answer = wrapperRef ? [] : [{ id: 'target1', name, item: { theirs: 1 } }]
+      const outcome = await serverAnswer(answer)(name, hooks)
+      // the merge callback belongs to the CONTROLLER now, so the pending wrapper is read from the
+      // index rather than captured through a test-supplied merge
+      wrapperRef = wrapperRef ?? [...idx.byId.values()].find(w => w.adopt_id)
+      return outcome
     },
     encryptState: async state => {
       await gate.promise // hold the attempt inside encryption
@@ -1563,10 +1579,8 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
   const controller = createHiddenPersistence({
     ...h.deps,
     syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
-    confirmIndex: async name => {
-      if (!idx.byId.has('a1'))
-        registerHidden(idx, { id: 'a1', name, item: { shared: 'v1' } }, (p, f) => controller.mergeAdopted(p, f))
-    },
+    confirmTarget: async (name, hooks) =>
+      serverAnswer(idx.byId.has('a1') ? [] : [{ id: 'a1', name, item: { shared: 'v1' } }])(name, hooks),
     encryptState: async state => {
       if (!gated) {
         gated = true
@@ -2131,9 +2145,10 @@ test('a delivery opening during confirmation stops the create: no adoption, no p
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async () => {
+    confirmTarget: async (name, hooks) => {
       confirmStarted.resolve()
       await confirming.promise
+      return serverAnswer([], undefined, () => h.ingress.gate())(name, hooks)
     },
     syncOwner: n => void published.push(n),
     encryptState: async state => {
@@ -2181,9 +2196,10 @@ for (const [label, settle] of [
     const h = harness()
     const controller = createHiddenPersistence({
       ...h.deps,
-      confirmIndex: async () => {
+      confirmTarget: async (name, hooks) => {
         confirmStarted.resolve()
         await confirming.promise
+        return serverAnswer([], undefined, () => h.ingress.gate())(name, hooks)
       },
       syncOwner: n => void published.push(n),
       encryptState: async state => {
@@ -2402,7 +2418,10 @@ test('an ADOPTED create whose encryption rejects after stop does not finalize th
   const h = harness()
   const controller = createHiddenPersistence({
     ...h.deps,
-    confirmIndex: async () => {},
+    // the server CONFIRMS the survivor, so the create adopts it rather than the slice being
+    // replaced with nothing (an empty answer legitimately removes it now)
+    confirmTarget: (name, hooks) =>
+      serverAnswer([{ id: 'd1', name: 'n', item: { server: 1 } }], undefined, () => h.ingress.gate())(name, hooks),
     syncOwner: n => void published.push(n),
     notifyFailure: n => void failures.push(n),
     encryptState: async state => {
