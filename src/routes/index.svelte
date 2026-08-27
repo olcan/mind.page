@@ -7459,7 +7459,21 @@
           deferredRemoteChanges
         )
 
+        // THE ONE visible-side removal for a visible-to-hidden transition, extracted so the
+        // SAME operation runs inside the live delivery's owned application AND inside
+        // confirmation's registerTargetRow (see the ingress coordinator design): keeping it at
+        // the call site would leave the destructive half of the transition outside the delivery
+        // slot that owns the outcome, and duplicating it would create two discriminator
+        // contracts. synchronous, returns undefined
+        function removeVisibleForHidden(doc): undefined {
+          if (!indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)) return
+          console.warn(`item ${doc.id} became hidden; removing its visible representation`)
+          applyRemoteChangeAndSupersede({ type: 'removed' }, doc, { hidden: false, text: '' })
+          return undefined
+        }
+
         function applyRemoteChange(change, doc, savedItem) {
+
           // the marker is cleared AFTER this returns, not here: everything below is fallible, and
           // clearing first meant a throwing reducer left reconciliation reporting "retryable" with
           // nothing to retry from. reconciliation clears its OWN generation through settle; a live
@@ -7886,12 +7900,8 @@
                   // no row for this id and return, leaving the document in neither world
                   if (change.type == 'modified') change = { ...change, type: 'added', doc } as any
                 }
-                if (savedItem.hidden && indexFromId.has(tempIdFromSavedId.get(doc.id) ?? doc.id)) {
-                  // the inverse: a visible item became hidden, so its visible representation is
-                  // removed through the ordinary path before the hidden branch indexes it
-                  console.warn(`item ${doc.id} became hidden; removing its visible representation`)
-                  applyRemoteChangeAndSupersede({ type: 'removed' }, doc, { hidden: false, text: '' })
-                }
+                if (savedItem.hidden) removeVisibleForHidden(doc)
+
                 if (savedItem.hidden) {
                   const seenDirtySeq = hiddenDirtySeq // best-effort: see the note on the drop path above
                   const removed = change.type == 'removed'

@@ -99,4 +99,3 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
   }
   return { action: 'apply_changes', policy }
 }
-

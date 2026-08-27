@@ -78,10 +78,18 @@ test('sync disabled carries NO policy — the union removes the combination', ()
   expect('policy' in d, 'no policy key at all').toBe(false)
 })
 
-test('waiting is stable: the same cached snapshot keeps waiting until the server answers', () => {
-  // firstSnapshot stays true after a wait outcome (the caller does not consume it), so the same
-  // facts must keep producing wait_for_server, never oscillate into initialize
-  const facts = { ...base, fromCache: true, empty: true }
-  expect(snapshotDecision(facts).action).toBe('wait_for_server')
-  expect(snapshotDecision(facts).action).toBe('wait_for_server')
+test('a cached metadata-only post-initialization revision is ignored as data and revokes', () => {
+  // the row the table was missing; caller-owned firstSnapshot bookkeeping (a wait outcome leaves
+  // it unconsumed) is NOT provable by calling a pure function twice — the stage-3 listener
+  // fixture owns that assertion
+  expect(
+    snapshotDecision({
+      ...base,
+      initializationStarted: true,
+      firstSnapshot: false,
+      changeCount: 0,
+      fromCache: true,
+    })
+  ).toEqual({ action: 'ignore_metadata_only', policy: 'revoke' })
 })
+
