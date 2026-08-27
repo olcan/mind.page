@@ -79,7 +79,7 @@ test('a new device must enter the phrase; a wrong one can only sign out', async 
   // signed out: back to the anonymous account as a read-only visitor, credentials cleared
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   expect(
-    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')]),
+    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')])
   ).toEqual([null, null])
   // the right phrase decrypts the account
   await loadUser(page, ALICE)
@@ -345,21 +345,19 @@ test('the header scrolls to the top on a short column (new account)', async ({ p
           const header = document.querySelector('.header') as HTMLElement
           return Math.round(header.getBoundingClientRect().top)
         }),
-      { timeout: 30_000 },
+      { timeout: 30_000 }
     )
     .toBeLessThanOrEqual(1) // the header reaches the top of the viewport
   // and stays there once settled
   await page.waitForTimeout(2_000)
   expect(
     await page.evaluate(() =>
-      Math.round((document.querySelector('.header') as HTMLElement).getBoundingClientRect().top),
-    ),
+      Math.round((document.querySelector('.header') as HTMLElement).getBoundingClientRect().top)
+    )
   ).toBeLessThanOrEqual(1)
 })
 
-test('a foreign shared page is served from the isolated origin, which clears app storage residue', async ({
-  page,
-}) => {
+test('a foreign shared page is served from the isolated origin, which clears app storage residue', async ({ page }) => {
   // a shared page runs its OWNER's code, and no in-origin measure contains that: any same-origin
   // realm recreates the firebase facade, and auth persistence, the session cookie and
   // localStorage (secret included) are per-ORIGIN. so foreign shared pages move to an isolated
@@ -404,9 +402,9 @@ test('a foreign shared page is served from the isolated origin, which clears app
     await page.goto('/?shared=crawl_e2e/trap')
     // THE EXACT ORIGIN, not merely "somewhere else": a different port would not isolate, since
     // cookies are not port-scoped
-    await expect.poll(() => page.evaluate(() => location.origin), { timeout: 60_000 }).toBe(
-      `http://${SHARED_LOCAL_HOST}:3100`
-    )
+    await expect
+      .poll(() => page.evaluate(() => location.origin), { timeout: 60_000 })
+      .toBe(`http://${SHARED_LOCAL_HOST}:3100`)
     expect(new URL(page.url()).search).toBe('?shared=crawl_e2e/trap') // the url survives the move
 
     // ... and the page works normally for the anonymous visitor it is, running the owner's code
@@ -460,7 +458,6 @@ test('a corrupted visible document can still be removed remotely (removal applie
 })
 
 test('global-store updates and deletions reach a second tab of the same account', async ({ page }) => {
-
   // hidden documents cross tabs through the shared persistent cache, so their changes arrive
   // with hasPendingWrites set: classification must be by exact payload identity — a pending
   // REMOVAL was misclassified as the receiving tab's own (wrapper present, matching content)
@@ -631,14 +628,17 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     predicate: m => m.text().includes('e2e-corrupt-hidden') && m.text().includes('local intent held'),
     timeout: 30_000,
   })
-  await firestore().collection('items').doc('e2e-corrupt-hidden').set({
-    user: ALICE.uid,
-    time: Date.now(),
-    hidden: true,
-    attr: null,
-    text: null,
-    cipher: await encryptWithSecret(envelope, secretFor(ALICE, PHRASE)),
-  })
+  await firestore()
+    .collection('items')
+    .doc('e2e-corrupt-hidden')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: true,
+      attr: null,
+      text: null,
+      cipher: await encryptWithSecret(envelope, secretFor(ALICE, PHRASE)),
+    })
   await intentError // the Apply reached hasLocalIntent and refused
   expect(
     await page.evaluate(() => window._item('#e2e_healed_visible', true)?.text ?? null),
@@ -669,7 +669,6 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
   // render-time client any more (see reportInvalidHiddenCandidates)
   await page.waitForTimeout(3_000)
   expect(await hiddenDocs()).toBe(base)
-
 })
 
 // NOTE this test used to SIGN IN on the shared page itself. That route no longer exists: a
@@ -679,7 +678,7 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
 // It kept passing only because local hosts were exempt from that redirect. The phrase validation it
 // incidentally covered is covered directly by 'a new device must enter the phrase' above; what is
 // unique here, and still reachable, is what a shared-page SAVE does to the account's hidden store
-test('a save from the owner\'s own shared page updates its store rather than duplicating it', async ({ page }) => {
+test("a save from the owner's own shared page updates its store rather than duplicating it", async ({ page }) => {
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -790,8 +789,8 @@ test('a save from the owner\'s own shared page updates its store rather than dup
     await page.evaluate(() =>
       Object.keys(window._item('#e2e_shared')!.global_store)
         .filter(k => k.startsWith('_e2e'))
-        .sort(),
-    ),
+        .sort()
+    )
   ).toEqual(['_e2e_pre', '_e2e_probe', '_e2e_probe2', '_e2e_probe3']) // nothing lost across the shared-page saves
 })
 
@@ -810,7 +809,7 @@ test('signing out clears legacy session cookies at every scope, not just the roo
   const domain = new URL(origin).hostname
   const legacy = ['/2', '/2/', '/2f/', '/f/', '/b/']
   await context.addCookies(
-    legacy.map(path => ({ name: '__session', value: 'eyJhbGciOiJSUzI1NiJ9.legacy.token', domain, path })),
+    legacy.map(path => ({ name: '__session', value: 'eyJhbGciOiJSUzI1NiJ9.legacy.token', domain, path }))
   )
   // NOTE: cookies() with a URL returns only what would be SENT to that url — scoped cookies are
   // invisible from '/', which is exactly why the previous assertion could not see them
@@ -831,7 +830,7 @@ test('signing out clears the secret, the session and the local cache', async ({ 
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect(page.getByText('Stay Anonymous', { exact: true })).toBeVisible({ timeout: 60_000 })
   expect(
-    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')]),
+    await page.evaluate(() => [localStorage.getItem('mindpage_secret'), localStorage.getItem('mindpage_user')])
   ).toEqual([null, null])
   // the marker must be GONE after sign-out, not merely free of a token: a stale `__session=1`
   // keeps suppressing anonymous server rendering for signed-out requests

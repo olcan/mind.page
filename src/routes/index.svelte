@@ -8910,7 +8910,9 @@
   // state underneath, and publishes the exact result to the owner as a clone. registration paths
   // must not merge into a possibly stale projection themselves — defaultsDeep never overwrites a
   // filled-in key, so that kept a replaced document's values
-  const mergeAdoptedStore = (pending, found) => hiddenPersistence.mergeAdopted(pending, found)
+  // `: undefined` is the contract registerHidden requires (see its mergeAdopted dep): the merge is
+  // consumed synchronously inside the commit turn, and `void` would accept an async one
+  const mergeAdoptedStore = (pending, found): undefined => hiddenPersistence.mergeAdopted(pending, found)
 
   // parses one hidden document into a wrapper, QUARANTINING anything unusable (unparseable text
   // or a missing/non-string name) exactly as initialization does: an invalid record is reported
@@ -9000,8 +9002,10 @@
     whenActionable: () => hiddenIngress.whenActionable(),
     whenWritable: () => hiddenIngress.whenWritable(),
     // MERGE ONLY (see the dep's docstring): rebase and owner publication live in the controller
-    adopt: (pending, found) => _.defaultsDeep(pending.item, found.item),
-    syncOwner: (name, state) => {
+    // the returned object is DISCARDED explicitly: lodash returns its target, and letting that
+    // escape past an `any` would defeat the dep's exact `=> undefined` contract
+    adopt: (pending, found) => void _.defaultsDeep(pending.item, found.item),
+    syncOwner: (name, state): undefined => {
       const owner = name.match(/^global_store_(.+)$/)?.[1]
       if (!owner) return
       const local = tempIdFromSavedId.get(owner) ?? owner

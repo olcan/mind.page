@@ -100,7 +100,6 @@ function harness(overrides: Partial<HiddenPersistenceDeps> = {}) {
   return { idx, calls, deps, ingress, controller: createHiddenPersistence(deps) }
 }
 
-
 // mimics the items listener for one remote hidden record. there is NO receipt any more: a
 // delivery is visible to the writer through the coordinator's GATE, which stays non-writable from
 // open() until the application settles — the same fact the receipt overlay used to duplicate.
@@ -136,7 +135,6 @@ function arriveRemoval(controller: any, idx: HiddenIndex, id: string, ingress?: 
   handle.ready(apply)
   return handle.done
 }
-
 
 // a confirmTarget whose answer is exactly these server rows. the old confirmIndex overrides
 // expressed the same thing by calling registerHidden directly; now the answer goes through the
@@ -593,7 +591,6 @@ test('a removal arriving during an adopted create serializes on the adopting nam
   expect(idx.byId.has('srv1')).toBe(false) // the removal applied, after the adoption settled
 })
 
-
 test('emptying a store is an ordinary save, not a deletion', async () => {
   // round-12: physical deletion is what made emptying dangerous — the delete landed later than
   // the classification that authorized it, and could race a concurrent rename into destroying a
@@ -617,7 +614,6 @@ test('the controller exposes no deletion surface at all', () => {
   for (const gone of ['deleteName', 'deleteRecord', 'isDeleting', 'deleteDiscovered'])
     expect((controller as any)[gone]).toBeUndefined()
 })
-
 
 test('a remote change applied after our write is issued does not leave the client behind', async () => {
   // round-15 finding 2: B is received while our save C holds the name chain in encryption, so
@@ -688,7 +684,10 @@ test('a survivor received during the final encryption is adopted, not duplicated
   second.resolve()
   await delivery
   for (let i = 0; i < 10; i++) await flush()
-  expect(calls.filter(c => c.op == 'create'), 'no duplicate document').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'create'),
+    'no duplicate document'
+  ).toHaveLength(0)
   const update = calls.find(c => c.op == 'update')!
   expect(update.id).toBe('srv1') // adopted instead
   expect(itemOf(update.text)).toEqual({ theirs: 1, mine: 1 })
@@ -903,7 +902,10 @@ test('a rejection whose applied fallback is raw read-only state publishes {} ins
   expect(idx.byName.get('n')!.item, 'the applied index still holds the exact raw object').toBe(cyclic)
   expect(controller.owes('n'), 'no owed generation').toBe(false)
   await flush()
-  expect(calls.filter(c => c.op == 'create' || c.op == 'update'), 'no SDK write').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no SDK write'
+  ).toHaveLength(0)
 })
 
 test('a FAILED application blocks the delivery, and the writer refuses rather than duplicating', async () => {
@@ -913,14 +915,19 @@ test('a FAILED application blocks the delivery, and the writer refuses rather th
   // delivery, the global gate is blocked, and no writer resolution can reach an issue at all
   const { calls, controller, ingress } = harness()
   const handle = ingress.open('srv1', 'cipher:srv1')
-  handle.ready(() => controller.applyRemote(['n'], () => {
-    throw new Error('item code threw during application')
-  }))
+  handle.ready(() =>
+    controller.applyRemote(['n'], () => {
+      throw new Error('item code threw during application')
+    })
+  )
   expect(await handle.done, 'the delivery is blocked').toBe('blocked')
   expect(ingress.gate(), 'and every writer is gated').toBe('blocked')
   controller.save('n', { mine: 1 })
   for (let i = 0; i < 6; i++) await flush()
-  expect(calls.filter(c => c.op == 'create'), 'no duplicate: the writer never resolved').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'create'),
+    'no duplicate: the writer never resolved'
+  ).toHaveLength(0)
   expect(controller.owes('n'), 'the intent is retained for after healing').toBe(true)
 })
 
@@ -960,8 +967,14 @@ test('a holder removed during its encryption is not updated', async () => {
   for (let i = 0; i < 6; i++) await flush()
   pending.shift()?.() // the create the retry re-entered
   for (let i = 0; i < 6; i++) await flush()
-  expect(calls.filter(c => c.op == 'update'), 'never the removed document').toHaveLength(0)
-  expect(calls.filter(c => c.op == 'create'), 're-entered create resolution').toHaveLength(1)
+  expect(
+    calls.filter(c => c.op == 'update'),
+    'never the removed document'
+  ).toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'create'),
+    're-entered create resolution'
+  ).toHaveLength(1)
 })
 
 test('a superseded generation neither issues its create nor finalizes the wrapper', async () => {
@@ -1223,7 +1236,11 @@ for (const { what, arrive: deliver, expect: check } of TARGET_CHANGES)
     await drain(1) // whatever the retry legitimately chooses instead
     const updates = calls.filter(c => c.op == 'update')
     if (check) check(updates)
-    else expect(updates.map(u => u.id), 'the stale target is never written').not.toContain('b2')
+    else
+      expect(
+        updates.map(u => u.id),
+        'the stale target is never written'
+      ).not.toContain('b2')
   })
 
 test('a superseded generation does not leave an adoption pointing at a removed document', async () => {
@@ -1366,11 +1383,12 @@ test('a change that has ENTERED the listener but not yet decrypted still stops a
   // change yet, and the coordinator's gate is pending for its whole lifetime
   const entering = ingress.open('d1', 'cipher:d1')
   await releaseGate()
-  expect(calls.filter(c => c.op == 'update'), 'no write while a change for the target is in flight').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'update'),
+    'no write while a change for the target is in flight'
+  ).toHaveLength(0)
   // the change turns out to be a removal, applied as that delivery's own Apply
-  entering.ready(() =>
-    controller.applyRemote([controller.nameForDocument('d1')], () => void removeHidden(idx, 'd1'))
-  )
+  entering.ready(() => controller.applyRemote([controller.nameForDocument('d1')], () => void removeHidden(idx, 'd1')))
   await entering.done
   await drain(1)
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
@@ -1394,7 +1412,10 @@ test('a target with an undecoded delivery is REFUSED, and writes once it decodes
   // it does not even ENCRYPT: refusing only after the build cost a secret acquisition and a full
   // encryption per retry, which a slow decode turns into repeated builds
   expect(pending, 'no encryption is attempted while the delivery is undecoded').toHaveLength(0)
-  expect(calls.filter(c => c.op == 'update'), 'nothing written while the delivery is undecoded').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'update'),
+    'nothing written while the delivery is undecoded'
+  ).toHaveLength(0)
   expect(controller.owes('n'), 'the change is still owed').toBe(true)
   // decoded, and nothing about the record changed: the delivery applies as a no-op and terminates,
   // which is what returns the gate to writable
@@ -1420,7 +1441,10 @@ test('a delivery that decodes into a removal is not written through by the retry
   const decoded = arriveRemoval(controller, idx, 'd1', ingress) // what the delivery turned out to be
   await drainAll()
   expect(calls.filter(c => c.op == 'update').map(u => u.id)).not.toContain('d1')
-  expect(calls.filter(c => c.op == 'create'), 'it re-enters create resolution').toHaveLength(1)
+  expect(
+    calls.filter(c => c.op == 'create'),
+    'it re-enters create resolution'
+  ).toHaveLength(1)
 })
 
 // NOTE 'settlement does not reconcile the owner when its own echo failed to apply' stood here and
@@ -1467,7 +1491,6 @@ test('an adoption invalidated DURING encryption neither issues nor finalizes aga
   expect(created).toBeTruthy()
   expect(created!.id).not.toBe('target1')
 })
-
 
 // ROUND-35 STAGE 1B: baseline / derived projection / owner as three distinct identities
 
@@ -1579,7 +1602,6 @@ test('a same-id replacement DURING encryption never issues v1: payload, wrapper 
   expect(published.at(-1)!.shared, 'the last owner publication carries v2').toBe('v2')
 })
 
-
 test('the baseline is cloned at save time: later caller mutations never reach a queued write', async () => {
   // both owed sites clone (creation and supersede): sharing the caller's object would let an owner
   // that keeps mutating its global_store change what an already-queued write persists, and adoption
@@ -1623,7 +1645,6 @@ test('the baseline is cloned at save time: later caller mutations never reach a 
   expect(written.length).toBeGreaterThan(0)
   expect(itemOf(written.at(-1)!.text)).toEqual({ mine: 4 })
 })
-
 
 test('non-JSON state fails through notifyFailure at save time, mutating nothing', async () => {
   // round-37 contract choice: normalization moved from the asynchronous build path to save() entry,
@@ -1680,7 +1701,10 @@ test('rejecting a NEW invalid value keeps the older owed generation AND rolls th
   })
   expect(controller.save('n', { mine: 'D' }), 'valid save accepted').toBe(true)
   for (let i = 0; i < 6; i++) await flush()
-  expect(calls.filter(c => c.op == 'create'), 'D was issued').toHaveLength(1)
+  expect(
+    calls.filter(c => c.op == 'create'),
+    'D was issued'
+  ).toHaveLength(1)
   expect(controller.owes('n'), 'D is still owed (unacknowledged)').toBe(true)
   // remote C arrives through the production lifecycle (never a direct reducer call — see arrive)
   const docId = idx.byName.get('n')!.id
@@ -1751,7 +1775,10 @@ test('stop retains unissued intent, clears saving, and reports once per generati
   for (let i = 0; i < 6; i++) await flush()
   expect(failures, 'no second report for the same generation').toEqual(['n'])
   expect(acquisitions, 'still nothing').toBe(0)
-  expect(calls.filter(c => c.op == 'create' || c.op == 'update'), 'no new SDK work').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no new SDK work'
+  ).toHaveLength(0)
 })
 // TABLED WITH ITS POSITIVE CONTROL, and pinning the OUTCOME rather than a specific barrier: with
 // the no-await stop recheck deleted this still passes, because the refused attempt requeues and
@@ -1797,7 +1824,10 @@ test('a save AFTER stop takes the stopped outcome SYNCHRONOUSLY: no secret, no c
   expect(failures, 'reported once, at save time').toEqual(['n'])
   for (let i = 0; i < 6; i++) await flush()
   expect(acquisitions, 'and none afterwards either').toBe(0)
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no write'
+  ).toHaveLength(0)
   expect(controller.owes('n'), 'retained for a reload').toBe(true)
   expect(failures, 'still exactly one for this generation').toEqual(['n'])
   // a genuinely superseding save is a NEW generation, and reports its own outcome (see Owed)
@@ -1821,7 +1851,10 @@ test('an acknowledgement arriving AFTER stop clears the owed record without reco
   registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
   controller.save('n', { mine: 1 })
   for (let i = 0; i < 6; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'update'), 'the write went out before stop').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'the write went out before stop'
+  ).toHaveLength(1)
   // the listener dies while the write is in flight
   controller.stop()
   ack.resolve()
@@ -1844,13 +1877,19 @@ test('a save while the gate is PENDING does no secret work at all until the deli
   // THE POINT: acquireSecret PROMPTS for a phrase in production. doing that for a write that
   // cannot issue is user-visible damage, not just wasted work
   expect(acquisitions, 'no phrase prompt while the gate is shut').toBe(0)
-  expect(h.calls.filter(c => c.op == 'update'), 'and no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'and no write'
+  ).toHaveLength(0)
   // the delivery applies, the gate opens, and the wake resumes the writer
   other.ready(async () => {})
   expect(await other.done).toBe('applied')
   for (let i = 0; i < 8; i++) await flush()
   expect(acquisitions, 'exactly one acquisition, after the wake').toBe(1)
-  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'and the write went out').toEqual(['d1'])
+  expect(
+    h.calls.filter(c => c.op == 'update').map(c => c.id),
+    'and the write went out'
+  ).toEqual(['d1'])
 })
 
 test('a BLOCKED gate is reported once and waits for healing, instead of polling forever', async () => {
@@ -1871,7 +1910,10 @@ test('a BLOCKED gate is reported once and waits for healing, instead of polling 
   controller.save('n', { mine: 1 })
   for (let i = 0; i < 10; i++) await flush()
   expect(acquisitions, 'no secret work for a write that cannot issue').toBe(0)
-  expect(h.calls.filter(c => c.op == 'update'), 'no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'no write'
+  ).toHaveLength(0)
   expect(failures, 'the user is told ONCE, not on every wake').toEqual(['n'])
   expect(controller.owes('n'), 'still owed: healing can still let it through').toBe(true)
   // healing: a strictly higher delivery in d2's cell succeeds
@@ -1879,7 +1921,10 @@ test('a BLOCKED gate is reported once and waits for healing, instead of polling 
   heal.ready(async () => {})
   expect(await heal.done).toBe('applied')
   for (let i = 0; i < 10; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'the healed write issues').toEqual(['d1'])
+  expect(
+    h.calls.filter(c => c.op == 'update').map(c => c.id),
+    'the healed write issues'
+  ).toEqual(['d1'])
   expect(failures, 'and no second report').toEqual(['n'])
 })
 
@@ -1936,7 +1981,10 @@ test('one generation is reported ONCE even when healing immediately re-blocks', 
   expect(await reblock).toBe('blocked')
   for (let i = 0; i < 10; i++) await flush()
   expect(failures, 'STILL one report for this generation').toEqual(['n'])
-  expect(h.calls.filter(c => c.op == 'update'), 'and no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'and no write'
+  ).toHaveLength(0)
 })
 
 test('a superseding save REUSES the parked name wake, and only the newest state is written', async () => {
@@ -1963,19 +2011,28 @@ test('a superseding save REUSES the parked name wake, and only the newest state 
 // with no saving state -- rename and removal especially, since attemptWrite then synthesizes a
 // fresh holder that never had one. saving belongs to the NAME, so all three are the same case
 for (const [label, disturb] of [
-  ['replaced under the same id', (idx: HiddenIndex) => {
-    const b: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
-    idx.byId.set('d1', b)
-    idx.byName.set('n', b)
-  }],
-  ['renamed away', (idx: HiddenIndex) => {
-    const b: HiddenWrapper = { id: 'd1', name: 'm', item: { v: 1 } }
-    idx.byId.set('d1', b)
-    idx.byName.set('m', b) // 'n' deliberately keeps its stale alias, as production does
-  }],
-  ['removed', (idx: HiddenIndex) => {
-    idx.byId.delete('d1')
-  }],
+  [
+    'replaced under the same id',
+    (idx: HiddenIndex) => {
+      const b: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
+      idx.byId.set('d1', b)
+      idx.byName.set('n', b)
+    },
+  ],
+  [
+    'renamed away',
+    (idx: HiddenIndex) => {
+      const b: HiddenWrapper = { id: 'd1', name: 'm', item: { v: 1 } }
+      idx.byId.set('d1', b)
+      idx.byName.set('m', b) // 'n' deliberately keeps its stale alias, as production does
+    },
+  ],
+  [
+    'removed',
+    (idx: HiddenIndex) => {
+      idx.byId.delete('d1')
+    },
+  ],
 ] as const)
   test(`a holder ${label} while the writer is parked leaves the NAME saving throughout`, async () => {
     const encrypting = deferred<void>()
@@ -2006,7 +2063,10 @@ for (const [label, disturb] of [
     encrypting.resolve()
     for (let i = 0; i < 6; i++) await flush()
     expect(controller.isSaving('n'), 'false once the write is issued').toBe(false)
-    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'exactly one write').toHaveLength(1)
+    expect(
+      h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+      'exactly one write'
+    ).toHaveLength(1)
   })
 test('the gate closing during acquireSecret mutates nothing: no synthetic wrapper, no owner publication', async () => {
   // round 59 section 6: attemptWrite could clone, resolve a target, INSTALL a synthetic
@@ -2031,12 +2091,18 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
   // attemptWrite does on top of it before the gate is read: rewriting the claimed wrapper's item
   // and PUBLISHING it to the owner
   expect(published, 'nothing published to the owner while the gate is shut').toEqual([])
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no write'
+  ).toHaveLength(0)
   // once the gate heals the create proceeds normally
   held.ready(async () => {})
   expect(await held.done).toBe('applied')
   for (let i = 0; i < 8; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'create'), 'exactly one create, after the gate opened').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'create'),
+    'exactly one create, after the gate opened'
+  ).toHaveLength(1)
 })
 
 // ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
@@ -2058,9 +2124,15 @@ test('an idempotent delivery for the SELECTED id refuses the first payload by fr
   expect(idx.byName.get('n'), 'selection unchanged').toBe(live)
   expect(idx.byId.get('d1'), 'wrapper identity unchanged').toBe(live)
   await releaseGate()
-  expect(calls.filter(c => c.op == 'update'), 'the first payload was refused').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'update'),
+    'the first payload was refused'
+  ).toHaveLength(0)
   await drain(1)
-  expect(calls.filter(c => c.op == 'update').map(c => c.id), 'the retry issues').toEqual(['d1'])
+  expect(
+    calls.filter(c => c.op == 'update').map(c => c.id),
+    'the retry issues'
+  ).toEqual(['d1'])
 })
 
 test('an UNRELATED open delivery refuses the payload through the global gate alone', async () => {
@@ -2074,7 +2146,10 @@ test('an UNRELATED open delivery refuses the payload through the global gate alo
   await awaitGate('the first payload')
   const unrelated = ingress.open('d9', 'cipher:d9')
   await releaseGate()
-  expect(calls.filter(c => c.op == 'update'), 'refused by the GLOBAL gate').toHaveLength(0)
+  expect(
+    calls.filter(c => c.op == 'update'),
+    'refused by the GLOBAL gate'
+  ).toHaveLength(0)
   unrelated.ready(async () => {})
   expect(await unrelated.done).toBe('applied')
   await drain(1)
@@ -2094,7 +2169,10 @@ test('an unrelated delivery that applies BEFORE the encryption finishes lets the
   unrelated.ready(async () => {})
   expect(await unrelated.done).toBe('applied') // gone again before the encryption returns
   await releaseGate()
-  expect(calls.filter(c => c.op == 'update').map(c => c.id), 'ONE write, no retry').toEqual(['d1'])
+  expect(
+    calls.filter(c => c.op == 'update').map(c => c.id),
+    'ONE write, no retry'
+  ).toEqual(['d1'])
 })
 
 // ---- confirmation is an await, so both boundaries reopen across it (round 60) ----
@@ -2137,7 +2215,10 @@ test('a delivery opening during confirmation stops the create: no adoption, no p
     [...h.idx.byId.values()].filter(w => w.adopt_id),
     'and no adoption pointer was set'
   ).toEqual([])
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no write'
+  ).toHaveLength(0)
   // once the gate heals the create completes normally
   held.ready(async () => {})
   expect(await held.done).toBe('applied')
@@ -2200,7 +2281,10 @@ for (const [label, settle] of [
     expect(encrypted, 'and nothing was encrypted').toEqual([])
     expect(published, 'and published nothing').toEqual([])
     expect(failures, 'and reported nothing further').toEqual(['n'])
-    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+    expect(
+      h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+      'no write'
+    ).toHaveLength(0)
     expect(controller.owes('n'), 'the intent is still retained').toBe(true)
   })
 
@@ -2301,7 +2385,10 @@ for (const [label, hold] of [
     for (let i = 0; i < 8; i++) await flush()
     expect(failures, 'the late catch reports nothing further').toEqual(['n'])
     expect(controller.owes('n'), 'and the intent stays owed').toBe(true)
-    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+    expect(
+      h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+      'no write'
+    ).toHaveLength(0)
   })
 
 // TargetToken.wrapper is PROVISIONAL and currently unpinned. Removing the wrapper comparison
@@ -2366,7 +2453,10 @@ test('a generation that heals, builds, and RE-BLOCKS is not saving and is report
   await secondWake.promise // the retry has parked again: the exact completion signal
   expect(controller.isSaving('n'), 'false after refusal and requeue').toBe(false)
   expect(failures, 'and STILL one report for this generation').toEqual(['n'])
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'nothing was written').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'nothing was written'
+  ).toHaveLength(0)
 })
 
 test('an ADOPTED create whose encryption rejects after stop does not finalize the adoption', async () => {
@@ -2435,7 +2525,10 @@ test('an ISSUED update rejecting not-found after stop starts no recovery', async
   for (let i = 0; i < 8; i++) await flush()
   expect(invalidations, 'no authority invalidation after stop').toEqual([])
   expect([...h.idx.byId.keys()], 'the live wrapper was not removed').toEqual(idsBefore)
-  expect(h.calls.filter(c => c.op == 'create'), 'and no recovery create').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create'),
+    'and no recovery create'
+  ).toHaveLength(0)
   expect(controller.owes('n'), 'the intent is retained').toBe(true)
 })
 
@@ -2541,7 +2634,10 @@ test('stop cancels a REGISTERED coordinator wake, and later healing resumes noth
   expect(await held.done).toBe('applied')
   for (let i = 0; i < 6; i++) await flush()
   expect(acquisitions, 'no secret work after stop, even once the gate opens').toBe(0)
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'and no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'and no write'
+  ).toHaveLength(0)
   expect(controller.owes('n'), 'the intent is retained').toBe(true)
 })
 
@@ -2561,7 +2657,10 @@ test('stop before a queued name-chain turn runs: the chain-entry check does no s
   predecessor.resolve() // the queued persistOwed turn now runs
   for (let i = 0; i < 6; i++) await flush()
   expect(acquisitions, 'and refuses at chain entry, before acquiring anything').toBe(0)
-  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  expect(
+    h.calls.filter(c => c.op == 'create' || c.op == 'update'),
+    'no write'
+  ).toHaveLength(0)
 })
 
 test('a rejected Apply on a name chain is consumed by ORDINARY queued work, not just by applyRemote', async () => {
@@ -2582,7 +2681,10 @@ test('a rejected Apply on a name chain is consumed by ORDINARY queued work, not 
   registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
   controller.save('n', { mine: 1 })
   await checkpoint()
-  expect(h.calls.filter(c => c.op == 'update'), 'the write is issued and awaiting its ack').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'the write is issued and awaiting its ack'
+  ).toHaveLength(1)
   // a same-name Apply is now running and held
   const application = controller.applyRemote(['n'], () => applyBody.promise)
   await checkpoint()
@@ -2664,9 +2766,15 @@ test('a fixed page confirms before an update, and writes to the CONFIRMED target
   registerHidden(h.idx, { id: 'stale', name: 'n', item: { old: 1 } }, () => {})
   controller.save('n', { mine: 1 })
   for (let i = 0; i < 10; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'confirm'), 'it confirmed').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'confirm'),
+    'it confirmed'
+  ).toHaveLength(1)
   const updates = h.calls.filter(c => c.op == 'update')
-  expect(updates.map(c => c.id), 'and wrote to the confirmed target, never the stale one').toEqual(['srv'])
+  expect(
+    updates.map(c => c.id),
+    'and wrote to the confirmed target, never the stale one'
+  ).toEqual(['srv'])
   expect(h.idx.byId.has('stale'), 'the disproved row was removed').toBe(false)
 })
 
@@ -2692,7 +2800,10 @@ test('the direct bypass skips confirmation for our own unacknowledged create —
   controller.save('n', { v: 2 })
   for (let i = 0; i < 10; i++) await flush()
   expect(h.calls.filter(c => c.op == 'confirm').length, 'bypassed: no second confirmation').toBe(confirmsAfterCreate)
-  expect(h.calls.filter(c => c.op == 'update').map(c => c.id), 'and it updated the create').toEqual([created])
+  expect(
+    h.calls.filter(c => c.op == 'update').map(c => c.id),
+    'and it updated the create'
+  ).toEqual([created])
   expect(h.idx.byId.has(created), 'which an unbypassed empty answer would have deleted').toBe(true)
   ack.resolve()
 })
@@ -2740,7 +2851,10 @@ test('acknowledgement BEFORE any echo: cleared, not reconciled, and the waiter i
   registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
   controller.save('n', { mine: 1 })
   for (let i = 0; i < 8; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'update'), 'the write was acknowledged').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'update'),
+    'the write was acknowledged'
+  ).toHaveLength(1)
   expect(controller.owes('n'), 'and the record is cleared').toBe(false)
   expect(reconciled, 'but the owner is NOT reconciled from an echo that never came').toEqual([])
   // a LATER delivery for that id must not be mistaken for the disposed waiter's echo
@@ -2748,6 +2862,120 @@ test('acknowledgement BEFORE any echo: cleared, not reconciled, and the waiter i
   await arrive(controller, h.idx, { id: 'd1', name: 'n', item: { mine: 1 } }, h.ingress, issued)
   for (let i = 0; i < 6; i++) await flush()
   expect(reconciled, 'the waiter was disposed at settlement').toEqual([])
+})
+
+// ---- ECHO WAITER OWNERSHIP -------------------------------------------------------------------
+// An armed waiter is a retained resolver plus the controller state its reactions captured. On a
+// fixed page the echo may never enter the live shared query at all, so a waiter nobody disposes
+// lives for the page's lifetime. DISPOSAL IS NOT OBSERVABLE THROUGH BEHAVIOUR — a stale waiter's
+// reaction finds no current generation and does nothing visible — so these rows spy on the
+// coordinator's own cancel. They are the only rows that may: matching and ordering stay on the
+// real coordinator above.
+
+// wraps the real armEcho so cancellation is countable, per (id, cipher)
+function echoSpy() {
+  const ingress = createHiddenIngress()
+  const cancelled: string[] = []
+  let armed = 0
+  return {
+    ingress,
+    cancelled,
+    armedCount: () => armed,
+    armEcho: (id: string, cipher: string) => {
+      armed++
+      const sub = ingress.armEcho(id, cipher)
+      return {
+        promise: sub.promise,
+        cancel: () => {
+          cancelled.push(id)
+          sub.cancel()
+        },
+      }
+    },
+  }
+}
+
+test('an acknowledgement with no echo DISPOSES the waiter it armed', async () => {
+  const spy = echoSpy()
+  const h = harness()
+  const controller = createHiddenPersistence({ ...h.deps, armEcho: spy.armEcho, gate: () => spy.ingress.gate() })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  expect(spy.armedCount(), 'one write, one waiter').toBe(1)
+  expect(spy.cancelled, 'and it is disposed at settlement').toEqual(['d1'])
+})
+
+test('a SUPERSEDING save disposes the outgoing generation‘s waiter', async () => {
+  const spy = echoSpy()
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    armEcho: spy.armEcho,
+    gate: () => spy.ingress.gate(),
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise // held: the first generation is still issued when the second arrives
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  expect(spy.armedCount()).toBe(1)
+  expect(spy.cancelled, 'still outstanding: the write has not acknowledged').toEqual([])
+  controller.save('n', { mine: 2 }) // supersedes generation one
+  expect(spy.cancelled, 'the outgoing generation‘s waiter dies with it, synchronously').toEqual(['d1'])
+  ack.resolve()
+  for (let i = 0; i < 8; i++) await flush()
+})
+
+test('STOP disposes an offline write‘s waiter, whose sdk promise will never settle', async () => {
+  const spy = echoSpy()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    armEcho: spy.armEcho,
+    gate: () => spy.ingress.gate(),
+    // firestore keeps an offline write pending indefinitely: nothing else will ever reach this
+    // waiter, so stop is the only remaining owner
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await new Promise(() => {})
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 8; i++) await flush()
+  expect(spy.armedCount()).toBe(1)
+  expect(spy.cancelled).toEqual([])
+  controller.stop()
+  expect(spy.cancelled, 'stop owns what nothing else can reach').toEqual(['d1'])
+})
+
+test('a SYNCHRONOUS sdk throw disposes the waiter and clears the create marker', async () => {
+  const spy = echoSpy()
+  const h = harness()
+  const boom = new Error('sdk refused synchronously')
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    armEcho: spy.armEcho,
+    gate: () => spy.ingress.gate(),
+    createDoc: (() => {
+      throw boom
+    }) as any,
+    // the create path: nothing holds the name, so the writer confirms and then creates
+    confirmTarget: async (_name, hooks) => hooks.commit(new Map(), hooks.captureReadMarker()),
+    notifyFailure: () => {},
+  })
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 10; i++) await flush()
+  expect(spy.armedCount(), 'the waiter was armed immediately before the sdk call').toBe(1)
+  expect(spy.cancelled, 'and disposed when it threw').toHaveLength(1)
+  // the marker would otherwise exempt a document that was never written from every confirmation.
+  // an ordinary update for the same name proves it is gone: it re-resolves the target rather than
+  // trusting a retained create
+  expect(controller.owes('n'), 'the intent is retained for a page that can still write').toBe(true)
 })
 
 test('a BLOCKED echo does not reconcile: the index may still hold the pre-write state', async () => {
@@ -2777,7 +3005,10 @@ test('a BLOCKED echo does not reconcile: the index may still hold the pre-write 
     ack.resolve()
     for (let i = 0; i < 8; i++) await flush()
     expect(reconciled, 'the owner already holds what we wrote; reconciling would roll it back').toEqual([])
-    expect(warnings.some(w => w.includes('did not apply')), 'and it says so').toBe(true)
+    expect(
+      warnings.some(w => w.includes('did not apply')),
+      'and it says so'
+    ).toBe(true)
   } finally {
     console.warn = realWarn
   }
@@ -2842,7 +3073,10 @@ test('markers are PER NAME: a concurrent create for another name does not clobbe
   controller.save('nameA', { v: 'A2' })
   for (let i = 0; i < 10; i++) await flush()
   expect(h.idx.byId.has(createdA), "A's marker survived B's create").toBe(true)
-  expect(h.calls.filter(c => c.op == 'create' && c.text!.includes('"A')), 'no duplicate for A').toHaveLength(1)
+  expect(
+    h.calls.filter(c => c.op == 'create' && c.text!.includes('"A')),
+    'no duplicate for A'
+  ).toHaveLength(1)
   ackA.resolve()
   ackB.resolve()
 })
@@ -2911,8 +3145,14 @@ test('the a/m schedule: stale lower `a` is removed, unacknowledged `m` is preser
   expect(h.idx.byId.has('a'), 'the disproved stale row is removed').toBe(false)
   expect(h.idx.byId.has(m), 'the unacknowledged create is PRESERVED by its marker').toBe(true)
   const updates = h.calls.filter(c => c.op == 'update')
-  expect(updates.map(u => u.id), 'exactly one update, to `m`').toEqual([m])
-  expect(h.calls.filter(c => c.op == 'create'), 'and no second document').toHaveLength(1)
+  expect(
+    updates.map(u => u.id),
+    'exactly one update, to `m`'
+  ).toEqual([m])
+  expect(
+    h.calls.filter(c => c.op == 'create'),
+    'and no second document'
+  ).toHaveLength(1)
   ack.resolve()
 })
 
@@ -2920,7 +3160,14 @@ test('the a/m schedule: stale lower `a` is removed, unacknowledged `m` is preser
 for (const [what, rows, expected] of [
   ['an empty answer', [], { register: 0, published: 1 }],
   ['an ineligible-only answer', [{ id: 'q', name: 'n', eligible: false }], { register: 0, published: 1 }],
-  ['a quarantined lower row beside an eligible one', [{ id: 'a', name: 'n', eligible: false }, { id: 'k', name: 'n', eligible: true }], { register: 1, published: 0 }],
+  [
+    'a quarantined lower row beside an eligible one',
+    [
+      { id: 'a', name: 'n', eligible: false },
+      { id: 'k', name: 'n', eligible: true },
+    ],
+    { register: 1, published: 0 },
+  ],
 ] as const)
   test(`commit effects: ${what}`, async () => {
     const registered: string[] = []
@@ -2932,7 +3179,16 @@ for (const [what, rows, expected] of [
       syncOwner: n => void published.push(n),
       confirmTarget: async (name, hooks) => {
         const answer = new Map(
-          rows.map(r => [r.id, { id: r.id, kind: 'hidden' as const, name: r.name, wrapper: { id: r.id, name: r.name, item: {} }, eligible: r.eligible }])
+          rows.map(r => [
+            r.id,
+            {
+              id: r.id,
+              kind: 'hidden' as const,
+              name: r.name,
+              wrapper: { id: r.id, name: r.name, item: {} },
+              eligible: r.eligible,
+            },
+          ])
         )
         return hooks.commit(answer, hooks.captureReadMarker())
       },

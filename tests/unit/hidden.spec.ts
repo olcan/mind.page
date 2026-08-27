@@ -85,7 +85,13 @@ test('orphan classification is skipped when the account is not fully loaded (fix
 
 test('registration adopts a pending create exactly once, merging under the pending changes', () => {
   const idx = index()
-  const pending: HiddenWrapper = { id: 'temp1', name: 'global_store_x', item: { mine: 1 }, pending_create: true, adopt_id: null }
+  const pending: HiddenWrapper = {
+    id: 'temp1',
+    name: 'global_store_x',
+    item: { mine: 1 },
+    pending_create: true,
+    adopt_id: null,
+  }
   idx.byId.set(pending.id, pending)
   idx.byName.set(pending.name, pending)
   const merge = (p: HiddenWrapper, found: HiddenWrapper) => Object.assign(p.item, { ...found.item, ...p.item })
@@ -101,7 +107,7 @@ test('registration adopts a pending create exactly once, merging under the pendi
 
 test('registration without a claim indexes by the minimum-id rule', () => {
   const idx = index()
-  const merge = () => {}
+  const merge = (): undefined => undefined
   expect(registerHidden(idx, wrapper('m5', 'name'), merge)).toBe('added')
   expect(registerHidden(idx, wrapper('a1', 'name'), merge)).toBe('exists')
   expect(idx.byName.get('name')!.id).toBe('a1') // smaller id takes the name
@@ -147,7 +153,7 @@ test('adoption settlement re-keys to the persistent id and restores the minimum-
   const pending: HiddenWrapper = { id: 'temp1', name: 'name', item: { v: 1 }, pending_create: true, adopt_id: null }
   idx.byId.set(pending.id, pending)
   idx.byName.set(pending.name, pending)
-  const merge = () => {}
+  const merge = (): undefined => undefined
   // callers register server documents in ASCENDING id order (see saveHiddenItem/secret.ts), so
   // the pending create adopts the minimum-id duplicate; later duplicates are retained
   expect(registerHidden(idx, wrapper('a1', 'name'), merge)).toBe('adopted')
@@ -281,7 +287,6 @@ test('quarantine survives an index adapter that is rebuilt on every call (as pro
   expect(isQuarantined(index(), 'b2')).toBe(false)
 })
 
-
 // round-34 stage 1: an adoption's merge is only sound against the document state it saw, so every
 // transition that replaces that document must invalidate it (see invalidateAdopters)
 
@@ -291,7 +296,7 @@ const adopting = (idx: HiddenIndex, target: HiddenWrapper, local: any) => {
   idx.byId.set('temp1', pending)
   idx.byName.set(target.name, pending)
   // the real merge is _.defaultsDeep(pending.item, found.item), which MUTATES pending.item
-  const merge = (p: HiddenWrapper, f: HiddenWrapper) => {
+  const merge = (p: HiddenWrapper, f: HiddenWrapper): undefined => {
     for (const k of Object.keys(f.item)) if (!(k in p.item)) p.item[k] = f.item[k]
   }
   expect(registerHidden(idx, target, merge)).toBe('adopted')
@@ -342,11 +347,13 @@ test('re-registration under a NEW name still invalidates an adoption held under 
   const pending: HiddenWrapper = { id: 'temp1', name: 'A', item: { mine: 1 }, pending_create: true, adopt_id: null }
   idx.byId.set('temp1', pending)
   idx.byName.set('A', pending)
-  expect(registerHidden(idx, wrapper('d1', 'A', { x: 1 }), (p, f) => Object.assign(p.item, { ...f.item, ...p.item }))).toBe('adopted')
+  expect(
+    registerHidden(idx, wrapper('d1', 'A', { x: 1 }), (p, f) => Object.assign(p.item, { ...f.item, ...p.item }))
+  ).toBe('adopted')
   expect(pending.adopt_id).toBe('d1')
   // d1 arrives again under name B: the 'added' branch (no byName[B]) must still invalidate
   expect(registerHidden(idx, wrapper('d1', 'B', { x: 2 }), () => {})).toBe('added')
-  expect(pending.adopt_id, "the old-name adopter cannot keep writing d1").toBe(null)
+  expect(pending.adopt_id, 'the old-name adopter cannot keep writing d1').toBe(null)
 
   // ... and the 'adopted' branch analogue: d1 re-registers under name C that ANOTHER pending owns
   const other: HiddenWrapper = { id: 'temp2', name: 'C', item: {}, pending_create: true, adopt_id: null }

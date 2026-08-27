@@ -93,12 +93,19 @@ export type HiddenPersistenceDeps = {
   // first eligible registration performs the single rebase/adoption/publication. NOTIFICATION-FREE:
   // confirmation runs for an OWED name, so the live remote-change notification would suppress on
   // owes() anyway, and a live delivery keeps its own
-  registerTargetRow: (wrapper: HiddenWrapper, mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => undefined) => undefined
+  registerTargetRow: (
+    wrapper: HiddenWrapper,
+    mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => undefined
+  ) => undefined
   // MERGE ONLY: merges the found document's state under the pending wrapper's changes, in place
   // (production: _.defaultsDeep(pending.item, found.item)). rebasing the wrapper first and
   // publishing the result to the owner are the CONTROLLER's job (see mergeAdopted): keeping merge
   // mechanics here and ownership there is what lets every registration path share one contract
-  adopt: (pending: HiddenWrapper, found: HiddenWrapper) => void
+  // EXACTLY `undefined`, not `void`: TypeScript accepts an async function where `() => void` is
+  // expected, and this merge is consumed SYNCHRONOUSLY inside the commit turn — a promise-returning
+  // adopt would type-check and silently merge after the registration that depended on it.
+  // production's `_.defaultsDeep` returns its object, so the wiring must discard it explicitly
+  adopt: (pending: HiddenWrapper, found: HiddenWrapper) => undefined
   // THE COORDINATOR'S GLOBAL GATE: 'writable' means no delivery is open, ready or running
   // anywhere and no unhealed block is retained. every refuse-and-requeue decision reads this —
   // never a per-name predicate (see the design's v1 gate)
@@ -116,7 +123,9 @@ export type HiddenPersistenceDeps = {
   // publishes an EXACT state to whatever owns a name (the owner item's in-memory global_store),
   // as a clone, never an alias. the owner saves fresh full-state snapshots, so a merge it never
   // sees is erased on its next save — this is how it sees one
-  syncOwner: (name: string, state: any) => void
+  // `undefined`, not `void`, for the same reason as `adopt`: publication is part of the atomic
+  // commit turn, and an async implementation would type-check while publishing after it
+  syncOwner: (name: string, state: any) => undefined
   // synchronizes whatever owns a name's state (the owner item's in-memory global_store) with the
   // record that now holds it. called once when a generation SETTLES, ON THE NAME'S CHAIN: while a
   // name owes a change, deliveries deliberately do not touch the owner (they would roll it back
@@ -211,7 +220,19 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // not per block episode — an intervening writable can let the loop reach the report again for
   // the same generation, and a NEW generation inheriting a parked wake would otherwise never be
   // reported at all
-  type Owed = { generation: number; localIntent: any; phase: Phase; reportedStop?: boolean; reportedBlocked?: boolean }
+  // cancelEcho: the exact-echo waiter this name's CURRENT generation armed, if it is still
+  // outstanding. an armed waiter is a retained resolver plus the controller state its reactions
+  // captured, and on a FIXED page the echo may never enter the live shared query at all — so
+  // whoever ends that generation (supersession, stop, or any terminal/stale settlement) must
+  // dispose it, or a superseded write holds both for the page's lifetime
+  type Owed = {
+    generation: number
+    localIntent: any
+    phase: Phase
+    reportedStop?: boolean
+    reportedBlocked?: boolean
+    cancelEcho?: () => void
+  }
   const owed = new Map<string, Owed>()
   // THE OWN-UNACKNOWLEDGED-CREATE MARKERS, PER NAME. the writer retains the exact id it issued a
   // create for until that SDK promise settles, INDEPENDENTLY of any later owed generation. it is
@@ -302,7 +323,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const hasPendingReceipts = () => !gateWritable()
   const isPending = (_id: string) => !gateWritable()
 
-
   // THE NAME-OWNED WAKE: at most one live subscription per name, REUSED across supersession —
   // `Owed` already represents the latest intent for the name, so a parked waiter serves whatever
   // the name owes when it fires. only stop cancels one. reporting is separately GENERATION-scoped
@@ -374,7 +394,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     if (!op || op.reportedBlocked) return
     op.reportedBlocked = true
     try {
-      deps.notifyFailure(name, new Error(`hidden ingress blocked: '${name}' cannot be written until a later change for the affected document applies`))
+      deps.notifyFailure(
+        name,
+        new Error(
+          `hidden ingress blocked: '${name}' cannot be written until a later change for the affected document applies`
+        )
+      )
     } catch (e) {
       console.error('blocked notification failed:', name, e)
     }
@@ -398,8 +423,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     wrapper: deps.index().byId.get(id) ?? 'absent',
   })
   const sameTarget = (a: TargetToken, b: TargetToken) => a.seq === b.seq && a.wrapper === b.wrapper
-
-
 
   // the minimum-id record a create could adopt instead of creating alongside it
   function findSurvivor(wrapper: HiddenWrapper): HiddenWrapper | undefined {
@@ -448,31 +471,56 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // itself. the acknowledgement path below reads it
       if (currentOwed(name, generation)) echo = outcome
     })
-    const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
+    // OWNED BY THE GENERATION that armed it (see Owed.cancelEcho). the CAS is against this exact
+    // disposer, not the name: by the time a stale settlement runs, `owed.get(name)` may already be
+    // a NEWER generation holding its own waiter, and clearing that one would strand its echo
+    const disposeEcho = () => {
+      waiter.cancel() // idempotent: the coordinator splices the exact waiter out
+      const current = owed.get(name)
+      if (current?.cancelEcho === disposeEcho) current.cancelEcho = undefined
+    }
+    op.cancelEcho = disposeEcho
     // COMPARE-AND-SET on the token: a newer create may already have replaced the marker, and this
     // settlement must not clear that one. it never reinserts or finalizes the old wrapper either
     const clearMarker = () => {
       if (issuedMarker && markers.get(name)?.token === issuedMarker.token) markers.delete(name)
     }
+    // A SYNCHRONOUS SDK THROW leaks both otherwise: the waiter stays registered for the page's
+    // lifetime and the create marker stays installed, exempting a document that was never written
+    // from every later confirmation
+    let write: Promise<unknown>
+    try {
+      write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
+    } catch (e) {
+      disposeEcho()
+      clearMarker()
+      throw e
+    }
     write.then(
       () => {
         clearMarker()
-        if (!currentOwed(name, generation)) return // superseded: a newer generation owns the name
+        // EVERY exit from here disposes the waiter: the acknowledgement is the last moment this
+        // generation can still learn something from it, so nothing beyond this point may leave it
+        // registered
+        if (!currentOwed(name, generation)) return void disposeEcho() // superseded: a newer generation owns the name
         // settle ON THE NAME'S CHAIN, behind transitions already received. reconciliation reads
         // the APPLIED index, so settling straight from the acknowledgement could put the owner
         // back in step with state that a queued delivery was about to replace — and then clear
         // `owes()`, letting that delivery through as if nothing were outstanding
         void enqueue(name, async () => {
-          if (!currentOwed(name, generation)) return
+          if (!currentOwed(name, generation)) return void disposeEcho()
           // ONE CAUSAL MICROTASK before reading the recorded outcome, so a waiter that already
           // resolved can publish its promise reaction. one boundary, not polling
           await Promise.resolve()
-          if (!currentOwed(name, generation)) return
+          if (!currentOwed(name, generation)) return void disposeEcho()
           owed.delete(name) // settled, and still the latest: the write IS committed
+          // ... which is also the last holder of this waiter, so it is disposed unconditionally
+          // below. `echo` was already recorded by its reaction if one ever resolved
+          disposeEcho()
           // STOP WINS over the echo. reconciling publishes owner state derived from an index that
           // has stopped tracking the server, so a stop that landed while this write was in flight
           // must clear the record and stop there — even if an applied echo was already recorded
-          if (stopped) return void waiter.cancel()
+          if (stopped) return
           if (echo == 'applied') return void deps.reconcileOwner(name)
           if (echo == 'blocked') {
             // the application FAILED: the index may still hold the pre-write state while the owner
@@ -481,15 +529,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
             return
           }
           // NO RECORDED OUTCOME. on a fixed/shared page the live query is the shared subset, so
-          // this write's echo may never arrive at all. clear without reconciliation and dispose
-          // the waiter rather than leaking it for the page's lifetime — a later full-query echo
-          // still applies normally, and an equal own echo changes no owner state
-          waiter.cancel()
+          // this write's echo may never arrive at all — the disposal above is what stops it (and
+          // the controller state its reactions captured) leaking for the page's lifetime. a later
+          // full-query echo still applies normally, and an equal own echo changes no owner state
         })
       },
       e => {
         clearMarker()
-        waiter.cancel() // a rejected write has no echo to wait for
+        disposeEcho() // a rejected write has no echo to wait for
         const current = currentOwed(name, generation)
         if (!current) return // superseded: this outcome no longer matters
         if (!isNotFound(e)) {
@@ -506,7 +553,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         current.phase = 'queued'
         scheduleOwed(name) // the ONE gate-aware entry: taking the chain first only to find the
         // gate shut and schedule again is the polling this replaced
-      },
+      }
     )
     return true
   }
@@ -743,7 +790,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
 
   // THE ONE COMMIT ALGORITHM, run synchronously inside the corpus turn (see the confirmTarget
   // dep). the whole affected closure applies in ONE JavaScript turn
-  function commitTargetSlice(name: string, answer: Map<string, ClassifiedRow>, readMarker: Marker | undefined): CommitResult {
+  function commitTargetSlice(
+    name: string,
+    answer: Map<string, ClassifiedRow>,
+    readMarker: Marker | undefined
+  ): CommitResult {
     // STOP, checked HERE and not only after confirmTarget returns: the commit runs INSIDE the
     // corpus turn, so by the time the controller could recheck, the mutation would already have
     // happened. production's corpus cancels a stopped run before this is reached; this is the
@@ -855,6 +906,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // every name-owned wake, first: one resolving after stop would re-enter
       // persistOwed for a page that can never write again
       for (const name of [...wakes.keys()]) cancelWake(name)
+      // and every outstanding echo waiter. an issued write's own settlement disposes its waiter,
+      // but an OFFLINE write's SDK promise stays pending indefinitely, so after stop nothing else
+      // would ever reach it — leaving the waiter and the controller state its reactions captured
+      // registered for the page's lifetime
+      for (const op of owed.values()) op.cancelEcho?.()
       const notifications: Array<[string, unknown]> = []
       for (const [name, op] of owed) {
         // an issued generation is owned by its SDK result: it is not reported as a stopped build,
@@ -958,6 +1014,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       if (readOnly) return true // the index is updated; nothing is persisted
       const op = owed.get(name)
       if (op) {
+        // the outgoing generation's echo waiter dies WITH it: nothing will ever read its outcome
+        // again (every reader checks currentOwed), and on a fixed page the echo it waits for may
+        // never enter the live shared query at all — so it would retain its resolver and this
+        // controller's captured state for the page's lifetime
+        op.cancelEcho?.()
         // CLONE: the baseline must stay immutable under later caller mutations and adoption merges
         op.localIntent = intent // supersede: this is what the name owes now
         op.generation = ++generationSeq
@@ -1022,10 +1083,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // aggregates these before settling that revision's authority. pass the name when known; a removal
     // of an id not in the index has no affected name, so it starts on the NEXT MICROTASK with
     // nothing to wait for (the design's asynchronous direct path) rather than synchronously
-    applyRemote(
-      names: (string | undefined)[] | string | undefined,
-      apply: () => void | Promise<void>
-    ): Promise<void> {
+    applyRemote(names: (string | undefined)[] | string | undefined, apply: () => void | Promise<void>): Promise<void> {
       // ONE OPERATION PUBLISHED TO EVERY AFFECTED TAIL, in a single synchronous turn. three
       // things were wrong with the previous shape:
       //  - `.filter(chains.has)` dropped every affected name with no in-flight write, so a write

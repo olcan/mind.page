@@ -113,7 +113,10 @@ export function buildHiddenIndex(
 export function registerHidden(
   index: HiddenIndex,
   wrapper: HiddenWrapper,
-  mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => void
+  // EXACTLY `undefined`, not `void`: registration is synchronous and the adopted merge must be
+  // complete before it returns. `void` accepts an async function, which would type-check and merge
+  // after the caller already acted on the registration
+  mergeAdopted: (pending: HiddenWrapper, found: HiddenWrapper) => undefined
 ): 'adopted' | 'exists' | 'added' | 'quarantined' {
   if (isQuarantined(index, wrapper.id)) return 'quarantined' // judged redundant this session
   // BEFORE any branch: re-registration under a NEW name takes the 'added' or 'adopted' branch, and
@@ -170,7 +173,10 @@ export function applyRemoteAdded(index: HiddenIndex, wrapper: HiddenWrapper): { 
   return { warning, applied: true }
 }
 
-export function applyRemoteModified(index: HiddenIndex, wrapper: HiddenWrapper): { warning?: string; applied?: boolean } {
+export function applyRemoteModified(
+  index: HiddenIndex,
+  wrapper: HiddenWrapper
+): { warning?: string; applied?: boolean } {
   if (isQuarantined(index, wrapper.id)) return { applied: false } // a redelivery must not reinstate it
   let warning: string | undefined
   const existing = index.byId.get(wrapper.id)
