@@ -3,15 +3,13 @@
 // this module implements its pure surface and adds nothing beyond it.
 //
 // PURE: no firestore, no index, no owner, no crypto. the listener feeds it deliveries and the
-// writer consumes its gate, waits and authority; the echo waiters are armed but not yet consumed.
-// every schedule in the design's "Stage 2" list is pinned in tests/unit/hidden_ingress.spec.ts.
+// writer consumes its gate, waits, authority and exact echoes. every schedule in the design's
+// "Stage 2" list is pinned in tests/unit/hidden_ingress.spec.ts.
 //
-// what it replaces: the one-slot `receipts` map, `hiddenApplyOk`, the timer requeue and the
+// what it replaced: the one-slot `receipts` map, `hiddenApplyOk`, the timer requeue and the
 // dirty-sequence authority — one replaceable slot per document id stood for every delivery
 // received, the latest decoded state and the application lifecycle at once, which is the root of
-// the ingress defects. the timer requeue and the dirty-sequence authority are GONE; `receipts`
-// and `hiddenApplyOk` are still in place and are deleted in the final deletion-only step, once
-// the corpus seam and the lanes exist (review round 59).
+// the ingress defects. ALL FOUR ARE DELETED; no compatibility layer was introduced.
 
 // RESOLVE = applied, REJECT = blocked. there is no third answer (no 'irrelevant': a redelivery
 // must rerun the complete idempotent repair before it may heal an older partial-application block)
