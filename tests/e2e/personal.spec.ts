@@ -460,6 +460,7 @@ test('a corrupted visible document can still be removed remotely (removal applie
 })
 
 test('global-store updates and deletions reach a second tab of the same account', async ({ page }) => {
+
   // hidden documents cross tabs through the shared persistent cache, so their changes arrive
   // with hasPendingWrites set: classification must be by exact payload identity — a pending
   // REMOVAL was misclassified as the receiving tab's own (wrapper present, matching content)

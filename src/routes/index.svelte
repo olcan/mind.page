@@ -6305,7 +6305,7 @@
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { createHiddenIngress } from '../hidden_ingress'
-  import { createRecordAllocator } from '../hidden_listener_records'
+  import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
   import { createHiddenCorpus, CorpusStopped } from '../hidden_corpus'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
@@ -7842,7 +7842,11 @@
             // captured at RECEIPT, consumed by the eventual Apply (see pendingBoundary)
             const corpusBoundaries = new Map<string, Promise<void> | undefined>()
             const batch = recordAllocator.allocate(
-              changes.map(change => {
+              // EXPLICITLY ANNOTATED. `snapshot` is untyped here, so `docChanges()` is `any` and
+              // every call built from it type-checks against anything — which is how the adapter
+              // silently stopped emitting the `kind` discriminant and EVERY record became blind.
+              // annotating the callback's return restores checking at this seam regardless
+              changes.map((change: any): AllocationRequest => {
                 const id = change.doc.id
                 const rawHidden = !!change.doc.data().hidden
                 // THE PENDING-CORPUS BOUNDARY, read HERE and stored — never looked up later. by
@@ -7864,12 +7868,13 @@
                 // a hidden record at all
                 const live = change.type != 'removed' && rawHidden
                 corpusBoundaries.set(id, corpusBoundary)
-                return {
-                  id,
-                  handle: admitted
-                    ? hiddenIngress.open(id, live ? change.doc.data().cipher : undefined)
-                    : undefined,
-                }
+                return admitted
+                  ? {
+                      kind: 'admitted' as const,
+                      id,
+                      handle: hiddenIngress.open(id, live ? change.doc.data().cipher : undefined),
+                    }
+                  : { kind: 'blind' as const, id }
               }),
               // this callback's OWN state-only revocation, not a fresh outside-callback ordinal:
               // a fresh one would stale a NEWER callback's candidate that should be able to heal
