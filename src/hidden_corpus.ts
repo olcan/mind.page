@@ -49,20 +49,21 @@ export function createHiddenCorpus() {
   // serialized and the listener asks one boolean question
   let membership = new Set<string>()
   let stopped = false
-  // WRAPPED so `stop(undefined)` is distinguishable from an ordinary external stop
-  let stopCause: { value: unknown } | undefined
   // ONE active cancellation, replaced each turn and dropped when it ends. a shared never-resolved
   // signal accumulated two reactions PER RUN that a completed run could not detach, retaining
   // every fixed-page confirmation until page stop
   let cancelActive: ((error: unknown) => void) | undefined
 
   return {
-    // is this id part of an in-flight corpus read? the listener's admission predicate consults
-    // this so a delivery arriving mid-scan is admitted rather than treated as ordinary
-    isPendingHiddenId: (id: string) => membership.has(id),
-    // the ACTIVE producer's completion. FULFILS on failure and on stop as well as on success, so a
-    // caller awaiting it is released rather than held for the page's lifetime
-    boundary: () => currentBoundary,
+    // ONE accessor, and the only safe shape: it answers "is this id in an in-flight corpus read?"
+    // AND hands back that producer's boundary in the same call. two coupled reads invited looking
+    // the boundary up LATER — after decrypt or preparation — by which time producer A may have
+    // finished and unrelated producer B become active, so the delivery either misses A or waits
+    // for B and creates a dependency cycle. the listener calls this synchronously at receipt and
+    // stores the promise; the eventual Apply awaits that stored value, never a fresh lookup.
+    // FULFILS on failure and on stop as well as on success, so a waiter is released rather than
+    // held for the page's lifetime
+    pendingBoundary: (id: string) => (membership.has(id) ? currentBoundary : undefined),
 
     // run one corpus operation on the tail. the CALLER's promise carries the outcome: it rejects
     // with the body's own error, or with the stop cause. the tail and the boundary are private
@@ -119,9 +120,11 @@ export function createHiddenCorpus() {
     stop(cause?: unknown) {
       if (stopped) return
       stopped = true
-      if (arguments.length > 0) stopCause = { value: cause }
       membership = new Set()
-      cancelActive?.(stopCause ? stopCause.value : new CorpusStopped())
+      // computed here, not retained: it is consumed in this same call. checking arguments.length
+      // rather than `cause !== undefined` matters because JavaScript can legally throw undefined,
+      // and an ordinary external stop must not be misread as an active `undefined` cause
+      cancelActive?.(arguments.length > 0 ? cause : new CorpusStopped())
     },
   }
 }

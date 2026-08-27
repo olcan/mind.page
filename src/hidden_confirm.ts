@@ -36,7 +36,11 @@ export function classifyHiddenDocument(id: string, hidden: boolean, text: unknow
   }
   if (!parsed || typeof parsed != 'object') return { kind: 'indeterminate', reason: 'not an object' }
   if (typeof parsed.name != 'string' || !parsed.name) return { kind: 'indeterminate', reason: 'missing name' }
-  return { kind: 'hidden', wrapper: { ...parsed, id } }
+  // CONSTRUCTED, never spread: a stored plaintext object would otherwise inject controller-only
+  // transient state (pending_create, adopt_id) straight into registerHidden. persistence writes
+  // only name and item, so those are the only fields a server document can legitimately carry —
+  // and the caller's id wins over any embedded one
+  return { kind: 'hidden', wrapper: { id, name: parsed.name, item: parsed.item } }
 }
 
 // the writer's own unacknowledged create, retained until its SDK promise settles. WRAPPER-EXACT,
@@ -47,12 +51,16 @@ export type Marker = { id: string; wrapper: unknown; token: number }
 
 // what a fresh complete read said about ONE document
 export type ClassifiedRow =
-  // `eligible: false` is a row that IS hidden under this name but must not be registered — an
-  // already-quarantined duplicate, say. it still carries definite evidence about the name, so it
-  // is not absence; but counting it as a survivor would let registration skip that first row and
-  // leave a stale adoption selection, or prevent a later eligible row from performing the one
-  // rebase/publication
-  | { id: string; kind: 'hidden'; name: string; wrapper: unknown; eligible?: boolean }
+  // `eligible` is REQUIRED, not optional: the pure classifier cannot decide quarantine
+  // eligibility, so an optional field would let the production adapter forget the quarantine
+  // lookup and still type-check. `false` is a row that IS hidden under this name but must not be
+  // registered — an already-quarantined duplicate, say. it still carries definite evidence about
+  // the name, so it is not absence; but counting it as a survivor would let registration skip
+  // that first row and leave a stale adoption selection, or prevent a later eligible row from
+  // performing the one rebase/publication.
+  // production derives it from the CURRENT quarantine set inside the synchronous commit turn,
+  // after every query/decrypt await — that is the state whose registration is about to run
+  | { id: string; kind: 'hidden'; name: string; wrapper: unknown; eligible: boolean }
   // the server does not have it, or has it as a non-hidden document. both mean the same thing to
   // a name slice: this id is not part of any hidden name any more
   | { id: string; kind: 'absent' }
@@ -134,7 +142,7 @@ export function planTargetSlice({
   // ---- the FRESH side: rows the answer says belong to this name ----
   for (const row of answer.values()) {
     if (row.kind != 'hidden' || row.name != name) continue // outside the affected closure
-    if (row.eligible === false) continue // definite evidence about the name, but not registrable
+    if (!row.eligible) continue // definite evidence about the name, but not registrable
     register.push({ id: row.id, name: row.name, wrapper: row.wrapper })
   }
 
@@ -166,13 +174,14 @@ export type NormalizedScan = {
   // even when the point reads completed out of order — so a pending create cannot adopt a higher
   // duplicate first
   apply: { id: string; name: string; wrapper: unknown }[]
-  // stale raw-hidden rows that are merely SUPPRESSED. zero production-body calls: a blind change
-  // is by definition neither hidden nor outstanding when received, so its completed ordinary task
-  // or existing deferral owns visible state — replaying the visible side through an extracted body
-  // would bypass hasLocalIntent/deferRemoteChange and overwrite an unsaved edit the live callback
-  // deliberately deferred
-  suppress: string[]
 }
+// NOTE there is no `suppress` list. OMISSION from `apply` already expresses suppression, and the
+// design's `skippedIds` is a different, caller-specific concept — conflating them would invite a
+// consumer to treat a suppressed row as skipped work. a not-hidden point answer makes ZERO
+// production-body calls: a blind change is by definition neither hidden nor outstanding when
+// received, so its completed ordinary task or existing deferral owns visible state, and replaying
+// the visible side would bypass hasLocalIntent/deferRemoteChange and overwrite an unsaved edit the
+// live callback deliberately deferred
 
 /**
  * Applies point answers over a raw scan result. Each answer REPLACES its raw entry — collected
@@ -184,7 +193,6 @@ export function normalizeScan(
   answers: Map<string, PointAnswer>
 ): NormalizedScan {
   const apply: { id: string; name: string; wrapper: unknown }[] = []
-  const suppress: string[] = []
   for (const row of raw) {
     const point = answers.get(row.id)
     if (!point) {
@@ -192,9 +200,8 @@ export function normalizeScan(
       continue
     }
     if (point.kind == 'hidden') apply.push({ id: row.id, name: point.name, wrapper: point.wrapper })
-    else suppress.push(row.id)
+    // a not-hidden answer is simply not applied
   }
   apply.sort((a, b) => compareIds(a.id, b.id))
-  suppress.sort(compareIds)
-  return { apply, suppress }
+  return { apply }
 }

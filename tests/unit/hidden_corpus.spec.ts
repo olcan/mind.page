@@ -14,6 +14,17 @@ function deferred<T = void>() {
 
 const checkpoint = () => new Promise<void>(res => setImmediate(res))
 
+// the accessor answers membership and boundary together; these read only the membership half
+const isPending = (c: ReturnType<typeof createHiddenCorpus>, id: string) => !!c.pendingBoundary(id)
+
+// the boundary for an id that MUST be in an in-flight read. throwing rather than falling back is
+// deliberate: a silent `?? Promise.resolve()` makes every later assertion vacuously true
+function boundaryFor(c: ReturnType<typeof createHiddenCorpus>, id: string) {
+  const b = c.pendingBoundary(id)
+  if (!b) throw new Error(`no in-flight corpus read published ${id}`)
+  return b
+}
+
 // records how a promise settled WITHOUT awaiting it, so a row can prove something settled by a
 // given moment rather than merely eventually
 function watch<T>(p: Promise<T>) {
@@ -57,16 +68,16 @@ test('a FAILED operation: original error, FULFILLED boundary, cleared membership
   })
   const state = watch(op)
   await checkpoint()
-  const boundary = watch(c.boundary())
+  const boundary = watch(boundaryFor(c, 'd1'))
   await checkpoint()
-  expect(c.isPendingHiddenId('d1'), 'membership is open while it runs').toBe(true)
+  expect(isPending(c, 'd1'), 'membership is open while it runs').toBe(true)
   expect(boundary.settled, 'and the boundary is pending').toBe(false)
   held.reject(boom)
   await checkpoint()
   expect(state.error, 'the ORIGINAL error, not a wrapped outcome the caller must unwrap').toBe(boom)
   expect(boundary.settled, 'the boundary FULFILS on failure').toBe(true)
   expect(boundary.error, 'it does not reject').toBeUndefined()
-  expect(c.isPendingHiddenId('d1'), 'membership is cleared').toBe(false)
+  expect(isPending(c, 'd1'), 'membership is cleared').toBe(false)
   expect(await c.run(async () => 7), 'and the tail is intact').toBe(7)
 })
 
@@ -97,9 +108,7 @@ test('an operation that stops ITSELF keeps its own error; a queued one gets Corp
   await checkpoint()
   expect(bState.error, 'B gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
   expect(bRan, "and B's body never ran").toBe(false)
-  const boundary = watch(c.boundary())
-  await checkpoint()
-  expect(boundary.settled, 'the active boundary still fulfils').toBe(true)
+  expect(c.pendingBoundary('anything'), 'no read is in flight after stop').toBeUndefined()
 })
 
 test('stop releases the caller, a queued operation and the boundary WHILE the body is still held', async () => {
@@ -125,9 +134,9 @@ test('stop releases the caller, a queued operation and the boundary WHILE the bo
   const aState = watch(a)
   const bState = watch(b)
   await checkpoint() // A's turn has STARTED: only now is its boundary installed
-  const boundary = watch(c.boundary())
+  const boundary = watch(boundaryFor(c, 'h'))
   await checkpoint() // watch() records through .then: assert only after it has had its turn
-  expect(c.isPendingHiddenId('h'), "a's membership is open").toBe(true)
+  expect(isPending(c, 'h'), "a's membership is open").toBe(true)
   expect(boundary.settled, "and A's boundary is pending while A runs").toBe(false)
   c.stop()
   await checkpoint()
@@ -137,7 +146,7 @@ test('stop releases the caller, a queued operation and the boundary WHILE the bo
   expect(bState.settled, 'the queued caller is released too').toBe(true)
   expect(bState.error).toBeInstanceOf(CorpusStopped)
   expect(boundary.settled, 'and the captured boundary fulfils').toBe(true)
-  expect(c.isPendingHiddenId('h'), 'membership is closed').toBe(false)
+  expect(isPending(c, 'h'), 'membership is closed').toBe(false)
   expect(bRan, "the queued body never ran").toBe(false)
   // now release the held body: its late continuation is inert
   held.resolve()
@@ -168,7 +177,7 @@ test('a body that publishes membership AFTER stop cannot reopen the window', asy
   await checkpoint()
   // checked DURING the body's next await: after it returns, the finally clears membership anyway,
   // so a row that looked afterwards could not tell the guard apart from nothing
-  expect(c.isPendingHiddenId('late'), 'stop closed the window for good').toBe(false)
+  expect(isPending(c, 'late'), 'stop closed the window for good').toBe(false)
   expect(state.error, 'and the caller was released').toBeInstanceOf(CorpusStopped)
   second.resolve()
 })
@@ -197,7 +206,7 @@ test('the boundary is the ACTIVE producer, not the queue: B enqueued behind A do
     return 'b'
   })
   await checkpoint()
-  const boundary = watch(c.boundary()) // captured with B already queued
+  const boundary = watch(boundaryFor(c, 'h')) // captured with B already queued
   await checkpoint()
   expect(boundary.settled, "A's boundary is pending while A runs").toBe(false)
   aHeld.resolve()

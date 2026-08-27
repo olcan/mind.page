@@ -11,7 +11,8 @@ import {
 // PURE tables for confirmTarget's planning (see src/hidden_confirm.ts). No timers, no promises,
 // no fakes — these are decisions, and the point of extracting them is that they can be tabled
 
-const hidden = (id: string, name: string, wrapper: unknown = { id }): ClassifiedRow => ({ id, kind: 'hidden', name, wrapper })
+const hidden = (id: string, name: string, wrapper: unknown = { id }): ClassifiedRow => ({ id, kind: 'hidden', name, wrapper, eligible: true })
+const ineligible = (id: string, name: string): ClassifiedRow => ({ id, kind: 'hidden', name, wrapper: { id }, eligible: false })
 const absent = (id: string): ClassifiedRow => ({ id, kind: 'absent' })
 const answerOf = (...rows: ClassifiedRow[]) => new Map(rows.map(r => [r.id, r]))
 
@@ -180,7 +181,6 @@ test('a HIDDEN point answer replaces the stale raw row and enters registration',
   expect(out.apply, 'the point answer REPLACES the raw entry').toEqual([
     { id: 'd1', name: 'q', wrapper: { fresh: true } },
   ])
-  expect(out.suppress).toEqual([])
 })
 
 test('a NOT-HIDDEN point answer only suppresses: zero production-body calls', () => {
@@ -190,7 +190,7 @@ test('a NOT-HIDDEN point answer only suppresses: zero production-body calls', ()
   const answers = new Map<string, PointAnswer>([['d1', { kind: 'not-hidden' }]])
   const out = normalizeScan(raw, answers)
   expect(out.apply, 'nothing is applied').toEqual([])
-  expect(out.suppress).toEqual(['d1'])
+  // omission from `apply` IS the suppression: there is no separate list
 })
 
 test('rows with no point answer stand, and everything applies in CANONICAL id order', () => {
@@ -200,14 +200,15 @@ test('rows with no point answer stand, and everything applies in CANONICAL id or
     { id: 'a', name: 'n', wrapper: { stale: true } },
     { id: 'm', name: 'n', wrapper: {} },
   ]
+  const freshWrapper = { fresh: true }
   const answers = new Map<string, PointAnswer>([
-    ['a', { kind: 'hidden', name: 'n', wrapper: { fresh: true } }],
+    ['a', { kind: 'hidden', name: 'n', wrapper: freshWrapper }],
     ['m', { kind: 'not-hidden' }],
   ])
   const out = normalizeScan(raw, answers)
   expect(out.apply.map(r => r.id), 'canonical, not point-read completion order').toEqual(['a', 'z'])
-  expect(out.apply[0].wrapper).toEqual({ fresh: true })
-  expect(out.suppress).toEqual(['m'])
+  expect(out.apply[0].wrapper, 'exact wrapper identity').toBe(freshWrapper)
+  // 'm' is simply absent from apply
 })
 
 // ---- pure classification ----
@@ -227,29 +228,39 @@ test('classification is complete and side-effect free, and fails closed on an un
   expect(classifyHiddenDocument('d', true, null).kind, 'no text').toBe('indeterminate')
 })
 
-test('an INELIGIBLE same-name row is definite evidence but is not registered', () => {
+test('a quarantined LOWER row is skipped, and the eligible row registers', () => {
   // counting a quarantined duplicate as a survivor would let registration skip that first row,
   // leaving a stale adoption selection or preventing a later eligible row from performing the one
-  // rebase/publication
+  // rebase/publication. the quarantined id is NOT in `local`: quarantineNonCanonical removes it
+  // from byId, and `local` is the nonpending byId slice
   const plan = planTargetSlice({
     name: 'n',
-    local: [{ id: 'h', name: 'n', wrapper: {} }],
-    answer: new Map<string, ClassifiedRow>([
-      ['h', { id: 'h', kind: 'hidden', name: 'n', wrapper: {}, eligible: false }],
-      ['k', { id: 'k', kind: 'hidden', name: 'n', wrapper: {} }],
-    ]),
+    local: [],
+    answer: answerOf(ineligible('a', 'n'), hidden('k', 'n')),
   })
-  expect(plan.remove, 'h is still ours, so it is not removed from the slice').toEqual([])
-  expect(plan.register.map(r => r.id), 'but only the eligible row registers').toEqual(['k'])
+  expect(plan.remove).toEqual([])
+  expect(plan.register.map(r => r.id), 'only the eligible row registers').toEqual(['k'])
 })
 
-test('an ineligible row alone leaves no fresh registration, so the baseline resets', () => {
+test('a stale local row with only a quarantined fresh row: removed, and no fresh registration', () => {
   const plan = planTargetSlice({
     name: 'n',
     local: [{ id: 'h', name: 'n', wrapper: {} }],
-    answer: new Map<string, ClassifiedRow>([
-      ['h', { id: 'h', kind: 'hidden', name: 'n', wrapper: {}, eligible: false }],
-    ]),
+    answer: answerOf(absent('h'), ineligible('k', 'n')),
   })
+  expect(plan.remove, 'the disproved local row still goes').toEqual(['h'])
   expect(plan.register, 'nothing eligible to perform the rebase/publication').toEqual([])
+})
+test('server plaintext cannot inject controller-only transient state', () => {
+  // persistence writes only name and item. a stored object carrying pending_create or adopt_id
+  // would otherwise reach registerHidden as if it were live controller state — and an embedded id
+  // must never beat the caller's
+  const c = classifyHiddenDocument(
+    'real',
+    true,
+    JSON.stringify({ id: 'forged', name: 'n', item: { v: 1 }, pending_create: true, adopt_id: 'x' })
+  )
+  expect(c).toEqual({ kind: 'hidden', wrapper: { id: 'real', name: 'n', item: { v: 1 } } })
+  expect('pending_create' in (c as any).wrapper, 'no transient state').toBe(false)
+  expect('adopt_id' in (c as any).wrapper).toBe(false)
 })
