@@ -284,7 +284,9 @@ export function createHiddenIngress() {
       receipt,
       done,
       revoke() {
-        if (terminal && sealed) return // late revoke after seal: no invalidation of the sealed basis
+        // every late operation after EITHER terminal owner is a no-op: after seal it must not
+        // invalidate the sealed basis, and after fail the invalidation already happened
+        if (terminal) return
         invalidatedThrough = Math.max(invalidatedThrough, receipt)
       },
       seal() {

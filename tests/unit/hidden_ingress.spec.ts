@@ -6,12 +6,12 @@ import { createHiddenIngress, type Apply, type Outcome } from '../../src/hidden_
 // handles, deferred Apply closures, and no real timers. synchronization is DeliveryHandle.done and
 // AuthorityLease.done — never microtask-count loops. one fresh coordinator per test.
 
-// an explicit event-loop checkpoint: drains enough microtask turns that any settled promise
-// chain in the module (tail hops included) has fully propagated. used ONLY to assert that
-// something did NOT happen — positive progress always awaits the real done promises
-async function checkpoint() {
-  for (let i = 0; i < 10; i++) await Promise.resolve()
-}
+// an explicit event-loop checkpoint: ONE macrotask, which drains every recursively queued
+// microtask first — so any settled promise chain in the module has fully propagated, without
+// coupling the assertion to today's number of tail hops (a guessed microtask count is exactly the
+// failure mode that made two turns insufficient; round 44). used ONLY to assert that something
+// did NOT happen — positive progress always awaits the real done promises
+const checkpoint = () => new Promise<void>(res => setImmediate(res))
 
 function deferred<T = void>() {
   let resolve!: (v: T) => void, reject!: (e: any) => void
@@ -61,16 +61,21 @@ test('a rejecting Apply blocks that same handle', async () => {
   expect(c.hasOutstanding('d'), 'the block is retained').toBe(true)
 })
 
-test('S1 blocks, then strictly higher same-cell S2 applied heals it', async () => {
+test('a higher success heals EVERY strictly older same-cell block', async () => {
   const c = createHiddenIngress()
+  // TWO retained blocks: healing that stopped after the first deletion would leave the second
+  // gating forever (round 44)
   const s1 = c.open('d')
   s1.ready(failing)
   expect(await s1.done).toBe('blocked')
   const s2 = c.open('d')
-  s2.ready(applied)
-  expect(await s2.done).toBe('applied')
+  s2.ready(failing)
+  expect(await s2.done).toBe('blocked')
+  const s3 = c.open('d')
+  s3.ready(applied)
+  expect(await s3.done).toBe('applied')
   expect(c.gate(), 'healed').toBe('writable')
-  expect(c.hasOutstanding('d'), 'the healed block is gone, the success is pruned').toBe(false)
+  expect(c.hasOutstanding('d'), 'BOTH healed blocks are gone, the success is pruned').toBe(false)
 })
 
 test('a success in an UNRELATED cell heals nothing', async () => {
@@ -232,25 +237,33 @@ test('whenActionable delivers writable and blocked, never pending; whenWritable 
   expect(await c.whenActionable().promise, 'immediate on an empty coordinator').toBe('writable')
 
   const h = c.open('d')
-  const actionable = c.whenActionable() // registered SYNCHRONOUSLY...
+  // TWO subscriptions per level, registered SYNCHRONOUSLY: several names wait concurrently in
+  // production, and a drain that woke only one would strand an unrelated generation forever
+  // (round 44)
+  const actionable = c.whenActionable()
+  const actionable2 = c.whenActionable()
   const writable = c.whenWritable()
-  let actionableResolved: string | undefined
-  let writableResolved = false
-  void actionable.promise.then(g => (actionableResolved = g))
-  void writable.promise.then(() => (writableResolved = true))
+  const writable2 = c.whenWritable()
+  const resolved: string[] = []
+  void actionable.promise.then(g => resolved.push('a1:' + g))
+  void actionable2.promise.then(g => resolved.push('a2:' + g))
+  void writable.promise.then(() => resolved.push('w1'))
+  void writable2.promise.then(() => resolved.push('w2'))
   // ... and the transition happens in the SAME turn, before any yield: only synchronous
   // registration (no deferred push) can observe it (round 43)
   h.block()
   expect(await h.done).toBe('blocked')
   await Promise.resolve()
-  expect(actionableResolved, 'blocked IS deliverable to the initial wait').toBe('blocked')
-  expect(writableResolved, 'the healing wait ignores blocked').toBe(false)
+  expect(resolved.sort(), 'BOTH actionable waits saw blocked; the healing waits ignored it').toEqual([
+    'a1:blocked',
+    'a2:blocked',
+  ])
 
   const heal = c.open('d')
   heal.ready(applied)
   expect(await heal.done).toBe('applied')
   await Promise.resolve()
-  expect(writableResolved, 'the healing wait resolves on writable').toBe(true)
+  expect(resolved.sort(), 'BOTH healing waits resolved on writable').toEqual(['a1:blocked', 'a2:blocked', 'w1', 'w2'])
 })
 
 test('whenActionable while already blocked resolves immediately; whenWritable does not', async () => {
@@ -344,15 +357,26 @@ test('a cancelled echo waiter ignores a later match; a non-matching cipher never
   match.ready(applied)
   expect(await match.done).toBe('applied')
   const other = c.armEcho('d', 'cipher-w')
+  let otherResolved = false
+  void other.promise.then(() => (otherResolved = true))
+  // the SAME cipher under ANOTHER document id first: a cipher alone is not an exact echo
+  // identity (round 44). d2's matching delivery must carry a seq ABOVE the waiter's minSeq
+  // (frontiers are per-id, so a low foreign seq would be refused by the seq clause for the wrong
+  // reason and mask a missing id check) — a throwaway first delivery raises it
+  const filler = c.open('d2', 'cipher-unrelated')
+  filler.ready(applied)
+  expect(await filler.done).toBe('applied')
+  const otherDoc = c.open('d2', 'cipher-w') // seq 2 > minSeq 1: only the id clause refuses this
+  otherDoc.ready(applied)
+  expect(await otherDoc.done).toBe('applied')
+  await Promise.resolve()
+  expect(otherResolved, 'a matching cipher on the WRONG id is not this echo').toBe(false)
   const wrong = c.open('d', 'cipher-OTHER')
   wrong.ready(applied)
   expect(await wrong.done).toBe('applied')
   await Promise.resolve()
   expect(resolved, 'cancelled stays silent').toBe(false)
-  let otherResolved = false
-  void other.promise.then(() => (otherResolved = true))
-  await Promise.resolve()
-  expect(otherResolved, 'a different cipher is not this echo').toBe(false)
+  expect(otherResolved, 'a different cipher is not this echo either').toBe(false)
 })
 
 test('arming an echo neither advances the frontier nor allocates a cell', async () => {
@@ -456,6 +480,9 @@ test('terminal ownership: seal then late fail/revoke changes nothing; fail then 
 
   const failed = c.reserveAuthority(true)
   failed.fail()
+  // SYNCHRONOUS revocation: fail = revoke, then settle — deferring the invalidation into the
+  // tail turn would leave a stale-authority window (round 44). asserted before ANY await
+  expect(c.authorityUsable(), 'unusable immediately at fail()').toBe(false)
   failed.seal() // late: cannot advance the basis
   await failed.done
   expect(c.authorityUsable(), 'the failed lease never made authority usable').toBe(false)
@@ -500,6 +527,9 @@ test('done order: an unsettled older slot holds a sealed newer candidate; revoke
   await checkpoint()
   expect(c1done, "revoke() did not settle C1's slot").toBe(false)
   expect(resolvedUsable, "C2's ordered effect still waits for C1").toBe(undefined)
+  // the BASIS waited too, not only done: advancing it directly in seal() would authorize a write
+  // while the older callback is still unsettled (round 44)
+  expect(c.authorityUsable(), 'the sealed basis has NOT advanced before its ordered turn').toBe(false)
   c1.seal()
   await c2.done
   expect(c1done).toBe(true)
