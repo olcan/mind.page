@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { resolveFinalState, scanHiddenDocuments, type ScanDeps } from '../../src/hidden_scan.js'
+import { scanHiddenDocuments, type ScanDeps } from '../../src/hidden_scan.js'
 import { createRecordAllocator, type RecordHandle } from '../../src/hidden_listener_records.js'
 import type { Classification } from '../../src/hidden_confirm.js'
 
@@ -369,46 +369,4 @@ test('a point answer that says HIDDEN survives a query row classified otherwise'
   h.answerQuery(['a'])
   const result = await scan
   expect(result.apply.map(r => `${r.id}:${r.name}`)).toEqual(['a:fresh'])
-})
-
-// ---- a delivery's FINAL-STATE evidence ---------------------------------------------------------
-// the round-74/75 correction: an ambiguous owner-fixed removal is admitted on its own (see
-// needsFinalStateEvidence) and then establishes what the document CURRENTLY is, because withholding
-// the hidden-side effect leaves a newly hidden document under an unrelated name registered by nobody
-
-test('a document still in the owner hidden set is a TRANSITION, applied from the fresh document', async () => {
-  const item = { hidden: true, text: '{"name":"global_store_b"}' }
-  const final = await resolveFinalState(async () => ({
-    classification: hidden('k', 'global_store_b'),
-    snap: 'fresh-snapshot',
-    item,
-  }))
-  if (final.kind != 'hidden') throw new Error(`expected hidden, got ${final.kind}`)
-  // EXACT IDENTITY on the item: production routes on `item.hidden`, so returning fresh flags beside
-  // a stale item would pass a shape assertion and still take the wrong branch
-  expect(final.item, 'the effects apply from the FRESH document').toBe(item)
-  expect(final.snap).toBe('fresh-snapshot')
-  expect(final.wrapper.name, 'which is also what decides the affected name chains').toBe('global_store_b')
-})
-
-test('a document absent from the owner hidden set is REMOVED: deleted, unshared or visible alike', async () => {
-  // absence is a real answer here, not a denial — see the owner hidden-set rows in
-  // tests/e2e/rules.spec.ts for why the read is shaped that way
-  expect(await resolveFinalState(async () => ({ classification: notHidden }))).toEqual({ kind: 'removed' })
-})
-
-test('an INDETERMINATE answer blocks the delivery rather than healing on evidence it lacks', async () => {
-  // resolving `applied` here would delete every strictly older same-cell block (see finalize in
-  // hidden_ingress.ts) while having established nothing about the hidden side
-  await expect(resolveFinalState(async () => ({ classification: indeterminate }))).rejects.toThrow(
-    'could not be classified'
-  )
-})
-
-test('a failing read propagates: the delivery blocks, it does not fall through to removal', async () => {
-  await expect(
-    resolveFinalState(async () => {
-      throw new Error('offline')
-    })
-  ).rejects.toThrow('offline')
 })

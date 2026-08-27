@@ -153,40 +153,7 @@ export async function scanHiddenDocuments(deps: ScanDeps): Promise<HiddenScan> {
   }
 }
 
-// ---- a delivery's FINAL-STATE evidence ---------------------------------------------------------
-// Firestore hands a `removed` change the document's OLD data, and a fixed page's query is a strict
-// subset a hidden document can never be in — so a removal there means the document left the SHARED
-// SET: deleted, unshared, or TURNED HIDDEN (see needsFinalStateEvidence in src/snapshot.ts, which
-// also scopes this to the writable authenticated OWNER, and the design's "What a removal is
-// evidence OF").
-//
-// WITHHOLDING the hidden-side effect is not enough. A confirmation for an unrelated name registers
-// nothing for this id — its commit covers only its own affected closure — so nothing else would
-// ever install the hidden record and the page would end up holding NEITHER representation. The
-// delivery would also publish `applied` and heal every strictly older same-cell block while having
-// established nothing about the hidden side.
-//
-// So the delivery OWNS the evidence: ONE fresh read, taken after its corpus boundary and BEFORE it
-// enters the name chains, because the answer determines the affected NAMES as much as the effects —
-// and the stale payload's name set is empty.
-
-export type FinalState =
-  // the document is gone from this page's world: deleted, unshared, or simply visible. all three
-  // mean the same thing to the hidden side, and the removal the payload described stands
-  | { kind: 'removed' }
-  // it is HIDDEN now: the payload described the old, visible side of a transition, and the effects
-  // must be applied from THIS document through the ordinary reducers
-  | { kind: 'hidden'; snap: unknown; item: any; wrapper: ParsedWrapper }
-
-export async function resolveFinalState(
-  // ONE fresh read. `snap`/`item` are absent when the document is not in the owner's hidden set
-  read: () => Promise<{ classification: Classification; snap?: unknown; item?: any }>
-): Promise<FinalState> {
-  const fresh = await read()
-  // FAIL CLOSED: a read or classification failure is not absence, and this delivery must not heal
-  // an older same-cell block on evidence it does not have
-  if (fresh.classification.kind == 'indeterminate')
-    throw new Error(`hidden document could not be classified: ${fresh.classification.reason}`)
-  if (fresh.classification.kind == 'not-hidden') return { kind: 'removed' }
-  return { kind: 'hidden', snap: fresh.snap, item: fresh.item, wrapper: fresh.classification.wrapper }
-}
+// NOTE the delivery-side FINAL-STATE resolution moved to src/hidden_delivery.ts
+// (readHiddenMembership + applyAdmittedDelivery), where it sits beside the admission decision that
+// makes it reachable — round 76 showed the two halves must not live apart. This module keeps the
+// full-scan composition; both share the owner hidden-set read through their injected deps.

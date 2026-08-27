@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs'
+import { readHiddenMembership } from '../../src/hidden_delivery.js'
 import { expect, test } from '@playwright/test'
 import {
   assertFails,
@@ -95,30 +96,44 @@ test('a direct get of a MISSING id is denied: the rule reads fields off a resour
   await assertFails(getDoc(doc(db, 'items/rules-does-not-exist')))
 })
 
-test('the OWNER HIDDEN-SET query answers absence, because its potential result set is authorized', async () => {
-  // the shape the app already reads hidden documents with (the startup prefetch and the shared
-  // scan). "is this id currently hidden?" is the whole question a delivery asks, and absence from
-  // this set is a real answer — deleted or visible, which are the same thing to the hidden side
-  await env.withSecurityRulesDisabled(async ctx =>
-    setDoc(doc(ctx.firestore(), 'items/rules-alice-hidden'), {
+test('the OWNER HIDDEN-SET query answers TARGET-ID absence in a NONEMPTY set, through the real adapter', async () => {
+  // the shape the app reads hidden documents with, driven through the REAL membership adapter
+  // (readHiddenMembership): "is this id currently hidden?" is the whole question a delivery asks.
+  // an unrelated hidden document stays PRESENT throughout — production finds the target id in the
+  // returned set, and an assertion on set emptiness would stay green for an adapter that read
+  // rows[0] instead
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'items/rules-alice-hidden'), {
       user: 'alice',
       hidden: true,
       cipher: 'x',
       time: 1,
       attr: null,
     })
-  )
+    await setDoc(doc(ctx.firestore(), 'items/rules-alice-hidden-other'), {
+      user: 'alice',
+      hidden: true,
+      cipher: 'y',
+      time: 1,
+      attr: null,
+    })
+  })
   const db = env.authenticatedContext('alice').firestore()
-  const hiddenSet = () =>
-    getDocs(query(collection(db, 'items'), where('user', '==', 'alice'), where('hidden', '==', true)))
-  const rows = await assertSucceeds(hiddenSet())
-  expect(
-    rows.docs.map(d => d.id),
-    'the hidden document is readable by its owner'
-  ).toEqual(['rules-alice-hidden'])
-  // and a deleted id is simply not in it — no denial to mistake for a read failure
+  const membership = (id: string) =>
+    readHiddenMembership(id, {
+      queryHiddenSet: async () =>
+        (await getDocs(query(collection(db, 'items'), where('user', '==', 'alice'), where('hidden', '==', true)))).docs,
+      stopped: () => false,
+      // the emulator documents are not really encrypted; classification needs a hidden wrapper
+      decrypt: async data => ({ ...data, text: JSON.stringify({ name: 'global_store_x' }) }),
+    })
+  const present = await membership('rules-alice-hidden')
+  expect(present.kind, 'the present target is found among others').toBe('hidden')
+  // the target is deleted; the unrelated document REMAINS. absence must be target-specific
   await env.withSecurityRulesDisabled(async ctx => deleteDoc(doc(ctx.firestore(), 'items/rules-alice-hidden')))
-  expect((await assertSucceeds(hiddenSet())).empty, 'absence is an EMPTY RESULT').toBe(true)
+  expect(await membership('rules-alice-hidden'), 'target-id absence in a nonempty authorized set').toEqual({
+    kind: 'not-hidden',
+  })
 })
 
 test('the owner hidden-set query does not become a way to read someone else‘s documents', async () => {
@@ -126,11 +141,12 @@ test('the owner hidden-set query does not become a way to read someone else‘s 
   await assertFails(getDocs(query(collection(db, 'items'), where('user', '==', 'alice'), where('hidden', '==', true))))
 })
 
-test('adding an exact-id filter to that query breaks it: the shape must stay the plain owner set', async () => {
-  // documented here because it is not obvious and it decides the client's read shape: constraining
-  // by documentId() makes the list rule evaluate against a resource it cannot read fields from, and
-  // the request is denied — so "read one document" and "read the owner's hidden set" are the same
-  // call for us
+test('an exact-id query for a MISSING id is denied too: the shape must stay the plain owner set', async () => {
+  // documented here because it is not obvious and it decides the client's read shape: for a
+  // missing id, constraining by documentId() makes the list rule evaluate against a resource it
+  // cannot read fields from, and the request is denied — so "read one document" and "read the
+  // owner's hidden set" have to be the same call. (this row proves the MISSING-id denial; it does
+  // not claim an exact-id query for an existing owner document fails)
   const db = env.authenticatedContext('alice').firestore()
   await assertFails(
     getDocs(
@@ -138,7 +154,7 @@ test('adding an exact-id filter to that query breaks it: the shape must stay the
         collection(db, 'items'),
         where('user', '==', 'alice'),
         where('hidden', '==', true),
-        where(documentId(), '==', 'anything')
+        where(documentId(), '==', 'rules-does-not-exist')
       )
     )
   )
