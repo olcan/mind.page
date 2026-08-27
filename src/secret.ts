@@ -7,11 +7,12 @@
 //   read retries or signs out — an unvalidated phrase would encrypt new data under a wrong key
 // - an entered phrase is validated against found ciphertext (aes-gcm authentication throws on a
 //   wrong key) before it is accepted
-// - the account's hidden items are registered BEFORE the secret is returned/published: a
-//   concurrent encrypted save that saw the settled secret early could create a duplicate of a
-//   hidden document that registration had not reached yet
+//
+// VALIDATION ONLY: it returns a CANDIDATE and registers nothing. the caller runs one fresh
+// candidate-keyed hidden scan through the corpus seam before publishing or storing the secret —
+// the documents this flow fetched are prompt-aged by the time a human finishes typing, and the
+// whole fetch/retry/prompt sequence has no business holding the corpus tail
 
-import { compareIds } from './hidden.js'
 import { decryptWithSecret } from './crypto.js'
 
 export type AccountDoc = { id: string; data: () => Record<string, any> }
@@ -27,13 +28,11 @@ export type FixedOwnerSecretDeps = {
   reportWrongPhrase: () => Promise<void>
   // stored form of a phrase (see hashSecretPhrase in crypto.ts, bound to the uid)
   hashPhrase: (phrase: string) => Promise<string>
-  // register one decrypted hidden item (adopts pending creates, see registerHiddenItem)
-  registerHiddenItem: (item: Record<string, any>) => void
   signOut: () => void
 }
 
-// returns the validated hashed secret, or null when the (server-confirmed) account holds no
-// ciphertext — the caller then runs its new-phrase flow; throws 'secret phrase cancelled' after
+// returns the validated hashed secret CANDIDATE, or null when the (server-confirmed) account holds
+// no ciphertext — the caller then runs its new-phrase flow; throws 'secret phrase cancelled' after
 // signing out on any cancellation
 export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promise<string | null> {
   // fetch until the server answers (fail closed), or sign out; NOTE: this must be an internal
@@ -72,32 +71,9 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
     }
   }
 
-  // register the account's hidden items (e.g. global stores) decrypted with the validated
-  // candidate — NOT the session secret, which is not published yet and must not be until this
-  // completes (a pending save adopts the existing document instead of creating a duplicate);
-  // only hidden documents are touched ('hidden' is a plaintext field — an unrelated corrupt
-  // ordinary item must not fail this), in ascending id order so a pending create adopts the
-  // MINIMUM-id duplicate (the index invariant; the query itself is ordered by descending time)
-  // compareIds, not localeCompare: the index's canonical (minimum-id) selection is code-unit
-  // ordered, and mixed-case firestore ids order differently under a locale collator — the two
-  // must agree or registration adopts one record while cleanup retains a different one
-  for (const doc of docs.filter(doc => doc.data().hidden).sort((a, b) => compareIds(a.id, b.id))) {
-    try {
-      const item: Record<string, any> = Object.assign(doc.data(), { id: doc.id })
-      if (item.cipher) {
-        const decrypted = JSON.parse(await decryptWithSecret(item.cipher, candidate))
-        item.text = decrypted.text
-        item.attr = decrypted.attr
-        item.cipher = null
-      }
-      deps.registerHiddenItem(item)
-    } catch (e) {
-      // best-effort here: the phrase is validated regardless, and duplicate protection for a
-      // pending create does not rest on this pass — every new-name create on a fixed page
-      // re-confirms against the server and FAILS on any hidden-document error (see
-      // saveHiddenItem in index.svelte)
-      console.error('could not load hidden item:', e)
-    }
-  }
+  // NO REGISTRATION HERE. these documents are as old as the prompt: the caller takes one fresh
+  // candidate-keyed scan through the corpus seam, in canonical id order, before it publishes or
+  // stores the secret — which is what actually protects a concurrent encrypted save from
+  // duplicating a record registration has not reached yet
   return candidate
 }

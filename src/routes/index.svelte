@@ -3872,32 +3872,18 @@
     // falls through to the new-phrase flow below
     if (fixed) {
       new_phrase = false
-      // the validation flow is extracted with injected dependencies (see src/secret.ts and its
-      // unit tests); it fails closed on fetch errors, validates the phrase against
-      // server-confirmed ciphertext, and registers the account's hidden items BEFORE the secret
-      // is published here (a concurrent encrypted save must adopt, not duplicate)
-      // THROUGH THE CORPUS SEAM: this is a complete account read that REGISTERS hidden records, so
-      // it is a corpus producer like confirmTarget. its membership window admits a delivery for
-      // one of these ids that arrives mid-scan, and its boundary orders that delivery behind the
-      // registration rather than letting it mutate the pre-rebuild index. a second startup-only
-      // membership set would duplicate the state the corpus primitive already owns
-      let published = false
-      const validated = await hiddenCorpus.run(async run =>
-        resolveFixedOwnerSecret({
-        fetchAccountDocs: async () => {
-          const docs = (
+      // VALIDATION ONLY, and deliberately OUTSIDE the corpus tail (see src/secret.ts and its unit
+      // tests): it fails closed on fetch errors and validates the entered phrase against
+      // server-confirmed ciphertext, but it registers nothing. holding the corpus across a fetch,
+      // retry dialogs and a human-length phrase prompt blocked every other producer for as long as
+      // the user took to type, and then registered PROMPT-AGED documents
+      const candidate = await resolveFixedOwnerSecret({
+        fetchAccountDocs: async () =>
+          (
             await getDocsFromServer(
               query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
             )
-          ).docs
-          // BEFORE the phrase prompt and the registrations that follow it. once only: the
-          // validation flow refetches on retry, and membership is published per operation
-          if (!published) {
-            published = true
-            run.publishMembership(docs.filter(d => d.data().hidden).map(d => d.id))
-          }
-          return docs
-        },
+          ).docs,
         promptPhrase: async () => {
           await tick() // wait until modal is rendered on page
           return modal.show({
@@ -3923,22 +3909,40 @@
             background: 'confirm',
           }),
         hashPhrase: phrase => hashSecretPhrase(phrase),
-        // a late registration after stop must not touch the index
-        registerHiddenItem: item => {
-          if (run.cancelled()) return
-          registerHiddenItem(item)
-        },
         signOut,
-        })
-      ).catch(e => {
-        // a stopped corpus rejects; anything else is the validation flow's own failure and keeps
-        // its existing fail-closed behaviour
-        if (e instanceof CorpusStopped) return null
-        throw e
       })
-      if (validated != null) {
-        hiddenPrefetched = true // a completed owner scan: the first cached snapshot must wait
-        secret = validated
+      if (candidate != null) {
+        // ONE FRESH CANDIDATE-KEYED SCAN, through the corpus seam, BEFORE the secret is published
+        // or stored. it is a corpus producer like confirmTarget: its membership window admits a
+        // delivery for one of these ids arriving mid-scan, and its boundary orders that delivery
+        // behind the registration rather than letting it mutate the pre-rebuild index.
+        // CANDIDATE-KEYED because `secret` is not published yet — and must not be until this
+        // completes, or a concurrent encrypted save could duplicate a record not yet registered
+        await hiddenCorpus.run(async run => {
+          const scan = await scanHiddenDocuments(
+            hiddenScanDeps(run, async (data, id) => {
+              const item: Record<string, any> = Object.assign(data, { id })
+              if (!item.cipher) return item
+              const decrypted = JSON.parse(await decryptWithSecret(item.cipher, candidate))
+              return Object.assign(item, { text: decrypted.text, attr: decrypted.attr, cipher: null })
+            })
+          )
+          // canonical id order, so a pending create adopts the MINIMUM-id duplicate (the index
+          // invariant). an ADMITTED id is left to its own delivery, which is what the scan already
+          // withholds from `apply`
+          for (const row of scan.apply) {
+            if (run.cancelled()) return // a late registration after stop must not touch the index
+            registerHidden(hiddenIndex(), row.wrapper as HiddenWrapper, mergeAdoptedStore)
+          }
+        })
+        // NOTE a CorpusStopped rejection is NOT converted to null here any more: that value means
+        // server-confirmed EMPTY, so returning it after a sticky stop let execution fall into the
+        // choose-new-phrase path and publish and store a secret over an account it could no longer
+        // see. it propagates, exactly like a cancelled prompt.
+        // NOTE nor is `prefetchedHiddenDocs` assigned: this path runs from an encrypted save on an
+        // already-initialized page, so the first snapshot was consumed long ago and a prefetch
+        // fact recorded here could never reach the decision that reads it
+        secret = candidate
         localStorage.setItem('mindpage_secret', secret)
         return secret
       }
@@ -6306,7 +6310,7 @@
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
-  import { createHiddenCorpus, CorpusStopped } from '../hidden_corpus'
+  import { createHiddenCorpus } from '../hidden_corpus'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -6324,6 +6328,7 @@
   } from '../hidden'
   import { classifyHiddenDocument } from '../hidden_confirm'
   import { scanHiddenDocuments, type ScanDeps } from '../hidden_scan'
+  import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
@@ -6485,8 +6490,15 @@
   // the same cross-scope handle idiom used elsewhere in this file. inert before the listener
   // installs, which is correct: there is no visible representation to remove yet
   let removeVisibleForHiddenId: (id: string) => undefined = () => undefined
-  // whether a fixed-owner hidden prefetch has completed (see resolveFixedOwnerSecret)
-  let hiddenPrefetched = false
+  // THE STARTUP PREFETCH RESULT, retained. `undefined` means not attempted or failed (identical
+  // policy: the index simply stays unauthoritative and hidden creates re-confirm per save); an
+  // array — INCLUDING an empty one — means an eligible fixed-owner scan settled successfully
+  // before the listener installed, which is what makes a cached first snapshot wait for the
+  // server. one value, not a second boolean flag beside it
+  let prefetchedHiddenDocs: Record<string, any>[] | undefined
+  // THE INITIALIZATION ATTEMPT, retained. terminal on every branch — success, early return,
+  // rejection — unlike `initialization`, which resolves only from the rendering pass
+  let initializeAttempt: Promise<boolean> | undefined
   const recordAllocator = createRecordAllocator({
     onBlindError: (id, e) => console.error('could not apply remote change:', id, e),
   })
@@ -6643,9 +6655,17 @@
     const settle = async ({ failed }: { failed: boolean }) => {
       if (settled) return
       settled = true
-      await initialization
-      if (failed || !initialized) lease.fail()
-      else lease.seal()
+      // A FAILED LEASE NEVER WAITS, and a successful one settles behind the RETAINED attempt
+      // rather than the success-only `initialization` promise (see src/startup.ts, table-tested):
+      // awaiting first and inspecting `failed` after is what left settle({ failed: true }) pending
+      // forever, queueing every later lease behind it for the page's lifetime
+      const outcome = await settleAuthorityLease({
+        failed,
+        attempt: () => initializeAttempt,
+        initialized: () => initialized,
+      })
+      if (outcome == 'seal') lease.seal()
+      else lease.fail()
     }
     return { settle, revoke, lease }
   }
@@ -6789,7 +6809,11 @@
     return _.merge(item, state)
   }
 
-  async function initialize() {
+  // returns whether the rebuild ran to completion. it is a VALUE, not the success-only
+  // `initialization` promise: that one resolves from the rendering pass, so the encryption/signout
+  // early return below left it pending forever — and every caller that awaited it, including every
+  // authority lease's settle(), queued behind it for the page's lifetime
+  async function initialize(): Promise<boolean> {
     // NO fresh outside-callback revocation here. the INITIALIZING CALLBACK'S OWN LEASE owns this
     // lifecycle: it reserved an ordinal at receipt and seals only after this rebuild succeeds, so
     // a fresh ordinal would additionally stale every later callback that should be able to grant
@@ -6807,33 +6831,9 @@
     // whole firebase facade — and it does not need to be one: that origin holds no session, no
     // secret and no session cookie
 
-    // on a fixed page the shared-items query cannot include the account's hidden items (their
-    // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
-    // (e.g. global stores) looked empty and every save created a duplicate hidden item, flagged
-    // and deleted on the next full account load; fetch them for the signed-in owner when the
-    // device holds the secret (without it they are loaded after the phrase is validated instead,
-    // see getSecretPhrase)
-    if (fixed && !readonly && !anonymous && localStorage.getItem('mindpage_secret')) {
-      // from the server, never the cache: a partial cache could miss an existing hidden document
-      // and a later save would then create a duplicate; on failure the index stays marked
-      // unauthoritative and hidden CREATES re-confirm against the server first (see
-      // saveHiddenItem) instead of blocking the page here
-      try {
-        const hidden_docs = await getDocsFromServer(
-          query(
-            collection(getFirestore(firebase), 'items'),
-            where('user', '==', user.uid),
-            where('hidden', '==', true)
-          )
-        )
-        hidden_docs.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
-      } catch (e) {
-        console.error('could not load hidden items from server (creates will re-confirm):', e)
-      }
-    }
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
-    if (signingOut) return // encryption error
+    if (signingOut) return false // encryption error
 
     // remove "admin" items (e.g. welcome item) on readonly account
     if (readonly) _.remove(items, item => adminItems.has(item.id))
@@ -6959,6 +6959,7 @@
       initialized = true
       resolve_init()
     })
+    return initialized
   }
 
   let rendered = false
@@ -7716,12 +7717,48 @@
                   }
         }
 
-        // start listening for remote changes
-        // (also initialize if items were not returned by server)
-        // the unsubscribe closure is RETAINED so a sticky stop can invoke it exactly once, with
-        // the race-safe check below in case stop was reached before onSnapshot returned
-        armItemsUnsubscribe(
-          onSnapshot(
+        // THE STARTUP PREFETCH, settled BEFORE the listener installs.
+        //
+        // on a fixed page the shared-items query cannot include the account's hidden items (their
+        // names are inside the ciphertext, but 'hidden' is a plain field): without them item state
+        // (e.g. global stores) looked empty and every save created a duplicate hidden item,
+        // flagged and deleted on the next full account load. fetch them for the signed-in owner
+        // when the device holds the secret (without it they are loaded after the phrase is
+        // validated instead, see getSecretPhrase).
+        //
+        // it ran INSIDE initialize() before, which is inside the first snapshot's own callback —
+        // so it could not order against that snapshot at all, and its rows were pushed blind. now
+        // it settles first, is RETAINED, and the first snapshot supersedes any same-id copy of it.
+        //
+        // the ORDER and TERMINATION rules are in src/startup.ts (table-tested); the effects are
+        // here. an EMPTY successful scan is still a successful scan, and a FAILED one is fail-soft:
+        // the index is simply not authoritative, and hidden CREATES re-confirm against the server
+        // first (see saveHiddenItem) instead of blocking the page
+        const prefetchHiddenThenListen = () =>
+          prefetchThenInstall({
+            eligible: fixed && !readonly && !anonymous && !!localStorage.getItem('mindpage_secret'),
+            // from the server, never the cache: a partial cache could miss an existing hidden
+            // document and a later save would then create a duplicate
+            fetch: async () =>
+              (
+                await getDocsFromServer(
+                  query(
+                    collection(getFirestore(firebase), 'items'),
+                    where('user', '==', user.uid),
+                    where('hidden', '==', true)
+                  )
+                )
+              ).docs.map(doc => Object.assign(doc.data(), { id: doc.id })),
+            onError: e => console.error('could not load hidden items from server (creates will re-confirm):', e),
+            retain: docs => (prefetchedHiddenDocs = docs),
+            stopped: () => ingressStopped,
+            // start listening for remote changes
+            // (also initialize if items were not returned by server)
+            // the unsubscribe closure is RETAINED so a sticky stop can invoke it exactly once, with
+            // the race-safe check below in case stop was reached before onSnapshot returned
+            install: () =>
+              armItemsUnsubscribe(
+            onSnapshot(
           items_query,
           // metadata changes are included so that the fromCache -> server transition fires a
           // snapshot even when the cached data matches the server (see the first-snapshot gate
@@ -7751,7 +7788,7 @@
               hasStoredSecret: !!localStorage.getItem('mindpage_secret'),
               // TRUE once the fixed-owner scan has completed: a cached first snapshot must then
               // wait for the server, because prefetched same-id copies are superseded by it
-              prefetchSucceeded: hiddenPrefetched,
+              prefetchSucceeded: !!prefetchedHiddenDocs,
             })
             const action = decision.action
             // authority (a current, server, no-pending-writes revision of the full-account
@@ -7777,24 +7814,19 @@
 
               return
             }
-            // ONE ALWAYS-SETTLING INITIALIZATION ATTEMPT. `initialization` resolves only on the
-            // success path (resolve_init runs after rendering), so a rejection or early return
-            // left it pending forever — and every callback lease, whose settle() awaits it, then
-            // queued behind it for the page's lifetime. this wrapper settles on every exit and
-            // enters sticky stop when initialization cannot complete, so a metadata-only
-            // candidate received during a failing rebuild can never seal over a half-built index
-            const attemptInitialize = async (): Promise<boolean> => {
-              try {
-                await initialize()
-                await initialization // the rendering pass that sets `initialized`
-                if (!initialized) stopIngress('initialization did not complete')
-                return initialized
-              } catch (e) {
-                console.error('initialization failed:', e)
-                stopIngress('initialization failed')
-                return false
-              }
-            }
+            // ONE ALWAYS-SETTLING INITIALIZATION ATTEMPT, retained in `initializeAttempt` so a
+            // lease can order behind it without touching `initialization` — which resolves only
+            // on the success path (resolve_init runs after rendering) and stays pending forever
+            // on a rejection or an encryption/signout early return. initialize() now RETURNS
+            // whether the rebuild completed, so nothing here awaits a promise that may never
+            // settle; sticky stop follows any incomplete attempt, so a metadata-only candidate
+            // received during a failing rebuild can never seal over a half-built index
+            const attemptInitialize = () =>
+              runInitializationAttempt({
+                initialize,
+                onError: e => console.error('initialization failed:', e),
+                stop: stopIngress,
+              })
             if (action == 'initialize' || action == 'wait_for_server') {
               // note first snapshot comes from cache (if any) w/ persistent local cache (see client.ts)
               init_log(
@@ -7816,7 +7848,16 @@
                 reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: true })
                 stopIngress('first snapshot with initialization already started')
               } else if (action == 'initialize') {
-                snapshot.docs.forEach(doc => items.push(Object.assign(doc.data(), { id: doc.id })))
+                // THE MERGE, by id: the CURRENT snapshot SUPERSEDES a prefetched same-id copy.
+                // the prefetch settled before this listener installed, so its row is strictly
+                // older — applying it after would move the index backward
+                const fromSnapshot = new Set<string>()
+                snapshot.docs.forEach(doc => {
+                  fromSnapshot.add(doc.id)
+                  items.push(Object.assign(doc.data(), { id: doc.id }))
+                })
+                for (const doc of prefetchedHiddenDocs ?? [])
+                  if (!fromSnapshot.has(doc.id)) items.push(doc)
                 // alert on any firebase errors before/during first snapshot
                 // note we refuse to initialize with errors to avoid potential corruption
                 if (firebase_errors > 0) {
@@ -7837,7 +7878,8 @@
                   // it SEALS only after the attempt succeeds — settling as success up front let a
                   // lease seal over a rebuild that had not finished, or had failed
                   const lease = reserveHiddenAuthority({ policy: decision.policy })
-                  void attemptInitialize().then(ok => lease.settle({ failed: !ok }))
+                  initializeAttempt = attemptInitialize()
+                  void initializeAttempt.then(ok => lease.settle({ failed: !ok }))
                 }
               }
               // set up callback to complete init (or "sync")
@@ -8185,7 +8227,10 @@
               })
             }
           }
-        ))
+              )
+              ),
+          })
+        void prefetchHiddenThenListen()
       }
 
       onMount(() => {
@@ -8885,14 +8930,10 @@
   }
 
 
-  // registers one decrypted hidden document into the index. used when a fixed page loads the
-  // OWNER's own records after their phrase is validated (see resolveFixedOwnerSecret) — that is
-  // initial loading, not a query result being replayed across names
-  function registerHiddenItem(item) {
-    if (!item.hidden || !item.text) return
-    const wrapper = parseHiddenWrapper(item.id, item.text)
-    if (wrapper) registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
-  }
+  // NOTE the post-prompt registration helper is gone: that path now takes one fresh
+  // candidate-keyed scan (see getSecretPhrase) whose rows are already purely classified, so it
+  // registers them directly rather than routing plaintext back through the effectful
+  // parseHiddenWrapper — which logs and quarantines, and has no business doing either mid-scan
 
   // persistence runs through the per-name controller (src/hidden_persistence.ts, matrix-tested):
   // writes for a name are serialized, settlement goes through the index transitions, and an

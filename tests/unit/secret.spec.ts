@@ -2,22 +2,20 @@ import { expect, test } from '@playwright/test'
 import { resolveFixedOwnerSecret, type AccountDoc, type FixedOwnerSecretDeps } from '../../src/secret.js'
 import { hashSecretPhrase, encryptWithSecret } from '../../src/crypto.js'
 
-// transition tests for the fixed-owner secret flow (see src/secret.ts): fail-closed fetch retry,
-// phrase validation against real ciphertext, and hidden-item registration completing before the
-// secret is returned — the corruption boundaries the e2e suite cannot drive deterministically
+// transition tests for the fixed-owner secret flow (see src/secret.ts): fail-closed fetch retry and
+// phrase validation against real ciphertext — the corruption boundaries the e2e suite cannot drive
+// deterministically. this flow is VALIDATION ONLY: registration moved to the caller's fresh
+// candidate-keyed scan, because the documents fetched here are as old as the prompt
 
 const doc = (id: string, data: Record<string, any>): AccountDoc => ({ id, data: () => ({ ...data }) })
 
 function deps(overrides: Partial<FixedOwnerSecretDeps> & { uid?: string }): FixedOwnerSecretDeps & {
   calls: string[]
-  registered: Record<string, any>[]
 } {
   const calls: string[] = []
-  const registered: Record<string, any>[] = []
   const uid = overrides.uid ?? 'uid-1'
   return {
     calls,
-    registered,
     fetchAccountDocs: async () => {
       calls.push('fetch')
       return []
@@ -34,10 +32,6 @@ function deps(overrides: Partial<FixedOwnerSecretDeps> & { uid?: string }): Fixe
       calls.push('wrong')
     },
     hashPhrase: phrase => hashSecretPhrase(uid, phrase),
-    registerHiddenItem: item => {
-      calls.push('register:' + item.id)
-      registered.push(item)
-    },
     signOut: () => {
       calls.push('signout')
     },
@@ -99,47 +93,26 @@ test('a server-confirmed account with no ciphertext returns null without prompti
   expect(d.calls).not.toContain('prompt')
 })
 
-test('hidden items are decrypted with the candidate and registered before the secret is returned', async () => {
-  const secret = await hashSecretPhrase('uid-1', 'phrase')
-  const hidden = async (id: string, name: string) => ({
-    hidden: true,
-    cipher: await encryptWithSecret(JSON.stringify({ text: JSON.stringify({ name, item: { v: id } }), attr: null }), secret),
-  })
-  const d = deps({
-    fetchAccountDocs: async () => [
-      doc('h1', await hidden('h1', 'global_store_a')),
-      doc('h2', await hidden('h2', 'global_store_b')),
-      doc('p1', { text: '#plain' }),
-    ],
-  })
-  const resolved = await resolveFixedOwnerSecret(d)
-  expect(resolved).toBe(secret)
-  // both hidden documents were registered (decrypted, cipher cleared) before resolution: a
-  // concurrent save awaiting this operation can only ever see a fully registered index
-  expect(d.registered.map(item => item.id).sort()).toEqual(['h1', 'h2'])
-  for (const item of d.registered) {
-    expect(item.cipher).toBeNull()
-    expect(item.text).toContain('global_store_')
-  }
-  expect(d.calls.indexOf('register:h2')).toBeLessThan(d.calls.length)
-})
-
-test('hidden documents register in ascending id order (adoption targets the minimum id) and only hidden documents are touched', async () => {
+test('the candidate is returned WITHOUT touching hidden documents: registration is the caller‘s fresh scan', async () => {
   const secret = await hashSecretPhrase('uid-1', 'phrase')
   const hidden = async (name: string) => ({
     hidden: true,
     cipher: await encryptWithSecret(JSON.stringify({ text: JSON.stringify({ name, item: {} }), attr: null }), secret),
   })
+  // a CORRUPT hidden document would have thrown inside the old registration pass. validation must
+  // not depend on any hidden document decrypting: it rests on finding one readable ciphertext
+  const rows = [
+    doc('z9', await hidden('global_store_x')),
+    doc('h1', { hidden: true, cipher: 'CORRUPT-HIDDEN-ITEM' }),
+    doc('p1', { text: '#plain' }),
+  ]
   const d = deps({
-    fetchAccountDocs: async () => [
-      // descending time order, as the real query returns: z9 is encountered before a1
-      doc('z9', await hidden('global_store_x')),
-      doc('p1', { cipher: 'CORRUPT-ORDINARY-ITEM' }), // ordinary (not hidden): must be skipped, not decrypted
-      doc('a1', await hidden('global_store_x')),
-    ],
+    fetchAccountDocs: async () => {
+      d.calls.push('fetch')
+      return rows
+    },
   })
   expect(await resolveFixedOwnerSecret(d)).toBe(secret)
-  // registration order is ascending by id, so a pending create would adopt a1, the minimum
-  expect(d.calls.filter(call => call.startsWith('register:'))).toEqual(['register:a1', 'register:z9'])
-  expect(d.registered.map(item => item.id)).toEqual(['a1', 'z9'])
+  // exactly one fetch, one prompt, no repeated pass over the (prompt-aged) documents
+  expect(d.calls).toEqual(['fetch', 'prompt'])
 })
