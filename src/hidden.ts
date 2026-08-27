@@ -18,7 +18,6 @@ export type HiddenWrapper = {
   // claim must not be displaced, and registration ADOPTS an existing document into it
   pending_create?: boolean | null
   adopt_id?: string | null
-  saving?: Promise<string> | null
 }
 
 export type HiddenIndex = {

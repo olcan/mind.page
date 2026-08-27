@@ -486,7 +486,10 @@ test('remote transitions are not delayed by an unacknowledged local write', asyn
   expect(order).toEqual(['remote']) // applied without waiting for the acknowledgement
   ack.resolve()
 })
-test('the saving mirror clears per wrapper even when the name chain continues with a new wrapper', async () => {
+test('saving belongs to the NAME: a wrapper replaced mid-write does not disturb it', async () => {
+  // the mirror used to live on the wrapper, so a replacement mid-write meant the object the owner
+  // reads had no mirror while a write for its name was in flight. it is one name-owned boolean
+  // now, so a replacement is simply irrelevant to it (round 60)
   const gate = deferred<void>()
   let gated = true
   const h = harness()
@@ -500,21 +503,18 @@ test('the saving mirror clears per wrapper even when the name chain continues wi
   const first: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
   idx.byId.set('d1', first)
   idx.byName.set('n', first)
-  controller.save('n', { v: 1 }) // first wrapper mirrors its in-flight write
-  expect(first.saving).toBeTruthy()
-  // the record is replaced remotely while that write is in flight, and the NEW wrapper takes
-  // over the name's chain
+  controller.save('n', { v: 1 })
+  expect(controller.isSaving('n'), 'saving from the moment save() accepts').toBe(true)
+  // the record is replaced remotely while that write is in flight
   const replacement: HiddenWrapper = { id: 'd1', name: 'n', item: { remote: true } }
   idx.byId.set('d1', replacement)
   idx.byName.set('n', replacement)
   controller.save('n', { v: 2 })
-  const fresh = idx.byName.get('n')!
+  expect(controller.isSaving('n'), 'still saving across the replacement').toBe(true)
   gated = false
   gate.resolve()
-  await flush()
-  // the mirror clears when the task it belongs to settles, not when the chain finally drains
-  expect(first.saving).toBeNull()
-  expect(fresh.saving ?? null).toBeNull()
+  for (let i = 0; i < 6; i++) await flush()
+  expect(controller.isSaving('n'), 'and false once the last write is issued').toBe(false)
 })
 test('a write already issued is not retracted by a later rename (durability over rename order)', async () => {
   // round-9 finding 6 wanted a remote rename to wait for an in-flight old-name write, so the
@@ -1740,31 +1740,38 @@ test('rejection with NOTHING owed rolls the owner back to the applied state', as
 
 // STAGE 3: the writer's half of the sticky ingress stop
 
-test('stop retains unissued intent, clears the mirror, and reports once per generation', async () => {
+test('stop retains unissued intent, clears saving, and reports once per generation', async () => {
   const failures: string[] = []
+  let acquisitions = 0
   const h = harness()
-  const { idx, calls } = h
-  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
-  // stop arrives BEFORE the queued task runs, so the generation is still unissued — flushing
-  // first would let the write complete and leave nothing owed to retain
+  const { calls } = h
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => void ++acquisitions,
+    notifyFailure: n => void failures.push(n),
+  })
+  // stop arrives BEFORE the scheduler continuation runs, so the generation is still unissued
   controller.save('n', { mine: 1 })
   expect(controller.owes('n')).toBe(true)
-  const holder = idx.byName.get('n')!
-  holder.saving = Promise.resolve() as any
+  expect(controller.isSaving('n'), 'saving synchronously').toBe(true)
 
   controller.stop()
-  expect(holder.saving, 'the saving mirror clears immediately').toBe(null)
+  expect(controller.isSaving('n'), 'and not saving once stopped').toBe(false)
   expect(failures, 'reported once for this generation').toEqual(['n'])
   expect(controller.owes('n'), 'the accepted intent is RETAINED — not lost, just unwritable').toBe(true)
+
+  // THE ROUND-60 BOUNDARY: the already-scheduled continuation must not resume into secret work
+  for (let i = 0; i < 8; i++) await flush()
+  expect(acquisitions, 'the post-stop scheduler continuation acquires nothing').toBe(0)
 
   // a second stop is a no-op, and no further work starts
   calls.length = 0
   controller.stop()
   for (let i = 0; i < 6; i++) await flush()
   expect(failures, 'no second report for the same generation').toEqual(['n'])
+  expect(acquisitions, 'still nothing').toBe(0)
   expect(calls.filter(c => c.op == 'create' || c.op == 'update'), 'no new SDK work').toHaveLength(0)
 })
-
 // TABLED WITH ITS POSITIVE CONTROL, and pinning the OUTCOME rather than a specific barrier: with
 // the no-await stop recheck deleted this still passes, because the refused attempt requeues and
 // the retry refuses at attemptWrite's entry instead. Both checks are required by the design (a
@@ -1951,7 +1958,10 @@ test('one generation is reported ONCE even when healing immediately re-blocks', 
   expect(h.calls.filter(c => c.op == 'update'), 'and no write').toHaveLength(0)
 })
 
-test('a superseding save cancels the older generation wake, and only the newest state is written', async () => {
+test('a superseding save REUSES the parked name wake, and only the newest state is written', async () => {
+  // the name owns the physical wait; Owed owns the intent. supersession deliberately does NOT
+  // cancel the waiter -- an earlier version did, and the queued-phase shortcut then meant nothing
+  // rearmed it and the work was dropped entirely (zero writes)
   const h = harness()
   const controller = createHiddenPersistence(h.deps)
   registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
@@ -1967,43 +1977,56 @@ test('a superseding save cancels the older generation wake, and only the newest 
   expect(itemOf(updates[0].text), 'carrying the newest intent').toEqual({ v: 2 })
 })
 
-test('a wrapper replaced while the writer is parked owns the saving mirror when the chain turn runs', async () => {
-  // round 59: scheduleOwed captured the SAVE-TIME wrapper and handed it to enqueue after the
-  // park. a delivery can replace it meanwhile, so the real chain mirror landed on a detached
-  // object while hiddenItemsByName pointed at the live one -- saving_global_store false for the
-  // whole build and write. the encryption is HELD so the mirror is read while the write is
-  // genuinely in flight, not after the turn has settled and cleared it
-  const encrypting = deferred<void>()
-  const h = harness()
-  const controller = createHiddenPersistence({
-    ...h.deps,
-    encryptState: async state => {
-      await encrypting.promise
-      const e: any = state
-      e.cipher = 'cipher:' + state.text
-      e.text = null
-      return e
-    },
+// the round-60 table: the holder can be REPLACED, RENAMED or REMOVED while the writer is parked
+// on the gate. under the old wrapper mirror each of these left the object the owner actually reads
+// with no saving state -- rename and removal especially, since attemptWrite then synthesizes a
+// fresh holder that never had one. saving belongs to the NAME, so all three are the same case
+for (const [label, disturb] of [
+  ['replaced under the same id', (idx: HiddenIndex) => {
+    const b: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
+    idx.byId.set('d1', b)
+    idx.byName.set('n', b)
+  }],
+  ['renamed away', (idx: HiddenIndex) => {
+    const b: HiddenWrapper = { id: 'd1', name: 'm', item: { v: 1 } }
+    idx.byId.set('d1', b)
+    idx.byName.set('m', b) // 'n' deliberately keeps its stale alias, as production does
+  }],
+  ['removed', (idx: HiddenIndex) => {
+    idx.byId.delete('d1')
+  }],
+] as const)
+  test(`a holder ${label} while the writer is parked leaves the NAME saving throughout`, async () => {
+    const encrypting = deferred<void>()
+    const encryptStarted = deferred<void>()
+    const h = harness()
+    const controller = createHiddenPersistence({
+      ...h.deps,
+      encryptState: async state => {
+        encryptStarted.resolve() // CAUSAL: the test waits for this, never for a turn count
+        await encrypting.promise
+        const e: any = state
+        e.cipher = 'cipher:' + state.text
+        e.text = null
+        return e
+      },
+    })
+    const a: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
+    registerHidden(h.idx, a, () => {})
+    const held = h.ingress.open('d2', 'cipher:d2') // an unrelated delivery shuts the global gate
+    controller.save('n', { mine: 1 })
+    expect(controller.isSaving('n'), 'saving synchronously').toBe(true)
+    disturb(h.idx)
+    expect(controller.isSaving('n'), 'still saving while parked, whatever happened to the holder').toBe(true)
+    held.ready(async () => {})
+    expect(await held.done).toBe('applied')
+    await encryptStarted.promise // the chain turn is now genuinely inside the build
+    expect(controller.isSaving('n'), 'and through the build').toBe(true)
+    encrypting.resolve()
+    for (let i = 0; i < 6; i++) await flush()
+    expect(controller.isSaving('n'), 'false once the write is issued').toBe(false)
+    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'exactly one write').toHaveLength(1)
   })
-  const a: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 0 } }
-  registerHidden(h.idx, a, () => {})
-  const held = h.ingress.open('d2', 'cipher:d2') // an unrelated delivery shuts the global gate
-  controller.save('n', { mine: 1 })
-  expect(a.saving, 'the save-time wrapper mirrors immediately').toBeTruthy()
-  // a same-id replacement lands while the writer is parked on the gate
-  const b: HiddenWrapper = { id: 'd1', name: 'n', item: { v: 1 } }
-  registerHidden(h.idx, b, () => {})
-  expect(h.idx.byName.get('n'), 'B is what the owner reads now').toBe(b)
-  held.ready(async () => {})
-  expect(await held.done).toBe('applied')
-  for (let i = 0; i < 6; i++) await flush()
-  // the chain turn is now running and blocked in encryptState
-  expect(b.saving, 'the LIVE wrapper carries the mirror through the build and write').toBeTruthy()
-  encrypting.resolve()
-  for (let i = 0; i < 6; i++) await flush()
-  expect(h.calls.filter(c => c.op == 'update').map(c => c.id)).toEqual(['d1'])
-  expect(b.saving, 'and it clears when the turn settles').toBe(null)
-})
 test('the gate closing during acquireSecret mutates nothing: no synthetic wrapper, no owner publication', async () => {
   // round 59 section 6: attemptWrite could clone, resolve a target, INSTALL a synthetic
   // pending_create in byId/byName and publish owner state before attemptCreate first read the
@@ -2036,8 +2059,11 @@ test('the gate closing during acquireSecret mutates nothing: no synthetic wrappe
 })
 
 // ---- TargetToken and the global gate are independently necessary (rounds 58, 59) ----
-// the existing same-id replacement row proves WRAPPER IDENTITY checking. these three isolate the
-// other two halves: the per-id receipt frontier, and the global gate
+// these three isolate the per-id receipt frontier and the global gate. NOT the wrapper half of
+// TargetToken: no current row pins that in isolation, and the adoption row often cited for it
+// arrives through a real delivery (advancing the frontier) and rebases the projection, so it
+// would pass without the wrapper comparison. that field is retained deliberately — the corpus
+// seam's same-id replacement is what will finally judge it (round 60)
 
 test('an idempotent delivery for the SELECTED id refuses the first payload by frontier alone', async () => {
   // the delivery applies and PRUNES during the held encryption, leaving canonical selection and
@@ -2092,3 +2118,85 @@ test('an unrelated delivery that applies BEFORE the encryption finishes lets the
   await releaseGate()
   expect(calls.filter(c => c.op == 'update').map(c => c.id), 'ONE write, no retry').toEqual(['d1'])
 })
+
+// ---- confirmation is an await, so both boundaries reopen across it (round 60) ----
+
+test('a delivery opening during confirmation stops the create: no adoption, no publication, no encryption', async () => {
+  const published: string[] = []
+  const confirming = deferred<void>()
+  const confirmStarted = deferred<void>()
+  const encrypted: string[] = []
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    confirmIndex: async () => {
+      confirmStarted.resolve()
+      await confirming.promise
+    },
+    syncOwner: n => void published.push(n),
+    encryptState: async state => {
+      encrypted.push(state.text)
+      const e: any = state
+      e.cipher = 'cipher:' + state.text
+      e.text = null
+      return e
+    },
+  })
+  // a same-name survivor exists, so a confirmation that returns would adopt and publish
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  h.idx.byName.delete('n') // ... but is not the claimed holder, so the create path runs
+  controller.save('n', { mine: 1 })
+  await confirmStarted.promise
+  published.length = 0
+  encrypted.length = 0
+  const held = h.ingress.open('d2', 'cipher:d2') // the gate closes DURING confirmation
+  confirming.resolve()
+  for (let i = 0; i < 8; i++) await flush()
+  expect(published, 'no owner publication behind a shut gate').toEqual([])
+  expect(encrypted, 'and no encryption').toEqual([])
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+  // once the gate heals the create completes normally
+  held.ready(async () => {})
+  expect(await held.done).toBe('applied')
+  for (let i = 0; i < 10; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'create' || c.op == 'update').length, 'exactly one write, after healing').toBe(1)
+})
+
+for (const [label, settle] of [
+  ['fulfils', (d: ReturnType<typeof deferred<void>>) => d.resolve()],
+  ['rejects', (d: ReturnType<typeof deferred<void>>) => d.reject(new Error('confirmation failed'))],
+] as const)
+  test(`a confirmation that ${label} AFTER stop mutates nothing and reports nothing further`, async () => {
+    const failures: string[] = []
+    const published: string[] = []
+    const confirming = deferred<void>()
+    const confirmStarted = deferred<void>()
+    const h = harness()
+    const controller = createHiddenPersistence({
+      ...h.deps,
+      confirmIndex: async () => {
+        confirmStarted.resolve()
+        await confirming.promise
+      },
+      syncOwner: n => void published.push(n),
+      notifyFailure: n => void failures.push(n),
+    })
+    // a same-name SURVIVOR exists but does not hold the name, so a confirmation that returns
+    // would adopt it and publish -- which is what makes this row able to tell the stop check
+    // apart from doing nothing
+    registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+    h.idx.byName.delete('n')
+    controller.save('n', { mine: 1 })
+    await confirmStarted.promise
+    const before = [...h.idx.byId.keys()]
+    controller.stop()
+    expect(failures, 'stop reported this generation once').toEqual(['n'])
+    published.length = 0
+    settle(confirming)
+    for (let i = 0; i < 10; i++) await flush()
+    expect([...h.idx.byId.keys()], 'the late continuation mutated no index state').toEqual(before)
+    expect(published, 'and published nothing').toEqual([])
+    expect(failures, 'and reported nothing further').toEqual(['n'])
+    expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
+    expect(controller.owes('n'), 'the intent is still retained').toBe(true)
+  })

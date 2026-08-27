@@ -322,7 +322,7 @@
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
-    // hidden-index authority (see settleHiddenAuthority), asserted by cache/authority e2e tests
+    // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
@@ -487,7 +487,7 @@
     get saving_global_store(): boolean {
       const _item = item(this.id)
       if (!_item.savedId) return false // can not save global store until item itself has been saved
-      return !!hiddenItemsByName.get('global_store_' + _item.savedId)?.saving
+      return hiddenPersistence.isSaving('global_store_' + _item.savedId)
     }
     get saved_id(): number {
       return item(this.id).savedId
@@ -6577,20 +6577,12 @@
   //   failed hidden application — creates then re-confirm against the server, failing closed
   // - a revision with own pending writes leaves authority unchanged (our writes don't blind us)
   // on a false -> true grant, provisional invalid-hidden candidates are re-validated against
-  // the NOW-current state and only then deleted (see cleanupInvalidHidden)
-  // recomputes invalid candidates once this lease's ordered effect is consumed. the GRANT
-  // decision itself is no longer made here — the coordinator's receipt-ordered basis and the
-  // delivery gate decide usability (see hiddenAuthorityUsable) — so this only has to notice
-  // that a usable moment arrived with work owed
-  function settleHiddenAuthority({ hiddenChanged }: { hiddenChanged?: boolean }) {
-    if (fixed || anonymous) return
-    // recompute on any usable revision that changed hidden records, as well as on owed cleanup:
-    // duplicates and orphans arriving while authority is already usable would otherwise wait
-    // for an unrelated revoke/re-grant that may never come
-    if (hiddenAuthorityUsable() && (hiddenChanged || hiddenCleanupPending)) reportInvalidHiddenCandidates()
-
-  }
-
+  // the NOW-current state and only then deleted (see cleanupInvalidHidden).
+  // settleHiddenAuthority() lived here and is DELETED: the lease's own `done` continuation in
+  // reserveHiddenAuthority does its work, and its `fixed || anonymous` guard is subsumed by the
+  // policy union — those revisions are never 'candidate', so the basis never advances for them
+  // and hiddenAuthorityUsable() is false regardless. its `hiddenChanged` condition is subsumed
+  // too: every hidden application sets hiddenCleanupPending
   // recomputes invalid hidden records from CURRENT state and deletes them — runs INSIDE the
   // serialized snapshot chain on a false -> true authority grant, so classification cannot race
   // remote applications. startup candidates are not deleted from their (stale) provisional
@@ -7695,7 +7687,7 @@
             // receipt-time grant let a save skip confirmation while the revision's own changes
             // (possibly the very document being created) were still waiting in the queue, and
             // let initialization delete provisional invalid candidates before the changes that
-            // would reclassify them applied (see settleHiddenAuthority)
+            // would reclassify them applied (see reserveHiddenAuthority)
             if (action == 'ignore_sync_disabled') {
               console.warn('ignoring firestore snapshot due to _disable_sync')
               // STICKY: firestore does not replay this callback's docChanges, so clearing the flag
@@ -7846,7 +7838,6 @@
             // settles only after every queued transition of this revision lands. CALLBACK-SCOPED
             // so the task's finally owns the same lifetime on every exit, including a throw
             const hiddenApplied: Promise<unknown>[] = []
-            let landed: Promise<unknown> = Promise.resolve()
             for (const change of snapshot.docChanges()) {
               const id = change.doc.id
               entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
@@ -7891,7 +7882,7 @@
                 // observe the OLD frontier — letting an acknowledgement reconcile while that
                 // application was still pending. hiddenApplyOk defaults to success, so that is a
                 // wrong owner state, not merely a short wait
-                landed = Promise.allSettled(hiddenApplied)
+                const landed = Promise.allSettled(hiddenApplied)
                 hiddenFrontier = hiddenFrontier.then(async () => void (await landed)) // settle-only: allSettled never rejects
                 void landed.then(() => {
                   activeIngressContexts.delete(context)
@@ -9142,7 +9133,7 @@
       if (level == 'error') {
         firebase_errors++
         // any firestore error revokes hidden-index authority: the next hidden create then
-        // re-confirms against the server, failing closed (see settleHiddenAuthority); the epoch
+        // re-confirms against the server, failing closed (see hiddenAuthorityUsable); the epoch
         // bump also invalidates any authoritative grant already queued behind applications
         revokeHiddenAuthority()
       }

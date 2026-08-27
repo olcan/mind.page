@@ -13,9 +13,12 @@
 // overlapping deliveries for one document can erase one another (one receipt slot per id). both
 // are open blockers — see the ingress coordinator contract in plans/mind_page_next_steps.md.
 //
-// NOTE: `wrapper.saving` is mirrored while a write is being built and issued, and cleared once it
-// reaches the SDK's queue — not when the server acknowledges. item code observes it through
-// _Item.saving_global_store, so that meaning is part of the window contract.
+// NOTE: saving state is owned BY NAME (`isSaving`), true from the moment save() accepts an intent
+// until that generation's write reaches the SDK's queue — not until the server acknowledges. item
+// code observes it through _Item.saving_global_store, so that meaning is part of the window
+// contract. it was previously mirrored on the WRAPPER, which could not survive the wrapper being
+// replaced, renamed or removed while the writer was parked on the gate (round 60): the intent,
+// the wake and the blocked report already belong to the name, and so does this.
 
 import {
   compareIds,
@@ -203,23 +206,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const currentOwed = (name: string, generation: number) =>
     owed.get(name)?.generation == generation ? owed.get(name) : undefined
 
-  // enqueue work for the name; failures settle inside each task, so the chain always continues;
-  // the wrapper mirrors in-flight status via `saving`, cleared when ITS latest mirrored promise
-  // settles (not when the chain drains: the name can be reused by a new wrapper whose work must
-  // not keep the old wrapper's mirror alive forever)
-  function enqueue(name: string, wrapper: HiddenWrapper | undefined, task: () => Promise<void>) {
+  // enqueue work for the name; failures settle inside each task, so the chain always continues.
+  // saving state is NOT mirrored here any more: it belongs to the name (see `saving`), because a
+  // wrapper can be replaced, renamed or removed while its write is still owed
+  function enqueue(name: string, task: () => Promise<void>) {
     const next = (chains.get(name) ?? Promise.resolve()).then(task, task)
     chains.set(name, next)
-    let mirrored: Promise<string> | undefined
-    if (wrapper) {
-      mirrored = next.then(() => wrapper.id) as Promise<string>
-      mirrored.catch(() => {}) // observable to waiters, but never an unhandled rejection
-      wrapper.saving = mirrored
-    }
     next
       .catch(() => {}) // failures settle inside tasks; the chain itself must never be unhandled
       .then(() => {
-        if (wrapper && wrapper.saving === mirrored) wrapper.saving = null
         if (chains.get(name) === next) chains.delete(name)
       })
     return next
@@ -269,9 +264,16 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const isPending = (_id: string) => !gateWritable()
 
 
-  // THE GENERATION-OWNED WAKE: at most one live subscription per name, cancelled when the
-  // generation is superseded or ingress stops. without this, a wake outlives its generation and
-  // resolves into work nobody owes
+  // NAMES CURRENTLY SAVING: set when save() accepts an intent, cleared when that generation's
+  // write is issued (or the work is abandoned). ONE boolean per name, read by isSaving — no
+  // promise, no wrapper identity, nothing to transfer when the holder changes underneath
+  const saving = new Set<string>()
+
+  // THE NAME-OWNED WAKE: at most one live subscription per name, REUSED across supersession —
+  // `Owed` already represents the latest intent for the name, so a parked waiter serves whatever
+  // the name owes when it fires. only stop cancels one. reporting is separately GENERATION-scoped
+  // (see reportBlocked and Owed.reportedBlocked): the physical wait and the user-visible outcome
+  // have different owners, and conflating them is what made supersession drop work entirely
   const wakes = new Map<string, { cancel(): void }>()
   function cancelWake(name: string) {
     wakes.get(name)?.cancel()
@@ -322,19 +324,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   // this ordering is the whole point — persistOwed runs inside the chain, and a delivery's
   // application enqueues on that same chain, so a writer that waits while holding it deadlocks
   // against the very delivery that would release it
-  function scheduleOwed(name: string, holder?: HiddenWrapper) {
-    // MIRROR SYNCHRONOUSLY. saving_global_store must be true the moment the user saves — that is
-    // part of the window contract in this file's header — and the gate wait below happens BEFORE
-    // enqueue, which is what normally installs the mirror. this placeholder covers exactly that
-    // new window; enqueue supersedes it, and the finally below settles it either way so nothing
-    // awaiting it hangs
-    let resolvePlaceholder: (() => void) | undefined
-    let placeholder: Promise<string> | undefined
-    if (holder) {
-      placeholder = new Promise<string>(res => (resolvePlaceholder = () => res(holder.id)))
-      placeholder.catch(() => {})
-      holder.saving = placeholder
-    }
+  function scheduleOwed(name: string) {
+    // SAVING, SYNCHRONOUSLY: saving_global_store must be true the moment the user saves (this
+    // file's window contract), and the gate wait below happens before the chain is taken. one
+    // name-owned boolean needs no placeholder promise and nothing to transfer when the holder is
+    // replaced, renamed or removed while we are parked
+    saving.add(name)
     void (async () => {
       try {
         if (!owed.has(name)) return
@@ -343,17 +338,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // wake, and stop can land in the continuation gap. without this the writer enqueues, and
         // persistOwed then prompts for a phrase for a page that can never write again
         if (stopped || !owed.has(name)) return
-        // RE-RESOLVE THE LIVE HOLDER at the handoff. the wrapper captured at save time can have
-        // been replaced by a delivery while this was parked; putting the real chain mirror on the
-        // DETACHED old object leaves saving_global_store false for the wrapper the owner actually
-        // reads, throughout the build and write that follow
-        const live = deps.index().byName.get(name)
-        void enqueue(name, live ?? holder, () => persistOwed(name)) // installs the real mirror
+        await enqueue(name, () => persistOwed(name))
       } finally {
-        resolvePlaceholder?.()
-        // never leave a resolved placeholder standing as the mirror: it reads as truthy, so the
-        // owner would show a save in progress forever. enqueue's replacement is left alone
-        if (holder && holder.saving === placeholder) holder.saving = null
+        // the name stops saving when this scheduled attempt is over, however it ended. a retry
+        // schedules again and marks it saving again, synchronously, so the observable cannot
+        // flicker false between a refusal and its requeue
+        if (!owed.has(name) || owed.get(name)!.phase != 'queued') saving.delete(name)
       }
     })()
   }
@@ -366,8 +356,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const op = owed.get(name)
     if (!op || op.reportedBlocked) return
     op.reportedBlocked = true
-    const holder = deps.index().byName.get(name)
-    if (holder?.saving) holder.saving = null // it is not saving, and will not be until healed
+    saving.delete(name) // it is not saving, and will not be until a later delivery heals the block
     try {
       deps.notifyFailure(name, new Error(`hidden ingress blocked: '${name}' cannot be written until a later change for the affected document applies`))
     } catch (e) {
@@ -414,6 +403,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const op = currentOwed(name, generation)
     if (!op) return false // superseded before issue: no write, no finalization
     op.phase = 'issued'
+    // ISSUED: it is in the SDK'"'"'s durable queue, which is where saving ends. the scheduler'"'"'s finally
+    // also clears it, but one microtask later (persistOwed awaits attemptWrite), and a reactive
+    // read in that gap would see a stale true
+    saving.delete(name)
     const write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
     write.then(
       () => {
@@ -422,7 +415,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // the APPLIED index, so settling straight from the acknowledgement could put the owner
         // back in step with state that a queued delivery was about to replace — and then clear
         // `owes()`, letting that delivery through as if nothing were outstanding
-        void enqueue(name, undefined, async () => {
+        void enqueue(name, async () => {
           if (!currentOwed(name, generation)) return
           owed.delete(name) // settled, and still the latest: the write IS committed
           // STOP WINS over the echo. reconciling publishes owner state derived from an index that
@@ -452,7 +445,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         const index = deps.index()
         if (index.byId.get(id)) removeHidden(index, id) // it does not exist server-side
         current.phase = 'queued'
-        void enqueue(name, undefined, () => persistOwed(name))
+        void enqueue(name, () => persistOwed(name))
       },
     )
     return true
@@ -481,7 +474,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     if (!holder) {
       // nothing holds the name (never created, or removed while we were building): re-enter the
       // confirmed-create resolution rather than writing to whatever we had before
-      holder = { name, item: state, id: deps.newTempId(), saving: null, pending_create: true, adopt_id: null }
+      holder = { name, item: state, id: deps.newTempId(), pending_create: true, adopt_id: null }
       const index = deps.index()
       index.byId.set(holder.id, holder)
       index.byName.set(name, holder)
@@ -548,6 +541,12 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // decision) while routing every other name through its own chain (see confirmIndex)
         await deps.confirmIndex(name) // rejects to fail the create
         if (!current()) return true // superseded: the newer generation redoes this
+        // THE SAME CONTINUATION RULE as after acquireSecret: confirmation is an await, so a
+        // delivery can open or ingress can stop across it. checking only generation ownership let
+        // this go on to select an adopter, publish to the owner through mergeAdopted, and start a
+        // fresh encryption behind a shut gate or after stop
+        if (stopped) return true
+        if (!gateWritable()) return false
         // a same-name record can already be known locally even when confirmation was a no-op
         // (an authoritative index with a retained duplicate, or a remote arrival mid-create):
         // adopt the minimum-id survivor instead of creating alongside it
@@ -612,6 +611,11 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // mutation the generation checks above exist to prevent. it returns ABANDONMENT rather than
       // rethrowing, so the outer catch does not log a failure for work already known to be obsolete
       if (!current()) return true
+      // AND ON THE WAY OUT. a confirmation or encryption held across stop can reject afterwards,
+      // and finalizing an adoption or removing the pending wrapper here is exactly the stale
+      // world mutation the generation check above prevents — stop retained and reported this
+      // generation already, so its late continuation mutates nothing and reports nothing
+      if (stopped) return true
       if (wrapper.adopt_id) {
         // the document exists: settle onto it so the next save UPDATES it — deleting the
         // wrapper would send the next save down the create path and duplicate it
@@ -699,8 +703,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // SDK result, and clearing its mirror here contradicted that ownership (and this block's
         // own comment) — the write is still in flight, so the name is still saving
         if (op.phase == 'issued') continue
-        const holder = deps.index().byName.get(name)
-        if (holder?.saving) holder.saving = null // the mirror clears immediately
+        saving.delete(name) // it stops saving immediately
         if (op.reportedStop) continue
         op.reportedStop = true
         notifications.push([name, stoppedError()])
@@ -789,7 +792,6 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
           name,
           item,
           id: deps.newTempId(),
-          saving: null,
           pending_create: true,
           adopt_id: null,
         }
@@ -835,7 +837,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         }
         return true
       }
-      scheduleOwed(name, holder)
+      scheduleOwed(name)
       return true
     },
 
@@ -845,6 +847,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // still queued — a handler that reacts by saving would otherwise persist the older state
     owes(name: string) {
       return owed.has(name)
+    },
+
+    // whether this NAME has a change being built or waiting to be built. true from the moment
+    // save() accepts an intent until that generation's write reaches the SDK queue; false again
+    // while a blocked gate holds it, since it is not saving then and cannot until healing.
+    // read by _Item.saving_global_store
+    isSaving(name: string) {
+      return saving.has(name)
     },
 
     // applies a remote transition (add/modify/remove) for the name ON ITS CHAIN, so it can
@@ -870,7 +880,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       const acquire = (i: number): Promise<void> =>
         i == affected.length
           ? Promise.resolve(apply())
-          : (enqueue(affected[i], undefined, () => acquire(i + 1)) as Promise<void>)
+          : (enqueue(affected[i], () => acquire(i + 1)) as Promise<void>)
       return acquire(0)
     },
 

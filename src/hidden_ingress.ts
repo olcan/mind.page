@@ -1,17 +1,17 @@
-// the hidden INGRESS COORDINATOR — stage 2 of the design in the vault repo,
-// notes/design/mind_page_hidden_ingress_coordinator.md (revision 13; cleared as revision 10 by
-// review round 42, lifecycle rules added by rounds 43-45). that document is normative; this
-// module implements its pure surface and adds nothing beyond it.
+// the hidden INGRESS COORDINATOR — the design in the vault repo,
+// notes/design/mind_page_hidden_ingress_coordinator.md (revision 22). that document is normative;
+// this module implements its pure surface and adds nothing beyond it.
 //
-// PURE and wired to nothing: no firestore, no index, no owner, no crypto. the listener will feed
-// it deliveries and the writer will consume its gate, waits, echo waiters and authority in the
-// stage-3 cutover. every schedule in the design's "Stage 2" list is pinned in
-// tests/unit/hidden_ingress.spec.ts.
+// PURE: no firestore, no index, no owner, no crypto. the listener feeds it deliveries and the
+// writer consumes its gate, waits and authority; the echo waiters are armed but not yet consumed.
+// every schedule in the design's "Stage 2" list is pinned in tests/unit/hidden_ingress.spec.ts.
 //
-// what it replaces (at cutover, not before): the one-slot `receipts` map, `hiddenApplyOk`, the
-// timer requeue and the dirty-sequence authority — one replaceable slot per document id stood for
-// every delivery received, the latest decoded state and the application lifecycle at once, which
-// is the root of the remaining ingress defects.
+// what it replaces: the one-slot `receipts` map, `hiddenApplyOk`, the timer requeue and the
+// dirty-sequence authority — one replaceable slot per document id stood for every delivery
+// received, the latest decoded state and the application lifecycle at once, which is the root of
+// the ingress defects. the timer requeue and the dirty-sequence authority are GONE; `receipts`
+// and `hiddenApplyOk` are still in place and are deleted in the final deletion-only step, once
+// the corpus seam and the lanes exist (review round 59).
 
 // RESOLVE = applied, REJECT = blocked. there is no third answer (no 'irrelevant': a redelivery
 // must rerun the complete idempotent repair before it may heal an older partial-application block)
