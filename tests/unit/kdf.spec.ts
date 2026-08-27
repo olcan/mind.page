@@ -1,12 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-  createKeyCache,
-  deriveKeyBytes,
-  phraseBytes,
-  argon2idDeriver,
-  KDF_VERSIONS,
-  type Deriver,
-} from '../../src/kdf.js'
+import { deriveKeyBytes, phraseBytes, type Deriver } from '../../src/kdf.js'
 import {
   CipherError,
   classifyTextCipher,
@@ -34,18 +27,32 @@ const CHEAP = { memorySize: 8 * 1024, iterations: 1, parallelism: 1, hashLength:
 const SALT = new Uint8Array(16).fill(7)
 const FIXED_KEY = new Uint8Array(32).map((_, i) => i) // framing rows: no derivation involved
 
+// the SHARED cross-check vector: identical input in this Node row and the browser worker smoke
+// (tests/e2e/kdf.spec.ts asserts the same full 32-byte hex), so "matches the Node vector" is a
+// literal statement rather than a four-byte overlap of different inputs (review 81)
+export const KAT = {
+  password: 'test phrase',
+  saltFill: 7,
+  hex: 'e18399378b0a69373a4802509400ba9b281fa706bc645d79a7ed0fe338aedca2',
+}
+
 test('KNOWN ANSWER: hash-wasm argon2id 0x13 under the cheap test parameters', async () => {
-  // pins the dependency, not the math: if hash-wasm changes its defaults, units (memorySize is
-  // KiB), Argon2 version, or output encoding, this exact vector moves
-  const key = await argon2idDeriver({ password: phraseBytes('test phrase'), salt: SALT, params: CHEAP })
-  expect(key.length).toBe(32)
-  expect(Buffer.from(key).toString('hex')).toBe(
-    Buffer.from(await argon2idDeriver({ password: phraseBytes('test phrase'), salt: SALT, params: CHEAP })).toString(
-      'hex'
-    )
-  ) // deterministic
-  // the frozen vector: recorded from the pinned hash-wasm@4.12.0, argon2id v0x13
-  expect(Buffer.from(key).toString('hex')).toBe('e18399378b0a69373a4802509400ba9b281fa706bc645d79a7ed0fe338aedca2')
+  // ONE real derivation — the literal expectation already pins determinism and output.
+  // PROVENANCE (2026-08-27): this exact vector is INDEPENDENTLY reproduced by argon2-cffi 25.x
+  // (CFFI bindings to the reference C implementation), hash_secret_raw(b'test phrase',
+  // bytes([7]*16), time_cost=1, memory_cost=8192, parallelism=1, hash_len=32, type=ID,
+  // version=19) — so it pins hash-wasm@4.12.0 AGAINST the reference, not against itself
+  const { argon2id } = await import('hash-wasm')
+  const key = await argon2id({
+    password: phraseBytes(KAT.password),
+    salt: SALT,
+    memorySize: CHEAP.memorySize,
+    iterations: CHEAP.iterations,
+    parallelism: CHEAP.parallelism,
+    hashLength: CHEAP.hashLength,
+    outputType: 'binary',
+  })
+  expect(Buffer.from(key).toString('hex')).toBe(KAT.hex)
 })
 
 test('NFC normalization: composed and decomposed spellings derive the SAME v1 key', async () => {
@@ -70,44 +77,22 @@ test('v0 is NOT normalized: the legacy key keeps the exact original Unicode byte
   expect(await decryptWithSecret(composedCipher, 'café')).toBe('data')
 })
 
-test('unknown versions and wrong salt lengths are rejected before any derivation', async () => {
+test('the version is validated as EXACTLY the number 1: hostile metadata never reaches a deriver', async () => {
   let derivations = 0
   const spy: Deriver = async () => (derivations++, FIXED_KEY)
-  await expect(deriveKeyBytes('p', SALT, 2, spy)).rejects.toThrow('unsupported kdf version')
+  // TypeScript's annotation disappears at runtime; these are the values a stored document can
+  // actually carry, including prototype-chain keys an object lookup would have resolved
+  for (const version of ['1', '__proto__', 'toString', 1.5, 2, 0, null, undefined] as unknown[])
+    await expect(deriveKeyBytes('p', SALT, version, spy), String(version)).rejects.toThrow('unsupported kdf version')
   await expect(deriveKeyBytes('p', new Uint8Array(8), 1, spy)).rejects.toThrow('salt must be 16 bytes')
   expect(derivations, 'stored metadata is untrusted: nothing derived').toBe(0)
 })
 
-test('the key cache single-flights the COMPLETE identity (phrase, salt, version)', async () => {
-  let derivations = 0
-  const held: Array<() => void> = []
-  const deriver: Deriver = () =>
-    new Promise(res => {
-      derivations++
-      held.push(() => res(FIXED_KEY))
-    })
-  const cache = createKeyCache(deriver)
-  const a1 = cache.derive('phrase', SALT, 1)
-  const a2 = cache.derive('phrase', SALT, 1)
-  expect(derivations, 'same identity: one derivation').toBe(1)
-  // a DIFFERENT SALT is a different account: reusing the key would cross accounts
-  const otherSalt = new Uint8Array(16).fill(8)
-  void cache.derive('phrase', otherSalt, 1)
-  expect(derivations, 'salt is part of the identity').toBe(2)
-  held.forEach(release => release())
-  expect(await a1).toBe(await a2)
-})
-
-test('a FAILED derivation is not cached: the next attempt re-derives', async () => {
-  let attempts = 0
-  const deriver: Deriver = async () => {
-    if (++attempts == 1) throw new Error('worker load failed')
-    return FIXED_KEY
-  }
-  const cache = createKeyCache(deriver)
-  await expect(cache.derive('p', SALT, 1)).rejects.toThrow('worker load failed')
-  expect(await cache.derive('p', SALT, 1), 'transient failure recovered').toEqual(FIXED_KEY)
-  expect(attempts).toBe(2)
+test('a deriver returning anything but exactly 32 bytes fails AT the derivation boundary', async () => {
+  // a faulty deriver must fail here, not at a later import: acquisition retains the result
+  await expect(deriveKeyBytes('p', SALT, 1, async () => new Uint8Array(1))).rejects.toThrow('expected 32')
+  await expect(deriveKeyBytes('p', SALT, 1, async () => new Uint8Array(44))).rejects.toThrow('expected 32')
+  expect(await deriveKeyBytes('p', SALT, 1, async () => FIXED_KEY)).toEqual(FIXED_KEY)
 })
 
 // ---- the v1 cipher contract (injected fixed key; zero KDF cost) --------------------------------
@@ -179,16 +164,64 @@ test('a stripped v1 tag lands in the v0 parser as ordinary noise, not a special 
   await expect(decryptWithSecret(stripped, 'any secret'), 'and fails as ordinary v0 noise').rejects.toThrow()
 })
 
-test('the v0 reader is untouched: frozen text and bytes vectors still decrypt', async () => {
-  const text = await encryptWithSecret('legacy text', 'legacy secret')
-  expect(await decryptWithSecret(text, 'legacy secret')).toBe('legacy text')
-  const { encryptBytesWithSecret } = await import('../../src/crypto.js')
-  const bytes = await encryptBytesWithSecret(new Uint8Array([9, 8, 7]), 'legacy secret')
-  expect(Array.from(await decryptBytesWithSecret(bytes, 'legacy secret'))).toEqual([9, 8, 7])
+test('importV1Key refuses non-32-byte material as an INVARIANT error, not a cipher outcome', async () => {
+  // the v0 string functions hash their input again; this is the guard that a base64 string can
+  // never silently become the key by length coincidence. it is a plain Error — broken key
+  // plumbing must not be confusable with corpus corruption (review 81)
+  const failure = await importV1Key(new Uint8Array(44)).catch(e => e)
+  expect(String(failure)).toContain('invalid v1 key material')
+  expect(failure instanceof CipherError, 'NOT a CipherError').toBe(false)
 })
 
-test('importV1Key refuses non-32-byte material: the raw-key contract is load-bearing', async () => {
-  // the v0 string functions hash their input again; this is the guard that a base64 string can
-  // never silently become the key by length coincidence
-  await expect(importV1Key(new Uint8Array(44))).rejects.toThrow('32 bytes')
+test('LITERAL v1 fixtures decrypt: the persisted formats are frozen, not just round-tripped', async () => {
+  // a coordinated change to frame + AAD + writer keeps round-trip rows green while making
+  // already-persisted v1 data unreadable (review 81). these literals pin the wire format
+  const key = await importV1Key(FIXED_KEY)
+  expect(await decryptV1Text('1!a0a1a2a3a4a5a6a7a8a9aaabgGoTVyClIslTRfO2fw7gcj85RoAlsImU/LyzzG0J', key)).toBe(
+    'frozen v1 text'
+  )
+  const bytesFixture = new Uint8Array([
+    ...'~1!a0a1a2a3a4a5a6a7a8a9aaab'.split('').map(c => c.charCodeAt(0)),
+    ...Array.from(Buffer.from('7xB7K0DOsSE2Pj7UvZhowG41y/uJ', 'base64')),
+  ])
+  expect(Array.from(await decryptV1Bytes(bytesFixture, key))).toEqual([9, 8, 7, 6, 5])
+})
+
+test('an impossible frame length is MALFORMED, never an authentication failure', async () => {
+  // a payload shorter than the 16-byte GCM tag cannot be a ciphertext at all; letting it reach
+  // Web Crypto turned it into authentication-failed, which acquisition reads as evidence about
+  // the phrase (review 81)
+  const key = await importV1Key(FIXED_KEY)
+  const short = '1!' + 'a0a1a2a3a4a5a6a7a8a9aaab' + Buffer.from(new Uint8Array(8)).toString('base64')
+  const failure = await decryptV1Text(short, key).catch(e => e as CipherError)
+  expect((failure as CipherError).kind).toBe('malformed-frame')
+  const shortBytes = new Uint8Array([...'~1!a0a1a2a3a4a5a6a7a8a9aaab'.split('').map(c => c.charCodeAt(0)), 1, 2, 3])
+  expect(((await decryptV1Bytes(shortBytes, key).catch(e => e)) as CipherError).kind).toBe('malformed-frame')
+})
+
+test('only OperationError translates to authentication-failed; an integration error propagates', async () => {
+  // an InvalidAccessError (a key imported without the decrypt usage) is broken plumbing, not
+  // evidence about the data — relabeling it authentication-failed would feed the prompt policy a lie
+  const encryptOnly = await importV1Key(FIXED_KEY, ['encrypt'])
+  const cipher = await encryptV1Text('t', encryptOnly)
+  const failure = await decryptV1Text(cipher, encryptOnly).catch(e => e)
+  expect(failure instanceof CipherError, 'NOT translated').toBe(false)
+  expect((failure as DOMException).name).toBe('InvalidAccessError')
+})
+
+test('classification and parsing share ONE strict grammar, and the bytes dispatcher exists', async () => {
+  const { classifyBytesCipher } = await import('../../src/crypto.js')
+  // text: canonical '1!' only; any other digits! shape is a future tag; v0 needs its hex iv
+  expect(classifyTextCipher('1!' + 'a'.repeat(24) + 'AAAA')).toBe('v1')
+  expect(classifyTextCipher('01!whatever')).toBe('unsupported-version')
+  expect(classifyTextCipher('2!whatever')).toBe('unsupported-version')
+  expect(classifyTextCipher('not a cipher')).toBe('malformed-frame')
+  // bytes: legacy '~', legacy TEXT-form-stored-as-bytes, '~1!', future '~N!', malformed
+  const b = (s: string, extra: number[] = []) => new Uint8Array([...s.split('').map(c => c.charCodeAt(0)), ...extra])
+  expect(classifyBytesCipher(b('~' + 'ab'.repeat(12)))).toBe('v0')
+  expect(classifyBytesCipher(b('ab'.repeat(12) + 'QUFB'))).toBe('v0') // legacy text-form bytes
+  expect(classifyBytesCipher(b('~1!' + 'ab'.repeat(12)))).toBe('v1')
+  expect(classifyBytesCipher(b('~2!' + 'ab'.repeat(12)))).toBe('unsupported-version')
+  expect(classifyBytesCipher(b('~zz-not-hex'))).toBe('malformed-frame')
+  expect(classifyBytesCipher(b('garbage!'))).toBe('malformed-frame')
 })

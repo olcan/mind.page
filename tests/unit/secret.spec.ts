@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test'
 import {
   adoptValidatedSecret,
+  establishCandidate,
   resolveFixedOwnerSecret,
   type AccountDoc,
   type AdoptSecretDeps,
+  type CandidateEvidence,
   type FixedOwnerSecretDeps,
 } from '../../src/secret.js'
 import { commitOrStop, createHiddenCorpus, CorpusStopped } from '../../src/hidden_corpus.js'
@@ -196,4 +198,70 @@ test('a stop winning the post-scan continuation gap publishes nothing and persis
   h.deps.stopped = () => stopped
   await expect(adoptValidatedSecret('sec', h.deps)).rejects.toThrow(/hidden ingress stopped/)
   expect(h.log, 'registration ran; publication did not').toEqual(['register:a,b'])
+})
+
+// ---- candidate validation over mixed/corrupt evidence (review 81 §2.5) -------------------------
+// the policy rows: corrupt-before-valid, valid-before-corrupt, v1-only, v0-required-when-present,
+// and the no-usable-evidence fail-closed outcome. authentication attempts are injected; the policy
+// is pure
+
+const row = (kind: 'v0' | 'v1', cipher: string): CandidateEvidence => ({ kind, cipher })
+
+test('a corrupt row BEFORE a valid one no longer fails the candidate (the old prompt loop)', async () => {
+  const tried: string[] = []
+  const verdict = await establishCandidate([row('v0', 'corrupt'), row('v0', 'valid')], {
+    tryV0: async c => (tried.push(c), c == 'valid'),
+    tryV1: async () => false,
+  })
+  expect(verdict).toEqual({ kind: 'established' })
+  expect(tried, 'iterated past the corrupt row').toEqual(['corrupt', 'valid'])
+})
+
+test('valid-before-corrupt establishes on the first attempt', async () => {
+  const tried: string[] = []
+  const verdict = await establishCandidate([row('v0', 'valid'), row('v0', 'corrupt')], {
+    tryV0: async c => (tried.push(c), c == 'valid'),
+    tryV1: async () => false,
+  })
+  expect(verdict).toEqual({ kind: 'established' })
+  expect(tried, 'no attempt wasted past establishment').toEqual(['valid'])
+})
+
+test('v0 evidence is REQUIRED when present: v1 successes alone cannot establish', async () => {
+  // v1 alone cannot distinguish composed from decomposed spellings of the legacy phrase; v0
+  // deliberately can (its key keeps the exact original bytes)
+  const verdict = await establishCandidate([row('v0', 'a'), row('v1', 'b')], {
+    tryV0: async () => false,
+    tryV1: async () => true,
+  })
+  expect(verdict).toEqual({ kind: 'not-established' })
+})
+
+test('a v1-only corpus is established by one successful v1 authentication', async () => {
+  expect(
+    await establishCandidate([row('v1', 'x'), row('v1', 'y')], {
+      tryV0: async () => false,
+      tryV1: async c => c == 'y',
+    })
+  ).toEqual({ kind: 'established' })
+})
+
+test('no usable evidence fails closed instead of blaming the phrase', async () => {
+  expect(await establishCandidate([], { tryV0: async () => true, tryV1: async () => true })).toEqual({
+    kind: 'no-usable-evidence',
+  })
+})
+
+test('the resolver iterates ALL ciphers: a corrupt first item no longer causes a prompt loop', async () => {
+  // the production wiring of the policy: two ciphers, the first corrupt, the phrase correct
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
+  const d = deps({
+    fetchAccountDocs: async () => [doc('bad', { cipher: 'CORRUPT-NOT-DECRYPTABLE' }), doc('good', { cipher })],
+  })
+  expect(await resolveFixedOwnerSecret(d), 'established despite the corrupt first row').toBe(secret)
+  expect(
+    d.calls.filter(c => c == 'wrong'),
+    'and no wrong-phrase report'
+  ).toHaveLength(0)
 })

@@ -324,29 +324,35 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
-    // ONE worker deriver per tab (lazy: the worker exists only after the first derivation)
-    const kdfWorkerDeriver = createWorkerDeriver()
+    // ONE worker owner per tab (lazy; serialized; disposable — see createKdfWorker)
+    const kdfWorker = createKdfWorker()
     // KDF spike hooks (design: notes/design/mind_page_kdf_migration.md). __kdfSmoke proves the
     // WORKER path — Vite bundling, WASM load, round trip — with the CHEAP TEST parameters (this
-    // is a smoke, not the resolver; the production resolver maps versions only through the
-    // code-owned table). __kdfBenchmark runs the REAL v1 parameters once and reports ms — the
-    // fleet benchmark, opt-in, never asserted
+    // is a smoke, not the resolver; the production resolver accepts only the frozen V1_PARAMS).
+    // both hooks are TEMPORARY production surface: the smoke goes when the stage-2 mixed-reader
+    // row proves the path, the benchmark after the documented fleet run (review 81)
     window['__kdfSmoke'] = async () => {
       const salt = new Uint8Array(16).fill(7)
-      const key = await kdfWorkerDeriver({
-        password: new TextEncoder().encode('smoke'),
+      const key = await kdfWorker.derive({
+        password: new TextEncoder().encode('test phrase'),
         salt,
         params: { memorySize: 8 * 1024, iterations: 1, parallelism: 1, hashLength: 32 },
       })
-      return { length: key.length, head: Array.from(key.slice(0, 4)) }
+      // FULL key hex, so the browser row can compare all 32 bytes against the Node vector
+      return {
+        length: key.length,
+        hex: Array.from(key)
+          .map(b => ('00' + b.toString(16)).slice(-2))
+          .join(''),
+      }
     }
     window['__kdfBenchmark'] = async () => {
-      const { KDF_VERSIONS } = await import('../kdf')
+      const { V1_PARAMS } = await import('../kdf')
       const start = performance.now()
-      const key = await kdfWorkerDeriver({
+      const key = await kdfWorker.derive({
         password: new TextEncoder().encode('benchmark phrase'),
         salt: new Uint8Array(16).fill(9),
-        params: KDF_VERSIONS[1],
+        params: V1_PARAMS,
       })
       return { ms: Math.round(performance.now() - start), length: key.length }
     }
@@ -6364,7 +6370,7 @@
     scheduleDelivery,
     type Delivery,
   } from '../hidden_delivery'
-  import { createWorkerDeriver } from '../kdf_client'
+  import { createKdfWorker } from '../kdf_client'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'

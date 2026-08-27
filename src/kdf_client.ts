@@ -1,38 +1,86 @@
-// The page-side WORKER DERIVER: a `Deriver` (see src/kdf.ts) that posts to src/kdf_worker.ts, so
-// the production derivation never runs on the main thread. The worker is created LAZILY on the
-// first derivation and retained — one worker per tab, matching the per-tab single-flight — and a
-// worker that fails to load surfaces as the design's "derivation unavailable" outcome rather than
-// hanging the caller.
+// The page-side WORKER OWNER: one lazily created worker per tab, SERIALIZED derivations, and an
+// explicit dispose — the bounded lifecycle review 81 required. Each production derivation
+// allocates ~64 MiB of Argon working memory, so two must never run concurrently in one tab; and a
+// worker with no owner could outlive the sign-out that made its result meaningless.
+//
+// Failures are machine-readable KdfError kinds (see src/kdf.ts): `unavailable` (the worker or its
+// WASM could not load/run — a later call retries with a fresh worker), `failed` (the derivation
+// itself errored), `aborted` (dispose won). A late message from a replaced or disposed worker is
+// ignored by generation: entries belong to the worker instance that created them.
 
-import type { Deriver } from './kdf.js'
+import { KdfError, type Deriver } from './kdf.js'
 
-export function createWorkerDeriver(): Deriver {
+export function createKdfWorker(): { derive: Deriver; dispose: (reason?: string) => undefined } {
   let worker: Worker | undefined
+  let disposed = false
   let nextId = 0
+  let tail: Promise<unknown> = Promise.resolve() // SERIALIZED: one derivation at a time
   const pending = new Map<number, { resolve: (key: Uint8Array) => void; reject: (e: unknown) => void }>()
-  return ({ password, salt, params }) =>
-    new Promise((resolve, reject) => {
+
+  const failAllPending = (error: KdfError) => {
+    for (const [, entry] of pending) entry.reject(error)
+    pending.clear()
+  }
+
+  const ensureWorker = (): Worker => {
+    if (worker) return worker
+    const created = new Worker(new URL('./kdf_worker.ts', import.meta.url), { type: 'module' })
+    created.onmessage = (event: MessageEvent<{ id: number; key?: Uint8Array; error?: string }>) => {
+      if (worker !== created) return // a replaced/disposed worker's late message: not ours
+      const entry = pending.get(event.data.id)
+      if (!entry) return
+      pending.delete(event.data.id)
+      if (event.data.key) entry.resolve(event.data.key)
+      else entry.reject(new KdfError('failed', event.data.error ?? 'derivation error'))
+    }
+    created.onerror = event => {
+      if (worker !== created) return
+      // a LOAD/runtime failure fails every waiter — nothing else will answer them — and the
+      // broken worker is terminated rather than left running; the NEXT derive retries fresh
+      failAllPending(new KdfError('unavailable', event.message || 'worker error'))
+      worker = undefined
+      created.terminate()
+    }
+    worker = created
+    return created
+  }
+
+  const deriveOne: Deriver = ({ password, salt, params }) =>
+    new Promise<Uint8Array>((resolve, reject) => {
+      if (disposed) return reject(new KdfError('aborted', 'kdf worker disposed'))
+      let w: Worker
       try {
-        // Vite's worker bundling: the URL form is what makes the worker a build asset
-        worker ??= new Worker(new URL('./kdf_worker.ts', import.meta.url), { type: 'module' })
+        w = ensureWorker()
       } catch (e) {
-        return reject(new Error(`kdf worker unavailable: ${String((e as Error)?.message ?? e)}`))
+        return reject(new KdfError('unavailable', String((e as Error)?.message ?? e)))
       }
       const id = nextId++
       pending.set(id, { resolve, reject })
-      worker.onmessage = (event: MessageEvent<{ id: number; key?: Uint8Array; error?: string }>) => {
-        const entry = pending.get(event.data.id)
-        if (!entry) return
-        pending.delete(event.data.id)
-        if (event.data.key) entry.resolve(event.data.key)
-        else entry.reject(new Error(`kdf derivation failed: ${event.data.error}`))
+      try {
+        w.postMessage({ id, password, salt, params })
+      } catch (e) {
+        pending.delete(id) // a throwing postMessage must not leave its entry behind
+        reject(new KdfError('unavailable', String((e as Error)?.message ?? e)))
       }
-      worker.onerror = event => {
-        // a LOAD failure fails every waiter: nothing else will ever answer them
-        for (const [, entry] of pending) entry.reject(new Error(`kdf worker error: ${event.message}`))
-        pending.clear()
-        worker = undefined // the next derivation retries the load (transient failures recover)
-      }
-      worker.postMessage({ id, password, salt, params })
     })
+
+  return {
+    // SERIALIZED through a settle-only tail: a second call queues behind the first rather than
+    // doubling the Argon memory footprint
+    derive: input => {
+      const turn = tail.then(() => deriveOne(input))
+      tail = turn.catch(() => {})
+      return turn
+    },
+    // terminates the worker and rejects everything in flight as `aborted`. sign-out and principal
+    // changes call this so a late result cannot publish into a session that no longer exists
+    dispose(reason = 'disposed') {
+      if (disposed) return undefined
+      disposed = true
+      failAllPending(new KdfError('aborted', reason))
+      worker?.terminate()
+      worker = undefined
+      return undefined
+    },
+  }
 }

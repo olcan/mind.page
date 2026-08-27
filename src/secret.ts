@@ -51,10 +51,16 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
     }
   }
 
-  const cipher = docs.map(doc => doc.data().cipher).find(cipher => cipher)
-  if (!cipher) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
+  // EVERY truthy v0 cipher is evidence, not just the first: one corrupt item before a valid one
+  // used to cause a prompt loop for a correct phrase (review 81). classification-by-shape happens
+  // here (today the corpus is v0-only; v1 rows enter this list in stage 2)
+  const evidence: CandidateEvidence[] = docs
+    .map(doc => doc.data().cipher)
+    .filter((cipher): cipher is string => !!cipher)
+    .map(cipher => ({ kind: 'v0' as const, cipher }))
+  if (!evidence.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
 
-  // prompt and validate against the ciphertext
+  // prompt and validate against the corpus evidence, per the establishCandidate policy
   let candidate: string
   while (true) {
     const phrase = await deps.promptPhrase()
@@ -63,12 +69,20 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
       throw new Error('secret phrase cancelled')
     }
     candidate = await deps.hashPhrase(phrase)
-    try {
-      await decryptWithSecret(cipher, candidate) // throws on a wrong phrase
-      break
-    } catch (e) {
-      await deps.reportWrongPhrase()
-    }
+    const verdict = await establishCandidate(evidence, {
+      tryV0: async cipher => {
+        try {
+          await decryptWithSecret(cipher, candidate)
+          return true
+        } catch {
+          return false
+        }
+      },
+      tryV1: async () => false, // no v1 corpus yet (stage 2 supplies the real attempt)
+    })
+    if (verdict.kind == 'established') break
+    // NOT-ESTABLISHED: the honest outcome — the phrase did not unlock the available data
+    await deps.reportWrongPhrase()
   }
 
   // NO REGISTRATION HERE. these documents are as old as the prompt: the caller takes one fresh
@@ -126,4 +140,54 @@ export async function adoptValidatedSecret<Row, Run>(
   if (deps.stopped()) throw new Error('hidden ingress stopped: reload to recover')
   deps.publish(candidate)
   return candidate
+}
+
+// ---- candidate validation over mixed/corrupt evidence ------------------------------------------
+// (Review 81 §2.5.) "Wrong phrase" is a POLICY conclusion, not a crypto outcome: AES-GCM cannot
+// say why authentication failed, and the old first-truthy-cipher rule turned one corrupt item into
+// a prompt loop. This is the deterministic policy — no verifier item, no sampling framework:
+//
+// - malformed/unsupported rows are NOT evidence about the phrase; they are skipped;
+// - if any v0 evidence exists, a successful v0 authentication is REQUIRED: v1 alone cannot
+//   distinguish composed from decomposed spellings of the legacy phrase, while v0 deliberately can
+//   (its key keeps the exact original bytes);
+// - a v1-only corpus is established by one successful v1 authentication;
+// - all supported evidence failing means NOT ESTABLISHED — the honest "did not unlock the
+//   available data", eligible for re-prompt;
+// - no usable supported evidence at all is CORRUPT/UNSUPPORTED DATA, which must fail closed
+//   rather than blame the phrase.
+//
+// Once a candidate IS established, later authentication failures under its keys are item
+// corruption and must never re-prompt — that rule lives with the caller, which stops consulting
+// this policy after establishment.
+
+export type CandidateEvidence = { kind: 'v0' | 'v1'; cipher: string }
+
+export type CandidateVerdict =
+  | { kind: 'established' }
+  // supported evidence existed and every attempt failed: may re-prompt
+  | { kind: 'not-established' }
+  // nothing usable to judge against: fail closed, never blame the phrase
+  | { kind: 'no-usable-evidence' }
+
+export async function establishCandidate(
+  evidence: CandidateEvidence[],
+  deps: {
+    // one authentication attempt per row; resolves true on success, false on authentication
+    // failure. malformed/unsupported classification happens BEFORE rows enter `evidence`
+    tryV0: (cipher: string) => Promise<boolean>
+    tryV1: (cipher: string) => Promise<boolean>
+  }
+): Promise<CandidateVerdict> {
+  const v0 = evidence.filter(row => row.kind == 'v0')
+  const v1 = evidence.filter(row => row.kind == 'v1')
+  if (!v0.length && !v1.length) return { kind: 'no-usable-evidence' }
+  if (v0.length) {
+    // v0 REQUIRED when present: iterate until one authenticates — a corrupt row before a valid
+    // one is exactly the case the old first-cipher rule got wrong
+    for (const row of v0) if (await deps.tryV0(row.cipher)) return { kind: 'established' }
+    return { kind: 'not-established' }
+  }
+  for (const row of v1) if (await deps.tryV1(row.cipher)) return { kind: 'established' }
+  return { kind: 'not-established' }
 }

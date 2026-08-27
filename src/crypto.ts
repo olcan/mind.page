@@ -102,13 +102,28 @@ export class CipherError extends Error {
   }
 }
 
-/** Imports 32 raw derived key bytes as a non-extractable AES-GCM key (cache the result). */
+/**
+ * Imports 32 raw derived key bytes as a non-extractable AES-GCM key (retain the result; the raw
+ * bytes should not outlive this call). A wrong length is an INVARIANT error, deliberately not a
+ * CipherError: no frame is involved, and acquisition must not confuse broken key plumbing with
+ * corpus corruption.
+ */
 export async function importV1Key(keyBytes: Uint8Array<ArrayBuffer>, usages: KeyUsage[] = ['encrypt', 'decrypt']) {
-  if (keyBytes.length != 32) throw new CipherError('malformed-frame', `v1 key must be 32 bytes, got ${keyBytes.length}`)
+  if (keyBytes.length != 32) throw new Error(`invalid v1 key material: ${keyBytes.length} bytes, expected 32`)
   return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, usages)
 }
 
 const IV_HEX = /^[0-9a-f]{24}$/
+// ONE strict grammar shared by classification and parsing: canonical '1!' exactly — never a
+// looser tag match in one place and a stricter one in the other
+const V1_TEXT_TAG = '1!'
+const V1_BYTES_TAG = '~1!'
+// a GCM ciphertext is plaintext + the 16-byte tag: anything shorter is an impossible frame and
+// must be malformed, not an authentication failure the acquisition policy would read as evidence
+const GCM_MIN_BYTES = 16
+// translate ONLY the operation's own failure. an InvalidAccessError (wrong key usage/algorithm)
+// is an integration error, not evidence about the data, and must propagate as itself
+const isOperationError = (e: unknown) => e instanceof DOMException && e.name == 'OperationError'
 
 export async function encryptV1Text(text: string, key: CryptoKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -121,7 +136,7 @@ export async function encryptV1Text(text: string, key: CryptoKey): Promise<strin
 }
 
 export async function decryptV1Text(cipher: string, key: CryptoKey): Promise<string> {
-  if (!cipher.startsWith('1!')) throw new CipherError('unsupported-version', `not a v1 text cipher`)
+  if (!cipher.startsWith(V1_TEXT_TAG)) throw new CipherError('unsupported-version', `not a v1 text cipher`)
   const ivHex = cipher.slice(2, 26)
   if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
   let bytes: Uint8Array<ArrayBuffer>
@@ -130,6 +145,7 @@ export async function decryptV1Text(cipher: string, key: CryptoKey): Promise<str
   } catch {
     throw new CipherError('malformed-frame', 'bad base64')
   }
+  if (bytes.length < GCM_MIN_BYTES) throw new CipherError('malformed-frame', 'shorter than a gcm tag')
   try {
     const text = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_TEXT_AAD },
@@ -137,9 +153,11 @@ export async function decryptV1Text(cipher: string, key: CryptoKey): Promise<str
       bytes
     )
     return new TextDecoder().decode(text)
-  } catch {
-    // cause unknowable by construction: wrong key, modified cipher/tag, or wrong AAD
-    throw new CipherError('authentication-failed', 'v1 text')
+  } catch (e) {
+    // cause unknowable by construction: wrong key, modified cipher/tag, or wrong AAD — but ONLY
+    // the operation's own failure translates; anything else is an integration error
+    if (isOperationError(e)) throw new CipherError('authentication-failed', 'v1 text')
+    throw e
   }
 }
 
@@ -154,9 +172,10 @@ export async function decryptV1Bytes(
   key: CryptoKey
 ): Promise<Uint8Array<ArrayBuffer>> {
   const prefix = byteArrayToString(cipher.subarray(0, 3))
-  if (prefix != '~1!') throw new CipherError('unsupported-version', 'not a v1 bytes cipher')
+  if (prefix != V1_BYTES_TAG) throw new CipherError('unsupported-version', 'not a v1 bytes cipher')
   const ivHex = byteArrayToString(cipher.subarray(3, 27))
   if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
+  if (cipher.length - 27 < GCM_MIN_BYTES) throw new CipherError('malformed-frame', 'shorter than a gcm tag')
   try {
     const plain = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_BYTES_AAD },
@@ -164,8 +183,9 @@ export async function decryptV1Bytes(
       cipher.subarray(27)
     )
     return new Uint8Array(plain)
-  } catch {
-    throw new CipherError('authentication-failed', 'v1 bytes')
+  } catch (e) {
+    if (isOperationError(e)) throw new CipherError('authentication-failed', 'v1 bytes')
+    throw e
   }
 }
 
@@ -175,7 +195,21 @@ export async function decryptV1Bytes(
 // as "reload this tab" — for builds that HAVE this code; a genuinely old build has no recognizer,
 // which is why the rollout gate is the owner checklist, not this message
 export function classifyTextCipher(cipher: string): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
-  const tagged = cipher.match(/^(\d+)!/)
-  if (tagged) return tagged[1] == '1' ? 'v1' : 'unsupported-version'
+  // the SAME canonical tag decryptV1Text parses — never a looser match here and a stricter one
+  // there. any other digits-then-'!' shape is a tag from a future version (or corruption; a
+  // future reader that knows it says "reload", which is all this arm is for)
+  if (cipher.startsWith(V1_TEXT_TAG)) return 'v1'
+  if (/^\d+!/.test(cipher)) return 'unsupported-version'
   return IV_HEX.test(cipher.slice(0, 24)) ? 'v0' : 'malformed-frame'
+}
+
+// the bytes-side dispatcher, with the same outcomes: legacy '~' + iv (v0 bytes mode), a legacy
+// TEXT-form value stored as bytes (no '~', hex iv — decryptBytesWithSecret's compatibility mode),
+// '~1!' (v1), a future '~N!' tag, or a malformed header
+export function classifyBytesCipher(cipher: Uint8Array): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
+  const head = byteArrayToString(cipher.subarray(0, 28))
+  if (head.startsWith(V1_BYTES_TAG)) return 'v1'
+  if (/^~\d+!/.test(head)) return 'unsupported-version'
+  if (head[0] == '~') return IV_HEX.test(head.slice(1, 25)) ? 'v0' : 'malformed-frame'
+  return IV_HEX.test(head.slice(0, 24)) ? 'v0' : 'malformed-frame'
 }

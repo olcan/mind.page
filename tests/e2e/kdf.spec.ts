@@ -11,7 +11,8 @@ test('the kdf worker bundles, loads its wasm, and derives in a real browser', as
   await page.goto('/')
   const result = await page.evaluate(() => (window as any).__kdfSmoke())
   expect(result.length, 'a 32-byte key came back through the worker').toBe(32)
-  // the same input through the same pinned dependency: the head must match the Node-side vector
-  // for these parameters (password 'smoke', salt 16x0x07, t=1, 8 MiB)
-  expect(result.head).toEqual([76, 8, 39, 46])
+  // the SAME input as the Node known-answer row, compared in FULL: "matches the Node vector" is a
+  // literal statement (password 'test phrase', salt 16x0x07, t=1, 8 MiB — see KAT in
+  // tests/unit/kdf.spec.ts)
+  expect(result.hex).toBe('e18399378b0a69373a4802509400ba9b281fa706bc645d79a7ed0fe338aedca2')
 })
