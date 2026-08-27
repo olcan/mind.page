@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { createHiddenIngress, type Apply, type Outcome } from '../../src/hidden_ingress.js'
 
 // STAGE 2 of the hidden ingress coordinator (see notes/design/mind_page_hidden_ingress_coordinator
-// in the vault repo, revision 12): the PURE schedules, with literal ids and ciphers, exact
+// in the vault repo, revision 13): the PURE schedules, with literal ids and ciphers, exact
 // handles, deferred Apply closures, and no real timers. synchronization is DeliveryHandle.done and
 // AuthorityLease.done — never microtask-count loops. one fresh coordinator per test.
 
