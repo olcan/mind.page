@@ -152,6 +152,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const owed = new Map<string, Owed>()
   // sticky for the controller's lifetime; every await-crossing continuation rechecks it
   let stopped = false
+  // one message for both stop paths — the terminal transition and a save that arrives after it
+  const stoppedError = () => new Error('hidden ingress stopped: reload to recover')
   let generationSeq = 0
 
   // the LATEST receipt per document: either the record as received, or the fact of its removal.
@@ -311,6 +313,10 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         void enqueue(name, undefined, async () => {
           if (!currentOwed(name, generation)) return
           owed.delete(name) // settled, and still the latest: the write IS committed
+          // STOP WINS over the echo. reconciling publishes owner state derived from an index that
+          // has stopped tracking the server, so a stop that landed while this write was in flight
+          // must clear the record and stop there — even if an applied echo was already recorded
+          if (stopped) return
           // ... but only reconcile from an index that actually took this write's echo. when the
           // application FAILED the index may still hold the pre-write state, and the owner already
           // holds what we wrote — reconciling would roll it back, with no later echo guaranteed.
@@ -554,12 +560,15 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       stopped = true
       const notifications: Array<[string, unknown]> = []
       for (const [name, op] of owed) {
+        // ORDER MATTERS: the issued exclusion comes FIRST. an issued generation is owned by its
+        // SDK result, and clearing its mirror here contradicted that ownership (and this block's
+        // own comment) — the write is still in flight, so the name is still saving
+        if (op.phase == 'issued') continue
         const holder = deps.index().byName.get(name)
         if (holder?.saving) holder.saving = null // the mirror clears immediately
-        if (op.phase == 'issued') continue // owned by its SDK result
         if (op.reportedStop) continue
         op.reportedStop = true
-        notifications.push([name, new Error('hidden ingress stopped: reload to recover')])
+        notifications.push([name, stoppedError()])
       }
       for (const [name, error] of notifications) {
         try {
@@ -659,12 +668,33 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
         // CLONE: the baseline must stay immutable under later caller mutations and adoption merges
         op.localIntent = intent // supersede: this is what the name owes now
         op.generation = ++generationSeq
+        op.reportedStop = false // a new generation reports its own outcome (see Owed)
         // a record that is QUEUED already has a task coming. one that is building, issued or
         // failed does not — and treating those as "already queued" is how failed work sat idle
-        // forever, and how a save after issuance was never written
-        if (op.phase == 'queued') return true
+        // forever, and how a save after issuance was never written.
+        // NOT while stopped: this is a SCHEDULING shortcut, and after stop nothing was enqueued,
+        // so "queued" no longer implies a task is coming. every post-stop save must fall through
+        // to take — and report — its own generation's stopped outcome
+        if (!stopped && op.phase == 'queued') return true
         op.phase = 'queued'
       } else owed.set(name, { generation: ++generationSeq, localIntent: intent, phase: 'queued' })
+      // STOPPED: the intent is RETAINED (owes() stays true, and a reload recovers it) but nothing
+      // is scheduled. enqueueing would take a chain turn and persistOwed would await
+      // acquireSecret() — prompting for a phrase, no less — before attemptWrite finally noticed
+      // stop and refused. the outcome is knowable synchronously, so take it synchronously, and
+      // report exactly once for THIS generation (see Owed)
+      if (stopped) {
+        const op = owed.get(name)!
+        if (!op.reportedStop) {
+          op.reportedStop = true
+          try {
+            deps.notifyFailure(name, stoppedError())
+          } catch (e) {
+            console.error('stop notification failed:', name, e)
+          }
+        }
+        return true
+      }
       void enqueue(name, holder, () => persistOwed(name))
       return true
     },

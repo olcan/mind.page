@@ -92,4 +92,3 @@ test('a cached metadata-only post-initialization revision is ignored as data and
     })
   ).toEqual({ action: 'ignore_metadata_only', policy: 'revoke' })
 })
-

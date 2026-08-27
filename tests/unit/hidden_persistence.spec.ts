@@ -1789,14 +1789,75 @@ for (const stopDuringEncryption of [false, true])
     }
   })
 
-test('a save AFTER stop takes the stopped outcome without entering a chain', async () => {
+test('a save AFTER stop takes the stopped outcome SYNCHRONOUSLY: no secret, no chain, one report', async () => {
   const failures: string[] = []
+  let acquisitions = 0
   const h = harness()
-  const controller = createHiddenPersistence({ ...h.deps, notifyFailure: n => void failures.push(n) })
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    acquireSecret: async () => void ++acquisitions,
+    notifyFailure: n => void failures.push(n),
+  })
   controller.stop()
   expect(controller.save('n', { mine: 1 }), 'accepted as intent').toBe(true)
+  // SYNCHRONOUSLY, before any turn: the outcome is knowable at save time, and the old code
+  // enqueued a chain turn whose persistOwed awaited acquireSecret() — a PHRASE PROMPT — before
+  // attemptWrite finally noticed stop
+  expect(acquisitions, 'no secret work at all').toBe(0)
+  expect(failures, 'reported once, at save time').toEqual(['n'])
   for (let i = 0; i < 6; i++) await flush()
+  expect(acquisitions, 'and none afterwards either').toBe(0)
   expect(h.calls.filter(c => c.op == 'create' || c.op == 'update'), 'no write').toHaveLength(0)
   expect(controller.owes('n'), 'retained for a reload').toBe(true)
-  void failures // its own report is optional; what matters is that nothing was written
+  expect(failures, 'still exactly one for this generation').toEqual(['n'])
+  // a genuinely superseding save is a NEW generation, and reports its own outcome (see Owed)
+  expect(controller.save('n', { mine: 2 }), 'accepted as intent').toBe(true)
+  expect(failures, 'one report per generation').toEqual(['n', 'n'])
+  expect(acquisitions, 'still no secret work').toBe(0)
+})
+
+test('an acknowledgement arriving AFTER stop clears the owed record without reconciling the owner', async () => {
+  const reconciled: string[] = []
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    reconcileOwner: n => void reconciled.push(n),
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise
+    },
+  })
+  registerHidden(h.idx, { id: 'd1', name: 'n', item: { server: 1 } }, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 6; i++) await flush()
+  expect(h.calls.filter(c => c.op == 'update'), 'the write went out before stop').toHaveLength(1)
+  // the listener dies while the write is in flight
+  controller.stop()
+  ack.resolve()
+  for (let i = 0; i < 6; i++) await flush()
+  // the write IS committed, so the record is cleared — but the index has stopped tracking the
+  // server, so publishing owner state derived from it would be a guess
+  expect(controller.owes('n'), 'the committed write cleared it').toBe(false)
+  expect(reconciled, 'stop wins over the echo').toEqual([])
+})
+
+test('stop leaves an ISSUED generation\'s saving mirror alone (it is owned by its SDK result)', async () => {
+  const ack = deferred<void>()
+  const h = harness()
+  const controller = createHiddenPersistence({
+    ...h.deps,
+    updateDoc: async (id, data) => {
+      h.calls.push({ op: 'update', id, text: data.cipher })
+      await ack.promise
+    },
+  })
+  const w: HiddenWrapper = { id: 'd1', name: 'n', item: { server: 1 } }
+  registerHidden(h.idx, w, () => {})
+  controller.save('n', { mine: 1 })
+  for (let i = 0; i < 6; i++) await flush()
+  const mirror = Promise.resolve('in flight') // what production keeps while a write is out
+  w.saving = mirror
+  controller.stop()
+  expect(w.saving, 'an in-flight write is still saving: the mirror is its SDK result to clear').toBe(mirror)
 })

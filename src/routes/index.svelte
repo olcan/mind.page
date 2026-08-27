@@ -7667,6 +7667,13 @@
           // snapshots are ignored after initialization
           { includeMetadataChanges: true },
           snapshot => {
+            // STOPPED, and this callback was already dispatched when unsubscribe ran: firestore
+            // cannot retract it. reserve and FAIL a lease so the receipt-ordered chain keeps its
+            // slot (a later sealed candidate must not advance past stop's invalidation), then do
+            // nothing else — no delivery cell, no decrypt, no application. returning without a
+            // lease would be wrong in the other direction: reserveAuthority is what orders the
+            // chain, and skipping it entirely leaves the ordinals it already handed out unsettled
+            if (ingressStopped) return void reserveHiddenAuthority({ policy: 'revoke' }).lease.fail()
             // the gating decisions are extracted and table-tested (see snapshotDecision in
             // src/snapshot.ts); this listener owns the effects and the firstSnapshot bookkeeping
             const decision = snapshotDecision({
@@ -7683,16 +7690,6 @@
               prefetchSucceeded: false, // the cutover's prefetch-before-listener startup sets this
             })
             const action = decision.action
-            // BEHAVIOR-EQUIVALENT derivation of the old boolean: authoritative was exactly
-            // "sync enabled, server revision, no pending writes". under the policy union that is
-            // policy != 'revoke' (revoke IS fromCache) minus the pending-write overlay — the
-            // 'preserve' policy also covers current fixed/anonymous revisions, which the old
-            // boolean treated as authoritative and the account-mode facts never gated. the
-            // cutover replaces this read with the lease mapping (candidate/revoke/preserve)
-            const authoritative =
-              action != 'ignore_sync_disabled' &&
-              decision.policy != 'revoke' &&
-              !snapshot.metadata.hasPendingWrites
             // authority (a current, server, no-pending-writes revision of the full-account
             // query) is settled INSIDE the serialized application chain, never on receipt: a
             // receipt-time grant let a save skip confirmation while the revision's own changes
@@ -7831,6 +7828,24 @@
             // application settles, which is what keeps a create's confirmation from missing data
             // already on this client
             const handles = new Map<string, ReturnType<typeof hiddenIngress.open>>()
+            // HANDED OFF: a handle whose Apply was given to ready(). its slot is reserved on the
+            // coordinator's per-id tail and may legitimately still be waiting behind an OLDER
+            // same-id slot when this callback's task returns — the applications below are awaited
+            // DETACHED. block() converts `ready` as well as `open` (that is what makes abort
+            // work), so sweeping every handle on the success path silently discarded valid work
+            // and left the gate blocked forever. the sweep must skip these; a handed-off handle
+            // owns its own outcome
+            const handedOff = new Set<ReturnType<typeof hiddenIngress.open>>()
+            // a failed hidden decrypt or application keeps this revision from granting
+            // authority, and the document id stays DIRTY (blocking later grants) until a
+            // successful change for it applies
+            let hiddenApplyFailed = false
+            // hidden transitions apply ON THE NAME'S CONTROLLER CHAIN so they can never
+            // interleave with an in-flight write for the same name (a remote replacement
+            // applied mid-write could displace the wrapper the write targets); authority
+            // settles only after every queued transition of this revision lands. CALLBACK-SCOPED
+            // so the task's finally owns the same lifetime on every exit, including a throw
+            const hiddenApplied: Promise<unknown>[] = []
             for (const change of snapshot.docChanges()) {
               const id = change.doc.id
               entryReceipts.set(id, hiddenPersistence.noteRemotePending(id))
@@ -7838,8 +7853,14 @@
               const relevant =
                 rawHidden || !!hiddenPersistence.nameForDocument(id) || hiddenIngress.hasOutstanding(id)
               // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own
-              // echo failed to decrypt rather than waiting forever; a removal carries none
-              if (relevant) handles.set(id, hiddenIngress.open(id, change.doc.data().cipher))
+              // echo failed to decrypt rather than waiting forever. ONLY for a live raw-hidden
+              // delivery: firestore hands a REMOVED change its old data, so forwarding that
+              // cipher would let a deletion satisfy the exact echo waiter of the write it
+              // deleted, and a visible discriminator change carries a cipher that is no longer a
+              // hidden record at all. the coordinator contract is that removals and transitions
+              // have no ciphertext and can never match
+              const live = change.type != 'removed' && rawHidden
+              if (relevant) handles.set(id, hiddenIngress.open(id, live ? change.doc.data().cipher : undefined))
             }
             // this callback is ACTIVE until it terminalizes: a sticky stop fails its lease and
             // blocks every handle that has not started applying
@@ -7851,17 +7872,29 @@
               // target, so one left behind makes that document's saves poll without ever issuing.
               // the per-change finally below releases them as they are handled; this covers every
               // early return
+              let threw = true
               try {
                 await applyChanges()
+                threw = false
               } finally {
-                activeIngressContexts.delete(context) // terminalized: stop no longer owns it
                 for (const [id, token] of entryReceipts) hiddenPersistence.releaseRemote(id, token)
-                // EVERY opened handle must terminalize, or the gate stays pending forever and no
-                // hidden write can ever issue again. block() is a compare-and-set: it converts
-                // only handles still open or ready — one already running owns its own outcome,
-                // and one already terminal is untouched. this covers every early return and
-                // every throw out of applyChanges
-                for (const handle of handles.values()) handle.block()
+                // every handle that was NEVER handed off must terminalize, or the gate stays
+                // pending forever and no hidden write can ever issue again. block() is a
+                // compare-and-set: it converts open and ready alike, so the handed-off ones are
+                // skipped — theirs is not an abandoned slot, it is a queued one
+                for (const handle of handles.values()) if (!handedOff.has(handle)) handle.block()
+                // the context stays ACTIVE until every handed-off record settles: the applications
+                // are detached, so terminalizing here would leave a stop with nothing to block
+                // while real work was still running. lease settlement rides the SAME lifetime,
+                // which is what makes it exactly-once on every exit — a throw out of applyChanges
+                // used to skip settleApplied entirely and strand every later lease behind it
+                void Promise.allSettled(hiddenApplied).then(() => {
+                  activeIngressContexts.delete(context)
+                  settleApplied({
+                    failed: threw || hiddenApplyFailed,
+                    hiddenChanged: !!hiddenApplied.length,
+                  })
+                })
               }
             }
             const applyChanges = async () => {
@@ -7876,15 +7909,6 @@
               const applied = [] // labels of applied changes, logged in aggregate below
               let ownSkipped = 0
               let deferred = 0 // changes held back behind unsettled local intent (reconciled later)
-              // a failed hidden decrypt or application keeps this revision from granting
-              // authority, and the document id stays DIRTY (blocking later grants) until a
-              // successful change for it applies
-              let hiddenApplyFailed = false
-              // hidden transitions apply ON THE NAME'S CONTROLLER CHAIN so they can never
-              // interleave with an in-flight write for the same name (a remote replacement
-              // applied mid-write could displace the wrapper the write targets); authority
-              // settles only after every queued transition of this revision lands
-              const hiddenApplied = []
               for (let change of snapshot.docChanges()) {
                 const doc = change.doc
                 const couldBeHidden = !!doc.data().hidden // plaintext field, readable without decrypt
@@ -7951,6 +7975,7 @@
                     )
                   if (dropHandle) {
                     dropHandle.ready(dropApply)
+                    handedOff.add(dropHandle) // the task's sweep must not abort a queued slot
                     hiddenApplied.push(dropHandle.done)
                   } else hiddenApplied.push(dropApply().catch(() => {}))
 
@@ -8038,6 +8063,7 @@
                       )
                   if (hiddenHandle) {
                     hiddenHandle.ready(hiddenApply)
+                    handedOff.add(hiddenHandle) // the task's sweep must not abort a queued slot
                     hiddenApplied.push(hiddenHandle.done)
                   } else hiddenApplied.push(hiddenApply().catch(() => {}))
                   continue
@@ -8088,11 +8114,9 @@
               // release this revision's reserved authority slot once every hidden transition it
               // queued has landed: the settlement itself runs on the authority chain, in receipt
               // order, so a later revision cannot grant ahead of these transitions
-              const landed = Promise.all(hiddenApplied)
-              void landed.then(
-                () => settleApplied({ failed: hiddenApplyFailed, hiddenChanged: !!hiddenApplied.length }),
-                () => settleApplied({ failed: true, hiddenChanged: true })
-              )
+              // settlement itself moved to the task's finally, which owns the same all-settling
+              // lifetime on EVERY exit (see applyTask). this is only the frontier chain
+              const landed = Promise.allSettled(hiddenApplied)
               // a snapshot is NOT fully applied when its apply task returns: the hidden
               // applications above were pushed and awaited detached, and applyRemote acquires
               // multiple names RECURSIVELY, so a second name is not even reserved until the first
