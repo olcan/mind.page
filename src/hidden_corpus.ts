@@ -133,3 +133,30 @@ export function createHiddenCorpus() {
 }
 
 export type HiddenCorpus = ReturnType<typeof createHiddenCorpus>
+
+/**
+ * Runs a corpus operation's SYNCHRONOUS commit inside the fatal boundary.
+ *
+ * Once a commit begins mutating — removal, pointer clearing, baseline publication, visible removal,
+ * registration, rebase, owner publication — a throw leaves a PARTIALLY MUTATED index, and the
+ * caller would otherwise see an ordinary build failure while ingress stayed live and queued corpus
+ * turns kept running. Everything before it (fetch, decode, classification) must stay outside: those
+ * happen before any mutation and must reject normally without stopping the page.
+ *
+ * It exists as a function rather than four lines at the call site because both of its rules were
+ * got wrong before: the cause has to be WRAPPED (so an active `throw undefined` is not read as an
+ * ordinary stop), and the rethrown value has to be the EXACT one — a stop that itself throws must
+ * not replace it.
+ */
+export function commitOrStop<T>(commit: () => T, stop: (active: { cause: unknown }) => void): T {
+  try {
+    return commit()
+  } catch (e) {
+    try {
+      stop({ cause: e })
+    } catch (stopError) {
+      console.error('ingress stop failed:', stopError) // the caller's error still wins
+    }
+    throw e
+  }
+}

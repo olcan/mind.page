@@ -6314,7 +6314,7 @@
   import type { DocumentChange } from 'firebase/firestore'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator, type AllocationRequest } from '../hidden_listener_records'
-  import { createHiddenCorpus } from '../hidden_corpus'
+  import { createHiddenCorpus, commitOrStop } from '../hidden_corpus'
   import { resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
@@ -9080,15 +9080,14 @@
         // what the active-cause channel exists for, and until now nothing supplied it.
         // fetch/decode/classification failures stay OUTSIDE: they happen before any mutation and
         // must reject normally without stopping the page
-        try {
-          // VERBATIM: translating to a two-value string forced the controller to capture
-          // requiredMarker through mutable closure state, and a direct bypass then carried no
-          // proof at all
-          return hooks.commit(answer, readMarker)
-        } catch (e) {
-          stopIngress('hidden corpus commit failed', { cause: e })
-          throw e // the EXACT value: the active operation keeps its own error
-        }
+        // VERBATIM: translating to a two-value string forced the controller to capture
+        // requiredMarker through mutable closure state, and a direct bypass then carried no proof
+        // at all. commitOrStop owns the fatal boundary (see src/hidden_corpus.ts): the exact value
+        // is rethrown so this active operation keeps its own error
+        return commitOrStop(
+          () => hooks.commit(answer, readMarker),
+          active => stopIngress('hidden corpus commit failed', active)
+        )
       })
     },
     // the visible-to-hidden discriminator prelude plus EXACTLY ONE registerHidden, whose first

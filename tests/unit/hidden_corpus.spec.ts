@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHiddenCorpus, CorpusStopped } from '../../src/hidden_corpus.js'
+import { commitOrStop, createHiddenCorpus, CorpusStopped } from '../../src/hidden_corpus.js'
 
 // the corpus seam's ordering, membership window and stop behaviour (see src/hidden_corpus.ts).
 // deferred-driven: no real timers, no guessed microtask counts. the stop rows assert SETTLED FLAGS
@@ -132,6 +132,58 @@ test('an active `throw undefined` is still an active cause, not an ordinary stop
   await expect(a, 'A keeps the exact value it threw').rejects.toBeUndefined()
   await checkpoint()
   expect(bState.error, 'and B still gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
+})
+
+test('THE PRODUCTION COMPOSITION: a failing commit stops the corpus with its own cause and rethrows it', async () => {
+  // the exact shape index.svelte's confirmTarget uses — commitOrStop inside a corpus body, with
+  // stop wired to the page's one stop path. the pure corpus rows prove the primitive; this proves
+  // the wiring, which is what was wrong twice: once with no cause channel at all, and once with a
+  // channel nothing supplied
+  const c = createHiddenCorpus()
+  const boom = new Error('commit failed')
+  const stops: { cause: unknown }[] = []
+  let bRan = false
+  const started = deferred()
+  const held = deferred()
+  const a = c.run(async () => {
+    started.resolve()
+    await held.promise // genuinely mid-flight: a synchronous throw wins the race on array order
+    return commitOrStop(
+      () => {
+        throw boom // the commit turn, already partway through mutating
+      },
+      active => {
+        stops.push(active)
+        c.stop(active)
+      }
+    )
+  })
+  const b = c.run(async () => {
+    bRan = true
+    return 'b'
+  })
+  const bState = watch(b)
+  await started.promise
+  held.resolve()
+  await expect(a, 'the active operation keeps its OWN error').rejects.toBe(boom)
+  await checkpoint()
+  expect(stops, 'stop was called ONCE, with the cause wrapped').toEqual([{ cause: boom }])
+  expect(bState.error, 'and the queued operation gets the ordinary stop outcome').toBeInstanceOf(CorpusStopped)
+  expect(bRan, 'whose body never ran').toBe(false)
+})
+
+test('a stop that itself throws does not replace the commit error', async () => {
+  const boom = new Error('commit failed')
+  expect(() =>
+    commitOrStop(
+      () => {
+        throw boom
+      },
+      () => {
+        throw new Error('stop failed')
+      }
+    )
+  ).toThrow(boom)
 })
 
 test('stop releases the caller, a queued operation and the boundary WHILE the body is still held', async () => {
