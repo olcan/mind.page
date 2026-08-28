@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 import {
   decodeKdfMetadata,
+  decodeSalt,
   decodeKeyEnvelope,
   encodeKeyEnvelope,
   encodeSalt,
   provisionKdfProfile,
+  restoreKeyEnvelope,
 } from '../../src/kdf_profile.js'
 
 // the account KDF profile: metadata decoding, the provisioning transaction, and the persisted key
@@ -14,9 +16,11 @@ const SALT = new Uint8Array(16).fill(7)
 const SALT_B64 = encodeSalt(SALT)
 const KEY = new Uint8Array(32).map((_, i) => i)
 
-test('metadata: ABSENT is provisionable; VALID adopts; present-but-invalid THROWS', () => {
+test('metadata: only a MISSING field is absent; VALID adopts; present-but-invalid THROWS', () => {
   expect(decodeKdfMetadata(undefined)).toEqual({ kind: 'absent' })
-  expect(decodeKdfMetadata(null)).toEqual({ kind: 'absent' })
+  // an explicit null is PRESENT: the rules reject it and forbid replacing it, so calling it
+  // provisionable would send a write the server denies (review 84)
+  expect(() => decodeKdfMetadata(null)).toThrow()
   expect(decodeKdfMetadata({ v: 1, salt: SALT_B64 })).toEqual({ kind: 'valid', profile: { v: 1, salt: SALT_B64 } })
   // present-but-invalid is NOT a third routable value: overwriting a salt this client merely
   // cannot read would strand every ciphertext derived from it
@@ -30,7 +34,7 @@ test('metadata: ABSENT is provisionable; VALID adopts; present-but-invalid THROW
     { salt: SALT_B64 },
     { v: 1, salt: SALT_B64, extra: true },
     { v: 1, salt: 'not-base64!' },
-    { v: 1, salt: SALT_B64.slice(0, -2) + 'B==' }, // noncanonical pad bits
+    { v: 1, salt: SALT_B64.slice(0, -3) + 'x==' }, // SAME bytes, noncanonical pad bits (24 chars)
   ])
     expect(() => decodeKdfMetadata(bad), JSON.stringify(bad)).toThrow()
 })
@@ -41,46 +45,41 @@ test('the envelope round-trips through its canonical encodings', () => {
   expect(Array.from(decoded!.keyBytes)).toEqual(Array.from(KEY))
 })
 
-test('the provisioning transaction: absent writes ONE candidate; valid adopts the committed value', async () => {
-  // the candidate is generated OUTSIDE the transaction body: firestore re-runs the body on
-  // contention, and a fresh salt per retry makes "which salt committed" unanswerable
+test('provisioning: ONE candidate across retries, and a contention loser adopts without writing', async () => {
+  // combined retry + loser shape (review 84): attempt 1 reads ABSENCE and stages the candidate;
+  // contention installs ANOTHER device's salt before the retry; the retry reads that salt,
+  // performs NO write, and the caller receives the committed value — its local candidate is
+  // demonstrably abandoned
+  const otherSalt = encodeSalt(new Uint8Array(16).fill(9))
   let saltCalls = 0
-  let writes = 0
-  let attempts = 0
-  const stored: Record<string, unknown> = {}
+  let retryWrites = 0
+  let attempt = 0
   const profile = await provisionKdfProfile({
     randomSalt: () => (saltCalls++, SALT),
     runTransaction: async body => {
-      // TWO attempts: the first is "aborted by contention" after running, the second commits —
-      // exactly firestore's retry shape
-      await body({ get: async () => ({ ...stored }), set: () => void writes++ })
-      attempts++
+      attempt++
+      await body({ get: async () => ({}), set: () => {} }) // attempt 1: absent; then contention
+      attempt++
       return body({
-        get: async () => ({ ...stored }),
-        set: kdf => {
-          writes++
-          stored.kdf = kdf
-        },
+        get: async () => ({ kdf: { v: 1, salt: otherSalt } }),
+        set: () => void retryWrites++,
       })
     },
   })
-  expect(saltCalls, 'one candidate across every retry').toBe(1)
+  expect(saltCalls, 'one random salt across every retry').toBe(1)
+  expect(retryWrites, 'the retry writes nothing over a committed profile').toBe(0)
+  expect(profile.salt, 'the caller receives the COMMITTED salt, not its candidate').toBe(otherSalt)
+  expect(attempt).toBe(2)
+})
+
+test('provisioning: an uncontended absent account commits the single candidate', async () => {
+  const stored: Record<string, unknown> = {}
+  const profile = await provisionKdfProfile({
+    randomSalt: () => SALT,
+    runTransaction: async body => body({ get: async () => ({ ...stored }), set: kdf => void (stored.kdf = kdf) }),
+  })
   expect(profile.salt).toBe(SALT_B64)
   expect(stored.kdf).toEqual({ v: 1, salt: SALT_B64 })
-
-  // a LOSER adopts: the doc now holds a committed profile from another device
-  const otherSalt = encodeSalt(new Uint8Array(16).fill(9))
-  const adopted = await provisionKdfProfile({
-    randomSalt: () => SALT,
-    runTransaction: async body =>
-      body({
-        get: async () => ({ kdf: { v: 1, salt: otherSalt } }),
-        set: () => {
-          throw new Error('must not write over a committed profile')
-        },
-      }),
-  })
-  expect(adopted.salt, 'derives from the COMMITTED value, never the local candidate').toBe(otherSalt)
 })
 
 test('provisioning FAILS on present-but-invalid metadata instead of overwriting it', async () => {
@@ -102,21 +101,86 @@ test('the envelope decodes only its EXACT shape, bound to the expected uid', () 
   const good = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY })
   expect(decodeKeyEnvelope(good, 'uid-1')).not.toBeNull()
   expect(decodeKeyEnvelope(good, 'uid-2'), "another principal's envelope is not usable").toBeNull()
-  for (const bad of [
-    null,
-    '',
-    'not json',
-    '42',
-    '[]',
-    JSON.stringify({ uid: 'uid-1', v: 1, salt: SALT_B64 }), // missing key
-    JSON.stringify({ uid: 'uid-1', v: 1, salt: SALT_B64, key: 'AAA', extra: 1 }),
-    JSON.stringify({ uid: 'uid-1', v: 2, salt: SALT_B64, key: 'AAA' }),
-    JSON.stringify({ uid: 'uid-1', v: 1, salt: 'bad', key: 'AAA' }),
-    JSON.stringify({ uid: 'uid-1', v: 1, salt: SALT_B64, key: btoa('short') }),
-  ])
-    expect(decodeKeyEnvelope(bad, 'uid-1'), String(bad).slice(0, 40)).toBeNull()
-  // noncanonical KEY encoding: same bytes, different string — refused by the re-encode check
-  const parsed = JSON.parse(good)
-  parsed.key = parsed.key.slice(0, -2) + '=='
-  if (parsed.key != JSON.parse(good).key) expect(decodeKeyEnvelope(JSON.stringify(parsed), 'uid-1')).toBeNull()
+  // ONE FIELD CHANGED PER ROW, from the parsed GOOD envelope — a table whose rows also carried a
+  // short key stayed green on the length guard whichever check was deleted (review 84)
+  const mutate = (change: (parsed: any) => void) => {
+    const parsed = JSON.parse(good)
+    change(parsed)
+    return JSON.stringify(parsed)
+  }
+  expect(decodeKeyEnvelope(null, 'uid-1')).toBeNull()
+  expect(decodeKeyEnvelope('', 'uid-1')).toBeNull()
+  expect(decodeKeyEnvelope('not json', 'uid-1')).toBeNull()
+  expect(decodeKeyEnvelope('42', 'uid-1')).toBeNull()
+  expect(decodeKeyEnvelope('[]', 'uid-1')).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => delete p.key),
+      'uid-1'
+    ),
+    'missing key'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.extra = 1)),
+      'uid-1'
+    ),
+    'extra field'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.v = 2)),
+      'uid-1'
+    ),
+    'wrong version'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.salt = 'bad')),
+      'uid-1'
+    ),
+    'bad salt'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.key = btoa('short'))),
+      'uid-1'
+    ),
+    'short key'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.key = 'not base64!')),
+      'uid-1'
+    ),
+    'undecodable key'
+  ).toBeNull()
+  // NONCANONICAL KEY ENCODING, same 32 bytes: for key bytes 0..31 the canonical string ends 'Hh8='
+  // and 'Hh9=' decodes identically — only the re-encode check can refuse it
+  const nonCanonical = mutate(p => (p.key = p.key.slice(0, -2) + '9='))
+  expect(JSON.parse(nonCanonical).key).not.toBe(JSON.parse(good).key)
+  expect(decodeKeyEnvelope(nonCanonical, 'uid-1'), 'same bytes, noncanonical encoding').toBeNull()
+})
+
+test('decodeSalt/encodeSalt: an independent literal vector, both directions', () => {
+  // review 84: SALT_B64 was produced by encodeSalt, so the encoder had no independent pin
+  const bytes = new Uint8Array(16).map((_, i) => i)
+  expect(encodeSalt(bytes)).toBe('AAECAwQFBgcICQoLDA0ODw==')
+  expect(Array.from(decodeSalt('AAECAwQFBgcICQoLDA0ODw=='))).toEqual(Array.from(bytes))
+  expect(() => decodeSalt('AAECAwQFBgcICQoLDA0ODx==')).toThrow() // same bytes, noncanonical
+})
+
+test('encodeKeyEnvelope refuses an invalid salt: the codec invariant is self-contained', () => {
+  expect(() => encodeKeyEnvelope({ uid: 'u', salt: 'not-canonical', keyBytes: KEY })).toThrow()
+})
+
+test('a valid envelope whose salt differs from the server profile is DISCARDED, never restored', () => {
+  const stored = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY })
+  expect(restoreKeyEnvelope(stored, 'uid-1', { v: 1, salt: SALT_B64 })).not.toBeNull()
+  const otherSalt = encodeSalt(new Uint8Array(16).fill(9))
+  expect(
+    restoreKeyEnvelope(stored, 'uid-1', { v: 1, salt: otherSalt }),
+    'another provisioning epoch‘s key: not importable'
+  ).toBeNull()
+  expect(restoreKeyEnvelope(stored, 'uid-2', { v: 1, salt: SALT_B64 }), 'wrong uid').toBeNull()
 })

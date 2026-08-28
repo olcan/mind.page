@@ -24,6 +24,7 @@
     addDoc,
     updateDoc,
     deleteDoc,
+    runTransaction,
     query,
     where,
     orderBy,
@@ -3289,6 +3290,8 @@
     setTimeout(() => (document.activeElement as HTMLElement).blur())
 
     localStorage.removeItem('mindpage_secret') // also remove secret when signing out
+    clearKdfState() // and the v1 bundle, envelope, and any in-flight derivation — SYNCHRONOUSLY,
+    // before firebase signOut, so the clearing happens even if the network sign-out fails
     // and every remembered foreign-code consent, plus the principal marker: an ANONYMOUS visit
     // is not gated, so owner code running there could otherwise write a consent key for the uid
     // that just signed out and have it honored when that account signs back in
@@ -3927,6 +3930,24 @@
           }),
         hashPhrase: phrase => hashSecretPhrase(phrase),
         signOut,
+        // v1 evidence support (stage 2): PROFILE FIRST — fetched or provisioned before deriving —
+        // then one worker derivation for the candidate phrase, disposed in finally. null when the
+        // owner flag is off, which keeps this path exactly v0 until rules are confirmed deployed
+        deriveV1Key: async phrase => {
+          if (!kdfEnabled()) return null
+          const snapshot = await getDocFromServer(kdfUserRef())
+          const state = decodeKdfMetadata(snapshot.data()?.kdf) // present-invalid throws, fail closed
+          const profile = state.kind == 'valid' ? state.profile : await provisionKdf()
+          const worker = createKdfWorker()
+          kdfActiveWorker = worker
+          try {
+            const keyBytes = await deriveKeyBytes(phrase, decodeSalt(profile.salt), profile.v, worker.derive)
+            return await importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
+          } finally {
+            worker.dispose()
+            if (kdfActiveWorker === worker) kdfActiveWorker = null
+          }
+        },
       })
       if (candidate != null) {
         // THE ADOPTION ORDER IS THE CONTRACT, and it lives in src/secret.ts (table-tested): one
@@ -4046,9 +4067,168 @@
   // overhead for binary can be ~60% cpu time (utf8 for ~50% larger buffers) and ~2x storage (utf8+base64)
   // session-secret wrappers over the aes-gcm module (src/crypto.ts): resolve (or initialize via
   // getSecretPhrase) the session secret, then delegate
+  // ---- the v1 KEY BUNDLE (component-owned; design: "Acquisition ownership") --------------------
+  // ONE single-flight per principal generation, beside the existing `secret` state — never a
+  // module singleton (SSR shares module state across requests; module state has no sign-out/HMR
+  // lifetime). All of this is inert until the OWNER FLAG below is set, which happens only after
+  // the new Firestore rules are deployed and confirmed (design: rollout order — a resident old
+  // tab's bare profile set is made harmless only by the live no-drop rule).
+  let kdfBundle: { uid: string; salt: string; key: CryptoKey } | null = null
+  let kdfBundlePromise: Promise<typeof kdfBundle> | null = null
+  let kdfGeneration = 0
+  let kdfActiveWorker: ReturnType<typeof createKdfWorker> | null = null
+  const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
+  // principal transitions and sign-out clear EVERYTHING v1: the bundle, the single-flight, the
+  // persisted envelope, and any in-flight derivation (disposed, so a late result cannot publish
+  // into a session that no longer exists)
+  function clearKdfState(): undefined {
+    kdfGeneration++
+    kdfBundle = null
+    kdfBundlePromise = null
+    localStorage.removeItem('mindpage_key1')
+    kdfActiveWorker?.dispose('principal change or sign-out')
+    kdfActiveWorker = null
+    return undefined
+  }
+  const kdfUserRef = () => doc(getFirestore(firebase), 'users', user.uid)
+  // the REAL transaction adapter: merge-set inside the transaction (a bare tx.set would be
+  // authorized on a kdf-less document while erasing the profile's other fields), candidate salt
+  // generated once outside the retrying body by the helper itself
+  const provisionKdf = () =>
+    provisionKdfProfile({
+      randomSalt: () => crypto.getRandomValues(new Uint8Array(16)),
+      runTransaction: body =>
+        runTransaction(getFirestore(firebase), tx =>
+          body({
+            get: async () => (await tx.get(kdfUserRef())).data(),
+            set: kdf => void tx.set(kdfUserRef(), { kdf }, { merge: true }),
+          })
+        ),
+    })
+  // acquires (or returns) the session's v1 bundle. PROFILE FIRST, then envelope, then — online,
+  // with metadata present and no matching envelope — the ONE-TIME upgrade prompt. Offline reuse
+  // is envelope-only (previously committed for this uid); no salt is ever invented offline. A
+  // device with only v0 state and no envelope continues v0 behavior without prompting when the
+  // prompt cannot validate (no stored v0 secret to compare)
+  async function ensureKdfBundle(): Promise<typeof kdfBundle> {
+    if (!kdfEnabled()) return null
+    // ELIGIBILITY: only the signed-in owner's own personal or fixed page. never anonymous,
+    // readonly, or someone else's shared page (their corpus is not ours to derive against)
+    if (anonymous || readonly || !user?.uid || (fixed && sharer && sharer != user.uid)) return null
+    if (kdfBundle) return kdfBundle
+    if (kdfBundlePromise) return kdfBundlePromise
+    const generation = kdfGeneration
+    const acquisition = acquireKdfBundle(generation)
+    kdfBundlePromise = acquisition
+    try {
+      return await acquisition
+    } catch (e) {
+      // a rejected acquisition clears ITS OWN slot (if still current), so the same principal can
+      // retry instead of replaying the rejection forever
+      if (kdfBundlePromise === acquisition) kdfBundlePromise = null
+      throw e
+    }
+  }
+  async function acquireKdfBundle(generation: number): Promise<typeof kdfBundle> {
+    const uid = user.uid as string
+    const stale = () => generation != kdfGeneration || ingressStopped
+    // 1. the SERVER-AUTHORITATIVE PROFILE, first (the salt is public; no phrase crosses any
+    //    network retry). offline: fall back to the previously committed envelope alone
+    let profile: KdfProfile | null = null
+    try {
+      const snapshot = await getDocFromServer(kdfUserRef())
+      if (stale()) throw new Error('kdf acquisition superseded')
+      const state = decodeKdfMetadata(snapshot.data()?.kdf) // present-invalid THROWS (fail closed)
+      profile = state.kind == 'valid' ? state.profile : await provisionKdf()
+    } catch (e) {
+      if (stale()) throw e
+      // OFFLINE (or read failure): envelope-only reuse. the envelope was persisted only from a
+      // committed transaction, so its salt is a previously server-confirmed identity
+      const offline = decodeKeyEnvelopeOffline(uid)
+      if (!offline) throw e
+      const key = await importV1Key(offline.keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
+      if (stale()) throw new Error('kdf acquisition superseded')
+      return (kdfBundle = { uid, salt: offline.salt, key })
+    }
+    if (stale()) throw new Error('kdf acquisition superseded')
+    // 2. the envelope, AGAINST the confirmed profile: a valid envelope for a different salt is a
+    //    different provisioning epoch's key and is discarded
+    const restored = restoreKeyEnvelope(localStorage.getItem('mindpage_key1'), uid, profile)
+    if (restored) {
+      const key = await importV1Key(restored as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
+      if (stale()) throw new Error('kdf acquisition superseded')
+      return (kdfBundle = { uid, salt: profile.salt, key })
+    }
+    localStorage.removeItem('mindpage_key1') // whatever was there does not match this profile
+    // 3. the ONE-TIME upgrade prompt. validation is exact: the phrase's v0 hash must equal the
+    //    stored v0 secret — a returning device always has one; without one, this device stays on
+    //    v0 behavior (not v1-reader-ready) rather than guessing
+    const storedV0 = localStorage.getItem('mindpage_secret')
+    if (!storedV0) return null
+    await tick()
+    const phrase = await modal.show({
+      content:
+        'Re-enter your <b>secret phrase</b> once to upgrade the encryption on this device (a one-time step per device).',
+      confirm: 'Upgrade',
+      cancel: 'Not Now',
+      input: '',
+      password: true,
+      username: user.email,
+      autocomplete: 'current-password',
+    })
+    if (stale()) throw new Error('kdf acquisition superseded')
+    if (phrase == null) return null // declined: this device is not v1-reader-ready yet
+    if ((await hashSecretPhrase(phrase)) != storedV0) {
+      _modal_alert('That phrase does not match this device\'s stored secret. Encryption upgrade skipped.')
+      return null
+    }
+    if (stale()) throw new Error('kdf acquisition superseded')
+    // 4. derive in the acquisition-local worker; dispose in finally; generation-check after
+    const worker = createKdfWorker()
+    kdfActiveWorker = worker
+    let keyBytes: Uint8Array
+    try {
+      keyBytes = await deriveKeyBytes(phrase, decodeSalt(profile.salt), profile.v, worker.derive)
+    } finally {
+      worker.dispose()
+      if (kdfActiveWorker === worker) kdfActiveWorker = null
+    }
+    if (stale()) throw new Error('kdf acquisition superseded')
+    const key = await importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
+    if (stale()) throw new Error('kdf acquisition superseded')
+    // 5. persist the phrase-free envelope LAST, only on this (still-current) success
+    localStorage.setItem('mindpage_key1', encodeKeyEnvelope({ uid, salt: profile.salt, keyBytes }))
+    return (kdfBundle = { uid, salt: profile.salt, key })
+  }
+  // offline decode WITHOUT a profile: the envelope's own validation (uid, version, canonical
+  // encodings) is the whole check, since the salt it names WAS server-confirmed when persisted
+  function decodeKeyEnvelopeOffline(uid: string) {
+    const stored = localStorage.getItem('mindpage_key1')
+    if (!stored) return null
+    // decodeKeyEnvelope validates shape and uid; no profile to compare against offline
+    const parsedProfile = (() => {
+      try {
+        const parsed = JSON.parse(stored)
+        return typeof parsed?.salt == 'string' ? { v: 1 as const, salt: parsed.salt } : null
+      } catch {
+        return null
+      }
+    })()
+    if (!parsedProfile) return null
+    const keyBytes = restoreKeyEnvelope(stored, uid, parsedProfile)
+    return keyBytes ? { salt: parsedProfile.salt, keyBytes } : null
+  }
+
   async function encrypt(text: string): Promise<string> {
+    // WRITES STAY v0 in this phase (the writer switch is stage 3, behind the owner checklist)
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
-    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const pending = secret
+    try {
+      secret = await Promise.resolve(pending) // resolve secret if promise pending
+    } catch (e) {
+      if (secret === pending) secret = null // a rejected acquisition clears its own slot
+      throw e
+    }
     return encryptWithSecret(text, secret)
   }
 
@@ -4056,19 +4236,50 @@
   // ideal for firebase storage of large binary data such as images
   async function encrypt_bytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
     if (!secret) secret = getSecretPhrase(true /* new_phrase */)
-    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const pending = secret
+    try {
+      secret = await Promise.resolve(pending)
+    } catch (e) {
+      if (secret === pending) secret = null
+      throw e
+    }
     return encryptBytesWithSecret(bytes, secret)
   }
 
   async function decrypt(cipher: string): Promise<string> {
+    // v1 DECRYPTION AWAITS THE BUNDLE SINGLE-FLIGHT (design guarantee: no v1 ciphertext reaches a
+    // decrypt path before the bundle decision settles); v0-only paths proceed exactly as before,
+    // offline included
+    if (classifyTextCipher(cipher) == 'v1') {
+      const bundle = await ensureKdfBundle()
+      if (!bundle) throw new Error('v1 ciphertext but no v1 key on this device (upgrade pending)')
+      return decryptV1Text(cipher, bundle.key)
+    }
     if (!secret) secret = getSecretPhrase()
-    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const pending = secret
+    try {
+      secret = await Promise.resolve(pending) // resolve secret if promise pending
+    } catch (e) {
+      if (secret === pending) secret = null // a rejected acquisition clears its own slot
+      throw e
+    }
     return decryptWithSecret(cipher, secret)
   }
 
   async function decrypt_bytes(cipher: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+    if (classifyBytesCipher(cipher) == 'v1') {
+      const bundle = await ensureKdfBundle()
+      if (!bundle) throw new Error('v1 ciphertext but no v1 key on this device (upgrade pending)')
+      return decryptV1Bytes(cipher, bundle.key)
+    }
     if (!secret) secret = getSecretPhrase()
-    secret = await Promise.resolve(secret) // resolve secret if promise pending
+    const pending = secret
+    try {
+      secret = await Promise.resolve(pending)
+    } catch (e) {
+      if (secret === pending) secret = null
+      throw e
+    }
     return decryptBytesWithSecret(cipher, secret)
   }
 
@@ -6329,6 +6540,11 @@
     encryptBytesWithSecret,
     decryptWithSecret,
     decryptBytesWithSecret,
+    classifyTextCipher,
+    classifyBytesCipher,
+    decryptV1Text,
+    decryptV1Bytes,
+    importV1Key,
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
@@ -6364,6 +6580,8 @@
     type Delivery,
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
+  import { decodeKdfMetadata, decodeSalt, encodeKeyEnvelope, provisionKdfProfile, restoreKeyEnvelope, type KdfProfile } from '../kdf_profile'
+  import { deriveKeyBytes } from '../kdf'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -7227,6 +7445,8 @@
       // (seems to be much faster to render user.photoURL, but watch out for possible 403 on user.photoURL)
       if (!user && localStorage.getItem('mindpage_user')) {
         user = JSON.parse(localStorage.getItem('mindpage_user'))
+        // the cached identity is UNCONFIRMED until firebase auth answers: key material restored
+        // against it must be re-checked then (see the auth-confirm mismatch clearing below)
         secret = localStorage.getItem('mindpage_secret') // may be null if user was acting as anonymous
         init_log(`restored user ${user.email}`)
       } else if (window.sessionStorage.getItem('mindpage_signin_pending')) {
@@ -7320,6 +7540,17 @@
             return // cancel init (no need to indicate visually since reload is required)
           }
           if (action == 'apply_user') {
+            // PRINCIPAL-MISMATCH CLEARING (design guarantee 2): a cached uid A followed by a
+            // confirmed firebase uid B must not retain A's key material — resetUser deliberately
+            // preserves the in-memory secret, so the check lives here, at the ONE place the
+            // confirmed principal replaces the cached one
+            const cachedUid = user?.uid
+            if (cachedUid && authUser?.uid && cachedUid != authUser.uid) {
+              console.warn('cached identity does not match the signed-in account: clearing key material')
+              secret = null
+              localStorage.removeItem('mindpage_secret')
+              clearKdfState()
+            }
             resetUser() // clean up first
             user = authUser
             const userInfoString = JSON.stringify(user) // uses custom user.toJSON (but does not assume it)

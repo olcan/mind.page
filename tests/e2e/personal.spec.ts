@@ -845,3 +845,58 @@ test('signing out clears the secret, the session and the local cache', async ({ 
   await waitForApp(page)
   expect(await page.evaluate(() => window._items().some(item => item.name == '#e2e_private'))).toBe(false)
 })
+
+test('MIXED CORPUS: a seeded v1 item decrypts through the application beside the v0 corpus', async ({ page }) => {
+  // the stage-2 deployability row (KDF design): the production application opens frozen v0 AND v1
+  // in one session, with ZERO Argon cost — the v1 key arrives via a seeded persisted envelope, the
+  // profile via seeded users/{uid} metadata, and the owner flag is on for this page only.
+  // writes remain v0 throughout (the writer switch is stage 3)
+  const SALT = 'BwcHBwcHBwcHBwcHBwcHBw=='
+  const KEY_B64 = 'QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8='
+  await firestore()
+    .collection('users')
+    .doc(ALICE.uid)
+    .set({ kdf: { v: 1, salt: SALT } }, { merge: true })
+  await firestore().collection('items').doc('e2e-v1-item').set({
+    user: ALICE.uid,
+    time: Date.now(),
+    hidden: false,
+    text: null,
+    attr: null,
+    cipher:
+      '1!b0b1b2b3b4b5b6b7b8b9babbeCL04Lk+yaMZzULKiKk6+td84UVkcbP8gb8QT+zU3/bzVOi99ACe9i/aRjc0/UjM3OFPVFHBJ4r61YYVnc6L+UXICmSmNheo8mcm',
+  })
+  try {
+    await withSecret(page)
+    await page.evaluate(
+      ([uid, salt, key]) => {
+        localStorage.setItem('mindpage_kdf', 'on')
+        localStorage.setItem('mindpage_key1', JSON.stringify({ uid, v: 1, salt, key }))
+      },
+      [ALICE.uid, SALT, KEY_B64]
+    )
+    await loadUser(page, ALICE)
+    await waitForApp(page)
+    // the v1 item decrypted through decryptItem -> ensureKdfBundle -> decryptV1Text
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_v1item', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('decrypted-from-v1 xyz789')
+    // and the v0 corpus still opens beside it (the frozen reader; same session, same secret)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
+      .toContain('secret text 12345')
+    // no upgrade prompt appeared: the envelope satisfied the bundle without any derivation
+    expect(await page.getByText(/upgrade the encryption/).count()).toBe(0)
+  } finally {
+    await firestore().collection('items').doc('e2e-v1-item').delete()
+    await firestore()
+      .collection('users')
+      .doc(ALICE.uid)
+      .set({ kdf: null }, { merge: true })
+      .catch(() => {})
+    await page.evaluate(() => {
+      localStorage.removeItem('mindpage_kdf')
+      localStorage.removeItem('mindpage_key1')
+    })
+  }
+})

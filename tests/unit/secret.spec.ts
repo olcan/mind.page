@@ -9,6 +9,7 @@ import {
   type FixedOwnerSecretDeps,
 } from '../../src/secret.js'
 import { commitOrStop, createHiddenCorpus, CorpusStopped } from '../../src/hidden_corpus.js'
+import { encryptV1Text, importV1Key } from '../../src/crypto.js'
 import { hashSecretPhrase, encryptWithSecret } from '../../src/crypto.js'
 
 // transition tests for the fixed-owner secret flow (see src/secret.ts): fail-closed fetch retry and
@@ -315,14 +316,67 @@ test('the resolver iterates past a REAL authentication failure to the valid seco
 })
 
 test('PRESENT-but-invalid cipher values are corrupt, never the new-account path', async () => {
-  // review 83: `cipher: 42`, `{}` or `''` used to vanish before the presence check, so a corrupt
-  // account entered the choose-new-phrase flow. presence means any value other than null/undefined
-  const d = deps({
-    fetchAccountDocs: async () => [doc('n', { cipher: 42 }), doc('o', { cipher: {} }), doc('e', { cipher: '' })],
-  })
-  await expect(resolveFixedOwnerSecret(d)).rejects.toThrow('unsupported or corrupt')
-  expect(d.calls).not.toContain('prompt')
+  // review 83/84: `cipher: 42`, `{}` or `''` used to vanish before the presence check, so a
+  // corrupt account entered the choose-new-phrase flow. EACH value is pinned INDIVIDUALLY — a
+  // combined corpus stayed green as long as any one value survived the filter
+  for (const bad of [42, {}, ''] as const) {
+    const d = deps({ fetchAccountDocs: async () => [doc('n', { cipher: bad })] })
+    await expect(resolveFixedOwnerSecret(d), JSON.stringify(bad)).rejects.toThrow('unsupported or corrupt')
+    expect(d.calls).not.toContain('prompt')
+  }
   // and absent/null stays the legitimate no-cipher answer
   const clean = deps({ fetchAccountDocs: async () => [doc('p', { cipher: null }), doc('q', { text: '#plain' })] })
   expect(await resolveFixedOwnerSecret(clean)).toBeNull()
+})
+
+// ---- v1 evidence through the REAL derivation seam (stage 2) ------------------------------------
+
+test('a v1-only corpus establishes through deriveV1Key, with ONE derivation per candidate phrase', async () => {
+  const fixedKey = new Uint8Array(32).map((_, i) => i)
+  const key = await importV1Key(fixedKey)
+  const c1 = await encryptV1Text('one', key)
+  const c2 = await encryptV1Text('two', key)
+  let derivations = 0
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher: c1 }), doc('b', { cipher: c2 })],
+    deriveV1Key: async () => (derivations++, key),
+  })
+  expect(await resolveFixedOwnerSecret(d), 'established by v1 evidence alone').toBe(
+    await hashSecretPhrase('uid-1', 'phrase')
+  )
+  expect(derivations, 'one derivation per candidate phrase, memoized across rows').toBe(1)
+})
+
+test('a v1-only corpus with NO derivation available is honestly not-established, never new-account', async () => {
+  const fixedKey = new Uint8Array(32).map((_, i) => i)
+  const key = await importV1Key(fixedKey)
+  const cipher = await encryptV1Text('data', key)
+  const phrases = ['phrase', null] // one failed attempt, then cancel
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher })],
+    promptPhrase: async () => phrases.shift() ?? null,
+    deriveV1Key: async () => null, // kdf disabled/unavailable on this device
+  })
+  await expect(resolveFixedOwnerSecret(d), 'cancel signs out; the corpus was never called empty').rejects.toThrow(
+    /cancelled/
+  )
+  expect(d.calls).toContain('signout')
+})
+
+test('a WRONG phrase against v1 evidence re-prompts; the right one establishes', async () => {
+  const fixedKey = new Uint8Array(32).map((_, i) => i)
+  const rightKey = await importV1Key(fixedKey)
+  const wrongKey = await importV1Key(new Uint8Array(32).fill(9))
+  const cipher = await encryptV1Text('data', rightKey)
+  const phrases = ['wrong', 'right']
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher })],
+    promptPhrase: async () => phrases.shift() ?? null,
+    deriveV1Key: async phrase => (phrase == 'right' ? rightKey : wrongKey),
+  })
+  expect(await resolveFixedOwnerSecret(d)).toBe(await hashSecretPhrase('uid-1', 'right'))
+  expect(
+    d.calls.filter(c => c == 'wrong'),
+    'exactly one wrong-phrase report'
+  ).toHaveLength(1)
 })

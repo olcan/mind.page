@@ -37,7 +37,11 @@ export type ProfileState =
 
 /** Decodes the `kdf` field of a users/{uid} document. */
 export function decodeKdfMetadata(kdf: unknown): ProfileState {
-  if (kdf === undefined || kdf === null) return { kind: 'absent' }
+  // ONLY a missing field is absent. An explicit `null` is a PRESENT value: the rules reject it as
+  // not-a-map and forbid replacing it (kdf_unchanged sees `'kdf' in prev`), so calling it
+  // provisionable here would send a write the server denies and report a misleading permission
+  // failure (review 84)
+  if (kdf === undefined) return { kind: 'absent' }
   if (typeof kdf != 'object' || Array.isArray(kdf)) throw new Error('kdf metadata is not a map')
   const { v, salt, ...rest } = kdf as Record<string, unknown>
   if (Object.keys(rest).length) throw new Error(`kdf metadata has unexpected fields: ${Object.keys(rest).join(',')}`)
@@ -87,6 +91,7 @@ export async function provisionKdfProfile(deps: {
 export type KeyEnvelope = { uid: string; v: 1; salt: string; key: string }
 
 export function encodeKeyEnvelope(envelope: { uid: string; salt: string; keyBytes: Uint8Array }): string {
+  decodeSalt(envelope.salt) // the exported codec's invariant is self-contained: no invalid salt out
   if (envelope.keyBytes.length != KEY_BYTES) throw new Error(`key must be ${KEY_BYTES} bytes`)
   let binary = ''
   for (const byte of envelope.keyBytes) binary += String.fromCharCode(byte)
@@ -120,10 +125,24 @@ export function decodeKeyEnvelope(
     return null
   }
   if (keyBytes.length != KEY_BYTES) return null
-  // canonical re-encode: the stored encoding must be THE encoding, or two strings could name one
-  // key and identity comparisons drift
+  // canonical re-encode (the KEY only — the salt is held canonical by the exact regex above, which
+  // is mathematically equivalent; no salt re-encode happens): the stored encoding must be THE
+  // encoding, or two strings could name one key and identity comparisons drift
   let binary = ''
   for (const byte of keyBytes) binary += String.fromCharCode(byte)
   if (btoa(binary) !== key) return null
   return { salt, keyBytes }
+}
+
+/**
+ * Restores the persisted key for a confirmed uid AGAINST a server-confirmed profile: the envelope
+ * must decode, belong to this uid, and name the profile's exact canonical salt — a valid envelope
+ * for a different salt is some other provisioning epoch's key and is DISCARDED, never imported
+ * (review 84's caller-level rule, owned here so the comparison itself is pinned).
+ */
+export function restoreKeyEnvelope(stored: string | null, expectedUid: string, profile: KdfProfile): Uint8Array | null {
+  const decoded = decodeKeyEnvelope(stored, expectedUid)
+  if (!decoded) return null
+  if (decoded.salt !== profile.salt) return null
+  return decoded.keyBytes
 }

@@ -17,8 +17,8 @@ import {
 //
 // EXACTLY ONE row pays a real (cheap) Argon2id derivation — the known-answer test that pins the
 // dependency, its Argon2 version and its units. Every framing/AAD/error row runs on an injected
-// fixed 32-byte key and pays no KDF at all. The production-cost benchmark lives behind the
-// browser's __kdfBenchmark hook, opt-in, reported and never asserted.
+// fixed 32-byte key and pays no KDF at all. The production-cost fleet benchmark is DONE and
+// documented in the design; its temporary hook is gone (review 84).
 
 // the CHEAP test parameters. injected here only — the production resolver maps versions through
 // the code-owned KDF_VERSIONS table and can never accept these

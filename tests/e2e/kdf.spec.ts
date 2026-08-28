@@ -4,8 +4,8 @@ import { expect, test } from '@playwright/test'
 // the hash-wasm WASM loads inside it in a REAL browser, and the page-side deriver round-trips —
 // none of which a Node unit test can show. It runs the CHEAP test parameters (this is a bundling
 // smoke, not the resolver; the production resolver maps versions only through the code-owned
-// table). The production-cost benchmark stays behind __kdfBenchmark as a manual, reported-only
-// run — wall-clock is never a correctness assertion (review 79/80).
+// table). The production-cost fleet benchmark is DONE and documented in the design, and its
+// temporary hook is gone; wall-clock is never a correctness assertion (reviews 79/80/84).
 
 test('the kdf worker bundles, loads its wasm, and derives in a real browser', async ({ page }) => {
   await page.goto('/')

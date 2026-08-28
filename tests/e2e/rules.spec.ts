@@ -180,9 +180,16 @@ test('the shared owner policy still covers items, history and instances', async 
 })
 
 test('an UNKNOWN collection with a matching user field is denied: new collections are deny-by-default', async () => {
+  // the read denial must be about the RULE, not about the document not existing (the old generic
+  // rule also denied a missing document for want of resource.data.user) — so the document EXISTS
+  await env.withSecurityRulesDisabled(async ctx =>
+    setDoc(doc(ctx.firestore(), 'surprise/rules-s1'), { user: 'alice', data: 1 })
+  )
   const db = env.authenticatedContext('alice').firestore()
-  await assertFails(setDoc(doc(db, 'surprise/rules-s1'), { user: 'alice', data: 1 }))
   await assertFails(getDoc(doc(db, 'surprise/rules-s1')))
+  await assertFails(updateDoc(doc(db, 'surprise/rules-s1'), { data: 2 }))
+  await assertFails(deleteDoc(doc(db, 'surprise/rules-s1')))
+  await assertFails(setDoc(doc(db, 'surprise/rules-s2'), { user: 'alice', data: 1 }))
 })
 
 test('webhook collections: reads as documented, and a client user-field injection cannot write', async () => {
@@ -195,10 +202,13 @@ test('webhook collections: reads as documented, and a client user-field injectio
   await assertSucceeds(getDoc(doc(alice, 'github_webhooks/rules-g1')))
   const mallory = env.authenticatedContext('mallory-ok').firestore()
   await assertFails(getDoc(doc(mallory, 'webhooks/rules-w1'))) // not their webhook
-  // the OLD bypass: the generic rule granted a write for any document carrying user == uid
+  // the OLD bypass: the generic rule granted a write for any document carrying user == uid.
+  // create, update AND delete — "no client writes" means all three
   await assertFails(setDoc(doc(alice, 'webhooks/rules-w2'), { user: 'alice', hook: 2 }))
   await assertFails(setDoc(doc(alice, 'github_webhooks/rules-g2'), { user: 'alice', repo: 'r' }))
   await assertFails(updateDoc(doc(alice, 'webhooks/rules-w1'), { user: 'alice', hook: 3 }))
+  await assertFails(deleteDoc(doc(alice, 'webhooks/rules-w1')))
+  await assertFails(deleteDoc(doc(alice, 'github_webhooks/rules-g1')))
 })
 
 test('users: owner-only read/create/update; NO client delete; injected user field buys nothing', async () => {
@@ -216,6 +226,12 @@ test('users: owner-only read/create/update; NO client delete; injected user fiel
 test('kdf metadata: exact shape enforced, immutable once set, and merge refreshes preserve it', async () => {
   const alice = env.authenticatedContext('alice').firestore()
   const SALT = 'BwcHBwcHBwcHBwcHBwcHBw==' // canonical base64 of 16x0x07
+  // PRECONDITIONS INSIDE THE ROW (review 84: a focused --grep run must still prove everything):
+  // the profile exists and carries an injected user field, so the old overlapping-rule bypass is
+  // exercised here, not via state another test happened to leave
+  await env.withSecurityRulesDisabled(async ctx =>
+    setDoc(doc(ctx.firestore(), 'users/alice'), { email: 'a@x', user: 'alice' })
+  )
   // exact-shape rejections
   for (const kdf of [
     { v: 2, salt: SALT },
@@ -224,10 +240,16 @@ test('kdf metadata: exact shape enforced, immutable once set, and merge refreshe
     { salt: SALT },
     { v: 1, salt: SALT, extra: 1 },
     { v: 1, salt: 'not base64' },
-    { v: 1, salt: 'BwcHBwcHBwcHBwcHBwcHBB==' }, // noncanonical pad bits
+    { v: 1, salt: 'BwcHBwcHBwcHBwcHBwcHBx==' }, // SAME 16 bytes, noncanonical pad bits
   ])
     await assertFails(setDoc(doc(alice, 'users/alice'), { kdf }, { merge: true }))
-  // the valid shape lands
+  // explicit null is present-invalid on the server too, matching decodeKdfMetadata (review 84)
+  await assertFails(setDoc(doc(alice, 'users/alice'), { kdf: null }, { merge: true }))
+  // FIRST PROVISIONING on a document that does not exist yet — the branch that can race the
+  // fire-and-forget sign-in profile merge (a fresh uid, so no earlier row's state)
+  const fresh = env.authenticatedContext('freshuser').firestore()
+  await assertSucceeds(setDoc(doc(fresh, 'users/freshuser'), { kdf: { v: 1, salt: SALT } }, { merge: true }))
+  // the valid shape lands on the existing profile
   await assertSucceeds(setDoc(doc(alice, 'users/alice'), { kdf: { v: 1, salt: SALT } }, { merge: true }))
   // IMMUTABLE: mutation, deletion, and a non-merge replace that would drop it are all denied
   await assertFails(

@@ -13,7 +13,7 @@
 // the documents this flow fetched are prompt-aged by the time a human finishes typing, and the
 // whole fetch/retry/prompt sequence has no business holding the corpus tail
 
-import { classifyTextCipher, decryptWithSecret } from './crypto.js'
+import { CipherError, classifyTextCipher, decryptV1Text, decryptWithSecret } from './crypto.js'
 
 export type AccountDoc = { id: string; data: () => Record<string, any> }
 
@@ -29,6 +29,11 @@ export type FixedOwnerSecretDeps = {
   // stored form of a phrase (see hashSecretPhrase in crypto.ts, bound to the uid)
   hashPhrase: (phrase: string) => Promise<string>
   signOut: () => void
+  // derives the v1 key for a CANDIDATE phrase (profile-first: the caller obtains/provisions the
+  // server profile before deriving). null when v1 is not enabled/available — a v1-only corpus
+  // then cannot establish, which is the honest outcome. OPTIONAL only until stage 3; the memo per
+  // prompt-loop iteration lives here so one wrong phrase costs one derivation
+  deriveV1Key?: (phrase: string) => Promise<CryptoKey | null>
 }
 
 // returns the validated hashed secret CANDIDATE, or null when the (server-confirmed) account holds
@@ -94,7 +99,23 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
           throw e
         }
       },
-      tryV1: async () => false, // no v1 corpus yet (stage 2 supplies the real attempt)
+      tryV1: (() => {
+        // ONE derivation per candidate phrase, memoized across this phrase's v1 evidence rows
+        let derived: Promise<CryptoKey | null> | undefined
+        return async (cipher: string) => {
+          if (!deps.deriveV1Key) return false
+          derived ??= deps.deriveV1Key(phrase)
+          const key = await derived
+          if (!key) return false
+          try {
+            await decryptV1Text(cipher, key)
+            return true
+          } catch (e) {
+            if (e instanceof CipherError && e.kind == 'authentication-failed') return false
+            throw e // malformed/unsupported cannot reach here (preflighted); integration errors propagate
+          }
+        }
+      })(),
     })
     if (verdict.kind == 'established') break
     // NOT-ESTABLISHED: the honest outcome — the phrase did not unlock the available data
