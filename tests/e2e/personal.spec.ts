@@ -1203,12 +1203,18 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     const itemCountBefore = (await firestore().collection('items').where('user', '==', ALICE.uid).get()).size
     const queuedRejection = await page.evaluate(async () => {
       void window._create('#e2e_w_fail must fail 780')
-      try {
-        await (window._item('#e2e_w_fail') as any)!.save() // queued before any settlement wait
-        return 'no rejection'
-      } catch (e) {
-        return (e as Error).message
-      }
+      // BOUNDED wait (review 96): if the forever-polling wedge ever regresses, this fails in
+      // ~10s with its own sentinel instead of consuming the row's whole timeout
+      const timeout = new Promise<string>(resolve => setTimeout(() => resolve('TIMEOUT: save never settled'), 10_000))
+      const save = (async () => {
+        try {
+          await (window._item('#e2e_w_fail') as any)!.save() // queued before any settlement wait
+          return 'no rejection'
+        } catch (e) {
+          return (e as Error).message
+        }
+      })()
+      return Promise.race([save, timeout])
     })
     expect(queuedRejection, 'the queued save rejects with the KDF-disabled cause').toContain(
       'v1 keys unavailable (kdf disabled)'
@@ -1223,9 +1229,9 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
         // ONE item carries the whole failure state (review 95 §2.2: never splice a stale marker
         // from one item with another's text)
         const it = window.__items.find(i => i.labelText == '#e2e_w_fail') as any
-        return it
-          ? { createFailed: !!it.createFailed, savedId: it.savedId ?? null, text: window._item('#e2e_w_fail', true)?.text ?? null }
-          : null
+        // the text comes from the SAME selected entry (review 96): one object carries the whole
+        // failure state, so a stale marker cannot be spliced with another item's text
+        return it ? { createFailed: !!it.createFailed, savedId: it.savedId ?? null, text: it.text ?? null } : null
       }),
       'createFailed recorded on THE item; no savedId; local text retained'
     ).toEqual({ createFailed: true, savedId: null, text: '#e2e_w_fail must fail 780' })
