@@ -180,5 +180,35 @@ for (const [what, facts, expected] of [
   // never prompt a visitor for their secret
   ['a READ-ONLY fixed page stays an ordinary visible-query removal', { ...owner, readonly: true }, false],
   ['an ANONYMOUS fixed page likewise', { ...owner, anonymous: true }, false],
+  // the SECOND trigger (the two-tab `_old` root cause): a non-removal whose payload side may
+  // have moved by its reserved turn — held-side contradiction, prior same-id coordinator state
+  // remaining outstanding (a queued nonterminal delivery OR a retained terminal block), a live
+  // blind predecessor, or a pending corpus boundary — needs evidence on OWNER-CAPABLE pages; read-only
+  // and anonymous pages are refused outright (they must never query or decrypt the corpus)
+  [
+    'side uncertainty forces evidence on the ordinary account page',
+    { fixed: false, readonly: false, anonymous: false, removed: false, sideUncertain: true },
+    true,
+  ],
+  [
+    'side uncertainty forces evidence on an owner-fixed page too',
+    { ...owner, removed: false, sideUncertain: true },
+    true,
+  ],
+  [
+    'no uncertainty leaves a non-removal blind, exactly as before',
+    { fixed: false, readonly: false, anonymous: false, removed: false, sideUncertain: false },
+    false,
+  ],
+  [
+    'a READ-ONLY page is refused evidence even under uncertainty',
+    { fixed: true, readonly: true, anonymous: false, removed: false, sideUncertain: true },
+    false,
+  ],
+  [
+    'an ANONYMOUS page is refused evidence even under uncertainty',
+    { fixed: true, readonly: false, anonymous: true, removed: false, sideUncertain: true },
+    false,
+  ],
 ] as const)
   test(`final-state evidence: ${what}`, () => expect(needsFinalStateEvidence(facts)).toBe(expected))

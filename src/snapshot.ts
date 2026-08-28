@@ -123,12 +123,39 @@ export function snapshotDecision(facts: SnapshotFacts): SnapshotDecision {
  * ONE predicate for both uses: it forces ADMITTED allocation at receipt (a blind record never
  * reaches the resolver at all) and selects the final-state read at the delivery boundary. Those two
  * decisions must not be able to disagree.
+ *
+ * THE SECOND TRIGGER — `sideUncertain` (2026-08-28, the two-tab `_old` root cause; see the vault
+ * issue "MindPage Stale Hidden Redelivery Reverses a Visible Transition"): a NON-REMOVAL delivery
+ * whose payload side may not be the document's side by its reserved turn. A listener can deliver
+ * an OLDER opposite-side payload around a newer transition (transport unisolated: listener
+ * re-emission, shared-cache replay, or a late acknowledgement — the application fix is
+ * transport-agnostic), and a payload-routed application then reverses the transition — removing
+ * the visible row and reinstalling a stale wrapper, or dropping a live hidden record for a stale
+ * visible row. Uncertainty is CAPTURED AT RECEIPT from four sources: the held side already
+ * contradicts the payload; prior same-id coordinator STATE REMAINS OUTSTANDING — a queued
+ * nonterminal delivery, or a retained terminal block whose applied side still matches the stale
+ * payload (hasOutstanding covers both); an earlier live BLIND record, whose not-hidden body may
+ * install the visible side before a raw-hidden delivery's lane turn; or a pending corpus
+ * producer holds a boundary the delivery waits behind and may change the held side first. The
+ * membership read resolves the CURRENT side server-confirmed; a delivery whose payload matches
+ * it routes exactly as before.
+ *
+ * OWNER-SCOPED, defensively: read-only and anonymous pages must never take the MEMBERSHIP READ
+ * (nor decrypt its queried hidden result) — anonymous pages DO run the realtime listener on an
+ * admin-writable account and hold no owner secret (acquisition throws), and a read-only page
+ * must not query a corpus it does not own — so the evidence boundary refuses both modes
+ * outright rather than relying on uncertainty sources being unreachable there. (Delivered live
+ * payloads are still decrypted during ordinary preparation; this scopes only the evidence
+ * seam.) (Live anonymous hidden-row validity is a
+ * pre-existing policy hole recorded for backfill, deliberately not solved in this slice.)
  */
 export function needsFinalStateEvidence(facts: {
   fixed: boolean
   readonly: boolean
   anonymous: boolean
   removed: boolean
+  // the payload's side may have moved by the delivery's reserved turn (non-removal); see above
+  sideUncertain?: boolean
 }): boolean {
-  return facts.fixed && !facts.readonly && !facts.anonymous && facts.removed
+  return !facts.readonly && !facts.anonymous && ((facts.fixed && facts.removed) || !!facts.sideUncertain)
 }

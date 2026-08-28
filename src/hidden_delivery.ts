@@ -145,7 +145,12 @@ export function receiveChanges(
     pendingBoundary: (id: string) => Promise<void> | undefined
     // whether the applied index depends on this id (a wrapper, or an adoption in flight)
     tracksDocument: (id: string) => boolean
+    // whether the VISIBLE items currently hold the id (receipt-turn read; see sideUncertain)
+    visibleNow: (id: string) => boolean
     hasOutstanding: (id: string) => boolean
+    // whether an earlier BLIND (not-hidden) record for the id is still live in the allocator —
+    // its body may install the visible side before this delivery's turn (see sideUncertain)
+    hasLiveBlind: (id: string) => boolean
     open: (id: string, cipher: string | undefined) => RecordHandle
     // the record allocator (createRecordAllocator), with the callback's own revocation
     allocate: (requests: AllocationRequest[], revoke: (reason: string) => void) => Batch
@@ -155,12 +160,33 @@ export function receiveChanges(
   const facts = changes.map(change => {
     const id = change.doc.id
     const removed = change.type == 'removed'
-    // ONE observation of the payload: every receipt fact below derives from the same read
+    // ONE observation of the payload: every receipt fact below derives from the same read.
+    // every OTHER receipt observation is likewise captured ONCE, before this delivery's own
+    // handle opens, and reused for BOTH evidence and admission — hadOutstanding read after
+    // open() would count the current delivery as its own predecessor, and a second read of any
+    // fact could disagree with the one admission used
     const data = change.doc.data()
     const rawHidden = !!data.hidden
     const boundary = deps.pendingBoundary(id)
-    const needsEvidence = needsFinalStateEvidence({ ...deps.mode, removed })
-    const admitted = rawHidden || needsEvidence || deps.tracksDocument(id) || deps.hasOutstanding(id) || !!boundary
+    const tracked = deps.tracksDocument(id)
+    const visible = deps.visibleNow(id)
+    const hadOutstanding = deps.hasOutstanding(id)
+    // the scan matters only for a live raw-hidden non-removal, so ordinary visible traffic
+    // skips the O(live) walk (review 110 §3); the fact is still captured before open()
+    const hadLiveBlind = !removed && rawHidden && deps.hasLiveBlind(id)
+    // the payload's side MAY HAVE MOVED by this delivery's reserved turn (the two-tab `_old`
+    // root cause; see the vault issue): the held side already contradicts the payload; OR prior
+    // same-id coordinator state remains OUTSTANDING — a queued nonterminal delivery that applies
+    // first, or a retained terminal block whose applied side still matches the stale payload
+    // (hasOutstanding covers both); OR an earlier live BLIND record's not-hidden body may install
+    // the visible side before this raw-hidden delivery's lane turn (blind bodies are always
+    // not-hidden, so only the raw-hidden half needs that arm); OR a pending corpus producer holds
+    // a boundary this delivery will wait behind. only the final-state read at the boundary can
+    // say what the document is NOW, so the delivery must establish evidence
+    const sideUncertain =
+      !removed && (!!boundary || hadOutstanding || (rawHidden ? visible || hadLiveBlind : tracked))
+    const needsEvidence = needsFinalStateEvidence({ ...deps.mode, removed, sideUncertain })
+    const admitted = rawHidden || needsEvidence || tracked || hadOutstanding || !!boundary
     // the raw cipher is captured BEFORE decrypt, so an echo waiter can learn its own echo failed
     // to decrypt rather than waiting forever. ONLY for a live raw-hidden delivery: firestore hands
     // a REMOVED change its old data, so forwarding that cipher would let a deletion satisfy the
@@ -264,11 +290,14 @@ export type AdmittedDeliveryDeps = {
 /**
  * Runs one admitted delivery's application, inside its record's reserved turn.
  *
- * Order: the captured corpus boundary, then liveness, then — for an ambiguous owner-fixed removal —
- * the final-state read (BEFORE the name chains, because the answer determines the affected NAMES as
- * much as the effects; the stale payload's name set is empty), then `applyRemote` with the routed
- * synchronous body. A rejection anywhere blocks the handle: a delivery that established or applied
- * nothing must not publish `applied` and heal older same-cell blocks with it.
+ * Order: the captured corpus boundary, then liveness, then — for a delivery whose receipt marked
+ * it `needsEvidence` (an ambiguous owner-fixed removal, or an owner-page non-removal whose side
+ * may have moved; see needsFinalStateEvidence) — the final-state read, BEFORE the name chains,
+ * because the answer determines the affected NAMES as much as the effects (a stale hidden payload
+ * serializes only `nameForDocument()`, never additionally its own target name), then `applyRemote`
+ * with the routed synchronous body. A rejection anywhere blocks the handle: a delivery that
+ * established or applied nothing must not publish `applied` and heal older same-cell blocks with
+ * it.
  */
 export async function applyAdmittedDelivery(
   delivery: {
@@ -285,13 +314,19 @@ export async function applyAdmittedDelivery(
   if (delivery.boundary) await delivery.boundary
   if (deps.stopped()) throw new Error('hidden ingress stopped')
 
-  // FINAL-STATE EVIDENCE for an ambiguous owner-fixed removal. the SAME envelope bit forced this
-  // record to be allocated admitted, so a blind record can never reach this line
+  // FINAL-STATE EVIDENCE — for an ambiguous owner-fixed removal OR an owner-page sideUncertain
+  // non-removal (see needsFinalStateEvidence). the SAME envelope bit forced this record to be
+  // allocated admitted, so a blind record can never reach this line
   let saved = delivery.item
   let target = delivery.wrapper
   let gone = delivery.change.type == 'removed'
   let applyChange = delivery.change
   let applySnap: unknown = delivery.change.doc
+  // the payload is the STALE OLD SIDE of a committed hidden-to-visible transition (a hidden
+  // payload whose document is not-hidden NOW): its content must not be applied ANYWHERE — not as
+  // a wrapper install, not as a visible row (see the vault issue "MindPage Stale Hidden
+  // Redelivery Reverses a Visible Transition")
+  let staleHiddenSide = false
   if (delivery.needsEvidence) {
     const membership = await deps.stopWaiters.race(deps.readMembership()).catch(e => {
       deps.onEvidenceError(e)
@@ -306,8 +341,16 @@ export async function applyAdmittedDelivery(
       gone = false
       applySnap = membership.snap
       applyChange = { ...delivery.change, type: deps.hiddenIndexed() ? 'modified' : 'added', doc: membership.snap }
+    } else if (saved?.hidden && !gone) {
+      // membership not-hidden under a live HIDDEN payload: the stale old side (above). NOTE
+      // `not-hidden` conflates visible, deleted and unshared — it proves ONLY that the delivered
+      // hidden content must not be applied; the only action backed by evidence is dropping a
+      // hidden record the index may still hold, and any visible representation is left to its
+      // OWN listener delivery
+      staleHiddenSide = true
     }
-    // not-hidden: the removal stands, and the hidden-side removal below is backed by evidence
+    // not-hidden + removal: the removal stands, and the hidden-side removal below is backed by
+    // evidence
   }
 
   // TWO predicates, deliberately distinct (round 77): the NAME selection cares whether the
@@ -317,14 +360,32 @@ export async function applyAdmittedDelivery(
   // reducer performs the hidden removal, WITH the visible sweep first. collapsing them routed
   // hidden deletions down the nonhidden body, whose unified-reducer call saw a hidden item, took
   // its hidden branch, and never touched the stale visible row
-  const currentHidden = !!saved?.hidden && !gone
+  const currentHidden = !!saved?.hidden && !gone && !staleHiddenSide
   // IN-TURN: the affected name chains are read here, from the index as it stands in this
-  // delivery's reserved turn. a rename must join the in-flight write on its OLD name
+  // delivery's reserved turn. a rename must join the in-flight write on its OLD name. the STALE
+  // branch serializes only the held record it may drop — it never applies its payload's target,
+  // so joining that name's chain would be needless waiting
   const names = currentHidden ? [deps.nameForDocument(), target?.name] : [deps.nameForDocument()]
   return deps.applyRemote(names, () => {
     // STOP REJECTS rather than returning: a running handle cannot be blocked, and returning
     // successfully would publish `applied` for a delivery that mutated nothing
     if (deps.stopped()) throw new Error('hidden ingress stopped')
+    // the STALE discard runs BEFORE the local-intent guard (review 108 §2.5): server evidence
+    // has already proved the hidden payload stale, and this branch applies no visible content —
+    // deferring it behind an in-flight visible edit would turn a harmless replay into a retained
+    // ingress block holding the writer gate until another delivery or reload
+    if (staleHiddenSide) {
+      // drop a hidden record the index may still hold for this id (with its downstream
+      // notification, exactly like the transition's own drop); NOTHING else — the stale payload's
+      // wrapper is not installed, and any visible representation is left to its OWN listener
+      // delivery (membership 'not-hidden' does not distinguish visible from deleted/unshared)
+      const { droppedName } = deps.removeHiddenRecord()
+      if (droppedName) {
+        deps.hiddenChanged(droppedName, applyChange.type)
+        deps.markCleanupPending()
+      }
+      return undefined
+    }
     // LOCAL INTENT, fail-closed: ordinary reconciliation owns no coordinator handle and cannot
     // heal this delivery, so deferring would strand it and clearing a deferral would lose the
     // local change. recovery is a reload or an independently later delivery

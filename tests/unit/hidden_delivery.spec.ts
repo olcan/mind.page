@@ -47,6 +47,7 @@ function harness(mode: PageMode = OWNER) {
   const evidenceErrors: unknown[] = []
   const applyErrors: unknown[] = []
   let stopped = false
+  let localIntent = false // overridable per row (see STALE + LOCAL INTENT)
   // the applied HIDDEN index: id -> name
   const hiddenById = new Map<string, string>()
   // the VISIBLE items: ids present
@@ -86,7 +87,9 @@ function harness(mode: PageMode = OWNER) {
       mode,
       pendingBoundary: id => corpus.pendingBoundary(id),
       tracksDocument: id => hiddenById.has(id),
+      visibleNow: id => visible.has(id),
       hasOutstanding: id => ingress.hasOutstanding(id),
+      hasLiveBlind: id => allocator.hasLiveBlind(id),
       open: (id, cipher) => ingress.open(id, cipher),
       allocate: (requests, revoke) => allocator.allocate(requests, revoke),
       revoke: () => {},
@@ -100,7 +103,7 @@ function harness(mode: PageMode = OWNER) {
     hiddenIndexed: () => hiddenById.has(id),
     visiblePresent: () => visible.has(id),
     applyRemote,
-    hasLocalIntent: () => false,
+    hasLocalIntent: () => localIntent,
     removeVisibleForHidden: () => void (visible.delete(id), effects.push(`removeVisible:${id}`)),
     // the UNIFIED reducer's contract, honored: hidden item + removed -> hidden removal only
     // (NEVER the visible row); hidden item + added/modified -> hidden install; visible item ->
@@ -149,6 +152,7 @@ function harness(mode: PageMode = OWNER) {
       stopWaiters.stop(new Error('hidden ingress stopped'))
     },
     membershipReadCount: () => membershipReads,
+    setLocalIntent: (v: boolean) => void (localIntent = v),
     readStarted: readStarted.promise,
     reserved: reserved.promise,
     holdMembership: () => {
@@ -223,14 +227,14 @@ test('RAW-HIDDEN DELETION: a full-account hidden removal removes BOTH representa
   expect(h.visible.has('k'), 'and so is the stale visible row').toBe(false)
 })
 
-test('BOUNDARY: membership-only admission, and NO evidence or reducer until the producer settles', async () => {
-  // the two facts round 78 showed the previous row did not prove. `a` is a VISIBLE non-removal:
-  // rawHidden false, needsEvidence false, nothing tracked or outstanding — pending corpus
-  // membership is its ONLY admission arm, so deleting `|| !!boundary` allocates it blind. `b` is
-  // an ambiguous owner removal whose current state is hidden: its EVIDENCE read must also wait for
-  // the captured producer, not just its reducers — fresh evidence taken against the pre-rebuild
-  // index is exactly what the boundary exists to prevent
+test('BOUNDARY: the producer changes the held side; the waiting delivery reads evidence AFTER it and preserves the current side', async () => {
+  // review 108 §2.2: a pending boundary is the same uncertainty as an outstanding predecessor —
+  // the producer may register the hidden side before its captured boundary fulfils, and a
+  // non-removal whose payload matches the pre-producer side is then stale in exactly the queued
+  // way. `a` is a VISIBLE non-removal whose boundary is its sole admission arm and (now) an
+  // uncertainty source; `b` is the ambiguous owner removal (evidence AND boundary), unchanged
   const h = harness()
+  h.server.set('a', { item: { hidden: true, text: 'cipher' }, name: 'global_store_a' }) // server truth: hidden NOW
   h.server.set('b', { item: { hidden: true, text: 'cipher' }, name: 'global_store_b' })
   const membershipPublished = deferred()
   const producerHold = deferred()
@@ -238,10 +242,11 @@ test('BOUNDARY: membership-only admission, and NO evidence or reducer until the 
     run.publishMembership(['a', 'b'])
     membershipPublished.resolve()
     await producerHold.promise // the producer is HELD, its boundary pending
+    h.hiddenById.set('a', 'global_store_a') // the producer registers the hidden side FIRST
   })
   await membershipPublished.promise
   const { deliveries } = h.receive([
-    changeOf('a', 'modified', { hidden: false }), // visible: boundary is the SOLE admission arm
+    changeOf('a', 'modified', { hidden: false }), // stale pre-producer side: boundary admits AND makes it uncertain
     changeOf('b', 'removed', { hidden: false }), // ambiguous owner removal: evidence AND boundary
   ])
   expect(
@@ -252,19 +257,21 @@ test('BOUNDARY: membership-only admission, and NO evidence or reducer until the 
     deliveries.map(d => !!d.boundary),
     'both captured a DEFINED boundary'
   ).toEqual([true, true])
-  expect(deliveries.map(d => d.needsEvidence)).toEqual([false, true])
-  h.schedule(deliveries[0], { hidden: false, text: 'visible item' })
+  expect(deliveries.map(d => d.needsEvidence), 'the boundary itself is an uncertainty source').toEqual([true, true])
+  h.schedule(deliveries[0], { hidden: false, text: 'stale visible body' })
   h.schedule(deliveries[1], { hidden: false, text: '' })
   await new Promise(res => setImmediate(res))
   expect(h.membershipReadCount(), 'ZERO evidence reads while the producer holds the boundary').toBe(0)
   expect(h.effects, 'and zero reducers').toEqual([])
-  producerHold.resolve() // the producer settles; both boundaries release
+  producerHold.resolve() // the producer settles (registering the hidden side); both boundaries release
   await producer
   const outcomes = await Promise.all(deliveries.map(outcomeOf))
   expect(outcomes).toEqual(['applied', 'applied'])
-  expect(h.membershipReadCount(), "b's evidence was taken AFTER the boundary").toBe(1)
-  expect(h.hiddenById.get('b'), 'and b installed from that post-boundary evidence').toBe('global_store_b')
-  expect(h.visible.has('a'), "a's visible modification applied ordinarily").toBe(true)
+  expect(h.membershipReadCount(), 'BOTH evidence reads were taken AFTER the boundary').toBe(2)
+  // a's stale visible payload was replaced by the CURRENT hidden document the producer installed
+  expect(h.hiddenById.get('a'), 'the current hidden side is preserved').toBe('global_store_a')
+  expect(h.visible.has('a'), 'no visible row from the stale pre-producer payload').toBe(false)
+  expect(h.hiddenById.get('b'), 'and b installed from its post-boundary evidence').toBe('global_store_b')
 })
 
 test('STOP between reservation and the body: the delivery blocks with zero mutation', async () => {
@@ -477,4 +484,227 @@ test('a set row that cannot be classified fails closed instead of healing', asyn
       decrypt: async () => ({ hidden: true, text: 'not json' }),
     })
   ).rejects.toThrow('could not be classified')
+})
+
+// ---- stale-side re-emissions (the two-tab `_old` root cause; vault issue "MindPage Stale Hidden
+// Redelivery Reverses a Visible Transition"): a listener can deliver an OLDER opposite-side
+// payload around a newer transition, and the payload's side may MOVE before its reserved turn —
+// the receipt-captured uncertainty facts (held-side contradiction, outstanding same-id state,
+// live blind predecessor, pending boundary) force final-state evidence; the membership verdict
+// routes the delivery.
+
+test('STALE OLD SIDE: a hidden re-emission after a committed hidden-to-visible transition installs nothing', async () => {
+  const h = harness()
+  h.visible.add('d') // the transition committed: the visible row is installed, the record dropped
+  h.server.set('d', { item: { hidden: false } }) // server truth: not hidden
+  const { deliveries } = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  const delivery = deliveries[0]
+  expect(delivery.record.kind).toBe('admitted')
+  expect(delivery.needsEvidence, 'a hidden payload over a visible row must establish evidence').toBe(true)
+  h.schedule(delivery, { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_x' })
+  expect(await outcomeOf(delivery)).toBe('applied')
+  expect(h.membershipReadCount()).toBe(1)
+  // NOTHING was reversed: the visible row survives, no wrapper was installed, no notification
+  expect(h.visible.has('d'), 'the visible row survives the stale re-emission').toBe(true)
+  expect(h.hiddenById.has('d'), 'the stale wrapper is not installed').toBe(false)
+  expect(h.effects.filter(e => e.startsWith('removeVisible:')), 'the visible row is never removed').toEqual([])
+  expect(h.effects.filter(e => e.startsWith('apply:')), 'no reducer application from stale content').toEqual([])
+})
+
+test('STALE OLD SIDE with the record still held: the drop is the only evidence-backed action', async () => {
+  const h = harness()
+  h.visible.add('d')
+  h.hiddenById.set('d', 'global_store_HELD') // a half-transitioned state: both sides present
+  h.server.set('d', { item: { hidden: false } })
+  const { deliveries } = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  const delivery = deliveries[0]
+  expect(delivery.needsEvidence).toBe(true)
+  // the payload's target name DIFFERS from the held name, pinning the chain scope below
+  h.schedule(delivery, { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_PAYLOAD' })
+  expect(await outcomeOf(delivery)).toBe('applied')
+  // the held record is dropped WITH its downstream notification; the visible row is untouched
+  expect(h.hiddenById.has('d')).toBe(false)
+  expect(h.effects).toContain('removeHidden:d')
+  expect(h.effects).toContain('notify:global_store_HELD')
+  expect(h.visible.has('d')).toBe(true)
+  expect(h.effects.filter(e => e.startsWith('apply:'))).toEqual([])
+  // the stale branch serializes ONLY the held record's chain — it does not ADDITIONALLY reserve
+  // the payload's target name (which it will not apply)
+  expect(h.effects).toContain('chains:global_store_HELD')
+  expect(
+    h.effects.filter(e => e.startsWith('chains:') && e.includes('global_store_PAYLOAD')),
+    "the distinct payload target is not additionally reserved"
+  ).toEqual([])
+})
+
+test('QUEUED TRANSITION + STALE REPLAY: a stale hidden delivery behind an unapplied transition installs nothing', async () => {
+  // review 108 §2.1: at the stale delivery's RECEIPT the held side is still hidden and the
+  // visible row absent, so the contradiction arm alone would leave it unevidenced — the
+  // uncertainty is the OUTSTANDING same-id predecessor (the queued legitimate transition)
+  const h = harness()
+  h.hiddenById.set('d', 'global_store_x')
+  h.server.set('d', { item: { hidden: false } }) // server truth: the transition committed
+  const hold = h.holdMembership()
+  const r1 = h.receive([changeOf('d', 'modified', { hidden: false, text: 'now visible' })])
+  const d1 = r1.deliveries[0]
+  expect(d1.needsEvidence, 'the legitimate transition is uncertain via the tracked record').toBe(true)
+  h.schedule(d1, { hidden: false, text: 'now visible' })
+  await h.readStarted // D1 is now HELD INSIDE its membership read (the hold parks it there)
+  // the stale hidden replay arrives while D1 is outstanding and unapplied
+  const r2 = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  const d2 = r2.deliveries[0]
+  expect(d2.record.kind).toBe('admitted')
+  expect(d2.needsEvidence, 'uncertain via the OUTSTANDING predecessor, not the held side').toBe(true)
+  h.schedule(d2, { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_x' })
+  hold.resolve()
+  expect(await outcomeOf(d1)).toBe('applied')
+  expect(await outcomeOf(d2)).toBe('applied')
+  expect(h.membershipReadCount(), 'both deliveries established evidence').toBe(2)
+  // D1's transition behavior is exactly the pre-change one; D2 installed NOTHING
+  expect(h.effects).toContain('removeHidden:d')
+  expect(h.effects).toContain('notify:global_store_x')
+  expect(h.effects).toContain('apply:added:d:visible')
+  expect(h.visible.has('d'), 'the transitioned visible row survives the stale replay').toBe(true)
+  expect(h.hiddenById.has('d'), 'the stale wrapper is not installed').toBe(false)
+})
+
+test('QUEUED MIRROR: a stale not-hidden delivery behind an unapplied visible-to-hidden transition applies the CURRENT hidden document', async () => {
+  const h = harness()
+  h.visible.add('d')
+  h.server.set('d', { item: { hidden: true, text: 'current wrapper' }, name: 'global_store_x' })
+  const hold = h.holdMembership()
+  const r1 = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })]) // the real transition
+  expect(r1.deliveries[0].needsEvidence, 'uncertain via the held-side contradiction').toBe(true)
+  h.schedule(r1.deliveries[0], { hidden: true, text: 'current wrapper' }, { id: 'd', name: 'global_store_x' })
+  await h.readStarted // D1 is now HELD INSIDE its membership read (the hold parks it there)
+  const r2 = h.receive([changeOf('d', 'modified', { hidden: false })]) // the stale visible replay
+  const d2 = r2.deliveries[0]
+  expect(d2.needsEvidence, 'uncertain via the OUTSTANDING predecessor').toBe(true)
+  h.schedule(d2, { hidden: false, text: 'stale visible body' })
+  hold.resolve()
+  expect(await outcomeOf(r1.deliveries[0])).toBe('applied')
+  expect(await outcomeOf(d2)).toBe('applied')
+  expect(h.membershipReadCount()).toBe(2)
+  // the CURRENT hidden document survives; the stale visible body never installs a row
+  expect(h.hiddenById.get('d')).toBe('global_store_x')
+  expect(h.visible.has('d'), 'no visible row from the stale payload').toBe(false)
+})
+
+test('RETAINED BLOCK: a later stale-side delivery establishes evidence, applies the current side, and heals', async () => {
+  // review 108 §2.1's second reason: a blocked predecessor leaves the applied side MATCHING the
+  // stale payload, so neither contradiction nor a queued nonterminal delivery marks it — the
+  // uncertainty is the RETAINED BLOCK itself, and applying without evidence would both install
+  // stale state and heal the block against the server's opposite side
+  const h = harness()
+  h.hiddenById.set('d', 'global_store_x') // the applied side is hidden, matching D2's payload
+  h.server.set('d', { item: { corrupt: true } })
+  const r1 = h.receive([changeOf('d', 'modified', { hidden: false, text: 'transition' })])
+  h.schedule(r1.deliveries[0], { hidden: false, text: 'transition' })
+  expect(await outcomeOf(r1.deliveries[0]), 'evidence failed: blocked').toBe('blocked')
+  expect(h.ingress.gate()).toBe('blocked')
+  expect(h.hiddenById.has('d'), 'the held side is unchanged').toBe(true)
+  h.server.set('d', { item: { hidden: false } }) // healthy now: the server is on the visible side
+  const r2 = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  const d2 = r2.deliveries[0]
+  expect(d2.needsEvidence, 'uncertain via the retained block alone').toBe(true)
+  h.schedule(d2, { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_x' })
+  expect(await outcomeOf(d2)).toBe('applied')
+  // the evidence-backed discard dropped the stale held record and healed the block
+  expect(h.hiddenById.has('d')).toBe(false)
+  expect(h.effects).toContain('removeHidden:d')
+  expect(h.effects).toContain('notify:global_store_x')
+  expect(h.ingress.gate(), 'a successful evidence-backed delivery heals').toBe('writable')
+})
+
+test('STALE + LOCAL INTENT: the evidence-backed discard proceeds under an in-flight visible edit', async () => {
+  // review 108 §2.5: the discard applies no visible content, so deferring it behind local intent
+  // would turn a harmless replay into a retained block holding the writer gate
+  const h = harness()
+  h.visible.add('d')
+  h.server.set('d', { item: { hidden: false } })
+  h.setLocalIntent(true)
+  const { deliveries } = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  expect(deliveries[0].needsEvidence).toBe(true)
+  h.schedule(deliveries[0], { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_x' })
+  expect(await outcomeOf(deliveries[0]), 'applied, not blocked on the intent guard').toBe('applied')
+  expect(h.visible.has('d')).toBe(true)
+  expect(h.hiddenById.has('d')).toBe(false)
+  expect(h.effects.filter(e => e.startsWith('apply:')), 'no application from stale content').toEqual([])
+  // the guard still protects REAL applications, production-shaped: production's intent predicate
+  // can only be true for an id with an existing visible item — reuse the SAME visible d, with
+  // the server now genuinely on the hidden side, and require the real transition to defer
+  h.server.set('d', { item: { hidden: true, text: 'current wrapper' }, name: 'global_store_x' })
+  const real = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  expect(real.deliveries[0].needsEvidence).toBe(true)
+  h.schedule(real.deliveries[0], { hidden: true, text: 'current wrapper' }, { id: 'd', name: 'global_store_x' })
+  expect(await outcomeOf(real.deliveries[0]), 'the real application still defers to intent').toBe('blocked')
+  expect(h.hiddenById.has('d'), 'nothing installed under intent').toBe(false)
+  expect(h.visible.has('d'), 'the visible row is untouched').toBe(true)
+})
+
+test('MATCHING SIDES, NO READ: routine same-side updates stay unevidenced, and visible ones stay blind', async () => {
+  const h = harness()
+  // hidden over a TRACKED HIDDEN record: routine store update — admitted, no membership read
+  h.hiddenById.set('d', 'global_store_x')
+  const r1 = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  expect(r1.deliveries[0].record.kind).toBe('admitted')
+  expect(r1.deliveries[0].needsEvidence, 'the payload side matches the held side').toBe(false)
+  h.schedule(r1.deliveries[0], { hidden: true, text: 'wrapper body' }, { id: 'd', name: 'global_store_x' })
+  expect(await outcomeOf(r1.deliveries[0])).toBe('applied')
+  expect(h.membershipReadCount(), 'no read amplification on the ordinary hidden path').toBe(0)
+  expect(h.effects).toContain('apply:modified:d:hidden')
+  // visible over a VISIBLE row: ordinary listener traffic — BLIND, no evidence, no read
+  h.visible.add('v')
+  const r2 = h.receive([changeOf('v', 'modified', { hidden: false, text: 'edit' })])
+  expect(r2.deliveries[0].record.kind, 'ordinary visible traffic stays blind').toBe('blind')
+  expect(r2.deliveries[0].needsEvidence).toBe(false)
+  r2.deliveries[0].record.finish()
+  expect(h.membershipReadCount(), 'still zero reads').toBe(0)
+})
+
+test('LIVE BLIND PREDECESSOR: a stale hidden delivery behind a held blind visible add establishes evidence', async () => {
+  // review 109 §2.1: the blind lane is an unobserved predecessor — C1's not-hidden body may
+  // install the visible side before C2's turn, and at C2's receipt no boundary, tracked record,
+  // visible row, or ingress handle exists. the allocator's live-blind observation is the arm
+  const h = harness()
+  h.server.set('d', { item: { hidden: false } }) // server truth: visible
+  const c1 = h.receive([changeOf('d', 'added', { hidden: false, text: 'visible item' })])
+  expect(c1.deliveries[0].record.kind, 'no other admission arm: blind').toBe('blind')
+  // C1 allocated but its body NOT yet run: the blind lane position is captured by later records
+  const c2 = h.receive([changeOf('d', 'modified', { hidden: true, cipher: 'c' })])
+  const d2 = c2.deliveries[0]
+  expect(d2.record.kind).toBe('admitted')
+  expect(d2.needsEvidence, 'uncertain via the LIVE BLIND predecessor alone').toBe(true)
+  h.schedule(d2, { hidden: true, text: 'stale wrapper body' }, { id: 'd', name: 'global_store_x' })
+  await new Promise(res => setImmediate(res))
+  expect(h.membershipReadCount(), "C2 waits behind C1's lane position").toBe(0)
+  // release C1: its blind body installs the visible row (as production's ordinary path would)
+  if (c1.deliveries[0].record.kind == 'blind')
+    c1.deliveries[0].record.run(() => {
+      h.visible.add('d')
+      h.effects.push('apply:added:d:visible')
+      return undefined
+    })
+  expect(await outcomeOf(d2)).toBe('applied')
+  expect(h.membershipReadCount(), 'one evidence read, after the blind body').toBe(1)
+  expect(h.visible.has('d'), 'the visible row survives the stale replay').toBe(true)
+  expect(h.hiddenById.has('d'), 'the stale wrapper is not installed').toBe(false)
+})
+
+test('OFF-OWNER SCOPE: read-only and anonymous pages never take a membership read, even under uncertainty', async () => {
+  // review 109 §2.2: anonymous pages DO run the realtime listener on an admin-writable account;
+  // the evidence boundary refuses both off-owner modes outright
+  for (const mode of [
+    { ...OWNER, readonly: true },
+    { ...OWNER, anonymous: true },
+  ]) {
+    const h = harness(mode)
+    h.visible.add('k') // contradiction conditions present
+    const { deliveries } = h.receive([changeOf('k', 'modified', { hidden: true, cipher: 'c' })])
+    expect(deliveries[0].record.kind, 'still admitted via rawHidden').toBe('admitted')
+    expect(deliveries[0].needsEvidence, JSON.stringify(mode)).toBe(false)
+    h.schedule(deliveries[0], { hidden: true, text: 'wrapper body' }, { id: 'k', name: 'global_store_k' })
+    expect(await outcomeOf(deliveries[0])).toBe('applied')
+    expect(h.membershipReadCount(), 'no membership read off-owner').toBe(0)
+  }
 })

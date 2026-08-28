@@ -106,6 +106,17 @@ export function createRecordAllocator(deps: {
   const collectors = new Set<(record: ListenerRecord) => void>()
 
   return {
+    // whether an earlier BLIND record for this id is still live (allocated, body not yet
+    // terminalized). a read-only scan of the existing `live` set — a later raw-hidden delivery
+    // waits behind the blind lane position its receipt captured, so that body may install the
+    // opposite (visible) side FIRST, which receipt cannot see through the ingress (blind records
+    // own no handle); see sideUncertain in src/hidden_delivery.ts. the tiny post-body window
+    // before done's reaction deletes the record is a harmless false positive: one safe read
+    hasLiveBlind(id: string): boolean {
+      for (const record of live) if (record.kind == 'blind' && record.id == id) return true
+      return false
+    },
+
     // opens a bounded prefix. call at FRESH-READ START, close it when raw membership publishes
     openPrefix(): ListenerPrefix {
       const collected = new Set<ListenerRecord>(live)

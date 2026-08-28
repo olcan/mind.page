@@ -8560,11 +8560,10 @@
             // src/hidden_listener_records.ts — production uses that exact module, and its
             // ordering and lifetime rules are pinned by deferred-driven schedules there rather
             // than only by the browser gate.
-            // ADMISSION is the conservative receipt-time predicate: the raw hidden flag, OR
-            // hidden/adopted in the applied index, OR outstanding coordinator work for the id —
-            // the last two catch a visible-to-hidden round trip whose second change looks
-            // ordinary (raw hidden:false, absent from the index) and would otherwise leave a
-            // phantom hidden representation, or strand an unhealable block
+            // ADMISSION and UNCERTAINTY are owned by receiveChanges (src/hidden_delivery.ts):
+            // this caller only supplies the production observations (mode, boundary, tracked,
+            // visible, outstanding, live-blind) — the arm list and its receipt-capture rules
+            // live at that one seam, deliberately not duplicated here
             // TYPED AT THE SEAM. the firebase facade is a global (see the destructuring at the top
             // of this file), so `snapshot` is `any` and everything built from it type-checks
             // against anything — which is how the adapter silently stopped emitting the `kind`
@@ -8582,6 +8581,8 @@
               mode: { fixed, readonly, anonymous },
               pendingBoundary: id => hiddenCorpus.pendingBoundary(id),
               tracksDocument: id => !!hiddenPersistence.nameForDocument(id),
+              visibleNow: id => indexFromId.has(tempIdFromSavedId.get(id) ?? id),
+              hasLiveBlind: id => recordAllocator.hasLiveBlind(id),
               hasOutstanding: id => hiddenIngress.hasOutstanding(id),
               open: (id, cipher) => hiddenIngress.open(id, cipher),
               allocate: (requests, revoke) => recordAllocator.allocate(requests, revoke),
