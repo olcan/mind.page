@@ -14,8 +14,18 @@
 // whole fetch/retry/prompt sequence has no business holding the corpus tail
 
 import { CipherError, classifyTextCipher, decryptV1Text, decryptWithSecret } from './crypto.js'
+import type { KdfProfile } from './kdf_profile.js'
 
 export type AccountDoc = { id: string; data: () => Record<string, any> }
+
+// "has ciphertext" for emptiness decisions: ANY value other than null/undefined is a PRESENT
+// cipher field — an empty string, a number or an object is corrupt data, not absence (review 83)
+export function accountHasCipher(docs: AccountDoc[]): boolean {
+  return docs.some(doc => {
+    const cipher = doc.data().cipher
+    return cipher !== null && cipher !== undefined
+  })
+}
 
 export type FixedOwnerSecretDeps = {
   // server-only read of the account's items (e.g. getDocsFromServer, see index.svelte)
@@ -80,6 +90,7 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // string, a number or an object is a PRESENT, corrupt field, and filtering it out before the
   // presence check silently rerouted a corrupt account into the new-phrase path (review 83)
   const rawCiphers = docs.map(doc => doc.data().cipher).filter(value => value !== null && value !== undefined)
+  // (presence itself is the accountHasCipher rule; the classification below decides usability)
   const evidence: CandidateEvidence[] = []
   for (const cipher of rawCiphers) {
     if (typeof cipher != 'string' || !cipher) continue // present but not usable
@@ -157,6 +168,44 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // stores the secret — which is what actually protects a concurrent encrypted save from
   // duplicating a record registration has not reached yet
   return { v0Secret: candidate, v1 }
+}
+
+// ---- the fixed-EMPTY complete acquisition ------------------------------------------------------
+// (Review 89 §2.2.) The fixed page's ONLY emptiness authority is the resolver's full-account
+// scan — and that authority is PROMPT-AGED by the time a human finishes choosing a phrase: the
+// fixed listener reads a shared subset, so ciphertext that appeared meanwhile can never reach the
+// session's evidence. This flow therefore RE-CONFIRMS emptiness against the server immediately
+// before adoption; if any cipher appeared, it publishes NOTHING and aborts observably — the next
+// attempt enters the now-nonempty resolver and validates the phrase properly.
+
+export async function adoptFreshFixedSecret(deps: {
+  // the session's external handle pieces (see src/kdf_session.ts): server profile BEFORE the
+  // prompt (null = kdf disabled/ineligible — the caller then runs its legacy v0 flow), one
+  // derivation, and the ONE-synchronous-complete-publication adoption
+  profile: () => Promise<KdfProfile | null>
+  derive: (phrase: string, profile: KdfProfile) => Promise<{ key: CryptoKey; keyBytes: Uint8Array }>
+  adopt: (v0secret: string, salt: string, derived: { key: CryptoKey; keyBytes: Uint8Array }) => boolean
+  // the component's choose+confirm flow; null on cancel (the caller signs out)
+  promptNewPhrase: () => Promise<string | null>
+  hashPhrase: (phrase: string) => Promise<string>
+  // the SAME server full-account query the resolver used to establish emptiness
+  fetchAccountDocs: () => Promise<AccountDoc[]>
+  signOut: () => void
+}): Promise<string | null> {
+  const profile = await deps.profile()
+  if (!profile) return null // kdf disabled/ineligible: the caller runs its legacy v0 flow
+  const phrase = await deps.promptNewPhrase()
+  if (phrase == null) {
+    deps.signOut()
+    throw new Error('secret phrase cancelled')
+  }
+  const v0secret = await deps.hashPhrase(phrase)
+  const derived = await deps.derive(phrase, profile)
+  // the RE-CONFIRMATION: emptiness aged across the prompt and derivation
+  if (accountHasCipher(await deps.fetchAccountDocs()))
+    throw new Error('account is no longer empty: encrypted data appeared while choosing a phrase — retry to validate it')
+  if (!deps.adopt(v0secret, profile.salt, derived)) throw new Error('secret acquisition superseded')
+  return v0secret
 }
 
 // ---- adopting the validated candidate --------------------------------------------------------

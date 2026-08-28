@@ -4072,26 +4072,28 @@
         })
       }
       new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
-      // FIXED-EMPTY COMPLETE PATH (review 88 §2.2): the full-account scan above is the ONLY
-      // fixed-page emptiness authority (the fixed listener reads a shared subset, so the
-      // ordinary corpusConfirmedEmpty fact excludes fixed pages). with the kdf flag on, obtain
-      // the shared profile BEFORE the new-phrase prompt and adopt BOTH halves through the
-      // external handle — otherwise this path would be neither profile-first nor complete
+      // FIXED-EMPTY COMPLETE PATH (reviews 88-89 §2.2): the full-account scan above is the ONLY
+      // fixed-page emptiness authority — and it is PROMPT-AGED, so the table-tested helper
+      // (adoptFreshFixedSecret, src/secret.ts) re-confirms emptiness against the same server
+      // query immediately before adoption; ciphertext that appeared meanwhile aborts the save
+      // observably instead of sealing an unvalidated phrase over it. profile BEFORE the prompt,
+      // both halves adopted through the external handle
       if (kdfEnabled()) {
-        const profile = await kdfHandle.profile() // fail-closed on read failure; null if ineligible
-        if (profile) {
-          const chosen = await promptNewPhraseFlow()
-          if (chosen == null) {
-            signOut()
-            throw new Error('secret phrase cancelled')
-          }
-          const v0secret = await hashSecretPhrase(chosen)
-          if (kdfHandle.stale()) throw new Error('secret acquisition superseded')
-          const derived = await kdfHandle.derive(chosen, profile)
-          if (!kdfHandle.adopt(v0secret, profile.salt, derived))
-            throw new Error('secret acquisition superseded')
-          return v0secret // adopt published both halves (secret + storage + bound envelope)
-        }
+        const adopted = await adoptFreshFixedSecret({
+          profile: () => kdfHandle.profile(),
+          derive: (phrase, profile) => kdfHandle.derive(phrase, profile),
+          adopt: (v0secret, salt, derived) => kdfHandle.adopt(v0secret, salt, derived),
+          promptNewPhrase: () => promptNewPhraseFlow(),
+          hashPhrase: phrase => hashSecretPhrase(phrase),
+          fetchAccountDocs: async () =>
+            (
+              await getDocsFromServer(
+                query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
+              )
+            ).docs,
+          signOut,
+        })
+        if (adopted != null) return adopted // both halves published (secret + storage + bound envelope)
       }
     }
 
@@ -4120,6 +4122,7 @@
       provisional = true
     }
 
+
     const phrase = new_phrase ? await promptNewPhraseFlow() : await promptExistingPhraseFlow()
     if (phrase == null) {
       // sign out on cancellation: callers (e.g. item code saving encrypted state) often swallow
@@ -4133,7 +4136,8 @@
     const validated = await hashSecretPhrase(phrase)
     if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
     secret = validated
-    if (!provisional) localStorage.setItem('mindpage_secret', secret)
+    if (provisional) provisionalSecret = validated
+    else localStorage.setItem('mindpage_secret', secret)
     return secret
   }
 
@@ -4161,6 +4165,11 @@
   // TRUE while getSecretPhrase's session-owned branch is awaiting the session itself: excludes
   // that flight from the pendingV0 join below (the session would otherwise await its own caller)
   let kdfSecretViaSession = false
+  // the PROVISIONAL candidate (review 89 §2.4): the hash the reader-only fallback published into
+  // the in-memory slot without establishment. writers re-check AFTER awaiting the shared slot —
+  // a candidate is not writable merely because a reader's flight resolved first — and a real v0
+  // authentication failure clears it so a later writer cannot take the early return under it
+  let provisionalSecret: string | null = null
   // any classified ciphertext seen this principal generation — the negative half of the
   // authoritative-emptiness fact (review 87 §2.2)
   let kdfCipherSeen = false
@@ -4238,6 +4247,7 @@
     hashPhrase: phrase => hashSecretPhrase(phrase),
     publishV0: v0secret => {
       secret = v0secret
+      provisionalSecret = null // establishment supersedes any provisional candidate
       localStorage.setItem('mindpage_secret', v0secret)
       return undefined
     },
@@ -4287,6 +4297,16 @@
     }
     return outcome
   }
+  // a REAL v0 authentication failure under the PROVISIONAL candidate clears it (review 89
+  // §2.4): the fallback phrase was wrong — the slot must not keep answering with it, or a later
+  // writer would take the early return and persist ciphertext under an unestablished phrase
+  function clearProvisionalOnAuthFailure(error: unknown, used: string): undefined {
+    if (!(error instanceof DOMException && error.name == 'OperationError')) return undefined
+    if (!provisionalSecret || used !== provisionalSecret) return undefined
+    provisionalSecret = null
+    if (secret === used) secret = null
+    return undefined
+  }
   // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure and
   // principal mismatch clear EVERYTHING — the in-memory v0 secret (resetUser deliberately
   // preserves it), the v1 session with its flights and evidence, the persisted v0 secret and v1
@@ -4296,6 +4316,7 @@
   // come here — they use the fence-only invalidateKeyState below
   function clearAllKeyState(reason: string): undefined {
     secret = null
+    provisionalSecret = null
     kdfCipherSeen = false
     kdfSession.clear(reason)
     return undefined
@@ -4307,6 +4328,7 @@
   // stored keys; a different account is caught by the principal-mismatch check on the next load
   function invalidateKeyState(reason: string): undefined {
     secret = null
+    provisionalSecret = null
     kdfCipherSeen = false
     kdfSession.invalidate(reason)
     return undefined
@@ -4319,21 +4341,23 @@
   async function acquireV0Secret(new_phrase: boolean = false): Promise<string> {
     if (!secret) {
       const flight = kdfSession.pending()
-      if (flight) {
-        // the joined outcome is INSPECTED (review 88 §2.5): a cancelled required prompt or a
-        // superseding clear() must not fall through into a second prompt below. flight
-        // REJECTIONS have no session outcome and are their owner's to report
-        const outcome = await flight.then(
-          o => o,
-          () => null
-        )
-        if (outcome) mapKdfOutcome(outcome)
-      }
+      // the joined outcome is INSPECTED (review 88 §2.5): a cancelled required prompt or a
+      // superseding clear() must not fall through into a second prompt below — and a REJECTED
+      // flight propagates (review 89 §3.1) rather than being swallowed into an immediate
+      // re-acquisition; the session's inflight slot already cleared, so a genuinely later
+      // action retries
+      if (flight) mapKdfOutcome(await flight)
     }
     if (!secret) secret = getSecretPhrase(new_phrase)
     const pending = secret
     try {
-      return (secret = await Promise.resolve(pending))
+      const resolved = (secret = await Promise.resolve(pending))
+      // POST-AWAIT provenance check (review 89 §2.4): a writer that joined a shared flight must
+      // re-check what it resolved to — a PROVISIONAL reader candidate is not establishment, and
+      // encrypting under it could persist split-key ciphertext
+      if (new_phrase && provisionalSecret && resolved === provisionalSecret)
+        throw new Error('cannot encrypt yet: the session phrase is provisional (unestablished)')
+      return resolved
     } catch (e) {
       if (secret === pending) secret = null
       throw e
@@ -4368,12 +4392,19 @@
         if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Text(cipher, outcome.keys.key)
       }
-      case 'v0':
+      case 'v0': {
         // noted as corpus evidence too: a first phrase on a MIXED corpus must authenticate a v0
         // row exactly, not just open a v1 row (review 86 §2.2)
         kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'text', cipher })
-        return decryptWithSecret(cipher, await acquireV0Secret())
+        const v0secret = await acquireV0Secret()
+        try {
+          return await decryptWithSecret(cipher, v0secret)
+        } catch (e) {
+          clearProvisionalOnAuthFailure(e, v0secret)
+          throw e
+        }
+      }
     }
   }
 
@@ -4390,10 +4421,17 @@
         if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Bytes(cipher, outcome.keys.key)
       }
-      case 'v0':
+      case 'v0': {
         kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'bytes', cipher })
-        return decryptBytesWithSecret(cipher, await acquireV0Secret())
+        const v0secret = await acquireV0Secret()
+        try {
+          return await decryptBytesWithSecret(cipher, v0secret)
+        } catch (e) {
+          clearProvisionalOnAuthFailure(e, v0secret)
+          throw e
+        }
+      }
     }
   }
 
@@ -6670,7 +6708,7 @@
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator } from '../hidden_listener_records'
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
-  import { adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
+  import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
   import { snapshotDecision } from '../snapshot'
   import {
     buildHiddenIndex,

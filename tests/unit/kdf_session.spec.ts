@@ -635,19 +635,58 @@ test('invalidate() fences and forgets in-memory state but KEEPS the persisted st
   expect((await h.session.acquire()).kind, 'a fresh acquire works from the kept stores').toBe('ready')
 })
 
-test('BOUND RESTORE: a stable envelope-A/v0-B pair is never silently ready (review 88 §2.1)', async () => {
-  // both values predate the generation (an old build wrote hash B; envelope A survived): the
-  // envelope's own binding disagrees with the store, so restore refuses and the trusted-hash
-  // upgrade recovers — establishing B and REBINDING the envelope to it
-  const h = harness({ promptUpgrade: async () => (h.log.push('promptUpgrade'), 'other') })
+test('BINDING CONFLICT is terminal, never destructively recovered (review 89 §2.1)', async () => {
+  // both values predate the generation (an old build wrote hash B; envelope A survived): v1(A)
+  // ciphertext may exist, so sealing B over A would strand it while attesting completeness.
+  // fail closed: no prompt, no derivation, no publication, both stores preserved
+  const h = harness()
   h.storage.set('env', envelope('v0:phrase')) // establishment A
-  h.storage.set('v0', 'v0:other') // unrelated legacy hash B
-  const outcome = await h.session.acquire()
-  expect(h.log, 'NOT a silent restore: the upgrade prompt ran').toContain('promptUpgrade')
+  h.storage.set('v0', 'v0:other') // unrelated stable legacy hash B
+  const before = h.storage.get('env')
+  expect(reasonOf(await h.session.acquire())).toBe('key binding conflict')
+  expect(h.log, 'zero effects').toEqual([])
+  expect(h.derivations()).toBe(0)
+  expect(h.storage.get('env'), 'envelope A preserved').toBe(before)
+  expect(h.storage.get('v0'), 'hash B preserved').toBe('v0:other')
+  expect(h.session.current()).toBeNull()
+  // the DISTINCT mid-generation case still establishes via the corpus: stored == envelope.v0
+  // but != baseline routes to the required prompt, not the conflict outcome and not trust
+  const h2 = harness()
+  h2.storage.set('env', envelope('v0:phrase'))
+  await h2.session.acquire() // anchor baseline: v0 absent
+  h2.storage.set('v0', 'v0:phrase') // mid-generation write matching the envelope binding
+  h2.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  expect((await h2.session.acquire()).kind).toBe('ready')
+  expect(h2.log.filter(l => l.startsWith('prompt'))[0], 'required prompt, corpus-validated').toBe('promptPhrase')
+})
+
+test('the SEAL shares the final revision check’s continuation: no microtask gap (review 89 §2.3)', async () => {
+  // park importKey so the final derivation resolves under our control, then use nested
+  // microtasks to land a note exactly where a REDUNDANT resolved-memo await would yield. the
+  // corrected code has no yield there: at note time the session is already sealed
+  let releaseImport: (k: CryptoKey) => void = () => {}
+  let sealedAtNote: boolean | null = null
+  const h = harness({
+    importKey: () => new Promise<CryptoKey>(resolve => (releaseImport = resolve)),
+  })
+  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0)) // parked inside importKey (the derivation tail)
+  queueMicrotask(() =>
+    queueMicrotask(() =>
+      queueMicrotask(() => {
+        sealedAtNote = h.session.current() != null
+        h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-late-rejecting' })
+      })
+    )
+  )
+  releaseImport(FAKE_KEY)
+  const outcome = await flight
   expect(outcome.kind).toBe('ready')
-  expect(outcome.kind == 'ready' && outcome.keys.v0Secret, 'the session is B, whole').toBe('v0:other')
-  const rebound = JSON.parse(h.storage.get('env')!)
-  expect(rebound.v0, 'the envelope now binds the establishment that owns it').toBe('v0:other')
+  // the invariant: a row can never land INSIDE the establishment window yet go unvalidated —
+  // either it arrived after the seal (sealedAtNote) or the policy consulted it
+  expect(sealedAtNote, 'the note ran').not.toBeNull()
+  expect(sealedAtNote, 'no unvalidated row can precede the seal').toBe(true)
 })
 
 test('BOUND RESTORE: a v0 hash written MID-GENERATION cannot complete a parked restore (review 88 §2.1)', async () => {

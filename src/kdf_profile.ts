@@ -145,18 +145,3 @@ export function decodeKeyEnvelope(
   if (btoa(binary) !== key) return null
   return { salt, keyBytes, v0Secret: v0 }
 }
-
-/**
- * Restores the persisted key for a confirmed uid AGAINST a server-confirmed profile: the envelope
- * must decode, belong to this uid, and name the profile's exact canonical salt — a valid envelope
- * for a different salt is some other provisioning epoch's key and is DISCARDED, never imported
- * (review 84's caller-level rule, owned here so the comparison itself is pinned).
- */
-export function restoreKeyEnvelope(stored: string | null, expectedUid: string, profile: KdfProfile): Uint8Array | null {
-  const decoded = decodeKeyEnvelope(stored, expectedUid)
-  if (!decoded) return null
-  if (decoded.salt !== profile.salt) return null
-  return decoded.keyBytes
-  // NOTE the v0 binding is NOT compared here: the session owns that comparison (against both the
-  // current store and its generation baseline), since only it knows the trusted values
-}

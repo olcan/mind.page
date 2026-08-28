@@ -294,13 +294,24 @@ export function createKdfSession(deps: KdfSessionDeps) {
     }
 
     // 2. the ENVELOPE, against the confirmed profile (mismatches are removed — review 87 §2.4),
-    //    restoring ONLY the complete bound state; anything else falls through to establishment
+    //    restoring ONLY the complete bound state
     const confirmed = confirmEnvelope(uid, profile)
     const confirmedV0 = confirmed && boundV0(confirmed)
     if (confirmed && confirmedV0) {
       const key = await deps.importKey(confirmed.keyBytes)
       if (stale()) return notReady('superseded')
       return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: confirmedV0 }) }
+    }
+    // a BINDING CONFLICT is terminal, never "recovered" (review 89 §2.1): a same-profile envelope
+    // bound to establishment A beside a STABLE stored hash B means v1(A) ciphertext may exist —
+    // exact-hashing B and sealing over A would strand it while attesting completeness. both
+    // stores are preserved; which side to recover is a corpus question for a later design. the
+    // DISTINCT case where the stored hash matches the envelope but not the baseline (a
+    // mid-generation write) still falls through to ordinary corpus establishment
+    if (confirmed) {
+      const stored = deps.storedV0()
+      if (stored && stored !== confirmed.v0Secret && stored === baseline())
+        return notReady('key binding conflict')
     }
 
     // 3. a PENDING component LEGACY v0 acquisition is joined before any prompt: a fixed-owner
@@ -374,24 +385,25 @@ export function createKdfSession(deps: KdfSessionDeps) {
       }
 
       // 6. ESTABLISHMENT against a STABLE evidence revision (review 88 §2.3), with LAZY memoized
-      //    derivation (§3.2): the verdict — and the final derivation — must both complete with
-      //    the revision unchanged, or the policy re-runs over the fuller collection (memoized
-      //    attempts keep the re-run cheap). refusals pay no Argon
+      //    derivation: the verdict — and the final derivation — must both complete with the
+      //    revision unchanged, or the policy re-runs over the fuller collection (memoized
+      //    DERIVATION keeps Argon cheap; authentication attempts do re-run). refusals pay no
+      //    Argon. the revision-checked DerivedKey is CARRIED OUT of the loop and sealed in the
+      //    SAME synchronous continuation (review 89 §2.3) — a second await on the resolved memo
+      //    would yield to the microtask queue and reopen the gap the checks just closed
       let derivedMemo: Promise<DerivedKey> | null = null
       const deriveOnce = () => (derivedMemo ??= deriveKey(candidate, profile))
-      let outcome: 'established' | 'wrong' | 'no-evidence' | 'superseded' | undefined
-      while (outcome === undefined) {
+      let established: DerivedKey | null = null
+      let wrong = false
+      while (established === null && !wrong) {
         const revision = evidenceRevision
         const rows = evidence.slice()
         if (!rows.length) {
-          if (!freshSeal) {
-            outcome = 'no-evidence'
-            break
-          }
-          await deriveOnce() // fresh seal: the derivation is the last await before publication
+          if (!freshSeal) return notReady('no evidence to validate a first phrase')
+          const derived = await deriveOnce() // fresh seal: the last await before publication
           if (stale()) return notReady('superseded')
           if (evidenceRevision != revision) continue // rows arrived during the seal derivation
-          outcome = 'established'
+          established = derived
           break
         }
         const verdict = await establishCandidate(rows, {
@@ -401,26 +413,24 @@ export function createKdfSession(deps: KdfSessionDeps) {
         if (stale()) return notReady('superseded')
         if (evidenceRevision != revision) continue // late rows: revisit REGARDLESS of the verdict
         if (verdict.kind != 'established') {
-          outcome = 'wrong'
+          wrong = true
           break
         }
-        await deriveOnce()
+        const derived = await deriveOnce()
         if (stale()) return notReady('superseded')
         if (evidenceRevision != revision) continue // rows arrived during the final derivation
-        outcome = 'established'
+        established = derived
       }
-      if (outcome == 'no-evidence') return notReady('no evidence to validate a first phrase')
-      if (outcome == 'wrong') {
-        deps.onWarn('phrase did not open the encrypted data')
+      if (wrong) {
+        // ONE blocking notice on the required path (review 89 §3.2; onWarn stays with the
+        // optional trusted-hash mismatch), then re-prompt with the regime recomputed
         await deps.reportWrongPhrase()
         if (stale()) return notReady('superseded')
-        continue // re-prompt, regime recomputed from current state
+        continue
       }
 
-      // 7. seal LAST, on this still-current established success (one publication point)
-      const derived = await deriveOnce()
-      if (stale()) return notReady('superseded')
-      return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, derived) }
+      // 7. seal in THIS continuation — no await separates the final revision check from the seal
+      return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, established!) }
     }
   }
 

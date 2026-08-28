@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
+  accountHasCipher,
+  adoptFreshFixedSecret,
   adoptValidatedSecret,
   establishCandidate,
   resolveFixedOwnerSecret,
@@ -458,4 +460,59 @@ test('a WRONG phrase against v1 evidence re-prompts; the right one establishes',
     d.calls.filter(c => c == 'wrong'),
     'exactly one wrong-phrase report'
   ).toHaveLength(1)
+})
+
+// ---- the fixed-EMPTY complete acquisition (review 89 §2.2) -------------------------------------
+
+const FIXED_PROFILE = { v: 1 as const, salt: 'BwcHBwcHBwcHBwcHBwcHBw==' }
+const DERIVED = { key: { fake: 'k' } as unknown as CryptoKey, keyBytes: new Uint8Array(32) }
+
+function freshDeps(overrides: Partial<Parameters<typeof adoptFreshFixedSecret>[0]> = {}) {
+  const calls: string[] = []
+  return {
+    calls,
+    deps: {
+      profile: async () => (calls.push('profile'), FIXED_PROFILE),
+      derive: async () => (calls.push('derive'), DERIVED),
+      adopt: () => (calls.push('adopt'), true),
+      promptNewPhrase: async () => (calls.push('prompt'), 'phrase'),
+      hashPhrase: async (phrase: string) => 'v0:' + phrase,
+      fetchAccountDocs: async () => (calls.push('refetch'), [] as AccountDoc[]),
+      signOut: () => void calls.push('signout'),
+      ...overrides,
+    },
+  }
+}
+
+test('fixed-empty: profile before the prompt, re-confirmed emptiness, then ONE complete adoption', async () => {
+  const f = freshDeps()
+  expect(await adoptFreshFixedSecret(f.deps)).toBe('v0:phrase')
+  expect(f.calls).toEqual(['profile', 'prompt', 'derive', 'refetch', 'adopt'])
+})
+
+test('fixed-empty: ciphertext that appeared while the prompt was open ABORTS — nothing adopted (review 89 §2.2)', async () => {
+  // the emptiness authority is prompt-aged: another device wrote the account's first cipher
+  // under phrase A while this page waited for phrase B
+  const f = freshDeps({
+    fetchAccountDocs: async () => [doc('a', { cipher: 'AAAA' + 'ab'.repeat(12) + 'cipher' })],
+  })
+  await expect(adoptFreshFixedSecret(f.deps)).rejects.toThrow('no longer empty')
+  expect(f.calls).not.toContain('adopt')
+})
+
+test('fixed-empty: cancel signs out; disabled kdf returns null for the legacy flow; stale adopt is superseded', async () => {
+  const cancel = freshDeps({ promptNewPhrase: async () => null })
+  await expect(adoptFreshFixedSecret(cancel.deps)).rejects.toThrow('cancelled')
+  expect(cancel.calls).toContain('signout')
+  const off = freshDeps({ profile: async () => null })
+  expect(await adoptFreshFixedSecret(off.deps)).toBeNull()
+  expect(off.calls).not.toContain('prompt')
+  const stale = freshDeps({ adopt: () => false })
+  await expect(adoptFreshFixedSecret(stale.deps)).rejects.toThrow('superseded')
+})
+
+test('accountHasCipher: presence is the rule — corrupt values count, null/absent do not', () => {
+  expect(accountHasCipher([doc('a', { text: '#x' }), doc('b', { cipher: null })])).toBe(false)
+  for (const bad of [42, {}, ''] as const) expect(accountHasCipher([doc('n', { cipher: bad })]), String(bad)).toBe(true)
+  expect(accountHasCipher([doc('c', { cipher: 'AAAA' })])).toBe(true)
 })

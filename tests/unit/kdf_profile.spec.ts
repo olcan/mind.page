@@ -6,7 +6,6 @@ import {
   encodeKeyEnvelope,
   encodeSalt,
   provisionKdfProfile,
-  restoreKeyEnvelope,
 } from '../../src/kdf_profile.js'
 
 // the account KDF profile: metadata decoding, the provisioning transaction, and the persisted key
@@ -200,15 +199,4 @@ test('encodeKeyEnvelope refuses an invalid salt or missing v0: the codec invaria
   expect(() => encodeKeyEnvelope({ uid: 'u', salt: SALT_B64, keyBytes: KEY, v0Secret: '' })).toThrow(
     'established v0 secret'
   )
-})
-
-test('a valid envelope whose salt differs from the server profile is DISCARDED, never restored', () => {
-  const stored = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY, v0Secret: 'v0:phrase' })
-  expect(restoreKeyEnvelope(stored, 'uid-1', { v: 1, salt: SALT_B64 })).not.toBeNull()
-  const otherSalt = encodeSalt(new Uint8Array(16).fill(9))
-  expect(
-    restoreKeyEnvelope(stored, 'uid-1', { v: 1, salt: otherSalt }),
-    'another provisioning epoch‘s key: not importable'
-  ).toBeNull()
-  expect(restoreKeyEnvelope(stored, 'uid-2', { v: 1, salt: SALT_B64 }), 'wrong uid').toBeNull()
 })
