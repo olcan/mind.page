@@ -165,3 +165,77 @@ test('an exact-id query for a MISSING id is denied too: the shape must stay the 
     )
   )
 })
+
+// ---- the round-83 rules refactor: positive allowlist + users/kdf protection --------------------
+// the recursive /{document=**} match overlapped every dedicated rule, and Firestore grants on ANY
+// matching allow — so a client-written `user` field could authorize webhook writes and every future
+// collection was owner-writable by default. the shared owner policy now names its collections.
+
+test('the shared owner policy still covers items, history and instances', async () => {
+  const db = env.authenticatedContext('alice').firestore()
+  await assertSucceeds(setDoc(doc(db, 'history/rules-h1'), { user: 'alice', item: 'x', time: 1 }))
+  await assertSucceeds(setDoc(doc(db, 'instances/rules-i1'), { user: 'alice', init_time: 1 }))
+  await assertSucceeds(getDoc(doc(db, 'history/rules-h1')))
+  await assertSucceeds(deleteDoc(doc(db, 'instances/rules-i1')))
+})
+
+test('an UNKNOWN collection with a matching user field is denied: new collections are deny-by-default', async () => {
+  const db = env.authenticatedContext('alice').firestore()
+  await assertFails(setDoc(doc(db, 'surprise/rules-s1'), { user: 'alice', data: 1 }))
+  await assertFails(getDoc(doc(db, 'surprise/rules-s1')))
+})
+
+test('webhook collections: reads as documented, and a client user-field injection cannot write', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'webhooks/rules-w1'), { user: 'alice', hook: 1 })
+    await setDoc(doc(ctx.firestore(), 'github_webhooks/rules-g1'), { repo: 'r' })
+  })
+  const alice = env.authenticatedContext('alice').firestore()
+  await assertSucceeds(getDoc(doc(alice, 'webhooks/rules-w1')))
+  await assertSucceeds(getDoc(doc(alice, 'github_webhooks/rules-g1')))
+  const mallory = env.authenticatedContext('mallory-ok').firestore()
+  await assertFails(getDoc(doc(mallory, 'webhooks/rules-w1'))) // not their webhook
+  // the OLD bypass: the generic rule granted a write for any document carrying user == uid
+  await assertFails(setDoc(doc(alice, 'webhooks/rules-w2'), { user: 'alice', hook: 2 }))
+  await assertFails(setDoc(doc(alice, 'github_webhooks/rules-g2'), { user: 'alice', repo: 'r' }))
+  await assertFails(updateDoc(doc(alice, 'webhooks/rules-w1'), { user: 'alice', hook: 3 }))
+})
+
+test('users: owner-only read/create/update; NO client delete; injected user field buys nothing', async () => {
+  const alice = env.authenticatedContext('alice').firestore()
+  await assertSucceeds(setDoc(doc(alice, 'users/alice'), { email: 'a@x', user: 'alice' }))
+  await assertSucceeds(getDoc(doc(alice, 'users/alice')))
+  const mallory = env.authenticatedContext('mallory-ok').firestore()
+  await assertFails(getDoc(doc(mallory, 'users/alice')))
+  await assertFails(setDoc(doc(mallory, 'users/alice'), { user: 'mallory-ok' })) // injection buys nothing
+  // delete denied even for the owner: delete/recreate would re-provision a fresh salt over data
+  // encrypted under the old one
+  await assertFails(deleteDoc(doc(alice, 'users/alice')))
+})
+
+test('kdf metadata: exact shape enforced, immutable once set, and merge refreshes preserve it', async () => {
+  const alice = env.authenticatedContext('alice').firestore()
+  const SALT = 'BwcHBwcHBwcHBwcHBwcHBw==' // canonical base64 of 16x0x07
+  // exact-shape rejections
+  for (const kdf of [
+    { v: 2, salt: SALT },
+    { v: '1', salt: SALT },
+    { v: 1 },
+    { salt: SALT },
+    { v: 1, salt: SALT, extra: 1 },
+    { v: 1, salt: 'not base64' },
+    { v: 1, salt: 'BwcHBwcHBwcHBwcHBwcHBB==' }, // noncanonical pad bits
+  ])
+    await assertFails(setDoc(doc(alice, 'users/alice'), { kdf }, { merge: true }))
+  // the valid shape lands
+  await assertSucceeds(setDoc(doc(alice, 'users/alice'), { kdf: { v: 1, salt: SALT } }, { merge: true }))
+  // IMMUTABLE: mutation, deletion, and a non-merge replace that would drop it are all denied
+  await assertFails(
+    setDoc(doc(alice, 'users/alice'), { kdf: { v: 1, salt: 'CAgICAgICAgICAgICAgICA==' } }, { merge: true })
+  )
+  await assertFails(setDoc(doc(alice, 'users/alice'), { email: 'a@x' })) // bare set = replace = kdf loss
+  // an ordinary MERGE profile refresh without kdf preserves it and is allowed — the sign-in path
+  await assertSucceeds(setDoc(doc(alice, 'users/alice'), { email: 'new@x', lastUpdateAt: 2 }, { merge: true }))
+  const after = await getDoc(doc(alice, 'users/alice'))
+  expect(after.data()?.kdf).toEqual({ v: 1, salt: SALT })
+})

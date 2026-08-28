@@ -57,16 +57,18 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // preserved SEPARATELY from "usable evidence": zero ciphertext is the new-account path, but
   // ciphertext with zero usable rows is CORRUPT/UNSUPPORTED DATA and must fail closed before any
   // prompt — a wrong-phrase loop against data no phrase can open is a phishing surface
-  const ciphers = docs
-    .map(doc => doc.data().cipher)
-    .filter((cipher): cipher is string => typeof cipher == 'string' && !!cipher)
+  // RAW VALUES FIRST: "had ciphertext" means any value other than null/undefined — an empty
+  // string, a number or an object is a PRESENT, corrupt field, and filtering it out before the
+  // presence check silently rerouted a corrupt account into the new-phrase path (review 83)
+  const rawCiphers = docs.map(doc => doc.data().cipher).filter(value => value !== null && value !== undefined)
   const evidence: CandidateEvidence[] = []
-  for (const cipher of ciphers) {
+  for (const cipher of rawCiphers) {
+    if (typeof cipher != 'string' || !cipher) continue // present but not usable
     const kind = classifyTextCipher(cipher)
     if (kind == 'v0' || kind == 'v1') evidence.push({ kind, cipher })
     // malformed-frame / unsupported-version: not evidence about any phrase
   }
-  if (!ciphers.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
+  if (!rawCiphers.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
   if (!evidence.length)
     throw new Error('account ciphertext is unsupported or corrupt: no phrase can be validated against it')
 

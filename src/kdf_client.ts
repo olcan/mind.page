@@ -1,5 +1,6 @@
-// The page-side WORKER OWNER: one lazily created worker per tab, SERIALIZED derivations, and an
-// explicit dispose — the bounded lifecycle review 81 required. Each production derivation
+// The page-side WORKER OWNER: one lazily created worker PER OWNER, serialized derivations, and an
+// explicit dispose — the bounded lifecycle review 81 required. (One owner per acquisition is the
+// callers' rule, enforced by the component's single-flight, not by this factory.) Each production derivation
 // allocates ~64 MiB of Argon working memory, so two must never run concurrently in one tab; and a
 // worker with no owner could outlive the sign-out that made its result meaningless.
 //
@@ -10,8 +11,7 @@
 // that created them.
 //
 // OWNERSHIP: acquisition creates one of these per acquisition and disposes it in `finally` — a
-// page-lifetime singleton would retain a ~64 MiB-capable worker with no owner. The manual
-// benchmark owns one for its cold/warm batch the same way.
+// page-lifetime singleton would retain a ~64 MiB-capable worker with no owner.
 
 import { KdfError, type Deriver } from './kdf.js'
 

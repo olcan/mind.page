@@ -8,7 +8,11 @@ service cloud.firestore {
       return request.auth == null ||
 				!exists(/databases/$(database)/documents/blocked_users/$(request.auth.uid))
     }
-    // generic user-based access rules (for ANY document in ANY collection w/ user field)
+    // shared user-data policy, granted ONLY to the allowlisted collections below (review 83: the
+    // old recursive /{document=**} match overlapped every dedicated rule, and Firestore grants on
+    // ANY matching allow — so a client-written `user` field could authorize writes the dedicated
+    // webhook/users rules were written to reject, and every FUTURE collection was owner-writable
+    // by default). new collections are now denied until listed.
 		// ANYONE can read user=anonymous items
 		// ANYONE can read shared items (where attr.shared exists and is non-null)
 		// admin user (y2swh7JY2ScO5soV7mJMHVltAOX2) can read/write user=anonymous items
@@ -17,17 +21,21 @@ service cloud.firestore {
 		// - for read/delete, check user in existing item
 		// - for create, check user in new item
 		// - for update, check user in new AND existing items
-		match /{document=**} {
-			allow read: if (resource.data.user == "anonymous" ||
+		match /{collection}/{document} {
+			allow read: if collection in ['items', 'history', 'instances'] &&
+										(resource.data.user == "anonymous" ||
 			      				  ('shared' in resource.data.attr && resource.data.attr.shared != null) ||
 						 	      	request.auth.uid == resource.data.user) && user_not_blocked();
-			allow delete: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+			allow delete: if collection in ['items', 'history', 'instances'] &&
+										((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
 							          resource.data.user == "anonymous") ||
 							          request.auth.uid == resource.data.user) && user_not_blocked();
-			allow create: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+			allow create: if collection in ['items', 'history', 'instances'] &&
+										((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
 							          request.resource.data.user == "anonymous") ||
 							          request.auth.uid == request.resource.data.user) && user_not_blocked();
-			allow update: if ((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
+			allow update: if collection in ['items', 'history', 'instances'] &&
+										((request.auth.uid == "y2swh7JY2ScO5soV7mJMHVltAOX2" &&
 							          request.resource.data.user == "anonymous" &&
 							          resource.data.user == "anonymous") ||
 							          (request.auth.uid == request.resource.data.user &&
@@ -35,30 +43,47 @@ service cloud.firestore {
 	  }
 
 		// webhooks collection
-		// only firebase-admin write
+		// only firebase-admin write (now literally: no generic rule can grant a client write)
 		// logged in <user> can read user=<user> items, as long as NOT in blocked_users collection
     match /webhooks/{item} {
 			allow write: if false;
-			// read rule inherited from document=** above
-			// see other inherited document=** rules above
+			allow read: if request.auth.uid == resource.data.user && user_not_blocked();
     }
 
 		// github_webhooks collection
-		// only firebase-admin write
+		// only firebase-admin write (now literally: no generic rule can grant a client write)
 		// logged in <user> can read ANY item, as long as NOT in blocked_users collection
 		// note documents in this collection are not considered shared across ALL users
     match /github_webhooks/{item} {
 			allow write: if false;
 			allow read: if request.auth != null && user_not_blocked();
-			// see other inherited document=** rules above
     }
 
-		// users collection
-		// logged in <user> can read/write own document where document id matches uid
-		// user must NOT be in blocked_users collection
+		// users collection: owner-only read/create/update; NO client delete — the app has no
+		// profile-delete path, and denying delete is the simplest defense against delete/recreate
+		// re-provisioning a fresh kdf salt over data encrypted under the old one.
+		// `kdf`, when present, must be EXACTLY { v: 1, salt: <canonical base64 of 16 bytes> } —
+		// hasAll + hasOnly, an integer version, and the canonical-final-block regex (a lax
+		// [A-Za-z0-9+/]{22}== would accept noncanonical pad bits, giving one salt many encodings).
+		// once set, kdf is IMMUTABLE byte-for-byte; profile refreshes without kdf remain allowed
+		// (the client writes with merge: true — see the sign-in path).
+		function kdf_valid(data) {
+			return !('kdf' in data) ||
+				(data.kdf is map &&
+				 data.kdf.keys().hasAll(['v', 'salt']) && data.kdf.keys().hasOnly(['v', 'salt']) &&
+				 data.kdf.v is int && data.kdf.v == 1 &&
+				 data.kdf.salt is string && data.kdf.salt.matches('^[A-Za-z0-9+/]{21}[AQgw]==$'));
+		}
+		function kdf_unchanged(prev, next) {
+			return !('kdf' in prev) || ('kdf' in next && next.kdf == prev.kdf);
+		}
     match /users/{user} {
-			allow read, write: if request.auth.uid == user && user_not_blocked();
-			// see other inherited document=** rules above
+			allow read: if request.auth.uid == user && user_not_blocked();
+			allow create: if request.auth.uid == user && user_not_blocked() &&
+										kdf_valid(request.resource.data);
+			allow update: if request.auth.uid == user && user_not_blocked() &&
+										kdf_valid(request.resource.data) && kdf_unchanged(resource.data, request.resource.data);
+			allow delete: if false;
     }
 
 	}

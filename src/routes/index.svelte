@@ -7338,8 +7338,10 @@
 
             // update user info (email, name, etc) in users collection
             const userInfo = Object.assign(JSON.parse(userInfoString), { lastUpdateAt: Date.now() })
-            // firestore().collection('users').doc(user.uid).set(userInfo).catch(console.error)
-            setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo).catch(console.error)
+            // MERGE, not replace: a bare set() replaces the whole document, which would erase the
+            // kdf salt/version metadata stage 2 stores here — losing the salt makes every v1
+            // ciphertext permanently undecryptable (review 79/83; rules-pinned in rules.spec.ts)
+            setDoc(doc(getFirestore(firebase), 'users', user.uid), userInfo, { merge: true }).catch(console.error)
 
             // NOTE: olcans@gmail.com signed in as "admin" will ACT as anonymous account
             //       (this is the only case where user != getAuth(firebase).currentUser)

@@ -182,8 +182,16 @@ export function preflightBytesCipher(cipher: Uint8Array<ArrayBuffer>): BytesPref
     if (cipher.length - 25 < GCM_MIN_BYTES) return { kind: 'malformed-frame' }
     return { kind: 'v0' }
   }
-  // legacy TEXT-form value stored as bytes (decryptBytesWithSecret's compatibility mode)
+  // legacy TEXT-form value stored as bytes (decryptBytesWithSecret's compatibility mode): the
+  // payload after the 24 ASCII iv chars is base64 TEXT, so the structural check decodes it and
+  // requires the GCM minimum — review 83: iv-only validation accepted a three-byte payload
   if (!IV_HEX.test(head.slice(0, 24))) return { kind: 'malformed-frame' }
+  try {
+    if (byteStringToArray(atob(byteArrayToString(cipher.subarray(24)))).length < GCM_MIN_BYTES)
+      return { kind: 'malformed-frame' }
+  } catch {
+    return { kind: 'malformed-frame' }
+  }
   return { kind: 'v0' }
 }
 

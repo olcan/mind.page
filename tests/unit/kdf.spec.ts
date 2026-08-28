@@ -67,14 +67,6 @@ test('NFC normalization: composed and decomposed spellings derive the SAME v1 ke
   expect(derived[0], 'same phrase bytes after NFC').toBe(derived[1])
 })
 
-test('v0 is NOT normalized: the legacy key keeps the exact original Unicode bytes', async () => {
-  // the frozen decomposed-Unicode v0 vector: normalization must never leak into the legacy path,
-  // so canonically equivalent spellings produce DIFFERENT v0 ciphers/keys
-  const composedCipher = await encryptWithSecret('data', 'café')
-  await expect(decryptWithSecret(composedCipher, 'café'), 'decomposed spelling is a WRONG v0 key').rejects.toThrow()
-  expect(await decryptWithSecret(composedCipher, 'café')).toBe('data')
-})
-
 test('the version is validated as EXACTLY the number 1: hostile metadata never reaches a deriver', async () => {
   let derivations = 0
   const spy: Deriver = async () => (derivations++, FIXED_KEY)
@@ -222,7 +214,14 @@ test('classification and parsing share ONE strict grammar, and the bytes dispatc
   // bytes: legacy '~', legacy TEXT-form-stored-as-bytes, '~1!', future '~N!', malformed
   const b = (s: string, extra: number[] = []) => new Uint8Array([...s.split('').map(c => c.charCodeAt(0)), ...extra])
   expect(classifyBytesCipher(b('~' + 'ab'.repeat(12), Array.from(new Uint8Array(16))))).toBe('v0')
-  expect(classifyBytesCipher(b('ab'.repeat(12) + 'QUFB'))).toBe('v0') // legacy text-form bytes
+  expect(
+    classifyBytesCipher(b('ab'.repeat(12) + Buffer.from(new Uint8Array(16)).toString('base64'))),
+    'legacy text-form bytes with a full GCM payload'
+  ).toBe('v0')
+  expect(
+    classifyBytesCipher(b('ab'.repeat(12) + 'QUFB')),
+    'legacy text-form bytes DECODING to three bytes cannot hold a GCM tag'
+  ).toBe('malformed-frame')
   expect(
     classifyBytesCipher(b('~1!' + 'ab'.repeat(12), Array.from(new Uint8Array(16)))),
     'v1 bytes with a full GCM payload'

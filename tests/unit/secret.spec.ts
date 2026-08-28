@@ -278,29 +278,51 @@ test('PRODUCTION: ciphertext with ZERO usable rows fails closed before any promp
   expect(d.calls).not.toContain('wrong')
 })
 
-test('PRODUCTION: a non-authentication decrypt error propagates instead of becoming wrong-phrase', async () => {
-  // a structurally valid v0 frame whose payload is not valid base64 CONTENT cannot happen (the
-  // preflight decodes it), so simulate the integration-bug class: a deps.hashPhrase that throws is
-  // out of scope — the narrow contract is pinned purely instead
-  const verdict = establishCandidate([{ kind: 'v0', cipher: 'x' }], {
-    tryV0: async () => {
-      throw new TypeError('integration bug')
-    },
-    tryV1: async () => false,
+test('a non-authentication error in the RESOLVER propagates instead of becoming wrong-phrase', async () => {
+  // review 83: the previous row injected a throwing tryV0 into the pure helper, so a restored
+  // catch-all in the RESOLVER would have stayed green. this drives the real path: a structurally
+  // valid v0 frame plus a hashPhrase returning a Symbol makes the real TextEncoder throw
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const cipher = await encryptWithSecret('x', secret)
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher })],
+    hashPhrase: async () => Symbol('broken') as unknown as string,
   })
-  await expect(verdict, 'the policy never converts an unexpected throw into false').rejects.toThrow('integration bug')
+  await expect(resolveFixedOwnerSecret(d)).rejects.toThrow(TypeError)
+  expect(
+    d.calls.filter(c => c == 'wrong'),
+    'never reported as a wrong phrase'
+  ).toHaveLength(0)
 })
 
-test('the resolver iterates ALL ciphers: a corrupt first item no longer causes a prompt loop', async () => {
-  // the production wiring of the policy: two ciphers, the first corrupt, the phrase correct
+test('the resolver iterates past a REAL authentication failure to the valid second frame', async () => {
+  // review 83: with the preflight, a malformed first value is SKIPPED before any attempt, which
+  // proves classification, not iteration. this first frame is structurally VALID but encrypted
+  // under a different secret, so the attempt genuinely fails authentication (OperationError ->
+  // false) and iteration continues to the frame the candidate can open
   const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const otherSecret = await hashSecretPhrase('uid-1', 'some other phrase')
+  const foreign = await encryptWithSecret('not ours', otherSecret)
   const cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
   const d = deps({
-    fetchAccountDocs: async () => [doc('bad', { cipher: 'CORRUPT-NOT-DECRYPTABLE' }), doc('good', { cipher })],
+    fetchAccountDocs: async () => [doc('foreign', { cipher: foreign }), doc('good', { cipher })],
   })
-  expect(await resolveFixedOwnerSecret(d), 'established despite the corrupt first row').toBe(secret)
+  expect(await resolveFixedOwnerSecret(d), 'established via the second frame').toBe(secret)
   expect(
     d.calls.filter(c => c == 'wrong'),
     'and no wrong-phrase report'
   ).toHaveLength(0)
+})
+
+test('PRESENT-but-invalid cipher values are corrupt, never the new-account path', async () => {
+  // review 83: `cipher: 42`, `{}` or `''` used to vanish before the presence check, so a corrupt
+  // account entered the choose-new-phrase flow. presence means any value other than null/undefined
+  const d = deps({
+    fetchAccountDocs: async () => [doc('n', { cipher: 42 }), doc('o', { cipher: {} }), doc('e', { cipher: '' })],
+  })
+  await expect(resolveFixedOwnerSecret(d)).rejects.toThrow('unsupported or corrupt')
+  expect(d.calls).not.toContain('prompt')
+  // and absent/null stays the legitimate no-cipher answer
+  const clean = deps({ fetchAccountDocs: async () => [doc('p', { cipher: null }), doc('q', { text: '#plain' })] })
+  expect(await resolveFixedOwnerSecret(clean)).toBeNull()
 })

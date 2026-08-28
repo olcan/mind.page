@@ -136,7 +136,7 @@ test('messageerror and a throwing postMessage both reset the worker for the next
   owner.dispose()
 })
 
-test('a failed CONSTRUCTION is unavailable, and the tail retains no key after success', async () => {
+test('a failed CONSTRUCTION is unavailable, and the next derive retries', async () => {
   FakeWorker.failConstruction = true
   const owner = createKdfWorker()
   expect(((await owner.derive(input()).catch(e => e)) as KdfError).kind).toBe('unavailable')
