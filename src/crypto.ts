@@ -125,6 +125,68 @@ const GCM_MIN_BYTES = 16
 // is an integration error, not evidence about the data, and must propagate as itself
 const isOperationError = (e: unknown) => e instanceof DOMException && e.name == 'OperationError'
 
+// ---- the ONE structural preflight per storage mode ---------------------------------------------
+// classification and decryption run the SAME frame validation (review 82: a header-only classifier
+// called frames v0/v1 that the decryptors then called malformed). the preflight is non-decrypting:
+// it validates the version tag, iv, payload decodability and the GCM minimum — everything short of
+// the key
+
+export type TextPreflight =
+  | { kind: 'v0' }
+  | { kind: 'v1'; ivHex: string; bytes: Uint8Array<ArrayBuffer> }
+  | { kind: 'unsupported-version' }
+  | { kind: 'malformed-frame' }
+
+export function preflightTextCipher(cipher: string): TextPreflight {
+  if (cipher.startsWith(V1_TEXT_TAG)) {
+    const ivHex = cipher.slice(2, 26)
+    if (!IV_HEX.test(ivHex)) return { kind: 'malformed-frame' }
+    let bytes: Uint8Array<ArrayBuffer>
+    try {
+      bytes = byteStringToArray(atob(cipher.slice(26)))
+    } catch {
+      return { kind: 'malformed-frame' }
+    }
+    if (bytes.length < GCM_MIN_BYTES) return { kind: 'malformed-frame' }
+    return { kind: 'v1', ivHex, bytes }
+  }
+  if (/^\d+!/.test(cipher)) return { kind: 'unsupported-version' }
+  // v0: untagged, 24-hex iv + base64 payload of at least the GCM tag
+  if (!IV_HEX.test(cipher.slice(0, 24))) return { kind: 'malformed-frame' }
+  try {
+    if (byteStringToArray(atob(cipher.slice(24))).length < GCM_MIN_BYTES) return { kind: 'malformed-frame' }
+  } catch {
+    return { kind: 'malformed-frame' }
+  }
+  return { kind: 'v0' }
+}
+
+export type BytesPreflight =
+  | { kind: 'v0' }
+  | { kind: 'v1'; ivHex: string; payload: Uint8Array<ArrayBuffer> }
+  | { kind: 'unsupported-version' }
+  | { kind: 'malformed-frame' }
+
+export function preflightBytesCipher(cipher: Uint8Array<ArrayBuffer>): BytesPreflight {
+  const head = byteArrayToString(cipher.subarray(0, 28))
+  if (head.startsWith(V1_BYTES_TAG)) {
+    const ivHex = head.slice(3, 27)
+    if (!IV_HEX.test(ivHex)) return { kind: 'malformed-frame' }
+    if (cipher.length - 27 < GCM_MIN_BYTES) return { kind: 'malformed-frame' }
+    return { kind: 'v1', ivHex, payload: cipher.subarray(27) }
+  }
+  if (/^~\d+!/.test(head)) return { kind: 'unsupported-version' }
+  if (head[0] == '~') {
+    // v0 bytes mode: '~' + iv hex + raw cipher bytes
+    if (!IV_HEX.test(head.slice(1, 25))) return { kind: 'malformed-frame' }
+    if (cipher.length - 25 < GCM_MIN_BYTES) return { kind: 'malformed-frame' }
+    return { kind: 'v0' }
+  }
+  // legacy TEXT-form value stored as bytes (decryptBytesWithSecret's compatibility mode)
+  if (!IV_HEX.test(head.slice(0, 24))) return { kind: 'malformed-frame' }
+  return { kind: 'v0' }
+}
+
 export async function encryptV1Text(text: string, key: CryptoKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const cipher = await crypto.subtle.encrypt(
@@ -136,21 +198,14 @@ export async function encryptV1Text(text: string, key: CryptoKey): Promise<strin
 }
 
 export async function decryptV1Text(cipher: string, key: CryptoKey): Promise<string> {
-  if (!cipher.startsWith(V1_TEXT_TAG)) throw new CipherError('unsupported-version', `not a v1 text cipher`)
-  const ivHex = cipher.slice(2, 26)
-  if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
-  let bytes: Uint8Array<ArrayBuffer>
-  try {
-    bytes = byteStringToArray(atob(cipher.slice(26)))
-  } catch {
-    throw new CipherError('malformed-frame', 'bad base64')
-  }
-  if (bytes.length < GCM_MIN_BYTES) throw new CipherError('malformed-frame', 'shorter than a gcm tag')
+  // THE SAME preflight classification uses: one grammar, one place
+  const frame = preflightTextCipher(cipher)
+  if (frame.kind != 'v1') throw new CipherError(frame.kind == 'v0' ? 'unsupported-version' : frame.kind, 'v1 text')
   try {
     const text = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_TEXT_AAD },
+      { name: 'AES-GCM', iv: ivFromHex(frame.ivHex), additionalData: V1_TEXT_AAD },
       key,
-      bytes
+      frame.bytes
     )
     return new TextDecoder().decode(text)
   } catch (e) {
@@ -171,16 +226,13 @@ export async function decryptV1Bytes(
   cipher: Uint8Array<ArrayBuffer>,
   key: CryptoKey
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const prefix = byteArrayToString(cipher.subarray(0, 3))
-  if (prefix != V1_BYTES_TAG) throw new CipherError('unsupported-version', 'not a v1 bytes cipher')
-  const ivHex = byteArrayToString(cipher.subarray(3, 27))
-  if (!IV_HEX.test(ivHex)) throw new CipherError('malformed-frame', 'bad iv')
-  if (cipher.length - 27 < GCM_MIN_BYTES) throw new CipherError('malformed-frame', 'shorter than a gcm tag')
+  const frame = preflightBytesCipher(cipher)
+  if (frame.kind != 'v1') throw new CipherError(frame.kind == 'v0' ? 'unsupported-version' : frame.kind, 'v1 bytes')
   try {
     const plain = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: ivFromHex(ivHex), additionalData: V1_BYTES_AAD },
+      { name: 'AES-GCM', iv: ivFromHex(frame.ivHex), additionalData: V1_BYTES_AAD },
       key,
-      cipher.subarray(27)
+      frame.payload
     )
     return new Uint8Array(plain)
   } catch (e) {
@@ -189,27 +241,15 @@ export async function decryptV1Bytes(
   }
 }
 
-// what regime a stored TEXT value selects: '1!'-tagged v1; an untagged 24-hex-iv v0; a tagged
-// value from a FUTURE version ('<digits>!' that is not '1'); or a malformed frame. the reader
-// dispatches on this ONE test, and the unsupported-version answer is what a too-old build shows
-// as "reload this tab" — for builds that HAVE this code; a genuinely old build has no recognizer,
-// which is why the rollout gate is the owner checklist, not this message
+// what regime a stored value selects: the PREFLIGHT's answer, projected. classification is the
+// same structural validation decryption performs — a frame that classifies v1 always reaches the
+// key, and one that cannot reach the key never classifies v1
 export function classifyTextCipher(cipher: string): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
-  // the SAME canonical tag decryptV1Text parses — never a looser match here and a stricter one
-  // there. any other digits-then-'!' shape is a tag from a future version (or corruption; a
-  // future reader that knows it says "reload", which is all this arm is for)
-  if (cipher.startsWith(V1_TEXT_TAG)) return 'v1'
-  if (/^\d+!/.test(cipher)) return 'unsupported-version'
-  return IV_HEX.test(cipher.slice(0, 24)) ? 'v0' : 'malformed-frame'
+  return preflightTextCipher(cipher).kind
 }
 
-// the bytes-side dispatcher, with the same outcomes: legacy '~' + iv (v0 bytes mode), a legacy
-// TEXT-form value stored as bytes (no '~', hex iv — decryptBytesWithSecret's compatibility mode),
-// '~1!' (v1), a future '~N!' tag, or a malformed header
-export function classifyBytesCipher(cipher: Uint8Array): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
-  const head = byteArrayToString(cipher.subarray(0, 28))
-  if (head.startsWith(V1_BYTES_TAG)) return 'v1'
-  if (/^~\d+!/.test(head)) return 'unsupported-version'
-  if (head[0] == '~') return IV_HEX.test(head.slice(1, 25)) ? 'v0' : 'malformed-frame'
-  return IV_HEX.test(head.slice(0, 24)) ? 'v0' : 'malformed-frame'
+export function classifyBytesCipher(
+  cipher: Uint8Array<ArrayBuffer>
+): 'v0' | 'v1' | 'unsupported-version' | 'malformed-frame' {
+  return preflightBytesCipher(cipher).kind
 }

@@ -324,37 +324,44 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
-    // ONE worker owner per tab (lazy; serialized; disposable — see createKdfWorker)
-    const kdfWorker = createKdfWorker()
-    // KDF spike hooks (design: notes/design/mind_page_kdf_migration.md). __kdfSmoke proves the
-    // WORKER path — Vite bundling, WASM load, round trip — with the CHEAP TEST parameters (this
-    // is a smoke, not the resolver; the production resolver accepts only the frozen V1_PARAMS).
-    // both hooks are TEMPORARY production surface: the smoke goes when the stage-2 mixed-reader
-    // row proves the path, the benchmark after the documented fleet run (review 81)
-    window['__kdfSmoke'] = async () => {
-      const salt = new Uint8Array(16).fill(7)
-      const key = await kdfWorker.derive({
-        password: new TextEncoder().encode('test phrase'),
-        salt,
-        params: { memorySize: 8 * 1024, iterations: 1, parallelism: 1, hashLength: 32 },
-      })
-      // FULL key hex, so the browser row can compare all 32 bytes against the Node vector
-      return {
-        length: key.length,
-        hex: Array.from(key)
-          .map(b => ('00' + b.toString(16)).slice(-2))
-          .join(''),
+    // KDF spike hooks — LOCAL/TEST HOSTS ONLY (the same predicate the emulator connection uses):
+    // production pages carry no benchmark surface. each invocation owns its worker and disposes it
+    // in `finally` (review 82: no page-lifetime singleton). __kdfSmoke proves the worker path with
+    // the CHEAP test parameters and goes when the stage-2 mixed-reader row lands; __kdfBenchmark
+    // runs the real V1_PARAMS once and goes after the documented fleet run
+    if (['localhost', '127.0.0.1'].includes(location.hostname)) {
+      window['__kdfSmoke'] = async () => {
+        const owner = createKdfWorker()
+        try {
+          const key = await owner.derive({
+            password: new TextEncoder().encode('test phrase'),
+            salt: new Uint8Array(16).fill(7),
+            params: { memorySize: 8 * 1024, iterations: 1, parallelism: 1, hashLength: 32 },
+          })
+          return {
+            length: key.length,
+            hex: Array.from(key)
+              .map(b => ('00' + b.toString(16)).slice(-2))
+              .join(''),
+          }
+        } finally {
+          owner.dispose()
+        }
       }
-    }
-    window['__kdfBenchmark'] = async () => {
-      const { V1_PARAMS } = await import('../kdf')
-      const start = performance.now()
-      const key = await kdfWorker.derive({
-        password: new TextEncoder().encode('benchmark phrase'),
-        salt: new Uint8Array(16).fill(9),
-        params: V1_PARAMS,
-      })
-      return { ms: Math.round(performance.now() - start), length: key.length }
+      window['__kdfBenchmark'] = async () => {
+        const owner = createKdfWorker()
+        try {
+          const start = performance.now()
+          const key = await owner.derive({
+            password: new TextEncoder().encode('benchmark phrase'),
+            salt: new Uint8Array(16).fill(9),
+            params: V1_PARAMS,
+          })
+          return { ms: Math.round(performance.now() - start), length: key.length }
+        } finally {
+          owner.dispose()
+        }
+      }
     }
     Object.defineProperty(window, '__this', { get: () => item(evalStack[evalStack.length - 1]) })
     window['_items'] = _items
@@ -6371,6 +6378,7 @@
     type Delivery,
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
+  import { V1_PARAMS } from '../kdf'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'

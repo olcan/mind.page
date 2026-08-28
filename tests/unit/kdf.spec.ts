@@ -6,7 +6,6 @@ import {
   decryptV1Bytes,
   decryptV1Text,
   decryptWithSecret,
-  decryptBytesWithSecret,
   encryptV1Bytes,
   encryptV1Text,
   encryptWithSecret,
@@ -32,7 +31,6 @@ const FIXED_KEY = new Uint8Array(32).map((_, i) => i) // framing rows: no deriva
 // literal statement rather than a four-byte overlap of different inputs (review 81)
 export const KAT = {
   password: 'test phrase',
-  saltFill: 7,
   hex: 'e18399378b0a69373a4802509400ba9b281fa706bc645d79a7ed0fe338aedca2',
 }
 
@@ -211,16 +209,26 @@ test('only OperationError translates to authentication-failed; an integration er
 
 test('classification and parsing share ONE strict grammar, and the bytes dispatcher exists', async () => {
   const { classifyBytesCipher } = await import('../../src/crypto.js')
-  // text: canonical '1!' only; any other digits! shape is a future tag; v0 needs its hex iv
-  expect(classifyTextCipher('1!' + 'a'.repeat(24) + 'AAAA')).toBe('v1')
+  // text: canonical '1!' only, AND structurally complete — the preflight is the same validation
+  // decryption performs, so a frame too short to reach the key never classifies v1 (review 82)
+  const real = await encryptV1Text('x', await importV1Key(FIXED_KEY))
+  expect(classifyTextCipher(real)).toBe('v1')
+  expect(classifyTextCipher('1!' + 'a'.repeat(24) + 'AAAA'), 'a sub-tag-length v1 frame is MALFORMED').toBe(
+    'malformed-frame'
+  )
   expect(classifyTextCipher('01!whatever')).toBe('unsupported-version')
   expect(classifyTextCipher('2!whatever')).toBe('unsupported-version')
   expect(classifyTextCipher('not a cipher')).toBe('malformed-frame')
   // bytes: legacy '~', legacy TEXT-form-stored-as-bytes, '~1!', future '~N!', malformed
   const b = (s: string, extra: number[] = []) => new Uint8Array([...s.split('').map(c => c.charCodeAt(0)), ...extra])
-  expect(classifyBytesCipher(b('~' + 'ab'.repeat(12)))).toBe('v0')
+  expect(classifyBytesCipher(b('~' + 'ab'.repeat(12), Array.from(new Uint8Array(16))))).toBe('v0')
   expect(classifyBytesCipher(b('ab'.repeat(12) + 'QUFB'))).toBe('v0') // legacy text-form bytes
-  expect(classifyBytesCipher(b('~1!' + 'ab'.repeat(12)))).toBe('v1')
+  expect(
+    classifyBytesCipher(b('~1!' + 'ab'.repeat(12), Array.from(new Uint8Array(16)))),
+    'v1 bytes with a full GCM payload'
+  ).toBe('v1')
+  expect(classifyBytesCipher(b('~1!' + 'ab'.repeat(12))), 'v1 bytes too short for the tag').toBe('malformed-frame')
+  expect(classifyBytesCipher(b('~' + 'ab'.repeat(12))), 'v0 bytes too short for the tag').toBe('malformed-frame')
   expect(classifyBytesCipher(b('~2!' + 'ab'.repeat(12)))).toBe('unsupported-version')
   expect(classifyBytesCipher(b('~zz-not-hex'))).toBe('malformed-frame')
   expect(classifyBytesCipher(b('garbage!'))).toBe('malformed-frame')

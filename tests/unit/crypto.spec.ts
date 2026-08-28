@@ -64,3 +64,17 @@ test('decrypt refuses uint8-mode ciphers, decrypt_bytes accepts legacy text-mode
   const legacy = await encryptWithSecret('\x01\x02\xfa\xff', SECRET)
   expect(Array.from(await decryptBytesWithSecret(byteStringToArray(legacy), SECRET))).toEqual([1, 2, 250, 255])
 })
+
+test('the legacy phrase hash is NOT normalized: literal vectors for a decomposed spelling', async () => {
+  // the frozen decomposed-Unicode v0 vector ON THE PHRASE PATH (review 82): hashSecretPhrase is
+  // where an accidental NFC would land, and these literals pin that canonically equivalent
+  // spellings keep producing DIFFERENT stored secrets forever
+  const composed = 'caf\u00e9'
+  const decomposed = 'cafe\u0301'
+  expect(composed).not.toBe(decomposed)
+  const composedHash = await hashSecretPhrase('uid-123', composed)
+  const decomposedHash = await hashSecretPhrase('uid-123', decomposed)
+  expect(composedHash).toBe('LirHp2z2mCBUOhvsGg9HdAJkS2obGkJ9fYApzzwS4p4=')
+  expect(decomposedHash).toBe('XbD/HrVHf3OfD3rw1hmPzojALbVv1In8tlayd8A86aM=')
+  expect(composedHash).not.toBe(decomposedHash)
+})

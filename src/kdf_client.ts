@@ -4,9 +4,14 @@
 // worker with no owner could outlive the sign-out that made its result meaningless.
 //
 // Failures are machine-readable KdfError kinds (see src/kdf.ts): `unavailable` (the worker or its
-// WASM could not load/run — a later call retries with a fresh worker), `failed` (the derivation
-// itself errored), `aborted` (dispose won). A late message from a replaced or disposed worker is
-// ignored by generation: entries belong to the worker instance that created them.
+// WASM could not load/run — the broken worker is terminated and a later call retries with a fresh
+// one), `failed` (the derivation itself errored), `aborted` (dispose won). A late message from a
+// replaced or disposed worker is ignored by generation: entries belong to the worker instance
+// that created them.
+//
+// OWNERSHIP: acquisition creates one of these per acquisition and disposes it in `finally` — a
+// page-lifetime singleton would retain a ~64 MiB-capable worker with no owner. The manual
+// benchmark owns one for its cold/warm batch the same way.
 
 import { KdfError, type Deriver } from './kdf.js'
 
@@ -14,7 +19,7 @@ export function createKdfWorker(): { derive: Deriver; dispose: (reason?: string)
   let worker: Worker | undefined
   let disposed = false
   let nextId = 0
-  let tail: Promise<unknown> = Promise.resolve() // SERIALIZED: one derivation at a time
+  let tail: Promise<void> = Promise.resolve() // SERIALIZED: one derivation at a time
   const pending = new Map<number, { resolve: (key: Uint8Array) => void; reject: (e: unknown) => void }>()
 
   const failAllPending = (error: KdfError) => {
@@ -32,6 +37,14 @@ export function createKdfWorker(): { derive: Deriver; dispose: (reason?: string)
       pending.delete(event.data.id)
       if (event.data.key) entry.resolve(event.data.key)
       else entry.reject(new KdfError('failed', event.data.error ?? 'derivation error'))
+    }
+    created.onmessageerror = () => {
+      if (worker !== created) return
+      // an undecodable response can answer NOTHING specific — the id is unreadable — so every
+      // pending waiter fails rather than hanging, and the next derive starts fresh
+      failAllPending(new KdfError('unavailable', 'undecodable worker message'))
+      worker = undefined
+      created.terminate()
     }
     created.onerror = event => {
       if (worker !== created) return
@@ -59,17 +72,26 @@ export function createKdfWorker(): { derive: Deriver; dispose: (reason?: string)
       try {
         w.postMessage({ id, password, salt, params })
       } catch (e) {
-        pending.delete(id) // a throwing postMessage must not leave its entry behind
+        // a throwing postMessage must not leave its entry behind — and the WORKER is reset too,
+        // so the documented `unavailable` contract ("a later call retries with a fresh worker")
+        // is literal rather than aspirational
+        pending.delete(id)
+        worker = undefined
+        w.terminate()
         reject(new KdfError('unavailable', String((e as Error)?.message ?? e)))
       }
     })
 
   return {
-    // SERIALIZED through a settle-only tail: a second call queues behind the first rather than
-    // doubling the Argon memory footprint
+    // SERIALIZED through a tail that settles to UNDEFINED on both arms: `turn.catch(() => {})`
+    // passes a fulfilled value through, so the tail would retain the LAST RAW KEY until the next
+    // derivation — the same retention deleting the cache was for (review 82)
     derive: input => {
       const turn = tail.then(() => deriveOne(input))
-      tail = turn.catch(() => {})
+      tail = turn.then(
+        () => undefined,
+        () => undefined
+      )
       return turn
     },
     // terminates the worker and rejects everything in flight as `aborted`. sign-out and principal

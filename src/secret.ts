@@ -13,7 +13,7 @@
 // the documents this flow fetched are prompt-aged by the time a human finishes typing, and the
 // whole fetch/retry/prompt sequence has no business holding the corpus tail
 
-import { decryptWithSecret } from './crypto.js'
+import { classifyTextCipher, decryptWithSecret } from './crypto.js'
 
 export type AccountDoc = { id: string; data: () => Record<string, any> }
 
@@ -51,14 +51,24 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
     }
   }
 
-  // EVERY truthy v0 cipher is evidence, not just the first: one corrupt item before a valid one
-  // used to cause a prompt loop for a correct phrase (review 81). classification-by-shape happens
-  // here (today the corpus is v0-only; v1 rows enter this list in stage 2)
-  const evidence: CandidateEvidence[] = docs
+  // EVERY cipher value is CLASSIFIED, once, through the same structural preflight the decryptors
+  // use — a truthy value is not evidence until its frame says which regime it is (review 82: a
+  // malformed or future-version frame must never count against the phrase). "had ciphertext" is
+  // preserved SEPARATELY from "usable evidence": zero ciphertext is the new-account path, but
+  // ciphertext with zero usable rows is CORRUPT/UNSUPPORTED DATA and must fail closed before any
+  // prompt — a wrong-phrase loop against data no phrase can open is a phishing surface
+  const ciphers = docs
     .map(doc => doc.data().cipher)
-    .filter((cipher): cipher is string => !!cipher)
-    .map(cipher => ({ kind: 'v0' as const, cipher }))
-  if (!evidence.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
+    .filter((cipher): cipher is string => typeof cipher == 'string' && !!cipher)
+  const evidence: CandidateEvidence[] = []
+  for (const cipher of ciphers) {
+    const kind = classifyTextCipher(cipher)
+    if (kind == 'v0' || kind == 'v1') evidence.push({ kind, cipher })
+    // malformed-frame / unsupported-version: not evidence about any phrase
+  }
+  if (!ciphers.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
+  if (!evidence.length)
+    throw new Error('account ciphertext is unsupported or corrupt: no phrase can be validated against it')
 
   // prompt and validate against the corpus evidence, per the establishCandidate policy
   let candidate: string
@@ -74,8 +84,12 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
         try {
           await decryptWithSecret(cipher, candidate)
           return true
-        } catch {
-          return false
+        } catch (e) {
+          // ONLY a real authentication failure is evidence against the candidate. anything else —
+          // a parser or integration bug — must propagate to its own handling, never become
+          // "wrong phrase" (review 82)
+          if (e instanceof DOMException && e.name == 'OperationError') return false
+          throw e
         }
       },
       tryV1: async () => false, // no v1 corpus yet (stage 2 supplies the real attempt)
@@ -167,8 +181,10 @@ export type CandidateVerdict =
   | { kind: 'established' }
   // supported evidence existed and every attempt failed: may re-prompt
   | { kind: 'not-established' }
-  // nothing usable to judge against: fail closed, never blame the phrase
-  | { kind: 'no-usable-evidence' }
+// NOTE there is no 'no-usable-evidence' verdict: the CALLER classifies the corpus and fails
+// closed on ciphertext-with-zero-usable-rows BEFORE any prompt, so the helper never sees an empty
+// list — and a verdict only an artificial input could produce is a state to delete, not to keep
+// (review 82)
 
 export async function establishCandidate(
   evidence: CandidateEvidence[],
@@ -181,7 +197,7 @@ export async function establishCandidate(
 ): Promise<CandidateVerdict> {
   const v0 = evidence.filter(row => row.kind == 'v0')
   const v1 = evidence.filter(row => row.kind == 'v1')
-  if (!v0.length && !v1.length) return { kind: 'no-usable-evidence' }
+  if (!v0.length && !v1.length) throw new Error('establishCandidate requires classified evidence (caller bug)')
   if (v0.length) {
     // v0 REQUIRED when present: iterate until one authenticates — a corrupt row before a valid
     // one is exactly the case the old first-cipher rule got wrong

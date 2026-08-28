@@ -246,10 +246,49 @@ test('a v1-only corpus is established by one successful v1 authentication', asyn
   ).toEqual({ kind: 'established' })
 })
 
-test('no usable evidence fails closed instead of blaming the phrase', async () => {
-  expect(await establishCandidate([], { tryV0: async () => true, tryV1: async () => true })).toEqual({
-    kind: 'no-usable-evidence',
+test('the helper REFUSES an empty evidence list: the caller owns the no-usable-evidence path', async () => {
+  await expect(establishCandidate([], { tryV0: async () => true, tryV1: async () => true })).rejects.toThrow(
+    'caller bug'
+  )
+})
+
+test('PRODUCTION: malformed and future-version ciphers are not evidence; valid rows still establish', async () => {
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
+  const d = deps({
+    fetchAccountDocs: async () => [
+      doc('junk', { cipher: 'CORRUPT-NOT-A-FRAME' }), // malformed: skipped, never counted against the phrase
+      doc('future', { cipher: '9!' + 'ab'.repeat(12) + 'QUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ==' }), // future tag
+      doc('good', { cipher }),
+    ],
   })
+  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  expect(
+    d.calls.filter(c => c == 'wrong'),
+    'no wrong-phrase report for unusable rows'
+  ).toHaveLength(0)
+})
+
+test('PRODUCTION: ciphertext with ZERO usable rows fails closed before any prompt', async () => {
+  const d = deps({
+    fetchAccountDocs: async () => [doc('junk', { cipher: 'CORRUPT-NOT-A-FRAME' })],
+  })
+  await expect(resolveFixedOwnerSecret(d)).rejects.toThrow('unsupported or corrupt')
+  expect(d.calls).not.toContain('prompt') // no wrong-phrase loop against data no phrase can open
+  expect(d.calls).not.toContain('wrong')
+})
+
+test('PRODUCTION: a non-authentication decrypt error propagates instead of becoming wrong-phrase', async () => {
+  // a structurally valid v0 frame whose payload is not valid base64 CONTENT cannot happen (the
+  // preflight decodes it), so simulate the integration-bug class: a deps.hashPhrase that throws is
+  // out of scope — the narrow contract is pinned purely instead
+  const verdict = establishCandidate([{ kind: 'v0', cipher: 'x' }], {
+    tryV0: async () => {
+      throw new TypeError('integration bug')
+    },
+    tryV1: async () => false,
+  })
+  await expect(verdict, 'the policy never converts an unexpected throw into false').rejects.toThrow('integration bug')
 })
 
 test('the resolver iterates ALL ciphers: a corrupt first item no longer causes a prompt loop', async () => {
