@@ -1110,6 +1110,18 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     expect(upgraded.startsWith('1!'), 'the edited item is v1').toBe(true)
     const kept = (await firestore().collection('items').doc('e2e-w-keep').get()).data()!.cipher as string
     expect(kept.startsWith('1!'), 'the untouched item keeps v0').toBe(false)
+    // the HISTORY row of that update is CIPHERTEXT, not plaintext (review 93 §2.1: the in-place
+    // decrypt used to strip the cipher before the history spread — every update since 2024
+    // published plaintext history)
+    const historySnap = await firestore().collection('history').where('item', '==', 'e2e-w-edit').get()
+    expect(historySnap.docs.length, 'the update wrote history').toBeGreaterThan(0)
+    for (const h of historySnap.docs) {
+      const data = h.data()
+      expect(data.text, 'NO plaintext in history').toBeNull()
+      expect(typeof data.cipher, 'ciphertext present').toBe('string')
+      expect((data.cipher as string).startsWith('1!'), 'the v1 payload, exactly as enqueued').toBe(true)
+      await h.ref.delete()
+    }
 
     // D. BYTES through the production wrapper: the v1 bytes frame tag is ~1!
     const firstBytes: number[] = await page.evaluate(async () =>
@@ -1134,6 +1146,9 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     await expect
       .poll(() => page.evaluate(() => window._item('#e2e_w_edit', true)?.text ?? null))
       .toContain('lazily upgraded 444')
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_old', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('old writer v0 666')
 
     // G. OBSERVABLE REFUSAL, never a silent v0 downgrade: with the writer flag on but the reader
     // flag off (a misconfigured device), an encrypted write FAILS with the session's reason
@@ -1147,6 +1162,18 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       }
     })
     expect(refusal).toContain('v1 keys unavailable (kdf disabled)')
+    // and a REAL item save under the same misconfiguration fails without touching the stored
+    // document (review 93 §5): zero durable writes, and the item's saving state settles
+    const cipherBeforeRefusal = (await firestore().collection('items').doc('e2e-w-edit').get()).data()!
+      .cipher as string
+    await page.evaluate(() => window._item('#e2e_w_edit')!.write('refused write 779'))
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(i => !i.saving)), { timeout: 30_000 })
+      .toBe(true)
+    expect(
+      (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher,
+      'the stored cipher is untouched by the refused save'
+    ).toBe(cipherBeforeRefusal)
     await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
 
     // H. ROLLBACK: writer off; a new edit returns to v0 while existing v1 stays readable

@@ -2014,27 +2014,37 @@
             })
         } else {
           const encrypt_start = Date.now()
-          encrypt_bytes(bytes)
-            .then(cipher => {
+          // the FENCED byte path (review 93 §2.3): the built-in image publication carries the
+          // identity fence to uploadBytes; the value-only _encrypt_bytes wrapper remains for
+          // programmatic callers, whose publication is outside the application guarantee
+          const prepare: Promise<{ value: Uint8Array; fence: () => undefined }> = kdfWriteEnabled()
+            ? encryptV1ForWrite(key => encryptV1Bytes(bytes, key))
+            : acquireV0Secret(true /* new_phrase */).then(async v0secret => ({
+                value: await encryptBytesWithSecret(bytes, v0secret),
+                fence: () => undefined,
+              }))
+          prepare
+            .then(({ value: cipher, fence }) => {
               const encrypt_time = Date.now() - encrypt_start
               console.debug(`uploading encrypted image ${fname} (${cipher.length} bytes, ${bytes.length} original) ...`)
-              uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher, {
+              fence() // immediately before the upload enqueue (review 92 §2)
+              return uploadBytes(ref(getStorage(firebase), `${user.uid}/images/${file_hash}`), cipher, {
                 contentType: file.type,
+              }).then(snapshot => {
+                console.debug(
+                  `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms ` +
+                    `(encryption took ${encrypt_time}ms)`
+                )
+                images[fname] = url
+                resolve(file_hash)
               })
-                .then(snapshot => {
-                  console.debug(
-                    `uploaded encrypted image ${fname} (${cipher.length} bytes) in ${Date.now() - start}ms ` +
-                      `(encryption took ${encrypt_time}ms)`
-                  )
-                  images[fname] = url
-                  resolve(file_hash)
-                })
-                .catch(e => {
-                  console.error(e)
-                  reject(e)
-                })
             })
-            .catch(console.error)
+            .catch(e => {
+              // acquisition, encryption, fence AND upload failures all REJECT (review 93 §2.3):
+              // swallowing them left the image insertion hanging forever
+              console.error(e)
+              reject(e)
+            })
         }
       }
       reader.onerror = e => {
@@ -4811,18 +4821,24 @@
         }
         case '/_backup': {
           if (readonly) return
+          // ENCRYPTED accounts back up through the SAME encrypted, fenced seam as every other
+          // history publication (review 93 §3): the old form wrote raw item.text to history,
+          // bypassing encryptItem and every fence — an explicit plaintext copy of the whole
+          // account. anonymous items remain plaintext by design
           let added = 0
           items.forEach(item => {
-            addDoc(collection(getFirestore(firebase), 'history'), {
-              item: item.id,
-              user: user.uid,
-              time: item.time,
-              text: item.text,
-            })
-              .then(doc => {
-                console.debug(`"added ${++added} of ${items.length} items to history`)
+            void (async () => {
+              const payload: Record<string, any> = anonymous
+                ? { time: item.time, text: item.text, attr: _.cloneDeep(item.attr) }
+                : await encryptItem({ time: item.time, text: item.text, attr: _.cloneDeep(item.attr) })
+              fenceV1Item(payload)
+              await addDoc(collection(getFirestore(firebase), 'history'), {
+                item: item.savedId ?? item.id,
+                user: user.uid,
+                ...payload,
               })
-              .catch(console.error)
+              console.debug(`added ${++added} of ${items.length} items to history`)
+            })().catch(console.error)
           })
           return
         }
@@ -5509,6 +5525,26 @@
     // if not saving, clear out itemToSave.text so that item will get deleted unless saved with text
     // if (!item.saving) itemToSave.text = ''
 
+    // the PLAINTEXT SNAPSHOT for onSaveDone (review 93 §2.1): the encrypted payload must never
+    // be decrypted in place while an enqueue (the create history) is still ahead of it
+    const written = { time: itemToSave.time, text: itemToSave.text, attr: _.cloneDeep(itemToSave.attr) }
+    // a FAILED create must SETTLE, not wedge (review 93 §2.4): the item keeps its local text,
+    // its saving state clears, the failure is surfaced, and a queued saveItem rejects through
+    // the createFailed marker instead of polling savedId forever
+    const failCreate = (error: unknown) => {
+      if (item.savedId) return // the create itself succeeded; later failures (history) only log
+      item.createFailed = error
+      if (indexFromId.get(item.id) != undefined) {
+        item.saving = false
+        item.savingText = null
+        items = items // trigger svelte render for saving state change
+      }
+      let detail = 'unknown error'
+      try {
+        detail = String((error as any)?.message ?? error)
+      } catch {}
+      _modal_alert(`Could not save new item: ${detail}`)
+    }
     encryptItem(itemToSave)
       .then(itemToSave => {
         // the document id is PREALLOCATED and mapped to the temp id before the write is issued:
@@ -5544,8 +5580,8 @@
             // (especially since programmatic saving is likely, and trying to prevent saving feels contrived)
             if (!save) return
 
-            // if (!item.editing) onSaveDone(item.id, itemToSave)
-            onSaveDone(item.id, itemToSave).finally(() => {
+            // if (!item.editing) onSaveDone(item.id, written)
+            onSaveDone(item.id, written).finally(() => {
               // for consistency with saveItem, we have to clear saving flag unless there is a saveTask
               if (!item.saveTask) {
                 item.saving = false
@@ -5557,6 +5593,7 @@
 
             // also save to history (using persistent doc.id) ...
             if (!readonly) {
+              fenceV1Item(itemToSave) // the SECOND enqueue of the create payload (review 93 §2.2)
               addDoc(collection(getFirestore(firebase), 'history'), { item: doc.id, ...itemToSave }).catch(
                 console.error
               )
@@ -5564,10 +5601,12 @@
           })
           .catch(e => {
             console.error(e)
+            failCreate(e)
           })
       })
       .catch(e => {
         console.error(e)
+        failCreate(e)
       })
 
     return (window['_mindbox_return'] = _item(item.id)) // return created item
@@ -5822,8 +5861,12 @@
     item.saveSeq = (item.saveSeq ?? 0) + 1
     const task = (item.saveTask = Promise.allSettled([item.saveTask])
       .then(async () => {
-        // wait for persistent id as long as item is not deleted in mean time
-        while (_exists(item.id) && !item.savedId) await _delay(1000)
+        // wait for persistent id as long as item is not deleted in mean time — and REJECT if
+        // the create failed (review 93 §2.4): polling savedId forever wedged the item
+        while (_exists(item.id) && !item.savedId) {
+          if (item.createFailed) throw item.createFailed
+          await _delay(1000)
+        }
         let itemToSave = {
           // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
           // user: user.uid, // allows us to use set() instead of update()
@@ -5846,7 +5889,12 @@
           itemToSave = await encryptItem(itemToSave)
           fenceV1Item(itemToSave) // the publication fence, at THIS enqueue seam (review 92 §2)
           await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
-          await onSaveDone(item.id, itemToSave)
+          // the PLAINTEXT SNAPSHOT goes to onSaveDone (review 93 §2.1): passing the encrypted
+          // payload let its awaited in-place decrypt strip the cipher BEFORE the history spread
+          // below — publishing PLAINTEXT history on every update since 7089dc4d (2024-06-27).
+          // the payload stays encrypted for its second enqueue, and the redundant decrypt (and
+          // its session acquisition) disappears
+          await onSaveDone(item.id, written)
         } finally {
           const w = item.unackedWrites.indexOf(written)
           if (w >= 0) item.unackedWrites.splice(w, 1)
