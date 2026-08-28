@@ -25,10 +25,11 @@ import { initializeApp, applicationDefault } from 'firebase-admin/app'
 import { getFirestore, FieldPath } from 'firebase-admin/firestore'
 import { parseArgs } from 'node:util'
 
-// STRICT CLI (review 95 §3): a hand-rolled parser let `--uid` swallow the next flag or pass with
-// no value, silently auditing a fictitious scope — a plausible empty report is worse than an
-// error. parseArgs rejects unknown/duplicate flags; the checks below reject malformed values and
-// conflicting scopes
+// STRICT CLI (reviews 95-96 §3): a hand-rolled parser let `--uid` swallow the next flag or pass
+// with no value, silently auditing a fictitious scope — and parseArgs alone is LAST-VALUE-WINS
+// on repeated options, so `--project a --project b` would silently audit b. parseArgs rejects
+// unknown flags and positionals; the token stream rejects DUPLICATES; the checks below reject
+// malformed values and conflicting scopes. everything fails before any credential or read
 let parsed
 try {
   parsed = parseArgs({
@@ -38,11 +39,21 @@ try {
       all: { type: 'boolean' },
     },
     allowPositionals: false,
+    tokens: true,
   })
 } catch (e) {
   console.error(String(e?.message ?? e))
   console.error('usage: node scripts/audit-history.mjs --project <project-id> (--uid <uid> | --all)')
   process.exit(1)
+}
+const seen = new Set()
+for (const token of parsed.tokens) {
+  if (token.kind != 'option') continue
+  if (seen.has(token.name)) {
+    console.error(`duplicate option --${token.name}: a repeated target or scope could silently audit the wrong one`)
+    process.exit(1)
+  }
+  seen.add(token.name)
 }
 const { project, uid, all } = parsed.values
 
