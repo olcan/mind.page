@@ -57,6 +57,11 @@ export type HiddenPersistenceDeps = {
   // required: a harness with no prompt supplies a no-op, but no adapter may leave it out — the
   // stable target loop below depends on encryption never prompting
   acquireSecret: () => Promise<void>
+  // invoked SYNCHRONOUSLY with the payload immediately before createDoc/updateDoc is called —
+  // the v1 writer's identity-to-publication fence (stage 3, review 92 §2): a payload encrypted
+  // under keys the session no longer holds must throw HERE, before the SDK's durable mutation
+  // queue accepts it. optional: v0-only adapters and harnesses may omit it
+  beforeWrite?: (data: Record<string, any>) => undefined
   // an ordinary firestore update. it reaches the SDK's durable, ordered mutation queue as soon
   // as it is called; the promise resolves only when the server acknowledges, which offline can
   // be much later (or never, until reconnect) — so the controller must not wait on it to decide
@@ -500,6 +505,7 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // bypass cannot match it; and overwritten by the next create for this name
     let write: Promise<unknown>
     try {
+      deps.beforeWrite?.(data) // the publication fence: throws join the ordinary failure path
       write = create ? deps.createDoc(id, data) : deps.updateDoc(id, data)
     } catch (e) {
       disposeEcho()

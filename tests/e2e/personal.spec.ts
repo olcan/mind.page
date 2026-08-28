@@ -1040,3 +1040,140 @@ test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in
     await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
   }
 })
+
+test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, reload, refusal, rollback', async ({
+  page,
+}) => {
+  // the combined stage-3 milestone (review 92 §6): one session covers the REAL correct-phrase
+  // acquisition (production Argon2id, once), lazy per-save v1 upgrade for text, the production
+  // bytes wrapper, old-writer v0 coexistence, auth reload, the observable no-silent-downgrade
+  // refusal, and writer rollback with v1 data still readable
+  test.setTimeout(240_000)
+  const { encryptWithSecret, encryptV1Text, importV1Key } = await import('../../src/crypto.js')
+  const seedV0 = async (id: string, text: string) =>
+    firestore()
+      .collection('items')
+      .doc(id)
+      .set({
+        user: ALICE.uid,
+        time: Date.now(),
+        hidden: false,
+        text: null,
+        attr: null,
+        cipher: await encryptWithSecret(JSON.stringify({ text, attr: null }), secretFor(ALICE, PHRASE)),
+      })
+  await seedV0('e2e-w-edit', '#e2e_w_edit original v0 text 111')
+  await seedV0('e2e-w-keep', '#e2e_w_keep untouched v0 text 222')
+  const seededDocs = ['e2e-w-edit', 'e2e-w-keep', 'e2e-w-old', 'e2e-w-v1seed']
+  try {
+    // A. REAL ACQUISITION: stored v0 secret, reader flag on, NO envelope — the sign-in trigger
+    // raises the one-time upgrade prompt, and the entered phrase pays production Argon once
+    await withSecret(page)
+    await page.evaluate(() => {
+      localStorage.setItem('mindpage_kdf', 'on')
+      localStorage.removeItem('mindpage_key1')
+    })
+    await loadUser(page, ALICE)
+    await enterPhrase(page, /upgrade the encryption/, PHRASE, 'Upgrade')
+    await waitForApp(page)
+    await expect.poll(() => page.evaluate(() => (window as any).__kdfReady), { timeout: 60_000 }).toBe(true)
+    const envelope = await page.evaluate(() => JSON.parse(localStorage.getItem('mindpage_key1')!))
+    expect(envelope.v0, 'the envelope is BOUND to the establishment').toBe(secretFor(ALICE, PHRASE))
+
+    // B. the REAL derived key opens externally-produced v1: seed a v1 doc under the envelope key
+    const realKey = await importV1Key(new Uint8Array([...atob(envelope.key)].map(c => c.charCodeAt(0))))
+    await firestore()
+      .collection('items')
+      .doc('e2e-w-v1seed')
+      .set({
+        user: ALICE.uid,
+        time: Date.now(),
+        hidden: false,
+        text: null,
+        attr: null,
+        cipher: await encryptV1Text(JSON.stringify({ text: '#e2e_w_v1seed external v1 333', attr: null }), realKey),
+      })
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('external v1 333')
+
+    // C. LAZY TEXT UPGRADE: writer on; ONE edit produces a v1 document; the untouched item stays v0
+    await page.evaluate(() => localStorage.setItem('mindpage_kdf_write', 'on'))
+    const before = (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher as string
+    await page.evaluate(() => window._item('#e2e_w_edit')!.write('#e2e_w_edit lazily upgraded 444'))
+    await expect
+      .poll(async () => (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher, {
+        timeout: 30_000,
+      })
+      .not.toBe(before)
+    const upgraded = (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher as string
+    expect(upgraded.startsWith('1!'), 'the edited item is v1').toBe(true)
+    const kept = (await firestore().collection('items').doc('e2e-w-keep').get()).data()!.cipher as string
+    expect(kept.startsWith('1!'), 'the untouched item keeps v0').toBe(false)
+
+    // D. BYTES through the production wrapper: the v1 bytes frame tag is ~1!
+    const firstBytes: number[] = await page.evaluate(async () =>
+      Array.from((await (window as any)._encrypt_bytes(new TextEncoder().encode('bytes 555'))).slice(0, 3))
+    )
+    expect(firstBytes, 'the ~1! v1 bytes tag').toEqual([126, 49, 33])
+
+    // E. OLD-WRITER COEXISTENCE: a phase-1 device adds v0 beside v1; both open
+    await seedV0('e2e-w-old', '#e2e_w_old old writer v0 666')
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_old', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('old writer v0 666')
+
+    // F. AUTH RELOAD: the bound envelope restores silently; no prompt; everything still opens
+    await page.reload()
+    await waitForApp(page)
+    expect(await page.getByText(/upgrade the encryption/).count()).toBe(0)
+    expect(await page.evaluate(() => (window as any).__kdfReady)).toBe(true)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('external v1 333')
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_edit', true)?.text ?? null))
+      .toContain('lazily upgraded 444')
+
+    // G. OBSERVABLE REFUSAL, never a silent v0 downgrade: with the writer flag on but the reader
+    // flag off (a misconfigured device), an encrypted write FAILS with the session's reason
+    await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
+    const refusal = await page.evaluate(async () => {
+      try {
+        await (window as any)._encrypt('refused 777')
+        return 'no error'
+      } catch (e) {
+        return (e as Error).message
+      }
+    })
+    expect(refusal).toContain('v1 keys unavailable (kdf disabled)')
+    await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
+
+    // H. ROLLBACK: writer off; a new edit returns to v0 while existing v1 stays readable
+    await page.evaluate(() => localStorage.removeItem('mindpage_kdf_write'))
+    await page.evaluate(() => window._item('#e2e_w_edit')!.write('#e2e_w_edit rolled back 888'))
+    await expect
+      .poll(async () => (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher, {
+        timeout: 30_000,
+      })
+      .not.toBe(upgraded)
+    const rolled = (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher as string
+    expect(rolled.startsWith('1!'), 'rollback writes v0 again').toBe(false)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null))
+      .toContain('external v1 333')
+  } finally {
+    for (const id of seededDocs)
+      await firestore()
+        .collection('items')
+        .doc(id)
+        .delete()
+        .catch(() => {})
+    await firestore().collection('users').doc(ALICE.uid).update({ kdf: FieldValue.delete() })
+    await page.evaluate(() => {
+      localStorage.removeItem('mindpage_kdf')
+      localStorage.removeItem('mindpage_kdf_write')
+      localStorage.removeItem('mindpage_key1')
+    })
+  }
+})

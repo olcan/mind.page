@@ -3353,6 +3353,25 @@ test('a CONFIRMED update refuses when its requiredMarker settles in the continua
   expect(atRequeue, 'the refused attempt did nothing after its commit').toEqual(afterCommit)
 })
 
+test('beforeWrite (the v1 publication fence) runs before the SDK write and its throw is the ordinary failure path', async () => {
+  // stage 3 (review 92 §2): a payload encrypted under keys the session no longer holds must be
+  // stopped HERE — synchronously before createDoc/updateDoc — and surface as a save failure
+  const failures: string[] = []
+  let fenceCalls = 0
+  const h = harness({
+    beforeWrite: () => {
+      fenceCalls++
+      throw new Error('v1 keys changed before publication: save aborted')
+    },
+    notifyFailure: (name, error) => void failures.push(`${name}:${(error as Error).message}`),
+  })
+  h.controller.save('n', { v: 1 })
+  await flush()
+  expect(fenceCalls, 'the fence ran').toBeGreaterThan(0)
+  expect(h.calls.filter(c => c.op == 'update' || c.op == 'create'), 'NO write reached the SDK').toEqual([])
+  expect(failures.some(f => f.includes('save aborted')), 'surfaced observably').toBe(true)
+})
+
 test('a bypassed update REFUSES when the create settles during its encryption', async () => {
   // the bypass skipped confirmation BECAUSE the marker was live, so the attempt depends on it
   // staying live. without carrying that proof, an exempted update issued after settlement

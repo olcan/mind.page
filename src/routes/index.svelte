@@ -4160,6 +4160,11 @@
   // only after the new Firestore rules are deployed and confirmed (design: rollout order — a
   // resident old tab's bare profile set is made harmless only by the live no-drop rule).
   const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
+  // the DISTINCT stage-3 WRITER flag (design: rollout order; reviews 85/88): deployment must not
+  // activate writers, and rollback must not disable reader/provisioning behavior. activation is
+  // owner-gated on the full checklist (rules deployed+confirmed, reader flag fleet-wide,
+  // per-device completed upgrades)
+  const kdfWriteEnabled = () => localStorage.getItem('mindpage_kdf_write') == 'on'
   // TRUE while getSecretPhrase's session-owned branch is awaiting the session itself: excludes
   // that flight from the pendingV0 join below (the session would otherwise await its own caller)
   let kdfSecretViaSession = false
@@ -4389,15 +4394,41 @@
     return resolved
   }
 
+  // the STAGE 3 WRITER SEAM (src/kdf_writer.ts, table-tested; review 92 §2): one guarded
+  // complete session per save, the acquisition mapped for the legacy contracts, and the
+  // identity-to-publication fence carried to the enqueue seams. key-unavailable, conflict and
+  // drift all FAIL THE SAVE OBSERVABLY — never a silent v0 downgrade while the writer flag is on
+  function encryptV1ForWrite<T>(operate: (key: CryptoKey) => Promise<T>) {
+    return encryptV1WithSession({
+      acquire: async () => mapKdfOutcome(await kdfSession.acquire()),
+      current: () => kdfSession.current(),
+      encrypt: keys => operate(keys.key),
+    })
+  }
+  // runs an item-like payload's publication fence (present only when its cipher was produced
+  // under v1) — called immediately before each firestore enqueue of that payload. the carrier is
+  // NON-ENUMERABLE, so neither the SDK serialization nor object spreads ever see it
+  function fenceV1Item(itemLike: Record<string, any>): undefined {
+    itemLike._v1fence?.()
+    return undefined
+  }
+  function attachV1Fence(itemLike: Record<string, any>, fence: () => undefined): undefined {
+    Object.defineProperty(itemLike, '_v1fence', { value: fence, enumerable: false, configurable: true, writable: true })
+    return undefined
+  }
+
   async function encrypt(text: string): Promise<string> {
-    // WRITES STAY v0 in this phase (the writer switch is stage 3, behind the DISTINCT
-    // mindpage_kdf_write flag and the owner checklist)
+    // STAGE 3: v1 writes under the distinct writer flag (internal fence only — programmatic
+    // callers of this wrapper own their publication; item saves go through encryptItem, which
+    // carries the fence to the enqueue seams)
+    if (kdfWriteEnabled()) return (await encryptV1ForWrite(key => encryptV1Text(text, key))).value
     return encryptWithSecret(text, await acquireV0Secret(true /* new_phrase */))
   }
 
   // encrypt arbitrary bytes (uint8)
   // ideal for firebase storage of large binary data such as images
   async function encrypt_bytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+    if (kdfWriteEnabled()) return (await encryptV1ForWrite(key => encryptV1Bytes(bytes, key))).value
     return encryptBytesWithSecret(bytes, await acquireV0Secret(true /* new_phrase */))
   }
 
@@ -4472,6 +4503,16 @@
     if (item.attr?.shared) {
       // do not encrypt shared items
       item.cipher = null // clear cipher if was previously encrypted
+      return item
+    }
+    if (kdfWriteEnabled()) {
+      // STAGE 3 LAZY UPGRADE: every encrypted save produces v1, carrying the publication fence
+      // to the enqueue seams (fenceV1Item at each firestore write of this payload)
+      const { value, fence } = await encryptV1ForWrite(key => encryptV1Text(JSON.stringify(item), key))
+      item.cipher = value
+      attachV1Fence(item, fence)
+      item.text = null
+      item.attr = null
       return item
     }
     item.cipher = await encrypt(JSON.stringify(item))
@@ -5479,6 +5520,7 @@
           ref = doc(collection(getFirestore(firebase), 'items'))
           tempIdFromSavedId.set(ref.id, item.id)
         }
+        if (!readonly) fenceV1Item(itemToSave) // the publication fence at the CREATE enqueue
         ;(readonly
           ? Promise.resolve({ id: item.id, delete: Promise.resolve /* dummy promise */ })
           : setDoc(ref, itemToSave).then(() => ref)
@@ -5802,6 +5844,7 @@
         ;(item.unackedWrites ??= []).push(written)
         try {
           itemToSave = await encryptItem(itemToSave)
+          fenceV1Item(itemToSave) // the publication fence, at THIS enqueue seam (review 92 §2)
           await updateDoc(doc(getFirestore(firebase), 'items', item.savedId), itemToSave)
           await onSaveDone(item.id, itemToSave)
         } finally {
@@ -5810,6 +5853,7 @@
         }
 
         // also save to history ...
+        fenceV1Item(itemToSave) // history is a SECOND enqueue of the same payload
         await addDoc(collection(getFirestore(firebase), 'history'), {
           item: item.savedId,
           user: user.uid,
@@ -6727,6 +6771,8 @@
     classifyBytesCipher,
     decryptV1Text,
     decryptV1Bytes,
+    encryptV1Text,
+    encryptV1Bytes,
     importV1Key,
     CipherError,
   } from '../crypto'
@@ -6765,6 +6811,7 @@
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
   import { createKdfSession, type KdfAcquireOutcome } from '../kdf_session'
+  import { encryptV1WithSession } from '../kdf_writer'
   import { createV0Provenance } from '../v0_provenance'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
@@ -9404,6 +9451,8 @@
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
+    // the v1 publication fence at the hidden enqueue seam (stage 3, review 92 §2)
+    beforeWrite: data => fenceV1Item(data),
     // acquired BEFORE a payload is built, so a phrase prompt (which can register hidden
     // documents, introducing a lower-id record) cannot invalidate a target chosen before it.
     // this is the SAME single-flight acquisition every other consumer uses (acquireV0Secret —

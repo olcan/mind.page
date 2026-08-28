@@ -328,7 +328,7 @@ export function createKdfSession(deps: KdfSessionDeps) {
     deps.persistEnvelope(encodeKeyEnvelope({ uid, salt, keyBytes: derived.keyBytes, v0Secret: v0secret }))
     evidence = []
     evidenceRevision++
-    sessionIdentity = { salt, v0Secret: v0secret, keyBytes: derived.keyBytes }
+    sessionIdentity = { salt, v0Secret: v0secret, keyBytes: derived.keyBytes.slice() } // private snapshot
     return (session = { uid, salt, key: derived.key, v0Secret: v0secret })
   }
 
@@ -375,6 +375,9 @@ export function createKdfSession(deps: KdfSessionDeps) {
         sessionIdentity = identity
         return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: confirmed.v0Secret }) }
       }
+      // the identity changed ACROSS the import (review 92 §4): terminal now — falling through
+      // would prompt and pay Argon only for the key-aware seal to refuse the same contradiction
+      return notReady('representation changed')
     }
     // a BINDING CONFLICT is terminal, never "recovered" (reviews 89-90 §2.1): a same-profile
     // envelope bound to establishment A beside ANY current differing stored hash B means v1(A)

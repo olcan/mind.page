@@ -895,9 +895,7 @@ test('BOUND RESTORE is rechecked after importKey: a store changed mid-import is 
   await new Promise(r => setTimeout(r, 0)) // parked inside importKey
   h.storage.set('v0', 'v0:other') // the store changes to B across the import
   releaseImport(FAKE_KEY)
-  expect(reasonOf(await flight), 'routed through the conflict decision, not cached ready').toBe(
-    'key binding conflict'
-  )
+  expect(reasonOf(await flight), 'terminal on the known drift, never cached ready').toBe('representation changed')
   expect(h.session.current(), 'no A session cached beside store B').toBeNull()
 
   // offline variant: the same parked import must stay not-ready
@@ -939,7 +937,11 @@ test('ENVELOPE IDENTITY: a same-v0 KEY swap across a parked import is never cach
   await new Promise(r => setTimeout(r, 0)) // parked inside importKey(K1)
   h.storage.set('env', envelope('v0:phrase', SALT_B64, OTHER_KEY)) // E2: same v0, key K2
   releaseImport(FAKE_KEY)
-  expect(reasonOf(await flight), 'K1 beside persisted K2 is a contradiction').toBe('key binding conflict')
+  expect(reasonOf(await flight), 'terminal immediately: no prompt or Argon spent on a known drift').toBe(
+    'representation changed'
+  )
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt').toEqual([])
+  expect(h.derivations(), 'no derivation').toBe(0)
   expect(h.session.current(), 'no mismatched key cached').toBeNull()
   expect(JSON.parse(h.storage.get('env')!).key, 'E2 preserved').toBe(JSON.parse(envelope('v0:phrase', SALT_B64, OTHER_KEY)).key)
 })
@@ -1021,6 +1023,60 @@ test('CACHED READINESS is validated against the current representation (review 9
   expect(h3.session.current()).toBeNull()
   expect(reasonOf(await h3.session.acquire())).toBe('representation changed')
   expect(h3.log.filter(l => l.startsWith('prompt') || l.startsWith('publishV0')), 'zero effects').toEqual([])
+})
+
+test('CACHED READINESS: the ENVELOPE half disappearing also invalidates readiness (review 92 §3)', async () => {
+  const h = harness()
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase'))
+  expect((await h.session.acquire()).kind).toBe('ready')
+  h.storage.delete('env')
+  expect(h.session.current()).toBeNull()
+  expect(reasonOf(await h.session.acquire())).toBe('representation changed')
+})
+
+test('the pending-join established-meanwhile branch validates the cached identity too (review 92 §3)', async () => {
+  let resolveV0: (v: string) => void = () => {}
+  const v0flight = new Promise<string>(resolve => (resolveV0 = resolve))
+  const h = harness({ pendingV0: () => v0flight })
+  const acquired = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0)) // parked at the join
+  // a fixed adoption establishes A/K1 — and then the representation drifts before the join wakes
+  const handle = h.session.external()
+  const profile = await handle.profile()
+  const derived = await handle.derive('phrase', profile!)
+  expect(handle.adopt('v0:phrase', SALT_B64, derived)).toBe(true)
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, OTHER_KEY)) // key swapped under the cache
+  resolveV0('v0:phrase')
+  expect(reasonOf(await acquired), 'the joined branch fails closed like every cached return').toBe(
+    'representation changed'
+  )
+  expect(h.session.current()).toBeNull()
+})
+
+test('OFFLINE identity isolates the SALT: a same-v0 same-key salt change across import fails closed (review 92 §3)', async () => {
+  let imports = 0
+  let releaseImport: (k: CryptoKey) => void = () => {}
+  const h = harness({
+    importKey: () =>
+      ++imports == 1 ? new Promise<CryptoKey>(resolve => (releaseImport = resolve)) : Promise.resolve(FAKE_KEY),
+    profileStore: () => ({
+      read: async () => {
+        throw new Error('offline')
+      },
+      runTransaction: async () => {
+        throw new Error('unreachable')
+      },
+    }),
+  })
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, KEY))
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0))
+  h.storage.set('env', envelope('v0:phrase', OTHER_SALT_B64, KEY)) // ONLY the salt changes
+  releaseImport(FAKE_KEY)
+  expect(reasonOf(await flight)).toBe('offline without complete persisted keys')
+  expect(h.session.current()).toBeNull()
 })
 
 test('a PRESENT empty-string store is a value, not absence: it conflicts with a bound envelope (review 91 §3)', async () => {
