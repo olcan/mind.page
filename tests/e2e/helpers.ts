@@ -9,7 +9,9 @@ import { createHash } from 'crypto'
 // app globals used via page.evaluate (see window._* in index.svelte and client.ts)
 declare global {
   interface Window {
-    _items: (selector?: string) => { id: string; name: string; text: string; global_store?: Record<string, unknown> }[]
+    _items: (
+      selector?: string
+    ) => { id: string; name: string; text: string; attr?: { source?: string }; global_store?: Record<string, unknown> }[]
     _item: (
       name: string,
       silent?: boolean
@@ -141,8 +143,21 @@ export async function signIn(page: Page, user: TestUser, url = '/') {
     .toBe(true)
 }
 
-// signs in as the admin uid and loads the anonymous account with write access (see ADMIN)
-export async function loadAdmin(page: Page) {
+// signs in as the admin uid and loads the anonymous account with write access (see ADMIN).
+// github interception is an INVARIANT of every admin load, not a per-caller choice: all
+// olcan/mind.items api traffic is served or failed CLOSED locally (network dependence, rate
+// limits, and nondeterministic upstream item text would all leak into the deterministic gate;
+// requests outside that repo route are not covered -- nothing in the gate makes them).
+// LOCAL-ONLY, fail-fast: the gate requires the mind.items checkout and always uses the fake
+// token -- there is no real-github mode (an ambient GITHUB_TOKEN must never leak into a traced
+// browser context, and a post-navigation token swap could not establish one reliably anyway)
+export async function loadAdmin(page: Page): Promise<void> {
+  const local = await interceptMindItems(page)
+  if (!local)
+    throw new Error(
+      'mind.items local checkout required (default ../mind.items, override with MIND_ITEMS_DIR): the mind.items install path never uses real github'
+    )
+  await useGithubToken(page)
   await signIn(page, ADMIN, '/?user=anonymous')
   await waitForApp(page)
 }
@@ -153,11 +168,37 @@ export async function loadUser(page: Page, user: TestUser) {
   expect(await page.evaluate(() => window._user.uid)).toBe(user.uid)
 }
 
+// installs a mind.items item via /_install and resolves to the alert message if the command failed,
+// otherwise null; a (root) install confirms with "Installed #x [OK]", then recommends reloading if
+// new items contain init or welcome code ([Reload] [Skip]), and resolves once these are dismissed
+export async function install(page: Page, path: string): Promise<string | null> {
+  let out: string | null | undefined
+  const result = page
+    .evaluate(
+      text =>
+        Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out =>
+          typeof out == 'string' ? out : null
+        ),
+      `/_install ${path}`
+    )
+    .then(r => (out = r))
+  const settledOr = (button: string) => async () =>
+    out !== undefined || (await page.getByText(button, { exact: true }).isVisible())
+  await expect.poll(settledOr('OK'), { message: `/_install ${path}`, timeout: 120_000 }).toBe(true)
+  if (out === undefined) {
+    await page.getByText('OK', { exact: true }).click()
+    await expect.poll(settledOr('Skip'), { message: `/_install ${path} after OK`, timeout: 30_000 }).toBe(true)
+    if (out === undefined) await page.getByText('Skip', { exact: true }).click() // reload happens in later tests anyway
+    await result
+  }
+  return out ?? null
+}
+
 // /_install prompts for a github personal access token (see index.svelte) unless one is stored, so
-// tests seed one: any value works while github is intercepted (see interceptMindItems), otherwise
-// set GITHUB_TOKEN to raise the unauthenticated rate limit
-export async function useGithubToken(page: Page, token = process.env.GITHUB_TOKEN ?? 'e2e-local') {
-  await page.addInitScript(token => localStorage.setItem('mindpage_github_token', token), token)
+// loadAdmin seeds the fake one, which works because that repository route is always intercepted;
+// parameterless and private -- a real token must never be copied into a traced browser context
+async function useGithubToken(page: Page) {
+  await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
 }
 
 // serves github api requests for olcan/mind.items from a local checkout (default ../mind.items,
@@ -166,7 +207,10 @@ export async function useGithubToken(page: Page, token = process.env.GITHUB_TOKE
 export async function interceptMindItems(page: Page): Promise<boolean> {
   const dir = resolve(process.env.MIND_ITEMS_DIR ?? '../mind.items')
   if (!existsSync(dir)) return false
-  const sha = 'local-' + Date.now().toString(36) // stands in for the latest commit sha
+  // reproducible synthetic commit identity stored in installed items' attr (install fetches and
+  // records the latest sha; nothing compares it unless a test explicitly invokes /_updates, and
+  // then a stable value keeps that behavior deterministic)
+  const sha = 'local-e2e'
   // after installing, the app watches the local repo via /watch/... (see watchLocalRepo), which the
   // production server only serves in dev mode; answer with no events to keep it quiet
   await page.route('**/watch/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
@@ -194,7 +238,9 @@ export async function interceptMindItems(page: Page): Promise<boolean> {
         encoding: 'base64',
       })
     }
-    return route.continue()
+    // FAIL CLOSED: this route must never continue to the network -- an unmodeled endpoint
+    // reaching real github (with the fake token) would silently break the local-only contract
+    return json(404, { message: `unmodeled mind.items api path in e2e interception: ${path}` })
   })
   return true
 }

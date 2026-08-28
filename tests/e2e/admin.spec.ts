@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
-import { interceptMindItems, loadAdmin, loadAnonymous, useGithubToken } from './helpers.js'
+import { expect, test } from '@playwright/test'
+import { install, loadAdmin, loadAnonymous } from './helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the baseline project
@@ -9,51 +9,27 @@ test.setTimeout(300_000)
 
 // mind.items to install via /_install <path> (dependencies are resolved recursively): the items
 // defining _test_* functions (see `grep -l _test_` in mind.items) plus #tester, which runs them
-const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample', 'util/sim', 'util/plot', 'logger']
+// note the agent framework (#agent, welcome hook + check_agents task) is NOT listed: it must
+// arrive as a dependency of the providers (via agent/chat's #_///agent), since providers cannot
+// function without it -- the framework is what runs them on chat item changes. the /native test
+// asserts this, keeping the dependency edge continuously verified for fresh-account installs
+const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample', 'util/sim', 'util/plot', 'logger', 'agent/chat/claude', 'agent/chat/gpt', 'agent/chat/gemini', 'agent/chat/together', 'agent/chat/groq', 'agent/chat/ollama', 'agent/chat/openrouter']
 
 type TestResult = { ok: boolean; ms?: number; log?: string }
-
-// installs a mind.items item via /_install and resolves to the alert message if the command failed,
-// otherwise null; a (root) install confirms with "Installed #x [OK]", then recommends reloading if
-// new items contain init or welcome code ([Reload] [Skip]), and resolves once these are dismissed
-async function install(page: Page, path: string): Promise<string | null> {
-  let out: string | null | undefined
-  const result = page
-    .evaluate(
-      text =>
-        Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out =>
-          typeof out == 'string' ? out : null
-        ),
-      `/_install ${path}`
-    )
-    .then(r => (out = r))
-  const settledOr = (button: string) => async () =>
-    out !== undefined || (await page.getByText(button, { exact: true }).isVisible())
-  await expect.poll(settledOr('OK'), { message: `/_install ${path}`, timeout: 120_000 }).toBe(true)
-  if (out === undefined) {
-    await page.getByText('OK', { exact: true }).click()
-    await expect.poll(settledOr('Skip'), { message: `/_install ${path} after OK`, timeout: 30_000 }).toBe(true)
-    if (out === undefined) await page.getByText('Skip', { exact: true }).click() // reload happens in later tests anyway
-    await result
-  }
-  return out ?? null
-}
 
 test('admin signs in and acts on the anonymous account with write access', async ({ page }) => {
   await loadAdmin(page)
   expect(await page.evaluate(() => window._user.uid)).toBe('anonymous')
-  // admin sees all 121 seeded items, including the welcome template dropped from read-only views
-  expect(await page.evaluate(() => window._items().length)).toBe(121)
+  // admin sees all 121 seeded items, including the welcome template dropped from read-only views.
+  // counted as items WITHOUT attr.source (which /_install sets and no seeded item has), so the
+  // exact assertion holds in either admin file order -- admin_live.spec.ts may legitimately
+  // self-install providers before this file when live validation is enabled
+  expect(await page.evaluate(() => window._items().filter(item => !item.attr?.source).length)).toBe(121)
 })
 
 test('installs mind.items with tests', async ({ page }) => {
-  const local = await interceptMindItems(page)
-  test.info().annotations.push({
-    type: 'mind.items source',
-    description: local ? 'local checkout' : 'github',
-  })
-  await useGithubToken(page)
-  await loadAdmin(page)
+  await loadAdmin(page) // fails fast without the local checkout -- the only supported source
+  test.info().annotations.push({ type: 'mind.items source', description: 'local checkout' })
   const exists = (name: string) => page.evaluate(name => window._exists(name), name)
   for (const path of INSTALL) {
     if (await exists(`#${path}`)) continue // already installed as a dependency of an earlier item
@@ -68,7 +44,14 @@ test('installs mind.items with tests', async ({ page }) => {
 })
 
 test('/test passes for all installed items', async ({ page }) => {
-  await loadAdmin(page)
+  // collect rendering/eval errors of installed items from the first render on: "macro error in
+  // item X" (macro eval failures) and "[#x] Error:" (item errors, e.g. agent framework fatals)
+  const macroErrors = new Set<string>()
+  page.on('console', m => {
+    const match = m.text().match(/^macro error in item ([^:]+):/) ?? m.text().match(/^\[(#[^\]]+)\] Error:/)
+    if (match) macroErrors.add(match[1])
+  })
+  await loadAdmin(page) // interception on every load is loadAdmin's invariant (see helpers.ts)
   // every installed root must have survived the reload (see the save wait in the install test);
   // a lost item would otherwise only show as a smaller test count
   for (const path of INSTALL) expect(await page.evaluate(name => window._exists(name), `#${path}`), path).toBe(true)
@@ -96,10 +79,43 @@ test('/test passes for all installed items', async ({ page }) => {
   console.log(`${summary} ${results.map(({ name, tests }) => `${name} (${Object.keys(tests).length})`).join(', ')}`)
   expect(results.length, summary).toBeGreaterThan(0)
   expect(failures, `${summary}\n${failures.join('\n')}`).toEqual([])
+  // no installed item may macro-error during rendering: console errors are otherwise unasserted
+  // noise, which is how a doc item once shipped with unescaped delimiter macros (evaluated even
+  // inside inline code spans) without failing any test. requires complete install closures --
+  // /_install walks text tags only (label-prefix autodeps are runtime-only), so items invoking
+  // parent-defined macros must declare the parent explicitly (e.g. #_///template)
+  const errors = [...macroErrors].sort()
+  expect(errors, `macro errors: ${errors.join(', ')}`).toEqual([])
+})
+
+test('/native creates a tagged request item without breaking the agent framework', async ({ page }) => {
+  // the native "provider" (#agent/native) is an agent item like every #agent/* item: the framework
+  // starts it as an agent on change events (e.g. a request item created as its dependent), and
+  // start_agent fatals unless the item carries a (deliberately inert) js_input block -- a doc-only
+  // item shipped exactly that bug, caught only in a live account. this covers the /native command,
+  // the explicit #_agent/native tag on request items (the vault bridge parses item text only), and
+  // the agent-framework contract
+  const errors: string[] = []
+  page.on('console', m => {
+    const match = m.text().match(/^\[(#[^\]]+)\] Error: (.*)$/s)
+    if (match) errors.push(`${match[1]}: ${match[2].slice(0, 160)}`)
+  })
+  await loadAdmin(page)
+  // the framework must have arrived via dependency resolution (providers -> agent/chat -> agent):
+  // it is deliberately not in INSTALL, so this continuously verifies the install-time dependency
+  // edge that fresh accounts rely on (without it, installed providers never reply at all)
+  expect(await page.evaluate(() => window._exists('#agent')), '#agent installed as dependency').toBe(true)
+  await page.evaluate(() => void window._create('/native hello bridge', { command: true }))
+  const text = () => page.evaluate(() => window._item('#chat/native/0', true)?.text ?? '')
+  await expect.poll(text, { message: 'request item #chat/native/0' }).toContain('<<user>> hello bridge')
+  expect(await text()).toContain('#_agent/native') // explicit tag for the text-parsing vault bridge
+  // let the agent framework react to the change (start_agent on #agent/native must not fatal)
+  await page.waitForTimeout(2_000)
+  expect(errors, errors.join('\n')).toEqual([])
 })
 
 test('an item created by admin syncs to a read-only visitor, and so does its deletion', async ({ page, browser }) => {
-  await loadAdmin(page)
+  await loadAdmin(page) // interception + fake token are loadAdmin's invariant (see helpers.ts)
   const context = await browser.newContext() // a signed-out visitor of the same account
   try {
     const visitor = await context.newPage()

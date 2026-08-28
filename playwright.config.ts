@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 // e2e tests run against local firebase emulators (see tests/e2e/run.sh) and the production build
 // served by `node server.mjs`. lanes that share mutable state are serialized by dependency and by
 // a one-worker cap per project; independent lanes overlap (see the projects below)
-const WRITE_SPECS = /(admin|editor|personal)\.spec\.ts/
+const WRITE_SPECS = /(admin|admin_live|editor|personal|bridge)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -41,7 +41,10 @@ export default defineConfig({
     {
       name: 'admin',
       testDir: 'tests/e2e',
-      testMatch: /admin\.spec\.ts/,
+      // admin_live is the explicitly opted-in live provider validation (MIND_ITEMS_LIVE=1); it
+      // shares this lane (both files mutate the shared anonymous account; it self-installs its
+      // corpus, so file order is free) and skips in the ordinary gate
+      testMatch: /admin(_live)?\.spec\.ts/,
       dependencies: ['chromium'],
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
@@ -51,6 +54,14 @@ export default defineConfig({
       testDir: 'tests/e2e',
       testMatch: /editor\.spec\.ts/,
       dependencies: ['admin'], // ORDERING: both mutate the shared anonymous account
+      workers: 1,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'bridge',
+      testDir: 'tests/e2e',
+      testMatch: /bridge\.spec\.ts/,
+      dependencies: ['editor'], // ORDERING: also mutates the shared anonymous account
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
