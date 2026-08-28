@@ -1196,9 +1196,23 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher,
       'the stored cipher is untouched by the refused save'
     ).toBe(cipherBeforeRefusal)
-    // G2. a REAL failed CREATE settles instead of wedging (review 94 §2): local text retained,
-    // saving cleared, createFailed recorded, no durable document — and the failure surfaced
-    await page.evaluate(() => void window._create('#e2e_w_fail must fail 780'))
+    // G2. a REAL failed CREATE settles instead of wedging (reviews 94-95 §2): the queued save is
+    // RETAINED and must REJECT through createFailed (queued while creation is unresolved — the
+    // original forever-polling condition), the database must show ZERO new documents, and the
+    // failure state binds to THE item
+    const itemCountBefore = (await firestore().collection('items').where('user', '==', ALICE.uid).get()).size
+    const queuedRejection = await page.evaluate(async () => {
+      void window._create('#e2e_w_fail must fail 780')
+      try {
+        await (window._item('#e2e_w_fail') as any)!.save() // queued before any settlement wait
+        return 'no rejection'
+      } catch (e) {
+        return (e as Error).message
+      }
+    })
+    expect(queuedRejection, 'the queued save rejects with the KDF-disabled cause').toContain(
+      'v1 keys unavailable (kdf disabled)'
+    )
     await expect(page.getByText(/Could not save new item/)).toBeVisible({ timeout: 30_000 })
     await page.evaluate(() => (window as any)._modal_close()) // a bare alert modal has no buttons
     await expect
@@ -1206,16 +1220,20 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       .toBe(true)
     expect(
       await page.evaluate(() => {
-        const it = window.__items.find(i => (i as any).createFailed)
-        return it ? { savedId: it.savedId ?? null, text: window._item('#e2e_w_fail', true)?.text ?? null } : null
+        // ONE item carries the whole failure state (review 95 §2.2: never splice a stale marker
+        // from one item with another's text)
+        const it = window.__items.find(i => i.labelText == '#e2e_w_fail') as any
+        return it
+          ? { createFailed: !!it.createFailed, savedId: it.savedId ?? null, text: window._item('#e2e_w_fail', true)?.text ?? null }
+          : null
       }),
-      'createFailed recorded; no savedId; local text retained'
-    ).toEqual({ savedId: null, text: '#e2e_w_fail must fail 780' })
-    // a queued save REJECTS through the marker rather than polling savedId forever
-    await page.evaluate(() => void window._item('#e2e_w_fail')!.write('later write'))
-    await expect
-      .poll(() => page.evaluate(() => window.__items.every(i => !i.saving)), { timeout: 30_000 })
-      .toBe(true)
+      'createFailed recorded on THE item; no savedId; local text retained'
+    ).toEqual({ createFailed: true, savedId: null, text: '#e2e_w_fail must fail 780' })
+    // ZERO durable writes, asserted at the DATABASE (savedId is client state)
+    expect(
+      (await firestore().collection('items').where('user', '==', ALICE.uid).get()).size,
+      'no document was created'
+    ).toBe(itemCountBefore)
     await page.evaluate(() => window._item('#e2e_w_fail')!.delete(false)) // local-only cleanup
     await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
 
@@ -1232,6 +1250,11 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     await expect
       .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null))
       .toContain('external v1 333')
+    // let the rollback save FULLY settle (its history enqueues after the acknowledgement), so
+    // the finally-cleanup's one-shot history queries cannot race a trailing append (review 95)
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(i => !i.saving)), { timeout: 30_000 })
+      .toBe(true)
   } finally {
     for (const id of seededDocs)
       await firestore()

@@ -8,7 +8,7 @@
 //
 // Usage:
 //   GOOGLE_APPLICATION_CREDENTIALS=<service-account.json> \
-//     node scripts/audit-history.mjs --project <project-id> [--uid <uid> | --all]
+//     node scripts/audit-history.mjs --project <project-id> (--uid <uid> | --all)
 //
 // The COMPLETE collection is paged by document id (never by `time`: ordering by a field excludes
 // documents missing it), and every classification — time bucket and uid scope included — happens
@@ -17,20 +17,34 @@
 //   expected-clear      `user == 'anonymous'` or truthy `attr.shared` (clear by design)
 //   cipher-only         encrypted rows (no `text`)
 //   neither             no text and no cipher
-// Rows carrying BOTH text and cipher are counted as private-plaintext exposure, with a separate
-// subcount. With --uid, other users' rows are still scanned and reported as an aggregate line.
+// Private-plaintext rows carrying BOTH text and cipher get a separate subcount (still counted
+// as exposure; expected-clear rows are not in it). With --uid, non-target rows — other users
+// AND rows missing a user — are still scanned and reported as an aggregate line.
 
 import { initializeApp, applicationDefault } from 'firebase-admin/app'
 import { getFirestore, FieldPath } from 'firebase-admin/firestore'
+import { parseArgs } from 'node:util'
 
-const args = process.argv.slice(2)
-const flag = name => {
-  const i = args.indexOf(name)
-  return i >= 0 ? (args[i + 1] ?? true) : null
+// STRICT CLI (review 95 §3): a hand-rolled parser let `--uid` swallow the next flag or pass with
+// no value, silently auditing a fictitious scope — a plausible empty report is worse than an
+// error. parseArgs rejects unknown/duplicate flags; the checks below reject malformed values and
+// conflicting scopes
+let parsed
+try {
+  parsed = parseArgs({
+    options: {
+      project: { type: 'string' },
+      uid: { type: 'string' },
+      all: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  })
+} catch (e) {
+  console.error(String(e?.message ?? e))
+  console.error('usage: node scripts/audit-history.mjs --project <project-id> (--uid <uid> | --all)')
+  process.exit(1)
 }
-const project = flag('--project')
-const uid = flag('--uid')
-const all = args.includes('--all')
+const { project, uid, all } = parsed.values
 
 // TARGET GUARD (review 94 §3.3): the Admin SDK follows ambient credentials, and a leftover
 // emulator variable silently redirects it — an audit that cannot say which database it read is
@@ -39,20 +53,20 @@ if (process.env.FIRESTORE_EMULATOR_HOST) {
   console.error('refusing to run: FIRESTORE_EMULATOR_HOST is set (this audit targets PRODUCTION)')
   process.exit(1)
 }
-if (typeof project != 'string' || !project) {
-  console.error('usage: node scripts/audit-history.mjs --project <project-id> [--uid <uid> | --all]')
+if (typeof project != 'string' || !project || project.startsWith('-')) {
+  console.error('usage: node scripts/audit-history.mjs --project <project-id> (--uid <uid> | --all)')
   process.exit(1)
 }
-if (!uid && !all) {
-  console.error('specify --uid <uid> for a scoped report or --all to scan without a scope')
+if (uid !== undefined && (!uid || uid.startsWith('-'))) {
+  console.error('--uid requires a nonempty uid value')
+  process.exit(1)
+}
+if ((uid === undefined) === !all) {
+  console.error('specify EXACTLY ONE of --uid <uid> (scoped report) or --all (no scope)')
   process.exit(1)
 }
 
 const app = initializeApp({ credential: applicationDefault(), projectId: project })
-if (app.options.projectId !== project) {
-  console.error(`resolved project ${app.options.projectId} does not match --project ${project}`)
-  process.exit(1)
-}
 console.log(`auditing project ${project}, scope ${uid ? `uid ${uid}` : 'ALL users'} (read-only)`)
 
 const db = getFirestore(app)
@@ -116,7 +130,11 @@ for (const [key, row] of [...months.entries()].sort()) {
   )
 }
 if (textAndCipher) console.log(`\nrows carrying BOTH text and cipher (counted as private-plaintext): ${textAndCipher}`)
-if (uid) console.log(`other users (out of scope): ${otherUsers.rows} rows, ${otherUsers.privatePlaintext} private-plaintext`)
+if (uid)
+  console.log(
+    `non-target/unknown rows (other or missing user): ${otherUsers.rows}, ` +
+      `${otherUsers.privatePlaintext} private-plaintext`
+  )
 if (samples.length) {
   console.log(`\nsample private-plaintext row ids (up to 20):`)
   for (const id of samples) console.log(`  history/${id}`)
