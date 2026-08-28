@@ -19,10 +19,11 @@ export type KdfParams = {
   hashLength: number // bytes
 }
 
-// v1: Argon2id 0x13, 64 MiB, t=3, p=1, 32-byte output. p=1 is the chosen lane count for a
-// single-threaded browser WASM host; it is FINAL only after the fleet benchmark completes —
-// desktop Chromium measured 121ms, the low-memory Safari run is still OPEN, and no v1 metadata is
-// provisioned until the parameters freeze (the design's rollout rule)
+// v1: Argon2id 0x13, 64 MiB, t=3, p=1, 32-byte output — FROZEN 2026-08-27 on the completed fleet
+// benchmark (owner's high-end iPhone, iOS 18.7: 160ms cold / 150ms warm, page survived; desktop
+// ~105-121ms; ≤1.5s budget met with ~9x headroom). p=1 is the chosen lane count for a
+// single-threaded browser WASM host. Deliberately NOT raised despite the headroom, per the
+// owner's preference against spending compute for marginal benefit — a parameter change is v2
 export const V1_PARAMS: Readonly<KdfParams> = Object.freeze({
   memorySize: 64 * 1024,
   iterations: 3,

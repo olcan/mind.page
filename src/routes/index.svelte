@@ -324,11 +324,11 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
-    // KDF spike hooks — LOCAL/TEST HOSTS ONLY (the same predicate the emulator connection uses):
-    // production pages carry no benchmark surface. each invocation owns its worker and disposes it
+    // KDF smoke hook — LOCAL/TEST HOSTS ONLY (the same predicate the emulator connection uses):
+    // production pages carry no benchmark surface. the invocation owns its worker and disposes it
     // in `finally` (review 82: no page-lifetime singleton). __kdfSmoke proves the worker path with
-    // the CHEAP test parameters and goes when the stage-2 mixed-reader row lands; __kdfBenchmark
-    // runs the real V1_PARAMS once and goes after the documented fleet run
+    // the CHEAP test parameters and goes when the stage-2 mixed-reader row lands. __kdfBenchmark
+    // is GONE: the fleet run is documented in the design (2026-08-27) and the parameters are frozen
     if (['localhost', '127.0.0.1'].includes(location.hostname)) {
       window['__kdfSmoke'] = async () => {
         const owner = createKdfWorker()
@@ -344,20 +344,6 @@
               .map(b => ('00' + b.toString(16)).slice(-2))
               .join(''),
           }
-        } finally {
-          owner.dispose()
-        }
-      }
-      window['__kdfBenchmark'] = async () => {
-        const owner = createKdfWorker()
-        try {
-          const start = performance.now()
-          const key = await owner.derive({
-            password: new TextEncoder().encode('benchmark phrase'),
-            salt: new Uint8Array(16).fill(9),
-            params: V1_PARAMS,
-          })
-          return { ms: Math.round(performance.now() - start), length: key.length }
         } finally {
           owner.dispose()
         }
@@ -6378,7 +6364,6 @@
     type Delivery,
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
-  import { V1_PARAMS } from '../kdf'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
