@@ -4824,13 +4824,16 @@
           // ENCRYPTED accounts back up through the SAME encrypted, fenced seam as every other
           // history publication (review 93 §3): the old form wrote raw item.text to history,
           // bypassing encryptItem and every fence — an explicit plaintext copy of the whole
-          // account. anonymous items remain plaintext by design
+          // account. anonymous AND explicitly shared items remain clear by design, and
+          // encryptItem already passes both through unchanged
           let added = 0
           items.forEach(item => {
             void (async () => {
-              const payload: Record<string, any> = anonymous
-                ? { time: item.time, text: item.text, attr: _.cloneDeep(item.attr) }
-                : await encryptItem({ time: item.time, text: item.text, attr: _.cloneDeep(item.attr) })
+              const payload: Record<string, any> = await encryptItem({
+                time: item.time,
+                text: item.text,
+                attr: _.cloneDeep(item.attr),
+              })
               fenceV1Item(payload)
               await addDoc(collection(getFirestore(firebase), 'history'), {
                 item: item.savedId ?? item.id,

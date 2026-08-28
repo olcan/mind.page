@@ -1065,6 +1065,7 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
   await seedV0('e2e-w-edit', '#e2e_w_edit original v0 text 111')
   await seedV0('e2e-w-keep', '#e2e_w_keep untouched v0 text 222')
   const seededDocs = ['e2e-w-edit', 'e2e-w-keep', 'e2e-w-old', 'e2e-w-v1seed']
+  let createdItemId: string | null = null
   try {
     // A. REAL ACQUISITION: stored v0 secret, reader flag on, NO envelope — the sign-in trigger
     // raises the one-time upgrade prompt, and the entered phrase pays production Argon once
@@ -1112,15 +1113,36 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     expect(kept.startsWith('1!'), 'the untouched item keeps v0').toBe(false)
     // the HISTORY row of that update is CIPHERTEXT, not plaintext (review 93 §2.1: the in-place
     // decrypt used to strip the cipher before the history spread — every update since 2024
-    // published plaintext history)
-    const historySnap = await firestore().collection('history').where('item', '==', 'e2e-w-edit').get()
-    expect(historySnap.docs.length, 'the update wrote history').toBeGreaterThan(0)
-    for (const h of historySnap.docs) {
+    // published plaintext history). POLLED: history enqueues after the primary acknowledgement
+    // continuation, so the row may trail the cipher change (review 94 §2); cleanup is in finally
+    await expect
+      .poll(async () => (await firestore().collection('history').where('item', '==', 'e2e-w-edit').get()).size, {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0)
+    for (const h of (await firestore().collection('history').where('item', '==', 'e2e-w-edit').get()).docs) {
       const data = h.data()
       expect(data.text, 'NO plaintext in history').toBeNull()
       expect(typeof data.cipher, 'ciphertext present').toBe('string')
       expect((data.cipher as string).startsWith('1!'), 'the v1 payload, exactly as enqueued').toBe(true)
-      await h.ref.delete()
+    }
+
+    // C2. a REAL flag-on CREATE (review 94 §2): the item AND its history row are v1 ciphertext
+    await page.evaluate(() => void window._create('#e2e_w_new created v1 999'))
+    await expect.poll(() => savedId(page, '#e2e_w_new'), { timeout: 30_000 }).toBeTruthy()
+    const createdId = (createdItemId = (await savedId(page, '#e2e_w_new'))!)
+    const createdDoc = (await firestore().collection('items').doc(createdId).get()).data()!
+    expect((createdDoc.cipher as string).startsWith('1!'), 'the created item is v1').toBe(true)
+    expect(createdDoc.text, 'no plaintext on the created item').toBeNull()
+    await expect
+      .poll(async () => (await firestore().collection('history').where('item', '==', createdId).get()).size, {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0)
+    for (const h of (await firestore().collection('history').where('item', '==', createdId).get()).docs) {
+      const data = h.data()
+      expect(data.text, 'NO plaintext in the CREATE history').toBeNull()
+      expect((data.cipher as string).startsWith('1!'), 'the fenced v1 create-history payload').toBe(true)
     }
 
     // D. BYTES through the production wrapper: the v1 bytes frame tag is ~1!
@@ -1174,6 +1196,27 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       (await firestore().collection('items').doc('e2e-w-edit').get()).data()!.cipher,
       'the stored cipher is untouched by the refused save'
     ).toBe(cipherBeforeRefusal)
+    // G2. a REAL failed CREATE settles instead of wedging (review 94 §2): local text retained,
+    // saving cleared, createFailed recorded, no durable document — and the failure surfaced
+    await page.evaluate(() => void window._create('#e2e_w_fail must fail 780'))
+    await expect(page.getByText(/Could not save new item/)).toBeVisible({ timeout: 30_000 })
+    await page.evaluate(() => (window as any)._modal_close()) // a bare alert modal has no buttons
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(i => !i.saving)), { timeout: 30_000 })
+      .toBe(true)
+    expect(
+      await page.evaluate(() => {
+        const it = window.__items.find(i => (i as any).createFailed)
+        return it ? { savedId: it.savedId ?? null, text: window._item('#e2e_w_fail', true)?.text ?? null } : null
+      }),
+      'createFailed recorded; no savedId; local text retained'
+    ).toEqual({ savedId: null, text: '#e2e_w_fail must fail 780' })
+    // a queued save REJECTS through the marker rather than polling savedId forever
+    await page.evaluate(() => void window._item('#e2e_w_fail')!.write('later write'))
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(i => !i.saving)), { timeout: 30_000 })
+      .toBe(true)
+    await page.evaluate(() => window._item('#e2e_w_fail')!.delete(false)) // local-only cleanup
     await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
 
     // H. ROLLBACK: writer off; a new edit returns to v0 while existing v1 stays readable
@@ -1194,6 +1237,19 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       await firestore()
         .collection('items')
         .doc(id)
+        .delete()
+        .catch(() => {})
+    // ALL history rows this row produced (update, create, and the rollback's v0 row) — in
+    // finally, so an earlier failure cannot strand them for later rows (review 94 §2)
+    for (const itemId of ['e2e-w-edit', ...(createdItemId ? [createdItemId] : [])]) {
+      for (const h of (await firestore().collection('history').where('item', '==', itemId).get()).docs)
+        await h.ref.delete().catch(() => {})
+    }
+    await page.evaluate(() => window._item('#e2e_w_new', true)?.delete(false)).catch(() => {})
+    if (createdItemId)
+      await firestore()
+        .collection('items')
+        .doc(createdItemId)
         .delete()
         .catch(() => {})
     await firestore().collection('users').doc(ALICE.uid).update({ kdf: FieldValue.delete() })
