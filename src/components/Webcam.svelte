@@ -1,10 +1,10 @@
-<!-- The NARRATION WEBCAM block (green-screen overlay video), extracted verbatim from
-     index.svelte (Stage 2 DOM-only extraction; plan step 3). The parent gates it with
-     {#if narrating} and owns the `intro` state and history interplay through onWebcamClick;
-     everything here is presentation: the raw <style> and <script> elements are DOM elements
-     injected on mount, exactly as they were inside the parent's {#if} block. The script reads
-     page globals (window._, window._green_screen, window._modal — see client-globals.ts) and
-     the #fragment-shader element from app.html. -->
+<!-- The NARRATION WEBCAM block, extracted verbatim from index.svelte (Stage 2 DOM-only
+     extraction; plan step 3). The parent owns narration/intro state and the history interplay
+     through onWebcamClick; THIS component gates the legacy webcam DOM, the global raw <style>,
+     and the camera/WebGL raw <script> behind {#if narrating} (review 99: the raw elements stay
+     literal DOM — the style is global, the script classic — injected when the block mounts).
+     The script reads page globals (window._, window._green_screen, window._modal — see
+     client-globals.ts) and the #fragment-shader element from app.html. -->
 <script lang="ts">
   export let narrating: boolean
   export let intro: boolean
