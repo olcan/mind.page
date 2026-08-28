@@ -3881,6 +3881,65 @@
   function hashSecretPhrase(phrase: string): Promise<string> {
     return hashSecretPhraseForUid(user.uid, phrase)
   }
+  // the CHOOSE-A-NEW-PHRASE flow (choose + confirm + mismatch retry): the component's modal
+  // logic, shared by the legacy path below and the session's promptNewPhrase dep (which invokes
+  // it only on an AUTHORITATIVELY EMPTY account — review 87 §2.2). null on cancel
+  async function promptNewPhraseFlow(): Promise<string | null> {
+    await tick() // wait until modal is rendered on page
+    let phrase = ''
+    let confirmed = ''
+    while (phrase == '' || confirmed != phrase) {
+      while (phrase == '') {
+        phrase = await modal.show({
+          content:
+            'Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never sent or stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.',
+          confirm: 'Continue',
+          cancel: 'Sign Out',
+          input: '',
+          password: true,
+          username: user.email,
+          autocomplete: 'new-password',
+        })
+      }
+      if (phrase == null) return null
+      confirmed = await modal.show({
+        content: 'Confirm your new secret phrase:',
+        confirm: 'Confirm',
+        cancel: 'Sign Out',
+        input: '',
+        password: true,
+        username: user.email,
+        autocomplete: 'new-password',
+      })
+      if (confirmed == null) return null
+      if (confirmed != phrase) {
+        await modal.show({
+          content: "Confirmed phrase did not match. Let's try again ...",
+          confirm: 'Try Again',
+          background: 'confirm',
+        })
+        phrase = ''
+      }
+    }
+    return phrase
+  }
+
+  // the ENTER-YOUR-EXISTING-PHRASE modal, shared by the legacy path and the session's
+  // promptPhrase dep (a REQUIRED prompt: cancel means sign out, mapped by the callers). null on
+  // cancel
+  async function promptExistingPhraseFlow(): Promise<string | null> {
+    await tick() // wait until modal is rendered on page
+    return modal.show({
+      content: 'Enter your secret phrase:',
+      confirm: 'Continue',
+      cancel: 'Sign Out',
+      input: '',
+      password: true,
+      username: user.email,
+      autocomplete: 'current-password',
+    })
+  }
+
   async function getSecretPhrase(new_phrase: boolean = false) {
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
     if (readonly) throw Error('readonly mode should not require a secret phrase')
@@ -4019,56 +4078,37 @@
       }
       new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
     }
-    await tick() // wait until modal is rendered on page
 
-    let phrase = ''
-    let confirmed = ''
-    if (new_phrase) {
-      while (phrase == '' || confirmed != phrase) {
-        while (phrase == '') {
-          phrase = await modal.show({
-            content:
-              'Choose a <b>secret phrase</b> to encrypt your items so that they are readable <b>only by you, on your devices</b>. This phrase is never sent or stored anywhere (unless you save it somewhere such as a password manager) and should never be shared with anyone.',
-            confirm: 'Continue',
-            cancel: 'Sign Out',
-            input: '',
-            password: true,
-            username: user.email,
-            autocomplete: 'new-password',
-          })
+    // SESSION-OWNED ACQUISITION (review 87 §2.1/§2.3): with the kdf flag on, the session runs
+    // profile-first, selects and raises the ONE prompt (upgrade / existing-phrase /
+    // new-phrase-on-authoritatively-empty), validates the candidate against corpus evidence, and
+    // publishes BOTH regimes — the component no longer publishes a phrase and offers it after
+    let provisional = false
+    if (kdfEnabled() && !fixed) {
+      kdfSecretViaSession = true // exclude THIS flight from the session's pendingV0 join
+      try {
+        const outcome = await kdfSession.acquire()
+        if (outcome.kind == 'ready') {
+          const published = localStorage.getItem('mindpage_secret')
+          if (published) return published // publishV0 set both stores
+        } else if (outcome.reason == 'cancelled') {
+          // a REQUIRED session prompt was cancelled: the legacy contract (callers often swallow
+          // the rejection, which used to leave the page signed in and re-prompting per save)
+          if (!signingOut) signOut()
+          throw new Error('secret phrase cancelled')
         }
-        if (phrase == null) break
-        confirmed = await modal.show({
-          content: 'Confirm your new secret phrase:',
-          confirm: 'Confirm',
-          cancel: 'Sign Out',
-          input: '',
-          password: true,
-          username: user.email,
-          autocomplete: 'new-password',
-        })
-        if (confirmed == null) break
-        if (confirmed != phrase) {
-          await modal.show({
-            content: "Confirmed phrase did not match. Let's try again ...",
-            confirm: 'Try Again',
-            background: 'confirm',
-          })
-          phrase = ''
-        }
+      } finally {
+        kdfSecretViaSession = false
       }
-    } else {
-      phrase = await modal.show({
-        content: 'Enter your secret phrase:',
-        confirm: 'Continue',
-        cancel: 'Sign Out',
-        input: '',
-        password: true,
-        username: user.email,
-        autocomplete: 'current-password',
-      })
+      // any other not-ready (offline; account not yet validatable): the READER-PHASE PROVISIONAL
+      // FALLBACK — the legacy prompt below still serves the v0 regime, but its result stays IN
+      // MEMORY ONLY (review 87 §2.1): an unestablished candidate must never become trusted
+      // stored history. the session persists the real hash when it later establishes
+      provisional = true
     }
-    if (phrase == null || confirmed == null) {
+
+    const phrase = new_phrase ? await promptNewPhraseFlow() : await promptExistingPhraseFlow()
+    if (phrase == null) {
       // sign out on cancellation: callers (e.g. item code saving encrypted state) often swallow
       // this error, which previously left the page signed in and re-prompting on the next save
       signOut()
@@ -4080,16 +4120,7 @@
     const validated = await hashSecretPhrase(phrase)
     if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
     secret = validated
-    localStorage.setItem('mindpage_secret', secret)
-    // ONE PHRASE, BOTH REGIMES (review 85 §2.2): the phrase is OFFERED to the session as the
-    // acquisition candidate — not awaited (a save must not wait on Argon), but registered
-    // synchronously, so a concurrent v1 acquisition consumes it instead of raising a second
-    // prompt. the session validates it against collected corpus evidence before sealing anything
-    // (review 86 §2.3); `fresh` marks the newly CHOSEN phrase of an account with no ciphertext,
-    // the one case with nothing to validate against
-    kdfSession
-      .offerPhrase(phrase, { fresh: new_phrase })
-      .catch(e => console.error('could not derive v1 keys from the entered phrase:', e))
+    if (!provisional) localStorage.setItem('mindpage_secret', secret)
     return secret
   }
 
@@ -4114,6 +4145,12 @@
   // only after the new Firestore rules are deployed and confirmed (design: rollout order — a
   // resident old tab's bare profile set is made harmless only by the live no-drop rule).
   const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
+  // TRUE while getSecretPhrase's session-owned branch is awaiting the session itself: excludes
+  // that flight from the pendingV0 join below (the session would otherwise await its own caller)
+  let kdfSecretViaSession = false
+  // any classified ciphertext seen this principal generation — the negative half of the
+  // authoritative-emptiness fact (review 87 §2.2)
+  let kdfCipherSeen = false
   const kdfSession = createKdfSession({
     uid: () => user?.uid,
     enabled: kdfEnabled,
@@ -4131,9 +4168,14 @@
       localStorage.removeItem('mindpage_key1')
       return undefined
     },
-    // the component's v0 single-flight, joined by the session before it would prompt (one phrase
-    // serves both regimes — see acquireV0Secret and the offerPhrase call in getSecretPhrase)
-    pendingV0: () => (secret && typeof secret.then == 'function' ? secret : null),
+    // the component's LEGACY v0 single-flight (the fixed-owner resolve or the provisional
+    // fallback prompt), joined by the session before it would prompt — but NEVER the
+    // session-owned acquisition itself, which is awaiting the session and would deadlock
+    pendingV0: () => (!kdfSecretViaSession && secret && typeof secret.then == 'function' ? secret : null),
+    // AUTHORITATIVE EMPTINESS (review 87 §2.2): initialization completed (an empty CACHE
+    // snapshot never initializes — see snapshotDecision — so a completed empty init is
+    // server-confirmed) and no classified ciphertext was ever encountered. NEVER caller intent
+    corpusConfirmedEmpty: () => initialized && !kdfCipherSeen,
     // ONE store per acquisition, bound to the uid at construction, so a principal change between
     // a transaction's read and write cannot retarget the document (review 85 §2.5). MERGE-set
     // inside the transaction (a bare tx.set would be authorized on a kdf-less document while
@@ -4166,18 +4208,9 @@
         autocomplete: 'current-password',
       })
     },
-    promptPhrase: async () => {
-      await tick()
-      return modal.show({
-        content: 'Enter your secret phrase:',
-        confirm: 'Continue',
-        cancel: 'Not Now',
-        input: '',
-        password: true,
-        username: user.email,
-        autocomplete: 'current-password',
-      })
-    },
+    // REQUIRED prompts (cancel maps to the legacy sign-out contract at the call sites)
+    promptPhrase: () => promptExistingPhraseFlow(),
+    promptNewPhrase: () => promptNewPhraseFlow(),
     hashPhrase: phrase => hashSecretPhrase(phrase),
     publishV0: v0secret => {
       secret = v0secret
@@ -4221,6 +4254,7 @@
   // come here — they use the fence-only invalidateKeyState below
   function clearAllKeyState(reason: string): undefined {
     secret = null
+    kdfCipherSeen = false
     kdfSession.clear(reason)
     return undefined
   }
@@ -4231,6 +4265,7 @@
   // stored keys; a different account is caught by the principal-mismatch check on the next load
   function invalidateKeyState(reason: string): undefined {
     secret = null
+    kdfCipherSeen = false
     kdfSession.invalidate(reason)
     return undefined
   }
@@ -4281,14 +4316,23 @@
       case 'unsupported-version':
         throw new CipherError('unsupported-version', 'ciphertext version is not supported by this build')
       case 'v1': {
+        kdfCipherSeen = true
         kdfSession.noteEvidence('v1', { kind: 'text', cipher })
         const outcome = await kdfSession.acquire()
-        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        if (outcome.kind != 'ready') {
+          // a cancelled REQUIRED session prompt keeps the legacy contract (see getSecretPhrase)
+          if (outcome.reason == 'cancelled') {
+            if (!signingOut) signOut()
+            throw new Error('secret phrase cancelled')
+          }
+          throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        }
         return decryptV1Text(cipher, outcome.keys.key)
       }
       case 'v0':
         // noted as corpus evidence too: a first phrase on a MIXED corpus must authenticate a v0
         // row exactly, not just open a v1 row (review 86 §2.2)
+        kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'text', cipher })
         return decryptWithSecret(cipher, await acquireV0Secret())
     }
@@ -4301,12 +4345,20 @@
       case 'unsupported-version':
         throw new CipherError('unsupported-version', 'byte cipher version is not supported by this build')
       case 'v1': {
+        kdfCipherSeen = true
         kdfSession.noteEvidence('v1', { kind: 'bytes', cipher })
         const outcome = await kdfSession.acquire()
-        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        if (outcome.kind != 'ready') {
+          if (outcome.reason == 'cancelled') {
+            if (!signingOut) signOut()
+            throw new Error('secret phrase cancelled')
+          }
+          throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        }
         return decryptV1Bytes(cipher, outcome.keys.key)
       }
       case 'v0':
+        kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'bytes', cipher })
         return decryptBytesWithSecret(cipher, await acquireV0Secret())
     }

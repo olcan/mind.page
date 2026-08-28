@@ -3,13 +3,14 @@ import { createKdfSession, type KdfAcquireOutcome, type KdfSessionDeps } from '.
 import { encodeKeyEnvelope, encodeSalt } from '../../src/kdf_profile.js'
 
 // the SESSION ORCHESTRATOR's state machine (src/kdf_session.ts), driven with injected effects —
-// review 85 §6's table plus review 86 §5's schedule rows: these exist because helper tests could
-// not see the component wiring defects (the broad offline catch, the cached not-ready, the frozen
-// evidence boolean, the second offer pipeline, the resurrected envelope). Every row is
-// milliseconds; no Argon, no worker, no browser.
+// reviews 85-87: these rows exist because helper tests could not see the wiring defects (the
+// broad offline catch, the cached not-ready, the frozen evidence boolean, the second offer
+// pipeline, the envelope-only "ready" that split the two regimes, the poisoned stored hash, the
+// resurrected envelope). Every row is milliseconds; no Argon, no worker, no browser.
 
 const SALT = new Uint8Array(16).fill(7)
 const SALT_B64 = encodeSalt(SALT)
+const OTHER_SALT_B64 = encodeSalt(new Uint8Array(16).fill(9))
 const KEY = new Uint8Array(32).map((_, i) => i)
 const FAKE_KEY = { fake: 'CryptoKey' } as unknown as CryptoKey
 
@@ -31,6 +32,7 @@ function harness(overrides: Partial<KdfSessionDeps> = {}) {
     clearEnvelope: () => void (storage.delete('env'), log.push('clearEnvelope')),
     clearPersisted: () => void (storage.delete('v0'), storage.delete('env'), log.push('clearPersisted')),
     pendingV0: () => null,
+    corpusConfirmedEmpty: () => false,
     profileStore: () => ({
       read: async () => ({ kdf: { v: 1, salt: SALT_B64 } }),
       runTransaction: async body =>
@@ -42,8 +44,9 @@ function harness(overrides: Partial<KdfSessionDeps> = {}) {
     randomSalt: () => SALT,
     promptUpgrade: async () => (log.push('promptUpgrade'), 'phrase'),
     promptPhrase: async () => (log.push('promptPhrase'), 'phrase'),
+    promptNewPhrase: async () => (log.push('promptNewPhrase'), 'phrase'),
     hashPhrase: async phrase => 'v0:' + phrase,
-    publishV0: v0 => void log.push('publishV0:' + v0),
+    publishV0: v0 => void (storage.set('v0', v0), log.push('publishV0:' + v0)),
     // candidate attempts against collected evidence rows: the default corpus authenticates the
     // canonical 'phrase' candidate against rows marked -good (a row's cipher is its identity)
     attemptV0: async (row, v0secret) => row.kind == 'text' && row.cipher == 'v0-good' && v0secret == 'v0:phrase',
@@ -66,9 +69,9 @@ function harness(overrides: Partial<KdfSessionDeps> = {}) {
   }
 }
 
-test('happy upgrade: profile, prompt validated by the stored v0 hash, one derivation, envelope last', async () => {
+test('happy upgrade: profile, prompt validated by the TRUSTED stored hash, one derivation, envelope last', async () => {
   const h = harness()
-  h.storage.set('v0', 'v0:phrase') // a returning device
+  h.storage.set('v0', 'v0:phrase') // a returning device (pre-generation storage = the baseline)
   const outcome = await h.session.acquire()
   expect(outcome.kind).toBe('ready')
   expect(h.log).toEqual(['promptUpgrade', 'publishV0:v0:phrase', 'persistEnvelope'])
@@ -80,13 +83,60 @@ test('happy upgrade: profile, prompt validated by the stored v0 hash, one deriva
   expect(h.derivations()).toBe(1)
 })
 
-test('a matching envelope needs NO prompt and no derivation', async () => {
+test('COMPLETE persisted state (envelope AND v0 secret) restores silently', async () => {
   const h = harness()
+  h.storage.set('v0', 'v0:phrase')
   h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
-  const outcome = await h.session.acquire()
-  expect(outcome.kind).toBe('ready')
+  expect((await h.session.acquire()).kind).toBe('ready')
   expect(h.derivations()).toBe(0)
   expect(h.log).toEqual([])
+})
+
+test('SPLIT-KEY GUARD: an envelope WITHOUT the v0 half is not a session — online recovery establishes BOTH (review 87 §2.1)', async () => {
+  // the envelope matches the profile, but mindpage_secret is gone (partial local storage)
+  const h = harness()
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
+  // without evidence the phrase cannot be validated: NOT ready, and no unrelated phrase accepted
+  expect(reasonOf(await h.session.acquire())).toBe('no evidence to validate a first phrase')
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt without a validator').toEqual([])
+  // with v1 evidence, the REQUIRED existing-phrase prompt runs and the candidate must open it;
+  // establishment republishes BOTH halves
+  h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
+  const outcome = await h.session.acquire()
+  expect(outcome.kind).toBe('ready')
+  expect(h.log).toContain('promptPhrase')
+  expect(h.log).toContain('publishV0:v0:phrase')
+  expect(h.storage.get('v0'), 'the v0 half exists again').toBe('v0:phrase')
+})
+
+test('SPLIT-KEY GUARD: a wrong phrase against the incomplete-envelope state seals nothing', async () => {
+  // attemptV1 refuses: the wrong candidate's derived key opens no v1 row
+  const h = harness({ promptPhrase: async () => 'wrong', attemptV1: async () => false })
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
+  h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
+  expect(reasonOf(await h.session.acquire())).toBe('wrong phrase')
+  expect(h.log.filter(l => l.startsWith('publishV0')), 'no v0 published from an unestablished phrase').toEqual([])
+  expect(h.session.current()).toBeNull()
+})
+
+test('OFFLINE requires COMPLETE persisted state: a lone envelope fails closed (review 87 §2.1)', async () => {
+  const offlineStore = () => ({
+    read: async (): Promise<Record<string, unknown>> => {
+      throw new Error('offline')
+    },
+    runTransaction: async () => {
+      throw new Error('unreachable')
+    },
+  })
+  const h = harness({ profileStore: offlineStore })
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
+  expect(reasonOf(await h.session.acquire())).toBe('offline without complete persisted keys')
+  // with BOTH halves, offline reuse works without any prompt
+  const h2 = harness({ profileStore: offlineStore })
+  h2.storage.set('v0', 'v0:phrase')
+  h2.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
+  expect((await h2.session.acquire()).kind).toBe('ready')
+  expect(h2.log).toEqual([])
 })
 
 test('an ABSENT profile provisions first, then the prompt path continues', async () => {
@@ -110,7 +160,7 @@ test('PRESENT-INVALID metadata REJECTS the acquisition — never mistaken for of
       },
     }),
   })
-  // a valid envelope is present — the old broad catch would have restored it
+  h.storage.set('v0', 'v0:phrase')
   h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
   await expect(h.session.acquire()).rejects.toThrow('kdf metadata is not a map')
   expect(h.session.current(), 'nothing published from invalid metadata').toBeNull()
@@ -125,11 +175,11 @@ test('confirmed-ABSENT plus a FAILED provisioning transaction rejects too', asyn
       },
     }),
   })
-  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
+  h.storage.set('v0', 'v0:phrase')
   await expect(h.session.acquire()).rejects.toThrow('transaction failed')
 })
 
-test('OFFLINE (the read itself fails) reuses a committed envelope; without one it is not-ready and RETRYABLE', async () => {
+test('OFFLINE without any envelope is not-ready and RETRYABLE (the profile flight is not wedged)', async () => {
   let readable = false
   const h = harness({
     profileStore: () => ({
@@ -140,30 +190,41 @@ test('OFFLINE (the read itself fails) reuses a committed envelope; without one i
       runTransaction: async body => body({ get: async () => ({}), set: () => {} }),
     }),
   })
-  expect(reasonOf(await h.session.acquire())).toBe('offline without a committed envelope')
-  // the not-ready outcome was NOT cached (and neither was the offline profile flight):
-  // connectivity returns, the next call succeeds
-  readable = true
   h.storage.set('v0', 'v0:phrase')
+  expect(reasonOf(await h.session.acquire())).toBe('offline without complete persisted keys')
+  readable = true
   expect((await h.session.acquire()).kind).toBe('ready')
-
-  // and with an envelope, offline reuse works without any prompt
-  const h2 = harness({
-    profileStore: () => ({
-      read: async () => {
-        throw new Error('offline')
-      },
-      runTransaction: async () => {
-        throw new Error('unreachable')
-      },
-    }),
-  })
-  h2.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY }))
-  expect((await h2.session.acquire()).kind).toBe('ready')
-  expect(h2.log).toEqual([])
 })
 
-test('a CONFIRMED salt mismatch clears the envelope — decline then offline cannot resurrect it (review 86 §2.4)', async () => {
+test('a CONFIRMED salt mismatch clears the envelope; decline then a FRESH offline generation cannot resurrect it (reviews 86-87 §2.4)', async () => {
+  let online = true
+  const store = () => ({
+    read: async () => {
+      if (!online) throw new Error('offline')
+      return { kdf: { v: 1, salt: SALT_B64 } }
+    },
+    runTransaction: async () => {
+      throw new Error('unreachable')
+    },
+  })
+  const h = harness({ profileStore: store, promptUpgrade: async () => null }) // the user declines
+  // a VALID same-uid envelope from a previous provisioning epoch (different salt)
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: OTHER_SALT_B64, keyBytes: KEY }))
+  h.storage.set('v0', 'v0:phrase')
+  expect(reasonOf(await h.session.acquire())).toBe('declined')
+  expect(h.log, 'cleared BEFORE the prompt, on the online confirmation').toContain('clearEnvelope')
+  expect(h.storage.get('env'), 'the obsolete envelope is gone').toBeUndefined()
+  // the review-87 schedule: a FRESH generation (stores preserved) goes offline — the removal is
+  // what protects it, not the cached online result or the decline marker
+  h.session.invalidate('external auth transition')
+  online = false
+  expect(reasonOf(await h.session.acquire()), 'not-ready, never a resurrected session').toBe(
+    'offline without complete persisted keys'
+  )
+  expect(h.session.current()).toBeNull()
+})
+
+test('the EXTERNAL profile() consumer revokes a mismatched envelope too (review 87 §2.4)', async () => {
   let online = true
   const h = harness({
     profileStore: () => ({
@@ -175,33 +236,29 @@ test('a CONFIRMED salt mismatch clears the envelope — decline then offline can
         throw new Error('unreachable')
       },
     }),
-    promptUpgrade: async () => null, // the user declines the upgrade
   })
-  // a VALID same-uid envelope from a previous provisioning epoch (different salt)
-  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: encodeSalt(new Uint8Array(16).fill(9)), keyBytes: KEY }))
-  h.storage.set('v0', 'v0:phrase')
-  expect(reasonOf(await h.session.acquire())).toBe('declined')
-  expect(h.log, 'cleared BEFORE the prompt, on the online confirmation').toContain('clearEnvelope')
-  expect(h.storage.get('env'), 'the obsolete envelope is gone').toBeUndefined()
-  // a later OFFLINE load must not restore the old key
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: OTHER_SALT_B64, keyBytes: KEY }))
+  const handle = h.session.external()
+  expect(await handle.profile()).toEqual({ v: 1, salt: SALT_B64 })
+  expect(h.log, 'the fixed-owner confirmation revoked the obsolete envelope').toContain('clearEnvelope')
+  // the fixed flow dies here (tab closed mid-scan); a fresh offline generation finds nothing
+  h.session.invalidate('tab reopened')
   online = false
-  expect(reasonOf(await h.session.acquire()), 'not-ready, never a resurrected session').toBe(
-    'upgrade declined this session'
-  )
-  expect(h.session.current()).toBeNull()
+  h.storage.set('v0', 'v0:phrase')
+  expect(reasonOf(await h.session.acquire())).toBe('offline without complete persisted keys')
 })
 
-test('an envelope for a DIFFERENT salt falls through to the prompt; the new envelope replaces it', async () => {
+test('an envelope for a DIFFERENT salt is cleared, then the prompt path replaces it', async () => {
   const h = harness()
-  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: encodeSalt(new Uint8Array(16).fill(9)), keyBytes: KEY }))
+  h.storage.set('env', encodeKeyEnvelope({ uid: 'uid-1', salt: OTHER_SALT_B64, keyBytes: KEY }))
   h.storage.set('v0', 'v0:phrase')
   expect((await h.session.acquire()).kind).toBe('ready')
-  expect(h.log).toContain('clearEnvelope') // the obsolete epoch's envelope was removed, then replaced
+  expect(h.log).toContain('clearEnvelope')
   expect(h.log).toContain('promptUpgrade')
   expect(h.session.current()?.salt, 'the PROFILE salt, not the stale envelope’s').toBe(SALT_B64)
 })
 
-test('DECLINE is a session no-nag: later acquires do not re-prompt, and clear() forgets it', async () => {
+test('DECLINE of the optional upgrade is a session no-nag; clear() forgets it', async () => {
   let prompts = 0
   const h = harness({ promptUpgrade: async () => ((prompts++), null) })
   h.storage.set('v0', 'v0:phrase')
@@ -214,7 +271,16 @@ test('DECLINE is a session no-nag: later acquires do not re-prompt, and clear() 
   expect(prompts, 'a fresh session may ask again').toBe(2)
 })
 
-test('a WRONG phrase against the stored v0 hash never derives, publishes, or persists', async () => {
+test('cancelling a REQUIRED prompt is reported as cancelled (the component signs out)', async () => {
+  const h = harness({ promptPhrase: async () => null })
+  h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
+  expect(reasonOf(await h.session.acquire())).toBe('cancelled')
+  // and it is NOT a no-nag decline: the next acquire may prompt again
+  const h2 = harness({ promptNewPhrase: async () => null, corpusConfirmedEmpty: () => true })
+  expect(reasonOf(await h2.session.acquire())).toBe('cancelled')
+})
+
+test('a WRONG phrase against the TRUSTED stored hash never derives, publishes, or persists', async () => {
   const h = harness({ promptUpgrade: async () => 'wrong' })
   h.storage.set('v0', 'v0:phrase')
   expect(reasonOf(await h.session.acquire())).toBe('wrong phrase')
@@ -222,18 +288,58 @@ test('a WRONG phrase against the stored v0 hash never derives, publishes, or per
   expect(h.log.filter(l => l.startsWith('publishV0') || l == 'persistEnvelope')).toEqual([])
 })
 
-test('a FIRST phrase validates against collected v1 evidence, then publishes BOTH regimes', async () => {
+test('POISON GUARD: a stored hash written MID-GENERATION is not trusted — it validates against evidence (review 87 §2.1)', async () => {
+  const h = harness({ promptUpgrade: async () => 'wrong', promptPhrase: async () => (h.log.push('promptPhrase'), 'wrong') })
+  // the baseline anchors on the first session touch: storage is EMPTY here
+  expect(reasonOf(await h.session.acquire())).toBe('no evidence to validate a first phrase')
+  // an unestablished component flow then publishes a wrong hash into storage (the production
+  // prepublication), and evidence that refuses it arrives
+  h.storage.set('v0', 'v0:wrong')
+  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  // entering the SAME wrong phrase must NOT become ready via the stored-hash comparison: the
+  // untrusted hash routes to corpus establishment, which refuses it
+  expect(reasonOf(await h.session.acquire())).toBe('wrong phrase')
+  expect(h.log.filter(l => l == 'persistEnvelope'), 'no envelope from a poisoned hash').toEqual([])
+  expect(h.session.current()).toBeNull()
+  // the RIGHT phrase establishes despite the poisoned storage
+  const ok = harness({ promptPhrase: async () => 'phrase' })
+  await ok.session.acquire() // anchor baseline on empty storage
+  ok.storage.set('v0', 'v0:wrong')
+  ok.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  expect((await ok.session.acquire()).kind).toBe('ready')
+  expect(ok.storage.get('v0'), 'the ESTABLISHED hash replaced the poison').toBe('v0:phrase')
+})
+
+test('a FIRST phrase validates against collected evidence, then publishes BOTH regimes', async () => {
   const h = harness()
   h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
   const outcome = await h.session.acquire()
   expect(outcome.kind).toBe('ready')
   expect(h.log[0]).toBe('promptPhrase')
-  // THE ONE-PHRASE-BOTH-REGIMES rule: v0 publishes before the acquisition resolves
   expect(h.log).toContain('publishV0:v0:phrase')
   // without evidence, the phrase cannot be validated at all
   const h2 = harness()
   expect(reasonOf(await h2.session.acquire())).toBe('no evidence to validate a first phrase')
   expect(h2.derivations(), 'and nothing derives for an unvalidatable prompt').toBe(0)
+})
+
+test('NEW-PHRASE arm: only an AUTHORITATIVELY EMPTY account seals without evidence (review 87 §2.2)', async () => {
+  // not confirmed empty (default): no new-phrase prompt, not-ready
+  const blocked = harness()
+  expect(reasonOf(await blocked.session.acquire())).toBe('no evidence to validate a first phrase')
+  expect(blocked.log).toEqual([])
+  // confirmed empty: the choose-a-new-phrase flow runs and seals both regimes
+  const h = harness({ corpusConfirmedEmpty: () => true })
+  const outcome = await h.session.acquire()
+  expect(outcome.kind).toBe('ready')
+  expect(h.log[0]).toBe('promptNewPhrase')
+  expect(h.log).toContain('publishV0:v0:phrase')
+  expect(h.log).toContain('persistEnvelope')
+  // evidence arriving before the flight wins over the emptiness fact: it validates
+  const raced = harness({ corpusConfirmedEmpty: () => true, attemptV0: async () => false })
+  raced.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  expect(reasonOf(await raced.session.acquire()), 'evidence gates even a "fresh" phrase').toBe('wrong phrase')
+  expect(raced.log[0], 'validated via the EXISTING-phrase prompt').toBe('promptPhrase')
 })
 
 test('MIXED corpus: v1 success alone is INSUFFICIENT while v0 evidence exists (review 86 §2.2)', async () => {
@@ -250,7 +356,7 @@ test('MIXED corpus: v1 success alone is INSUFFICIENT while v0 evidence exists (r
   expect(h.session.current()).toBeNull()
 })
 
-test('a CORRUPT first v1 row does not wedge validation: the second row establishes (review 86 §2.2)', async () => {
+test('EVIDENCE IS RETAINED IN FULL: three corrupt v1 rows plus a valid FOURTH still establish (review 87 §3.1)', async () => {
   const attempts: string[] = []
   const h = harness({
     attemptV1: async row => {
@@ -258,15 +364,38 @@ test('a CORRUPT first v1 row does not wedge validation: the second row establish
       return row.kind == 'text' && row.cipher == 'v1-good'
     },
   })
-  h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-corrupt' })
-  h.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
+  for (const cipher of ['bad-1', 'bad-2', 'bad-3', 'v1-good']) h.session.noteEvidence('v1', { kind: 'text', cipher })
+  h.session.noteEvidence('v1', { kind: 'text', cipher: 'bad-1' }) // duplicate: not re-attempted
   expect((await h.session.acquire()).kind).toBe('ready')
-  expect(attempts, 'iterated past the corrupt row').toEqual(['v1-corrupt', 'v1-good'])
+  expect(attempts, 'iterated past every corrupt row to the valid fourth, no duplicates').toEqual([
+    'bad-1',
+    'bad-2',
+    'bad-3',
+    'v1-good',
+  ])
+})
+
+test('LAZY DERIVATION: refusals pay no Argon; a v0-established candidate derives exactly once, after validation (review 87 §3.2)', async () => {
+  // wrong phrase by corpus (v0 refusal): ZERO derivations
+  const wrong = harness({ promptPhrase: async () => 'wrong' })
+  wrong.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  expect(reasonOf(await wrong.session.acquire())).toBe('wrong phrase')
+  expect(wrong.derivations()).toBe(0)
+  // v0-only establishment: the derivation happens once, for the seal, after v0 authenticated
+  const order: string[] = []
+  const h = harness({
+    attemptV0: async (row, v0secret) => (order.push('attemptV0'), v0secret == 'v0:phrase'),
+    createWorker: () => ({
+      derive: async () => (order.push('derive'), KEY),
+      dispose: () => undefined,
+    }),
+  })
+  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  expect((await h.session.acquire()).kind).toBe('ready')
+  expect(order, 'validation before any derivation').toEqual(['attemptV0', 'derive'])
 })
 
 test('DEFERRED PROFILE: evidence noted after the flight began PROMOTES it (review 86 §2.1)', async () => {
-  // the proactive trigger starts with NO evidence; a v1 decrypt joins while the profile read is
-  // pending. the old frozen boolean returned the weaker "no evidence" result to BOTH callers
   let releaseRead: (data: Record<string, unknown>) => void = () => {}
   let reads = 0
   const h = harness({
@@ -319,6 +448,24 @@ test('a clear() during DERIVATION disposes the worker and drops the result', asy
   expect(h.log.filter(l => l == 'persistEnvelope')).toEqual([])
 })
 
+test('a clear() during the ABSENT profile read stops BEFORE provisioning (review 87 §2.5)', async () => {
+  let releaseRead: (data: Record<string, unknown>) => void = () => {}
+  let provisions = 0
+  const h = harness({
+    profileStore: () => ({
+      read: () => new Promise<Record<string, unknown>>(resolve => (releaseRead = resolve)),
+      runTransaction: async body => ((provisions++), body({ get: async () => ({}), set: () => {} })),
+    }),
+  })
+  h.storage.set('v0', 'v0:phrase')
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0))
+  h.session.clear('sign-out during the read')
+  releaseRead({}) // the read resolves ABSENT — provisioning would normally follow
+  await expect(flight).rejects.toThrow('superseded')
+  expect(provisions, 'zero provisioning transactions after the clear').toBe(0)
+})
+
 test('single-flight: concurrent acquires share one attempt; the slot clears on EVERY settle', async () => {
   let reads = 0
   const h = harness({
@@ -334,79 +481,20 @@ test('single-flight: concurrent acquires share one attempt; the slot clears on E
   expect(reads, 'one profile read for both callers').toBe(1)
 })
 
-test('REVERSE OFFER SCHEDULE: an offer registered mid-flight is consumed as ITS candidate — no second pipeline (review 86 §2.3)', async () => {
-  // the flight is paused at the profile read; the component's v0 prompt finishes (its flight
-  // already settled, so pendingV0 is null) and offers the phrase. the SAME flight consumes it
-  let releaseRead: (data: Record<string, unknown>) => void = () => {}
-  let reads = 0
-  const h = harness({
-    profileStore: () => ({
-      read: () => ((reads++), new Promise<Record<string, unknown>>(resolve => (releaseRead = resolve))),
-      runTransaction: async () => {
-        throw new Error('unreachable')
-      },
-    }),
-  })
-  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
-  const flight = h.session.acquire()
-  await new Promise(r => setTimeout(r, 0))
-  const offer = h.session.offerPhrase('phrase') // returns the SAME flight
-  releaseRead({ kdf: { v: 1, salt: SALT_B64 } })
-  const [a, o] = await Promise.all([flight, offer])
-  expect(a.kind).toBe('ready')
-  expect(o).toEqual(a)
-  expect(reads, 'one profile read').toBe(1)
-  expect(h.derivations(), 'one derivation across both paths').toBe(1)
-  expect(h.log.filter(l => l.startsWith('prompt')), 'the session never prompted').toEqual([])
-  expect(h.log.filter(l => l.startsWith('publishV0')), 'an offered phrase never re-publishes v0').toEqual([])
-})
-
-test('a WRONG offered candidate seals nothing: corpus validation gates the envelope (review 86 §2.3)', async () => {
-  // the component's "Enter your secret phrase" flow publishes the v0 hash BEFORE any decrypt
-  // authenticates it — the session must not trust that publication
-  const h = harness()
-  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
-  // the offered phrase hashes to a non-matching candidate; attemptV0 (default) refuses it
-  expect(reasonOf(await h.session.offerPhrase('wrong'))).toBe('wrong phrase')
-  expect(h.log.filter(l => l == 'persistEnvelope' || l.startsWith('publishV0')), 'nothing sealed').toEqual([])
-  expect(h.session.current()).toBeNull()
-  expect(h.derivations(), 'the wrong candidate cost one derivation').toBe(1)
-  // the right phrase afterwards succeeds (the wrong offer cached nothing)
-  expect((await h.session.offerPhrase('phrase')).kind).toBe('ready')
-})
-
-test('a FRESH (newly chosen) phrase may seal without evidence — but validates when evidence exists', async () => {
-  // fresh + empty account: nothing to validate against, the phrase is definitionally correct
-  const h = harness()
-  expect((await h.session.offerPhrase('phrase', { fresh: true })).kind).toBe('ready')
-  expect(h.log, 'envelope only: no prompt, no v0 publication').toEqual(['persistEnvelope'])
-  // fresh + evidence (a "new" phrase chosen over an account that actually has ciphertext): the
-  // evidence still gates it
-  const h2 = harness({ attemptV0: async () => false })
-  h2.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
-  expect(reasonOf(await h2.session.offerPhrase('phrase', { fresh: true }))).toBe('wrong phrase')
-  expect(h2.log.filter(l => l == 'persistEnvelope')).toEqual([])
-  // and a non-fresh offer with NO evidence cannot establish at all
-  const h3 = harness()
-  expect(reasonOf(await h3.session.offerPhrase('phrase'))).toBe('no evidence to validate a first phrase')
-  expect(h3.log.filter(l => l == 'persistEnvelope')).toEqual([])
-})
-
-test('acquire JOINS a pending v0 flight and consumes its offer — one prompt, both regimes (review 85 §2.2)', async () => {
+test('acquire JOINS a pending legacy v0 flight; a fixed adoption meanwhile completes it', async () => {
   let resolveV0: (v: string) => void = () => {}
   const v0flight = new Promise<string>(resolve => (resolveV0 = resolve))
   const h = harness({ pendingV0: () => v0flight })
-  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
   const acquired = h.session.acquire()
   await new Promise(r => setTimeout(r, 0)) // let the acquisition reach the join
-  // the v0 prompt tail: publish v0 (component-owned), REGISTER the offer, then settle the flight
-  const offered = h.session.offerPhrase('phrase')
+  // the fixed-owner flow adopts through the external handle, then its v0 flight settles
+  const handle = h.session.external()
+  const profile = await handle.profile()
+  const derived = await handle.derive('phrase', profile!)
+  expect(handle.adopt(SALT_B64, derived)).toBe(true)
   resolveV0('v0:phrase')
-  const [a, o] = await Promise.all([acquired, offered])
-  expect(a.kind).toBe('ready')
-  expect(o).toEqual(a)
-  expect(h.derivations(), 'ONE derivation across both paths').toBe(1)
-  expect(h.log.filter(l => l.startsWith('prompt')), 'the session never prompted').toEqual([])
+  expect((await acquired).kind, 'the join found the adopted session').toBe('ready')
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt').toEqual([])
 })
 
 test('a pending v0 flight that REJECTS (cancelled prompt) leaves acquire not-ready without a second prompt', async () => {
@@ -418,7 +506,7 @@ test('a pending v0 flight that REJECTS (cancelled prompt) leaves acquire not-rea
   expect(h.log.filter(l => l.startsWith('prompt')), 'no nag behind their cancel').toEqual([])
 })
 
-test('EXTERNAL handle (fixed-owner): shared profile flight, session-slot derivation, fenced adoption', async () => {
+test('EXTERNAL handle: the profile flight is SHARED (no adoption needed to prove it)', async () => {
   let reads = 0
   const h = harness({
     profileStore: () => ({
@@ -429,20 +517,14 @@ test('EXTERNAL handle (fixed-owner): shared profile flight, session-slot derivat
     }),
   })
   const handle = h.session.external()
-  expect(handle.uid).toBe('uid-1')
-  const profile = await handle.profile()
-  expect(profile).toEqual({ v: 1, salt: SALT_B64 })
-  const derived = await handle.derive('phrase', profile!)
-  expect(h.derivations()).toBe(1)
-  expect(handle.adopt(SALT_B64, derived)).toBe(true)
-  expect(h.log).toEqual(['persistEnvelope'])
-  expect(h.session.current()?.salt, 'adopted as THE session').toBe(SALT_B64)
-  // an acquire after adoption is a cache hit, and the PROFILE FLIGHT was shared: one read total
+  expect(await handle.profile()).toEqual({ v: 1, salt: SALT_B64 })
+  // a session acquisition afterwards reuses the SAME resolved flight: still one read
+  h.storage.set('v0', 'v0:phrase')
   expect((await h.session.acquire()).kind).toBe('ready')
-  expect(reads, 'the external profile() and any session acquisition share one flight').toBe(1)
+  expect(reads, 'one read across the external consumer and the session flight').toBe(1)
 })
 
-test('external adoption after clear() is REFUSED: nothing persisted, nothing cached (§2.5)', async () => {
+test('external adoption after clear() is REFUSED: nothing persisted, nothing cached (review 85 §2.5)', async () => {
   const h = harness()
   const handle = h.session.external()
   const profile = await handle.profile()
@@ -453,6 +535,26 @@ test('external adoption after clear() is REFUSED: nothing persisted, nothing cac
   expect(handle.adopt(SALT_B64, derived)).toBe(false)
   expect(h.log.length, 'no persistEnvelope after the refusal').toBe(cleared)
   expect(h.session.current()).toBeNull()
+})
+
+test('a STALE external handle starts NO effects: zero reads and zero workers after clear() (review 87 §2.5)', async () => {
+  let reads = 0
+  let workers = 0
+  const h = harness({
+    profileStore: () => ({
+      read: async () => ((reads++), { kdf: { v: 1, salt: SALT_B64 } }),
+      runTransaction: async () => {
+        throw new Error('unreachable')
+      },
+    }),
+    createWorker: () => ((workers++), { derive: async () => KEY, dispose: () => undefined }),
+  })
+  const handle = h.session.external()
+  h.session.clear('sign-out before any effect')
+  await expect(handle.profile()).rejects.toThrow('superseded')
+  await expect(handle.derive('phrase', { v: 1, salt: SALT_B64 })).rejects.toThrow('superseded')
+  expect(reads, 'the server was never contacted').toBe(0)
+  expect(workers, 'no worker was created').toBe(0)
 })
 
 test('external profile() is null when disabled and propagates present-invalid (fail closed)', async () => {
@@ -469,6 +571,23 @@ test('external profile() is null when disabled and propagates present-invalid (f
   await expect(bad.session.external().profile()).rejects.toThrow('unsupported kdf version')
 })
 
+test('a CONCURRENT derivation is refused as an invariant violation, not silently raced (review 87 §3.3)', async () => {
+  let releaseDerive: (k: Uint8Array) => void = () => {}
+  const h = harness({
+    createWorker: () => ({
+      derive: () => new Promise<Uint8Array>(resolve => (releaseDerive = resolve)),
+      dispose: () => undefined,
+    }),
+  })
+  h.storage.set('v0', 'v0:phrase')
+  const flight = h.session.acquire() // reaches derivation and parks there
+  await new Promise(r => setTimeout(r, 0))
+  const handle = h.session.external()
+  await expect(handle.derive('phrase', { v: 1, salt: SALT_B64 })).rejects.toThrow('concurrent kdf derivation')
+  releaseDerive(KEY)
+  expect((await flight).kind).toBe('ready')
+})
+
 test('invalidate() fences and forgets in-memory state but KEEPS the persisted stores', async () => {
   const h = harness()
   h.storage.set('v0', 'v0:phrase')
@@ -477,22 +596,8 @@ test('invalidate() fences and forgets in-memory state but KEEPS the persisted st
   expect(h.session.current(), 'in-memory session forgotten').toBeNull()
   expect(h.log.filter(l => l == 'clearPersisted'), 'persisted stores untouched').toEqual([])
   expect(h.storage.get('env'), 'the envelope survives for the reloaded page').toBeTruthy()
-  expect((await h.session.acquire()).kind, 'a fresh acquire still works from the kept envelope').toBe('ready')
-})
-
-test('noteEvidence is bounded, deduplicated, and inert when disabled', async () => {
-  const attempts: string[] = []
-  const h = harness({
-    attemptV1: async row => (attempts.push(row.kind == 'text' ? row.cipher : 'bytes'), false),
-  })
-  for (let i = 0; i < 5; i++) h.session.noteEvidence('v1', { kind: 'text', cipher: `row-${i}` })
-  h.session.noteEvidence('v1', { kind: 'text', cipher: 'row-0' }) // duplicate
-  expect(reasonOf(await h.session.acquire())).toBe('wrong phrase')
-  expect(attempts, 'at most the per-regime bound of rows was retained').toEqual(['row-0', 'row-1', 'row-2'])
-  // disabled: nothing collects and acquisition refuses anyway
-  const off = harness({ enabled: () => false })
-  off.session.noteEvidence('v1', { kind: 'text', cipher: 'v1-good' })
-  expect(reasonOf(await off.session.acquire())).toBe('kdf disabled')
+  // the baseline re-anchors on the surviving stores: the kept v0 secret is trusted again
+  expect((await h.session.acquire()).kind, 'a fresh acquire works from the kept stores').toBe('ready')
 })
 
 test('disabled and ineligible are not-ready without any effect', async () => {
