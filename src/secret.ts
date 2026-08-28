@@ -29,17 +29,31 @@ export type FixedOwnerSecretDeps = {
   // stored form of a phrase (see hashSecretPhrase in crypto.ts, bound to the uid)
   hashPhrase: (phrase: string) => Promise<string>
   signOut: () => void
-  // derives the v1 key for a CANDIDATE phrase (profile-first: the caller obtains/provisions the
-  // server profile before deriving). null when v1 is not enabled/available — a v1-only corpus
-  // then cannot establish, which is the honest outcome. OPTIONAL only until stage 3; the memo per
-  // prompt-loop iteration lives here so one wrong phrase costs one derivation
-  deriveV1Key?: (phrase: string) => Promise<CryptoKey | null>
+  // the v1 half (stage 2), normally the session's external() handle (src/kdf_session.ts):
+  // `profile` runs ONCE, BEFORE any prompt (profile-first — present-invalid metadata fails closed
+  // before a phrase is collected) and resolves null when the kdf flag is off, which keeps this
+  // path exactly v0; `derive` is one worker derivation for a candidate phrase against that
+  // profile. the per-phrase memo lives here, so one phrase costs at most one derivation whether
+  // it validates via v1 evidence, is needed only for the post-establishment scan, or both
+  v1?: {
+    profile: () => Promise<{ v: 1; salt: string } | null>
+    derive: (phrase: string, profile: { v: 1; salt: string }) => Promise<{ key: CryptoKey; keyBytes: Uint8Array }>
+  }
 }
 
-// returns the validated hashed secret CANDIDATE, or null when the (server-confirmed) account holds
+// the resolver's EXPLICIT established result (review 85 §2.3): the validated v0 candidate plus —
+// when the v1 seam is enabled and the server profile exists — the derived v1 half, so the caller
+// scans under BOTH keys and adopts the phrase-free bundle/envelope after the scan, publishing
+// last. the phrase itself never crosses this seam
+export type EstablishedFixedSecret = {
+  v0Secret: string
+  v1: { salt: string; key: CryptoKey; keyBytes: Uint8Array } | null
+}
+
+// returns the validated ESTABLISHED result, or null when the (server-confirmed) account holds
 // no ciphertext — the caller then runs its new-phrase flow; throws 'secret phrase cancelled' after
 // signing out on any cancellation
-export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promise<string | null> {
+export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promise<EstablishedFixedSecret | null> {
   // fetch until the server answers (fail closed), or sign out; NOTE: this must be an internal
   // loop — recursing into the caller's entry point would return its own in-flight promise
   let docs: AccountDoc[]
@@ -77,8 +91,21 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   if (!evidence.length)
     throw new Error('account ciphertext is unsupported or corrupt: no phrase can be validated against it')
 
+  // PROFILE FIRST, before any prompt: present-invalid metadata fails closed before a phrase is
+  // collected, and no phrase-derived work waits on a network step. null = v1 disabled (pure v0)
+  const profile = deps.v1 ? await deps.v1.profile() : null
+  // ONE derivation per phrase, shared between v1-evidence validation and the post-establishment
+  // scan key — replacing a discarded validation derivation with a second Argon run was review 85
+  // §2.3's finding
+  let derived: { phrase: string; promise: Promise<{ key: CryptoKey; keyBytes: Uint8Array }> } | null = null
+  const deriveOnce = (phrase: string) => {
+    if (derived?.phrase !== phrase) derived = { phrase, promise: deps.v1!.derive(phrase, profile!) }
+    return derived.promise
+  }
+
   // prompt and validate against the corpus evidence, per the establishCandidate policy
   let candidate: string
+  let established: string // the phrase that validated, released as soon as its key is derived
   while (true) {
     const phrase = await deps.promptPhrase()
     if (phrase == null) {
@@ -99,34 +126,37 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
           throw e
         }
       },
-      tryV1: (() => {
-        // ONE derivation per candidate phrase, memoized across this phrase's v1 evidence rows
-        let derived: Promise<CryptoKey | null> | undefined
-        return async (cipher: string) => {
-          if (!deps.deriveV1Key) return false
-          derived ??= deps.deriveV1Key(phrase)
-          const key = await derived
-          if (!key) return false
-          try {
-            await decryptV1Text(cipher, key)
-            return true
-          } catch (e) {
-            if (e instanceof CipherError && e.kind == 'authentication-failed') return false
-            throw e // malformed/unsupported cannot reach here (preflighted); integration errors propagate
-          }
+      tryV1: async (cipher: string) => {
+        if (!profile) return false // v1 disabled or no server profile: v1 rows cannot validate
+        const { key } = await deriveOnce(phrase)
+        try {
+          await decryptV1Text(cipher, key)
+          return true
+        } catch (e) {
+          if (e instanceof CipherError && e.kind == 'authentication-failed') return false
+          throw e // malformed/unsupported cannot reach here (preflighted); integration errors propagate
         }
-      })(),
+      },
     })
-    if (verdict.kind == 'established') break
+    if (verdict.kind == 'established') {
+      established = phrase
+      break
+    }
     // NOT-ESTABLISHED: the honest outcome — the phrase did not unlock the available data
     await deps.reportWrongPhrase()
   }
+
+  // the v1 half of the established phrase: reuse the validation derivation, or — for a corpus
+  // established on v0 evidence — derive now, at most once, while the phrase is still in hand
+  // (the scan needs the key for v1 rows, and the device earns its phrase-free envelope without a
+  // second prompt). with no server profile (v1 disabled) the result is pure v0
+  const v1 = profile ? { salt: profile.salt, ...(await deriveOnce(established)) } : null
 
   // NO REGISTRATION HERE. these documents are as old as the prompt: the caller takes one fresh
   // candidate-keyed scan through the corpus seam, in canonical id order, before it publishes or
   // stores the secret — which is what actually protects a concurrent encrypted save from
   // duplicating a record registration has not reached yet
-  return candidate
+  return { v0Secret: candidate, v1 }
 }
 
 // ---- adopting the validated candidate --------------------------------------------------------

@@ -60,7 +60,7 @@ test('a failed fetch retries until the server answers, never falling through', a
       return [doc('a', { cipher })]
     },
   })
-  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  expect((await resolveFixedOwnerSecret(d))?.v0Secret).toBe(secret)
   expect(d.calls.filter(call => call == 'fetch')).toHaveLength(3)
   expect(d.calls.filter(call => call == 'retry?')).toHaveLength(2)
   expect(d.calls).not.toContain('signout')
@@ -86,7 +86,7 @@ test('a wrong phrase re-prompts and a cancelled prompt signs out', async () => {
     fetchAccountDocs: async () => [doc('a', { cipher })],
     promptPhrase: async () => phrases.shift() ?? null,
   })
-  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  expect((await resolveFixedOwnerSecret(d))?.v0Secret).toBe(secret)
   expect(d.calls).toContain('wrong')
 
   const cancelled = deps({
@@ -122,7 +122,9 @@ test('the candidate is returned WITHOUT touching hidden documents: registration 
       return rows
     },
   })
-  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  const established = await resolveFixedOwnerSecret(d)
+  expect(established?.v0Secret).toBe(secret)
+  expect(established?.v1, 'pure v0 without the v1 seam').toBeNull()
   // exactly one fetch, one prompt, no repeated pass over the (prompt-aged) documents
   expect(d.calls).toEqual(['fetch', 'prompt'])
 })
@@ -263,7 +265,7 @@ test('PRODUCTION: malformed and future-version ciphers are not evidence; valid r
       doc('good', { cipher }),
     ],
   })
-  expect(await resolveFixedOwnerSecret(d)).toBe(secret)
+  expect((await resolveFixedOwnerSecret(d))?.v0Secret).toBe(secret)
   expect(
     d.calls.filter(c => c == 'wrong'),
     'no wrong-phrase report for unusable rows'
@@ -308,7 +310,7 @@ test('the resolver iterates past a REAL authentication failure to the valid seco
   const d = deps({
     fetchAccountDocs: async () => [doc('foreign', { cipher: foreign }), doc('good', { cipher })],
   })
-  expect(await resolveFixedOwnerSecret(d), 'established via the second frame').toBe(secret)
+  expect((await resolveFixedOwnerSecret(d))?.v0Secret, 'established via the second frame').toBe(secret)
   expect(
     d.calls.filter(c => c == 'wrong'),
     'and no wrong-phrase report'
@@ -331,7 +333,9 @@ test('PRESENT-but-invalid cipher values are corrupt, never the new-account path'
 
 // ---- v1 evidence through the REAL derivation seam (stage 2) ------------------------------------
 
-test('a v1-only corpus establishes through deriveV1Key, with ONE derivation per candidate phrase', async () => {
+const SALT_B64 = 'BwcHBwcHBwcHBwcHBwcHBw==' // canonical 16x 0x07
+
+test('a v1-only corpus establishes through the v1 seam, with ONE derivation reused for the result', async () => {
   const fixedKey = new Uint8Array(32).map((_, i) => i)
   const key = await importV1Key(fixedKey)
   const c1 = await encryptV1Text('one', key)
@@ -339,12 +343,74 @@ test('a v1-only corpus establishes through deriveV1Key, with ONE derivation per 
   let derivations = 0
   const d = deps({
     fetchAccountDocs: async () => [doc('a', { cipher: c1 }), doc('b', { cipher: c2 })],
-    deriveV1Key: async () => (derivations++, key),
+    v1: {
+      profile: async () => ({ v: 1, salt: SALT_B64 }),
+      derive: async () => (derivations++, { key, keyBytes: fixedKey }),
+    },
   })
-  expect(await resolveFixedOwnerSecret(d), 'established by v1 evidence alone').toBe(
-    await hashSecretPhrase('uid-1', 'phrase')
-  )
-  expect(derivations, 'one derivation per candidate phrase, memoized across rows').toBe(1)
+  const established = await resolveFixedOwnerSecret(d)
+  expect(established?.v0Secret, 'established by v1 evidence alone').toBe(await hashSecretPhrase('uid-1', 'phrase'))
+  expect(established?.v1, 'the VALIDATION derivation is the result, not discarded (review 85 §2.3)').toEqual({
+    salt: SALT_B64,
+    key,
+    keyBytes: fixedKey,
+  })
+  expect(derivations, 'one derivation per candidate phrase, memoized across rows AND the result').toBe(1)
+})
+
+test('a MIXED corpus established on v0 derives the v1 half once, AFTER validation', async () => {
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const v0cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
+  const fixedKey = new Uint8Array(32).map((_, i) => i)
+  const key = await importV1Key(fixedKey)
+  const v1cipher = await encryptV1Text('hidden v1 row', key)
+  const derivedFor: string[] = []
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher: v0cipher }), doc('b', { cipher: v1cipher })],
+    v1: {
+      profile: async () => ({ v: 1, salt: SALT_B64 }),
+      derive: async phrase => (derivedFor.push(phrase), { key, keyBytes: fixedKey }),
+    },
+  })
+  const established = await resolveFixedOwnerSecret(d)
+  expect(established?.v0Secret).toBe(secret)
+  expect(established?.v1?.key, 'the scan can open v1 rows under this key').toBe(key)
+  expect(derivedFor, 'exactly one derivation, for the established phrase').toEqual(['phrase'])
+})
+
+test('a pure-v0 corpus with the seam enabled still derives once: the device earns its envelope', async () => {
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
+  const fixedKey = new Uint8Array(32).map((_, i) => i)
+  const key = await importV1Key(fixedKey)
+  let derivations = 0
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher })],
+    v1: {
+      profile: async () => ({ v: 1, salt: SALT_B64 }),
+      derive: async () => (derivations++, { key, keyBytes: fixedKey }),
+    },
+  })
+  expect((await resolveFixedOwnerSecret(d))?.v1?.salt).toBe(SALT_B64)
+  expect(derivations).toBe(1)
+})
+
+test('the profile runs BEFORE any prompt, and its failure is fail-closed (no phrase collected)', async () => {
+  const secret = await hashSecretPhrase('uid-1', 'phrase')
+  const cipher = await encryptWithSecret(JSON.stringify({ text: '#x', attr: null }), secret)
+  const d = deps({
+    fetchAccountDocs: async () => [doc('a', { cipher })],
+    v1: {
+      profile: async () => {
+        throw new Error('kdf metadata is not a map')
+      },
+      derive: async () => {
+        throw new Error('unreachable')
+      },
+    },
+  })
+  await expect(resolveFixedOwnerSecret(d)).rejects.toThrow('kdf metadata is not a map')
+  expect(d.calls, 'present-invalid fails closed before the prompt').not.toContain('prompt')
 })
 
 test('a v1-only corpus with NO derivation available is honestly not-established, never new-account', async () => {
@@ -355,7 +421,12 @@ test('a v1-only corpus with NO derivation available is honestly not-established,
   const d = deps({
     fetchAccountDocs: async () => [doc('a', { cipher })],
     promptPhrase: async () => phrases.shift() ?? null,
-    deriveV1Key: async () => null, // kdf disabled/unavailable on this device
+    v1: {
+      profile: async () => null, // kdf disabled/unavailable on this device
+      derive: async () => {
+        throw new Error('unreachable without a profile')
+      },
+    },
   })
   await expect(resolveFixedOwnerSecret(d), 'cancel signs out; the corpus was never called empty').rejects.toThrow(
     /cancelled/
@@ -369,12 +440,20 @@ test('a WRONG phrase against v1 evidence re-prompts; the right one establishes',
   const wrongKey = await importV1Key(new Uint8Array(32).fill(9))
   const cipher = await encryptV1Text('data', rightKey)
   const phrases = ['wrong', 'right']
+  const derivedFor: string[] = []
   const d = deps({
     fetchAccountDocs: async () => [doc('a', { cipher })],
     promptPhrase: async () => phrases.shift() ?? null,
-    deriveV1Key: async phrase => (phrase == 'right' ? rightKey : wrongKey),
+    v1: {
+      profile: async () => ({ v: 1, salt: 'BwcHBwcHBwcHBwcHBwcHBw==' }),
+      derive: async phrase => (
+        derivedFor.push(phrase),
+        { key: phrase == 'right' ? rightKey : wrongKey, keyBytes: fixedKey }
+      ),
+    },
   })
-  expect(await resolveFixedOwnerSecret(d)).toBe(await hashSecretPhrase('uid-1', 'right'))
+  expect((await resolveFixedOwnerSecret(d))?.v0Secret).toBe(await hashSecretPhrase('uid-1', 'right'))
+  expect(derivedFor, 'one derivation per phrase; the established one reused for the result').toEqual(['wrong', 'right'])
   expect(
     d.calls.filter(c => c == 'wrong'),
     'exactly one wrong-phrase report'

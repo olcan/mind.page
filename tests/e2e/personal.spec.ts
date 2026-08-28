@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { FieldValue } from 'firebase-admin/firestore'
 import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers.js'
 // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
 import { SHARED_LOCAL_HOST } from '../../src/host.js'
@@ -846,26 +847,51 @@ test('signing out clears the secret, the session and the local cache', async ({ 
   expect(await page.evaluate(() => window._items().some(item => item.name == '#e2e_private'))).toBe(false)
 })
 
-test('MIXED CORPUS: a seeded v1 item decrypts through the application beside the v0 corpus', async ({ page }) => {
+test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the application beside v0', async ({ page }) => {
   // the stage-2 deployability row (KDF design): the production application opens frozen v0 AND v1
-  // in one session, with ZERO Argon cost — the v1 key arrives via a seeded persisted envelope, the
-  // profile via seeded users/{uid} metadata, and the owner flag is on for this page only.
-  // writes remain v0 throughout (the writer switch is stage 3)
+  // — visible text, bytes, and a hidden global store — in ONE session with ZERO Argon cost: the
+  // v1 key arrives via a seeded persisted envelope, the profile via seeded users/{uid} metadata,
+  // and the owner flag is on for this page only. writes remain v0 throughout (the writer switch
+  // is stage 3). SELF-CONTAINED (review 85 §3): every fixture is seeded here — v0 included — and
+  // encrypted at seed time with the same frozen primitives the unit fixtures pin, so a focused
+  // run needs no serial predecessor
   const SALT = 'BwcHBwcHBwcHBwcHBwcHBw=='
-  const KEY_B64 = 'QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8='
+  const KEY_BYTES = new Uint8Array(32).map((_, i) => 64 + i)
+  const KEY_B64 = 'QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=' // KEY_BYTES, canonical base64
+  const { encryptWithSecret, encryptV1Text, encryptV1Bytes, importV1Key } = await import('../../src/crypto.js')
+  const v1key = await importV1Key(KEY_BYTES)
+  const BYTES_PLAINTEXT = 'v1 bytes plaintext 424242'
+  const seededDocs = ['e2e-v0-item', 'e2e-v1-item', 'e2e-v1-store']
+  let ownerId: string | null = null
   await firestore()
     .collection('users')
     .doc(ALICE.uid)
     .set({ kdf: { v: 1, salt: SALT } }, { merge: true })
-  await firestore().collection('items').doc('e2e-v1-item').set({
-    user: ALICE.uid,
-    time: Date.now(),
-    hidden: false,
-    text: null,
-    attr: null,
-    cipher:
-      '1!b0b1b2b3b4b5b6b7b8b9babbeCL04Lk+yaMZzULKiKk6+td84UVkcbP8gb8QT+zU3/bzVOi99ACe9i/aRjc0/UjM3OFPVFHBJ4r61YYVnc6L+UXICmSmNheo8mcm',
-  })
+  await firestore()
+    .collection('items')
+    .doc('e2e-v0-item')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: false,
+      text: null,
+      attr: null,
+      cipher: await encryptWithSecret(
+        JSON.stringify({ text: '#e2e_v0item v0 fixture text 67890', attr: null }),
+        secretFor(ALICE, PHRASE)
+      ),
+    })
+  await firestore()
+    .collection('items')
+    .doc('e2e-v1-item')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: false,
+      text: null,
+      attr: null,
+      cipher: await encryptV1Text(JSON.stringify({ text: '#e2e_v1item decrypted-from-v1 xyz789', attr: null }), v1key),
+    })
   try {
     await withSecret(page)
     await page.evaluate(
@@ -877,26 +903,130 @@ test('MIXED CORPUS: a seeded v1 item decrypts through the application beside the
     )
     await loadUser(page, ALICE)
     await waitForApp(page)
-    // the v1 item decrypted through decryptItem -> ensureKdfBundle -> decryptV1Text
+    // the v1 item decrypted through decryptItem -> the session single-flight -> decryptV1Text
     await expect
       .poll(() => page.evaluate(() => window._item('#e2e_v1item', true)?.text ?? null), { timeout: 30_000 })
       .toContain('decrypted-from-v1 xyz789')
-    // and the v0 corpus still opens beside it (the frozen reader; same session, same secret)
+    // and the v0 corpus opens beside it (the frozen reader; same session, same secret)
     await expect
-      .poll(() => page.evaluate(() => window._item('#e2e_private', true)?.text ?? null))
-      .toContain('secret text 12345')
-    // no upgrade prompt appeared: the envelope satisfied the bundle without any derivation
+      .poll(() => page.evaluate(() => window._item('#e2e_v0item', true)?.text ?? null))
+      .toContain('v0 fixture text 67890')
+    // the reader session is observably READY (the rollout checklist reads this same hook)
+    expect(await page.evaluate(() => (window as any).__kdfReady)).toBe(true)
+    // v1 BYTES through the application's own wrapper (window._decrypt_bytes — review 85 §3): the
+    // same session key, the bytes AAD domain, no Storage emulator and no Argon
+    const cipherBytes = Array.from(await encryptV1Bytes(new TextEncoder().encode(BYTES_PLAINTEXT), v1key))
+    const decryptedBytes: number[] = await page.evaluate(
+      async arr => Array.from(await window._decrypt_bytes(new Uint8Array(arr))),
+      cipherBytes
+    )
+    expect(new TextDecoder().decode(new Uint8Array(decryptedBytes))).toBe(BYTES_PLAINTEXT)
+    // v1 HIDDEN adoption in the same session: an item owns a global store whose backing document
+    // is seeded as v1 ciphertext; after a reload the initialization scan must decrypt it through
+    // the session and expose the value (hidden state is an encrypted consumer too — review 85 §3)
+    await page.evaluate(() => void window._create('#e2e_v1store store owner'))
+    await expect.poll(() => savedId(page, '#e2e_v1store'), { timeout: 30_000 }).toBeTruthy()
+    ownerId = await savedId(page, '#e2e_v1store')
+    await firestore()
+      .collection('items')
+      .doc('e2e-v1-store')
+      .set({
+        user: ALICE.uid,
+        time: Date.now(),
+        hidden: true,
+        text: null,
+        attr: null,
+        cipher: await encryptV1Text(
+          JSON.stringify({
+            text: JSON.stringify({ name: `global_store_${ownerId}`, item: { marker: 'v1-hidden' } }),
+            attr: null,
+          }),
+          v1key
+        ),
+      })
+    await page.reload()
+    await waitForApp(page)
+    await expect
+      .poll(() => page.evaluate(() => (window._item('#e2e_v1store') as any)?._global_store?.marker ?? null), {
+        timeout: 30_000,
+      })
+      .toBe('v1-hidden')
+    // no upgrade prompt appeared anywhere in this session: the envelope satisfied every path
     expect(await page.getByText(/upgrade the encryption/).count()).toBe(0)
   } finally {
-    await firestore().collection('items').doc('e2e-v1-item').delete()
+    for (const id of seededDocs) await firestore().collection('items').doc(id).delete()
+    if (ownerId)
+      await firestore()
+        .collection('items')
+        .doc(ownerId)
+        .delete()
+        .catch(() => {})
+    // FieldValue.delete(), NOT `kdf: null` (review 85 §3): the field was originally ABSENT, and a
+    // null residue is exactly the present-invalid state the decoder rejects
     await firestore()
       .collection('users')
       .doc(ALICE.uid)
-      .set({ kdf: null }, { merge: true })
+      .update({ kdf: FieldValue.delete() })
       .catch(() => {})
     await page.evaluate(() => {
       localStorage.removeItem('mindpage_kdf')
       localStorage.removeItem('mindpage_key1')
     })
+  }
+})
+
+test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in; declining stays v0 and cheap', async ({
+  page,
+}) => {
+  // review 85 §2.1: an all-v0 account never decrypts a v1 cipher, so the upgrade must be driven
+  // by the post-auth reader trigger — this row proves profile provisioning (a REAL transaction
+  // through the app) and the prompt, then DECLINES: no derivation runs (no envelope appears), and
+  // the session stays fully usable on v0
+  await firestore()
+    .collection('items')
+    .doc('e2e-v0-trigger')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: false,
+      text: null,
+      attr: null,
+      cipher: await (async () => {
+        const { encryptWithSecret } = await import('../../src/crypto.js')
+        return encryptWithSecret(
+          JSON.stringify({ text: '#e2e_v0trigger still readable 13579', attr: null }),
+          secretFor(ALICE, PHRASE)
+        )
+      })(),
+    })
+  try {
+    await withSecret(page)
+    await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
+    await loadUser(page, ALICE)
+    // the trigger runs off the confirmed principal: profile provisions (absent -> candidate) and
+    // the one-time upgrade prompt appears WITHOUT any v1 ciphertext in the account
+    await expect(page.getByText(/upgrade the encryption/)).toBeVisible({ timeout: 60_000 })
+    await page.locator('.modal .button.cancel', { hasText: 'Not Now' }).click()
+    await waitForApp(page)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_v0trigger', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('still readable 13579')
+    // declined: nothing derived, nothing persisted, not reader-ready — and v0 unaffected
+    expect(await page.evaluate(() => [localStorage.getItem('mindpage_key1'), (window as any).__kdfReady])).toEqual([
+      null,
+      false,
+    ])
+    // provisioning DID commit a valid profile through the real transaction (the salt is public)
+    const kdf = (await firestore().collection('users').doc(ALICE.uid).get()).data()?.kdf
+    expect(kdf?.v).toBe(1)
+    expect(kdf?.salt).toMatch(/^[A-Za-z0-9+/]{21}[AQgw]==$/)
+  } finally {
+    await firestore().collection('items').doc('e2e-v0-trigger').delete()
+    await firestore()
+      .collection('users')
+      .doc(ALICE.uid)
+      .update({ kdf: FieldValue.delete() })
+      .catch(() => {})
+    await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
   }
 })

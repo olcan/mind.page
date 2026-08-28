@@ -325,6 +325,9 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
+    // v1 reader readiness (review 85 §2.1): the rollout checklist's per-device observable —
+    // true once this session holds the derived key (envelope restored or upgrade completed)
+    Object.defineProperty(window, '__kdfReady', { get: () => kdfSession.current() != null })
     // KDF smoke hook — LOCAL/TEST HOSTS ONLY (the same predicate the emulator connection uses):
     // production pages carry no benchmark surface. the invocation owns its worker and disposes it
     // in `finally` (review 82: no page-lifetime singleton). __kdfSmoke proves the worker path with
@@ -3289,9 +3292,10 @@
     // (can require dispatch on chrome if triggered from active element)
     setTimeout(() => (document.activeElement as HTMLElement).blur())
 
-    localStorage.removeItem('mindpage_secret') // also remove secret when signing out
-    clearKdfState() // and the v1 bundle, envelope, and any in-flight derivation — SYNCHRONOUSLY,
-    // before firebase signOut, so the clearing happens even if the network sign-out fails
+    // ALL key state — the in-memory v0 secret, the v1 session, both persisted stores, and any
+    // in-flight derivation (review 85 §2.5) — SYNCHRONOUSLY, before firebase signOut, so the
+    // clearing happens even if the network sign-out fails
+    clearAllKeyState('sign-out')
     // and every remembered foreign-code consent, plus the principal marker: an ANONYMOUS visit
     // is not gated, so owner code running there could otherwise write a consent key for the uid
     // that just signed out and have it honored when that account signs back in
@@ -3881,6 +3885,10 @@
     if (anonymous) throw Error('anonymous user can not have a secret phrase')
     if (readonly) throw Error('readonly mode should not require a secret phrase')
     if (signingOut) throw new Error('secret phrase cancelled') // do not re-prompt while signing out
+    // the publication fence (review 85 §2.5): captured BEFORE any prompt/fetch, checked before
+    // every publication below — a sign-out or principal change mid-flow (which advances the
+    // generation through clearAllKeyState) must not repopulate cleared key state
+    const generationAtEntry = kdfSession.generation()
     if (secret) return secret // already initialized from localStorage
     secret = localStorage.getItem('mindpage_secret')
     if (secret) return secret // retrieved from localStorage
@@ -3897,7 +3905,8 @@
       // server-confirmed ciphertext, but it registers nothing. holding the corpus across a fetch,
       // retry dialogs and a human-length phrase prompt blocked every other producer for as long as
       // the user took to type, and then registered PROMPT-AGED documents
-      const candidate = await resolveFixedOwnerSecret({
+      const kdfHandle = kdfSession.external()
+      const established = await resolveFixedOwnerSecret({
         fetchAccountDocs: async () =>
           (
             await getDocsFromServer(
@@ -3930,26 +3939,21 @@
           }),
         hashPhrase: phrase => hashSecretPhrase(phrase),
         signOut,
-        // v1 evidence support (stage 2): PROFILE FIRST — fetched or provisioned before deriving —
-        // then one worker derivation for the candidate phrase, disposed in finally. null when the
-        // owner flag is off, which keeps this path exactly v0 until rules are confirmed deployed
-        deriveV1Key: async phrase => {
-          if (!kdfEnabled()) return null
-          const snapshot = await getDocFromServer(kdfUserRef())
-          const state = decodeKdfMetadata(snapshot.data()?.kdf) // present-invalid throws, fail closed
-          const profile = state.kind == 'valid' ? state.profile : await provisionKdf()
-          const worker = createKdfWorker()
-          kdfActiveWorker = worker
-          try {
-            const keyBytes = await deriveKeyBytes(phrase, decodeSalt(profile.salt), profile.v, worker.derive)
-            return await importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
-          } finally {
-            worker.dispose()
-            if (kdfActiveWorker === worker) kdfActiveWorker = null
-          }
-        },
+        // the v1 half (stage 2) through the session's EXTERNAL handle (review 85 §2.3): the
+        // profile is fetched/provisioned BEFORE the resolver prompts (present-invalid fails
+        // closed before a phrase is collected), each candidate derivation runs in the session's
+        // single worker slot (disposed on clear), and adoption below is generation-fenced. the
+        // seam itself is undefined when the owner flag is off, which keeps this path exactly v0
+        // until rules are confirmed deployed
+        v1: kdfEnabled()
+          ? {
+              profile: () => kdfHandle.profile(),
+              derive: (phrase, profile) => kdfHandle.derive(phrase, profile),
+            }
+          : undefined,
       })
-      if (candidate != null) {
+      if (established != null) {
+        const { v0Secret: candidate, v1 } = established
         // THE ADOPTION ORDER IS THE CONTRACT, and it lives in src/secret.ts (table-tested): one
         // corpus operation for the fresh candidate-keyed scan and its registration, the batch
         // inside the fatal boundary, stop rechecked in the post-await continuation gap, and the
@@ -3964,6 +3968,22 @@
         // NOTE nor is `prefetchedHiddenDocs` assigned: this path runs from an encrypted save on an
         // already-initialized page, so the first snapshot was consumed long ago and a prefetch fact
         // recorded here could never reach the decision that reads it
+        // the CANDIDATE-KEYED row decrypt, under BOTH regimes (review 85 §2.3): `secret` is not
+        // published yet, so the shared wrappers cannot be used; v1 rows open under the resolver's
+        // derived key, and structural failures keep their taxonomy instead of blaming the phrase
+        const decryptCandidateCipher = (cipher: string): Promise<string> => {
+          switch (classifyTextCipher(cipher)) {
+            case 'v0':
+              return decryptWithSecret(cipher, candidate)
+            case 'v1':
+              if (!v1) throw new Error('v1 hidden data but v1 keys are unavailable (kdf disabled)')
+              return decryptV1Text(cipher, v1.key)
+            case 'unsupported-version':
+              throw new CipherError('unsupported-version', 'hidden item cipher version is not supported by this build')
+            case 'malformed-frame':
+              throw new CipherError('malformed-frame', 'hidden item cipher frame is malformed')
+          }
+        }
         return await adoptValidatedSecret<HiddenScanRow, CorpusRun>(candidate, {
           runCorpus: body => hiddenCorpus.run(body),
           scan: async run =>
@@ -3972,7 +3992,7 @@
                 hiddenScanDeps(run, async (data, id) => {
                   const item: Record<string, any> = Object.assign(data, { id })
                   if (!item.cipher) return item
-                  const decrypted = JSON.parse(await decryptWithSecret(item.cipher, candidate))
+                  const decrypted = JSON.parse(await decryptCandidateCipher(item.cipher))
                   return Object.assign(item, { text: decrypted.text, attr: decrypted.attr, cipher: null })
                 })
               )
@@ -3985,8 +4005,14 @@
           commit: batch => commitOrStop(batch, active => stopIngress('hidden candidate registration failed', active)),
           stopped: () => ingressStopped,
           publish: validated => {
+            // fenced (review 85 §2.5): a sign-out or principal change since this acquisition
+            // began must refuse publication rather than repopulate cleared state
+            if (kdfHandle.stale()) throw new Error('secret adoption superseded by sign-out or principal change')
             secret = validated
             localStorage.setItem('mindpage_secret', validated)
+            // the phrase-free v1 half becomes THE session (envelope persisted, bundle cached) —
+            // adopt() re-checks the fence itself
+            if (v1) kdfHandle.adopt(v1.salt, v1)
             return undefined
           },
         })
@@ -4048,8 +4074,17 @@
       signOut()
       throw new Error('secret phrase cancelled')
     }
-    secret = await hashSecretPhrase(phrase)
+    // fenced publication (review 85 §2.5) — checked before hashing too, since the hash reads the
+    // (possibly already reset) principal
+    if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
+    const validated = await hashSecretPhrase(phrase)
+    if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
+    secret = validated
     localStorage.setItem('mindpage_secret', secret)
+    // ONE PHRASE, BOTH REGIMES (review 85 §2.2): the v1 half derives from this same phrase — not
+    // awaited (a save must not wait on Argon), but REGISTERED synchronously, so a concurrent v1
+    // acquisition parked on this flight joins the offer instead of raising a second prompt
+    kdfSession.offerPhrase(phrase).catch(e => console.error('could not derive v1 keys from the entered phrase:', e))
     return secret
   }
 
@@ -4067,220 +4102,194 @@
   // overhead for binary can be ~60% cpu time (utf8 for ~50% larger buffers) and ~2x storage (utf8+base64)
   // session-secret wrappers over the aes-gcm module (src/crypto.ts): resolve (or initialize via
   // getSecretPhrase) the session secret, then delegate
-  // ---- the v1 KEY BUNDLE (component-owned; design: "Acquisition ownership") --------------------
-  // ONE single-flight per principal generation, beside the existing `secret` state — never a
-  // module singleton (SSR shares module state across requests; module state has no sign-out/HMR
-  // lifetime). All of this is inert until the OWNER FLAG below is set, which happens only after
-  // the new Firestore rules are deployed and confirmed (design: rollout order — a resident old
-  // tab's bare profile set is made harmless only by the live no-drop rule).
-  let kdfBundle: { uid: string; salt: string; key: CryptoKey } | null = null
-  let kdfBundlePromise: Promise<typeof kdfBundle> | null = null
-  let kdfGeneration = 0
-  let kdfActiveWorker: ReturnType<typeof createKdfWorker> | null = null
+  // ---- the v1 KEY SESSION (component-owned; design: "Acquisition ownership") ------------------
+  // ONE orchestrator (src/kdf_session.ts, table-tested) beside the existing `secret` state —
+  // never a module singleton (SSR shares module state across requests; module state has no
+  // sign-out/HMR lifetime). All of it is inert until the OWNER FLAG below is set, which happens
+  // only after the new Firestore rules are deployed and confirmed (design: rollout order — a
+  // resident old tab's bare profile set is made harmless only by the live no-drop rule).
   const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
-  // principal transitions and sign-out clear EVERYTHING v1: the bundle, the single-flight, the
-  // persisted envelope, and any in-flight derivation (disposed, so a late result cannot publish
-  // into a session that no longer exists)
-  function clearKdfState(): undefined {
-    kdfGeneration++
-    kdfBundle = null
-    kdfBundlePromise = null
-    localStorage.removeItem('mindpage_key1')
-    kdfActiveWorker?.dispose('principal change or sign-out')
-    kdfActiveWorker = null
-    return undefined
-  }
-  const kdfUserRef = () => doc(getFirestore(firebase), 'users', user.uid)
-  // the REAL transaction adapter: merge-set inside the transaction (a bare tx.set would be
-  // authorized on a kdf-less document while erasing the profile's other fields), candidate salt
-  // generated once outside the retrying body by the helper itself
-  const provisionKdf = () =>
-    provisionKdfProfile({
-      randomSalt: () => crypto.getRandomValues(new Uint8Array(16)),
-      runTransaction: body =>
-        runTransaction(getFirestore(firebase), tx =>
-          body({
-            get: async () => (await tx.get(kdfUserRef())).data(),
-            set: kdf => void tx.set(kdfUserRef(), { kdf }, { merge: true }),
-          })
-        ),
-    })
-  // acquires (or returns) the session's v1 bundle. PROFILE FIRST, then envelope, then — online,
-  // with metadata present and no matching envelope — the ONE-TIME upgrade prompt. Offline reuse
-  // is envelope-only (previously committed for this uid); no salt is ever invented offline. A
-  // device with only v0 state and no envelope continues v0 behavior without prompting when the
-  // prompt cannot validate (no stored v0 secret to compare)
-  async function ensureKdfBundle(): Promise<typeof kdfBundle> {
-    if (!kdfEnabled()) return null
+  // the v1 evidence that triggered acquisition this session, for validating a FIRST phrase (a
+  // v1-only corpus on a device with no stored v0 secret)
+  let kdfEvidence: { kind: 'text'; cipher: string } | { kind: 'bytes'; cipher: Uint8Array<ArrayBuffer> } | null = null
+  const kdfSession = createKdfSession({
+    uid: () => user?.uid,
+    enabled: kdfEnabled,
     // ELIGIBILITY: only the signed-in owner's own personal or fixed page. never anonymous,
     // readonly, or someone else's shared page (their corpus is not ours to derive against)
-    if (anonymous || readonly || !user?.uid || (fixed && sharer && sharer != user.uid)) return null
-    if (kdfBundle) return kdfBundle
-    if (kdfBundlePromise) return kdfBundlePromise
-    const generation = kdfGeneration
-    const acquisition = acquireKdfBundle(generation)
-    kdfBundlePromise = acquisition
+    eligible: () => !anonymous && !readonly && !!user?.uid && !(fixed && sharer && sharer != user.uid),
+    storedV0: () => localStorage.getItem('mindpage_secret'),
+    storedEnvelope: () => localStorage.getItem('mindpage_key1'),
+    persistEnvelope: encoded => void localStorage.setItem('mindpage_key1', encoded),
+    clearPersisted: () => {
+      localStorage.removeItem('mindpage_secret')
+      localStorage.removeItem('mindpage_key1')
+      return undefined
+    },
+    // the component's v0 single-flight, joined by the session before it would prompt (one phrase
+    // serves both regimes — see acquireV0Secret and the offerPhrase call in getSecretPhrase)
+    pendingV0: () => (secret && typeof secret.then == 'function' ? secret : null),
+    // ONE store per acquisition, bound to the uid at construction, so a principal change between
+    // a transaction's read and write cannot retarget the document (review 85 §2.5). MERGE-set
+    // inside the transaction (a bare tx.set would be authorized on a kdf-less document while
+    // erasing the profile's other fields); candidate salt generated once outside the retrying
+    // body by the helper itself
+    profileStore: uid => {
+      const ref = doc(getFirestore(firebase), 'users', uid)
+      return {
+        read: async () => (await getDocFromServer(ref)).data(),
+        runTransaction: body =>
+          runTransaction(getFirestore(firebase), tx =>
+            body({
+              get: async () => (await tx.get(ref)).data(),
+              set: kdf => void tx.set(ref, { kdf }, { merge: true }),
+            })
+          ),
+      }
+    },
+    randomSalt: () => crypto.getRandomValues(new Uint8Array(16)),
+    promptUpgrade: async () => {
+      await tick() // wait until modal is rendered on page
+      return modal.show({
+        content:
+          'Re-enter your <b>secret phrase</b> once to upgrade the encryption on this device (a one-time step per device).',
+        confirm: 'Upgrade',
+        cancel: 'Not Now',
+        input: '',
+        password: true,
+        username: user.email,
+        autocomplete: 'current-password',
+      })
+    },
+    promptPhrase: async () => {
+      await tick()
+      return modal.show({
+        content: 'Enter your secret phrase:',
+        confirm: 'Continue',
+        cancel: 'Not Now',
+        input: '',
+        password: true,
+        username: user.email,
+        autocomplete: 'current-password',
+      })
+    },
+    hashPhrase: phrase => hashSecretPhrase(phrase),
+    publishV0: v0secret => {
+      secret = v0secret
+      localStorage.setItem('mindpage_secret', v0secret)
+      return undefined
+    },
+    validateV1: async key => {
+      const evidence = kdfEvidence
+      if (!evidence) return false // acquire refuses to prompt without evidence, so normally unreachable
+      try {
+        if (evidence.kind == 'text') await decryptV1Text(evidence.cipher, key)
+        else await decryptV1Bytes(evidence.cipher, key)
+        return true
+      } catch (e) {
+        if (e instanceof CipherError && e.kind == 'authentication-failed') return false
+        throw e // structural failures cannot reach here (evidence was classified v1); integration errors propagate
+      }
+    },
+    createWorker: () => createKdfWorker(),
+    importKey: keyBytes => importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt']),
+    onWarn: message => void _modal_alert(message),
+  })
+  // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure,
+  // principal mismatch and external auth transitions all clear EVERYTHING — the in-memory v0
+  // secret (resetUser deliberately preserves it), the v1 session and its single-flights, the
+  // persisted v0 secret and v1 envelope, and any in-flight derivation (disposed, so a late
+  // result cannot publish into a session that no longer exists). the generation it advances also
+  // fences the v0 prompt tails, so a pending prompt cannot repopulate any of it afterwards
+  function clearAllKeyState(reason: string): undefined {
+    secret = null
+    kdfEvidence = null
+    kdfSession.clear(reason)
+    return undefined
+  }
+  // the FENCE-ONLY variant for the external-auth-transition reload: in-memory state dies with
+  // the reload anyway and must not publish past the fence meanwhile, but the PERSISTED stores
+  // belong to whatever tab changed the auth state — a same-account sign-in elsewhere (or an
+  // in-page token sign-in, which reloads through this same action) must not cost this device its
+  // stored keys; a different account is caught by the principal-mismatch check on the next load
+  function invalidateKeyState(reason: string): undefined {
+    secret = null
+    kdfEvidence = null
+    kdfSession.invalidate(reason)
+    return undefined
+  }
+  // the ONE v0 acquisition used by EVERY consumer (encrypt/decrypt for text and bytes, and hidden
+  // persistence — review 85 §2.7): single-flight via `secret`; a REJECTED flight clears its own
+  // slot (identity-matched) so a later consumer retries instead of replaying the rejection; and a
+  // pending SESSION acquisition — whose prompt publishes both regimes — is joined first, so two
+  // prompts never race (§2.2)
+  async function acquireV0Secret(new_phrase: boolean = false): Promise<string> {
+    if (!secret) {
+      const flight = kdfSession.pending()
+      // the session path reports its own failures; here a settled flight just ends the join
+      if (flight)
+        await flight.then(
+          () => undefined,
+          () => undefined
+        )
+    }
+    if (!secret) secret = getSecretPhrase(new_phrase)
+    const pending = secret
     try {
-      return await acquisition
+      return (secret = await Promise.resolve(pending))
     } catch (e) {
-      // a rejected acquisition clears ITS OWN slot (if still current), so the same principal can
-      // retry instead of replaying the rejection forever
-      if (kdfBundlePromise === acquisition) kdfBundlePromise = null
+      if (secret === pending) secret = null
       throw e
     }
-  }
-  async function acquireKdfBundle(generation: number): Promise<typeof kdfBundle> {
-    const uid = user.uid as string
-    const stale = () => generation != kdfGeneration || ingressStopped
-    // 1. the SERVER-AUTHORITATIVE PROFILE, first (the salt is public; no phrase crosses any
-    //    network retry). offline: fall back to the previously committed envelope alone
-    let profile: KdfProfile | null = null
-    try {
-      const snapshot = await getDocFromServer(kdfUserRef())
-      if (stale()) throw new Error('kdf acquisition superseded')
-      const state = decodeKdfMetadata(snapshot.data()?.kdf) // present-invalid THROWS (fail closed)
-      profile = state.kind == 'valid' ? state.profile : await provisionKdf()
-    } catch (e) {
-      if (stale()) throw e
-      // OFFLINE (or read failure): envelope-only reuse. the envelope was persisted only from a
-      // committed transaction, so its salt is a previously server-confirmed identity
-      const offline = decodeKeyEnvelopeOffline(uid)
-      if (!offline) throw e
-      const key = await importV1Key(offline.keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
-      if (stale()) throw new Error('kdf acquisition superseded')
-      return (kdfBundle = { uid, salt: offline.salt, key })
-    }
-    if (stale()) throw new Error('kdf acquisition superseded')
-    // 2. the envelope, AGAINST the confirmed profile: a valid envelope for a different salt is a
-    //    different provisioning epoch's key and is discarded
-    const restored = restoreKeyEnvelope(localStorage.getItem('mindpage_key1'), uid, profile)
-    if (restored) {
-      const key = await importV1Key(restored as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
-      if (stale()) throw new Error('kdf acquisition superseded')
-      return (kdfBundle = { uid, salt: profile.salt, key })
-    }
-    localStorage.removeItem('mindpage_key1') // whatever was there does not match this profile
-    // 3. the ONE-TIME upgrade prompt. validation is exact: the phrase's v0 hash must equal the
-    //    stored v0 secret — a returning device always has one; without one, this device stays on
-    //    v0 behavior (not v1-reader-ready) rather than guessing
-    const storedV0 = localStorage.getItem('mindpage_secret')
-    if (!storedV0) return null
-    await tick()
-    const phrase = await modal.show({
-      content:
-        'Re-enter your <b>secret phrase</b> once to upgrade the encryption on this device (a one-time step per device).',
-      confirm: 'Upgrade',
-      cancel: 'Not Now',
-      input: '',
-      password: true,
-      username: user.email,
-      autocomplete: 'current-password',
-    })
-    if (stale()) throw new Error('kdf acquisition superseded')
-    if (phrase == null) return null // declined: this device is not v1-reader-ready yet
-    if ((await hashSecretPhrase(phrase)) != storedV0) {
-      _modal_alert('That phrase does not match this device\'s stored secret. Encryption upgrade skipped.')
-      return null
-    }
-    if (stale()) throw new Error('kdf acquisition superseded')
-    // 4. derive in the acquisition-local worker; dispose in finally; generation-check after
-    const worker = createKdfWorker()
-    kdfActiveWorker = worker
-    let keyBytes: Uint8Array
-    try {
-      keyBytes = await deriveKeyBytes(phrase, decodeSalt(profile.salt), profile.v, worker.derive)
-    } finally {
-      worker.dispose()
-      if (kdfActiveWorker === worker) kdfActiveWorker = null
-    }
-    if (stale()) throw new Error('kdf acquisition superseded')
-    const key = await importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt'])
-    if (stale()) throw new Error('kdf acquisition superseded')
-    // 5. persist the phrase-free envelope LAST, only on this (still-current) success
-    localStorage.setItem('mindpage_key1', encodeKeyEnvelope({ uid, salt: profile.salt, keyBytes }))
-    return (kdfBundle = { uid, salt: profile.salt, key })
-  }
-  // offline decode WITHOUT a profile: the envelope's own validation (uid, version, canonical
-  // encodings) is the whole check, since the salt it names WAS server-confirmed when persisted
-  function decodeKeyEnvelopeOffline(uid: string) {
-    const stored = localStorage.getItem('mindpage_key1')
-    if (!stored) return null
-    // decodeKeyEnvelope validates shape and uid; no profile to compare against offline
-    const parsedProfile = (() => {
-      try {
-        const parsed = JSON.parse(stored)
-        return typeof parsed?.salt == 'string' ? { v: 1 as const, salt: parsed.salt } : null
-      } catch {
-        return null
-      }
-    })()
-    if (!parsedProfile) return null
-    const keyBytes = restoreKeyEnvelope(stored, uid, parsedProfile)
-    return keyBytes ? { salt: parsedProfile.salt, keyBytes } : null
   }
 
   async function encrypt(text: string): Promise<string> {
-    // WRITES STAY v0 in this phase (the writer switch is stage 3, behind the owner checklist)
-    if (!secret) secret = getSecretPhrase(true /* new_phrase */)
-    const pending = secret
-    try {
-      secret = await Promise.resolve(pending) // resolve secret if promise pending
-    } catch (e) {
-      if (secret === pending) secret = null // a rejected acquisition clears its own slot
-      throw e
-    }
-    return encryptWithSecret(text, secret)
+    // WRITES STAY v0 in this phase (the writer switch is stage 3, behind the DISTINCT
+    // mindpage_kdf_write flag and the owner checklist)
+    return encryptWithSecret(text, await acquireV0Secret(true /* new_phrase */))
   }
 
   // encrypt arbitrary bytes (uint8)
   // ideal for firebase storage of large binary data such as images
   async function encrypt_bytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
-    if (!secret) secret = getSecretPhrase(true /* new_phrase */)
-    const pending = secret
-    try {
-      secret = await Promise.resolve(pending)
-    } catch (e) {
-      if (secret === pending) secret = null
-      throw e
-    }
-    return encryptBytesWithSecret(bytes, secret)
+    return encryptBytesWithSecret(bytes, await acquireV0Secret(true /* new_phrase */))
   }
 
   async function decrypt(cipher: string): Promise<string> {
-    // v1 DECRYPTION AWAITS THE BUNDLE SINGLE-FLIGHT (design guarantee: no v1 ciphertext reaches a
-    // decrypt path before the bundle decision settles); v0-only paths proceed exactly as before,
-    // offline included
-    if (classifyTextCipher(cipher) == 'v1') {
-      const bundle = await ensureKdfBundle()
-      if (!bundle) throw new Error('v1 ciphertext but no v1 key on this device (upgrade pending)')
-      return decryptV1Text(cipher, bundle.key)
+    // EXHAUSTIVE dispatch on the structural classification (review 85 §2.6): structural failures
+    // keep their taxonomy and throw BEFORE any secret acquisition, v1 awaits the session
+    // single-flight, and ONLY v0 reaches the frozen v0 path
+    switch (classifyTextCipher(cipher)) {
+      case 'malformed-frame':
+        throw new CipherError('malformed-frame', 'ciphertext frame is malformed')
+      case 'unsupported-version':
+        throw new CipherError('unsupported-version', 'ciphertext version is not supported by this build')
+      case 'v1': {
+        kdfEvidence ??= { kind: 'text', cipher } // first-phrase validation evidence
+        const outcome = await kdfSession.acquire({ validationCipherKnown: true })
+        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        return decryptV1Text(cipher, outcome.keys.key)
+      }
+      case 'v0':
+        return decryptWithSecret(cipher, await acquireV0Secret())
     }
-    if (!secret) secret = getSecretPhrase()
-    const pending = secret
-    try {
-      secret = await Promise.resolve(pending) // resolve secret if promise pending
-    } catch (e) {
-      if (secret === pending) secret = null // a rejected acquisition clears its own slot
-      throw e
-    }
-    return decryptWithSecret(cipher, secret)
   }
 
   async function decrypt_bytes(cipher: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
-    if (classifyBytesCipher(cipher) == 'v1') {
-      const bundle = await ensureKdfBundle()
-      if (!bundle) throw new Error('v1 ciphertext but no v1 key on this device (upgrade pending)')
-      return decryptV1Bytes(cipher, bundle.key)
+    switch (classifyBytesCipher(cipher)) {
+      case 'malformed-frame':
+        throw new CipherError('malformed-frame', 'byte cipher frame is malformed')
+      case 'unsupported-version':
+        throw new CipherError('unsupported-version', 'byte cipher version is not supported by this build')
+      case 'v1': {
+        kdfEvidence ??= { kind: 'bytes', cipher }
+        const outcome = await kdfSession.acquire({ validationCipherKnown: true })
+        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
+        return decryptV1Bytes(cipher, outcome.keys.key)
+      }
+      case 'v0':
+        return decryptBytesWithSecret(cipher, await acquireV0Secret())
     }
-    if (!secret) secret = getSecretPhrase()
-    const pending = secret
-    try {
-      secret = await Promise.resolve(pending)
-    } catch (e) {
-      if (secret === pending) secret = null
-      throw e
-    }
-    return decryptBytesWithSecret(cipher, secret)
   }
 
   async function encryptItem(item) {
@@ -6545,6 +6554,7 @@
     decryptV1Text,
     decryptV1Bytes,
     importV1Key,
+    CipherError,
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
@@ -6580,8 +6590,7 @@
     type Delivery,
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
-  import { decodeKdfMetadata, decodeSalt, encodeKeyEnvelope, provisionKdfProfile, restoreKeyEnvelope, type KdfProfile } from '../kdf_profile'
-  import { deriveKeyBytes } from '../kdf'
+  import { createKdfSession } from '../kdf_session'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -7336,6 +7345,11 @@
     setTimeout(() => (document.activeElement as HTMLElement).blur())
 
     resetUser()
+    // starting a NEW sign-in wipes key state (review 85 §2.5): resetUser deliberately preserves
+    // the in-memory secret and both persisted stores, so account A's keys could otherwise
+    // survive into a pending-auth load of account B with the cached-uid mismatch check blinded
+    // (resetUser just removed the cached uid this check compares against)
+    clearAllKeyState('sign-in start')
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
     // same attributes as the marker (see setSessionMarker), so the clears above remove it
     document.cookie = '__session=signin_pending;max-age=600;path=/;samesite=lax'
@@ -7490,8 +7504,13 @@
           })
           if (action == 'ignore_transition') return // a sign-in/out flow in this tab ends in a reload
           if (action == 'reload') {
-            // auth state modified after this page initialized, e.g. sign-in/out on another tab
+            // auth state modified after this page initialized, e.g. sign-in/out on another tab.
+            // key state is FENCED before the reload (review 85 §2.5): a pending prompt or
+            // derivation must not publish into the dying page — while the persisted stores are
+            // left to the flow that changed the auth state (sign-out and sign-in clear them
+            // themselves; a same-account token sign-in legitimately keeps them)
             console.warn('auth state modified, reloading ...')
+            invalidateKeyState('external auth transition')
             location.reload()
             return
           }
@@ -7531,6 +7550,9 @@
           }
 
           if (action == 'signin_failed') {
+            // a cached user followed by confirmed auth-null lands here: whatever principal the
+            // cache promised is NOT signed in, so its key material must not remain (review 85 §2.5)
+            clearAllKeyState('sign-in failed')
             _modal(`MindPage could not sign you in to your Google account.`, {
               confirm: 'Try Again',
               cancel: 'Cancel',
@@ -7547,9 +7569,7 @@
             const cachedUid = user?.uid
             if (cachedUid && authUser?.uid && cachedUid != authUser.uid) {
               console.warn('cached identity does not match the signed-in account: clearing key material')
-              secret = null
-              localStorage.removeItem('mindpage_secret')
-              clearKdfState()
+              clearAllKeyState('principal mismatch')
             }
             resetUser() // clean up first
             user = authUser
@@ -7589,6 +7609,20 @@
               // name stays even though the value no longer means anything
               setSessionMarker()
             }
+
+            // READER-PHASE ACQUISITION TRIGGER (review 85 §2.1): the one-time per-device upgrade
+            // must not wait for a v1 ciphertext that stage 2 never writes — start the session
+            // acquisition as soon as the confirmed principal and effective mode are known. NOT
+            // awaited (v0/offline initialization must not block on it); ineligible modes return
+            // not-ready synchronously inside; readiness is observable via __kdfReady for the
+            // rollout checklist
+            if (!admin && kdfEnabled())
+              kdfSession.acquire().then(
+                outcome => {
+                  if (outcome.kind != 'ready') console.warn('kdf reader acquisition:', outcome.reason)
+                },
+                e => console.error('kdf reader acquisition failed:', e)
+              )
           }
 
           // note we initialize firebase even in anonymous mode, because (1) we can fallback to initial snapshot if items are not preloaded, and (2) we allow one-way sync of anonymous items from admin account
@@ -9183,13 +9217,12 @@
     encryptState: state => encryptItem(state),
     // acquired BEFORE a payload is built, so a phrase prompt (which can register hidden
     // documents, introducing a lower-id record) cannot invalidate a target chosen before it.
-    // this is the SAME single-flight acquisition the encryption path uses (see encrypt): the
-    // in-flight promise is published into `secret` first, so two name chains arriving together
-    // join one prompt instead of raising two independent account fetches
+    // this is the SAME single-flight acquisition every other consumer uses (acquireV0Secret —
+    // review 85 §2.7): two name chains arriving together join one prompt, and a REJECTED prompt
+    // clears its own slot instead of replaying the rejection on every hidden retry
     acquireSecret: async () => {
       if (anonymous) return
-      if (!secret) secret = getSecretPhrase(true /* new_phrase */)
-      secret = await Promise.resolve(secret)
+      await acquireV0Secret(true /* new_phrase */)
     },
     // a settled permission/validation failure means the change is NOT saved, while `owes()` is a
     // boolean and `isSaving(name)` has already cleared — so without this the only trace was a

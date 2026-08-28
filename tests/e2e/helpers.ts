@@ -25,6 +25,7 @@ declare global {
       unshare: (key: string) => void
     } | null
     _render_item: (item: unknown) => Promise<HTMLElement>
+    _decrypt_bytes: (cipher: Uint8Array) => Promise<Uint8Array> // the application bytes wrapper (v0 and v1)
     _create: (text: string, options?: object) => unknown
     _exists: (name: string) => boolean
     __items: {

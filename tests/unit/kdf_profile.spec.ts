@@ -20,7 +20,7 @@ test('metadata: only a MISSING field is absent; VALID adopts; present-but-invali
   expect(decodeKdfMetadata(undefined)).toEqual({ kind: 'absent' })
   // an explicit null is PRESENT: the rules reject it and forbid replacing it, so calling it
   // provisionable would send a write the server denies (review 84)
-  expect(() => decodeKdfMetadata(null)).toThrow()
+  expect(() => decodeKdfMetadata(null)).toThrow('kdf metadata is not a map') // not a destructuring TypeError
   expect(decodeKdfMetadata({ v: 1, salt: SALT_B64 })).toEqual({ kind: 'valid', profile: { v: 1, salt: SALT_B64 } })
   // present-but-invalid is NOT a third routable value: overwriting a salt this client merely
   // cannot read would strand every ciphertext derived from it

@@ -42,7 +42,9 @@ export function decodeKdfMetadata(kdf: unknown): ProfileState {
   // provisionable here would send a write the server denies and report a misleading permission
   // failure (review 84)
   if (kdf === undefined) return { kind: 'absent' }
-  if (typeof kdf != 'object' || Array.isArray(kdf)) throw new Error('kdf metadata is not a map')
+  // typeof null is 'object': name it explicitly, or the destructure below throws an unhelpful
+  // TypeError instead of the taxonomy's own message
+  if (kdf === null || typeof kdf != 'object' || Array.isArray(kdf)) throw new Error('kdf metadata is not a map')
   const { v, salt, ...rest } = kdf as Record<string, unknown>
   if (Object.keys(rest).length) throw new Error(`kdf metadata has unexpected fields: ${Object.keys(rest).join(',')}`)
   if (v !== 1) throw new Error(`unsupported kdf version: ${String(v)}`)

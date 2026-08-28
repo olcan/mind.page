@@ -195,7 +195,10 @@ test('an UNKNOWN collection with a matching user field is denied: new collection
 test('webhook collections: reads as documented, and a client user-field injection cannot write', async () => {
   await env.withSecurityRulesDisabled(async ctx => {
     await setDoc(doc(ctx.firestore(), 'webhooks/rules-w1'), { user: 'alice', hook: 1 })
-    await setDoc(doc(ctx.firestore(), 'github_webhooks/rules-g1'), { repo: 'r' })
+    // user: 'alice' INJECTED (review 85 §6): the OLD recursive rule granted writes for any
+    // document carrying user == uid, and a user-less seed would let that bypass regress unseen —
+    // the delete denial below must hold even when the field matches
+    await setDoc(doc(ctx.firestore(), 'github_webhooks/rules-g1'), { user: 'alice', repo: 'r' })
   })
   const alice = env.authenticatedContext('alice').firestore()
   await assertSucceeds(getDoc(doc(alice, 'webhooks/rules-w1')))
