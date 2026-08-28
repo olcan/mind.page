@@ -931,11 +931,13 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
   try {
     await withSecret(page)
     await page.evaluate(
-      ([uid, salt, key]) => {
+      ([uid, salt, key, v0]) => {
         localStorage.setItem('mindpage_kdf', 'on')
-        localStorage.setItem('mindpage_key1', JSON.stringify({ uid, v: 1, salt, key }))
+        // the envelope is BOUND to the v0 secret its establishment produced (review 88 §2.1):
+        // the session restores only the complete matched pair
+        localStorage.setItem('mindpage_key1', JSON.stringify({ uid, v: 1, salt, key, v0 }))
       },
-      [ALICE.uid, SALT, KEY_B64]
+      [ALICE.uid, SALT, KEY_B64, secretFor(ALICE, PHRASE)]
     )
     await loadUser(page, ALICE)
     await waitForApp(page)

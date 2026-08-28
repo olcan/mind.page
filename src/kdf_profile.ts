@@ -85,19 +85,28 @@ export async function provisionKdfProfile(deps: {
 }
 
 // ---- the persisted key envelope ----------------------------------------------------------------
-// localStorage form of the derived v1 key: ACCOUNT-BOUND, exact-shape, canonical encodings. a
-// mismatch on any field means the envelope is for some other account/profile and is DISCARDED —
-// never "close enough". decode validates; the caller compares uid and salt against the
-// server-confirmed profile before importing the key.
+// localStorage form of the derived v1 key: ACCOUNT-BOUND, exact-shape, canonical encodings, and
+// BOUND to the v0 secret the SAME establishment produced (review 88 §2.1) — a v1 key beside an
+// unrelated v0 hash must never read as a complete session. a mismatch on any field means the
+// envelope is for some other account/profile/establishment and is DISCARDED — never "close
+// enough". decode validates; the caller compares uid, salt AND the v0 binding against the
+// server-confirmed profile and current stores before importing the key.
 
-export type KeyEnvelope = { uid: string; v: 1; salt: string; key: string }
+export type KeyEnvelope = { uid: string; v: 1; salt: string; key: string; v0: string }
 
-export function encodeKeyEnvelope(envelope: { uid: string; salt: string; keyBytes: Uint8Array }): string {
+export function encodeKeyEnvelope(envelope: {
+  uid: string
+  salt: string
+  keyBytes: Uint8Array
+  v0Secret: string
+}): string {
   decodeSalt(envelope.salt) // the exported codec's invariant is self-contained: no invalid salt out
   if (envelope.keyBytes.length != KEY_BYTES) throw new Error(`key must be ${KEY_BYTES} bytes`)
+  if (typeof envelope.v0Secret != 'string' || !envelope.v0Secret)
+    throw new Error('envelope requires the established v0 secret')
   let binary = ''
   for (const byte of envelope.keyBytes) binary += String.fromCharCode(byte)
-  return JSON.stringify({ uid: envelope.uid, v: 1, salt: envelope.salt, key: btoa(binary) })
+  return JSON.stringify({ uid: envelope.uid, v: 1, salt: envelope.salt, key: btoa(binary), v0: envelope.v0Secret })
 }
 
 /** Decodes and validates a stored envelope; returns null for ANY defect (a stored value is never
@@ -105,7 +114,7 @@ export function encodeKeyEnvelope(envelope: { uid: string; salt: string; keyByte
 export function decodeKeyEnvelope(
   stored: string | null,
   expectedUid: string
-): { salt: string; keyBytes: Uint8Array } | null {
+): { salt: string; keyBytes: Uint8Array; v0Secret: string } | null {
   if (!stored) return null
   let parsed: unknown
   try {
@@ -114,11 +123,12 @@ export function decodeKeyEnvelope(
     return null
   }
   if (typeof parsed != 'object' || parsed === null || Array.isArray(parsed)) return null
-  const { uid, v, salt, key, ...rest } = parsed as Record<string, unknown>
+  const { uid, v, salt, key, v0, ...rest } = parsed as Record<string, unknown>
   if (Object.keys(rest).length) return null
   if (uid !== expectedUid) return null // account-bound: some other principal's envelope
   if (v !== 1) return null
   if (typeof salt != 'string' || !SALT_B64.test(salt)) return null
+  if (typeof v0 != 'string' || !v0) return null // unbound (pre-rollout) envelopes re-acquire
   if (typeof key != 'string') return null
   let keyBytes: Uint8Array
   try {
@@ -133,7 +143,7 @@ export function decodeKeyEnvelope(
   let binary = ''
   for (const byte of keyBytes) binary += String.fromCharCode(byte)
   if (btoa(binary) !== key) return null
-  return { salt, keyBytes }
+  return { salt, keyBytes, v0Secret: v0 }
 }
 
 /**
@@ -147,4 +157,6 @@ export function restoreKeyEnvelope(stored: string | null, expectedUid: string, p
   if (!decoded) return null
   if (decoded.salt !== profile.salt) return null
   return decoded.keyBytes
+  // NOTE the v0 binding is NOT compared here: the session owns that comparison (against both the
+  // current store and its generation baseline), since only it knows the trusted values
 }

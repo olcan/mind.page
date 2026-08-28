@@ -325,8 +325,9 @@
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
-    // v1 reader readiness (review 85 §2.1): the rollout checklist's per-device observable —
-    // true once this session holds the derived key (envelope restored or upgrade completed)
+    // v1 reader readiness (reviews 85-88): the rollout checklist's per-device observable — true
+    // only once this session holds the COMPLETE BOUND state (the v0 secret and the v1 key one
+    // establishment produced together)
     Object.defineProperty(window, '__kdfReady', { get: () => kdfSession.current() != null })
     // KDF smoke hook — LOCAL/TEST HOSTS ONLY (the same predicate the emulator connection uses):
     // production pages carry no benchmark surface. the invocation owns its worker and disposes it
@@ -3972,18 +3973,7 @@
               query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
             )
           ).docs,
-        promptPhrase: async () => {
-          await tick() // wait until modal is rendered on page
-          return modal.show({
-            content: 'Enter your secret phrase:',
-            confirm: 'Continue',
-            cancel: 'Sign Out',
-            input: '',
-            password: true,
-            username: user.email,
-            autocomplete: 'current-password',
-          })
-        },
+        promptPhrase: () => promptExistingPhraseFlow(),
         confirmRetry: async () =>
           (await modal.show({
             content: 'Could not verify your secret phrase against your account. Check your connection and try again.',
@@ -4067,43 +4057,66 @@
             // fenced (review 85 §2.5): a sign-out or principal change since this acquisition
             // began must refuse publication rather than repopulate cleared state
             if (kdfHandle.stale()) throw new Error('secret adoption superseded by sign-out or principal change')
-            secret = validated
-            localStorage.setItem('mindpage_secret', validated)
-            // the phrase-free v1 half becomes THE session (envelope persisted, bundle cached) —
-            // adopt() re-checks the fence itself
-            if (v1) kdfHandle.adopt(v1.salt, v1)
+            if (v1) {
+              // ONE SYNCHRONOUS COMPLETE PUBLICATION (review 88 §2.1): adopt publishes the v0
+              // half (through the session's publishV0, which sets `secret` and storage),
+              // advances the trust baseline, persists the BOUND envelope and caches the session
+              if (!kdfHandle.adopt(validated, v1.salt, v1))
+                throw new Error('secret adoption superseded by sign-out or principal change')
+            } else {
+              secret = validated
+              localStorage.setItem('mindpage_secret', validated)
+            }
             return undefined
           },
         })
       }
       new_phrase = true // no ciphertext anywhere (server-confirmed): a new (or unencrypted) account
+      // FIXED-EMPTY COMPLETE PATH (review 88 §2.2): the full-account scan above is the ONLY
+      // fixed-page emptiness authority (the fixed listener reads a shared subset, so the
+      // ordinary corpusConfirmedEmpty fact excludes fixed pages). with the kdf flag on, obtain
+      // the shared profile BEFORE the new-phrase prompt and adopt BOTH halves through the
+      // external handle — otherwise this path would be neither profile-first nor complete
+      if (kdfEnabled()) {
+        const profile = await kdfHandle.profile() // fail-closed on read failure; null if ineligible
+        if (profile) {
+          const chosen = await promptNewPhraseFlow()
+          if (chosen == null) {
+            signOut()
+            throw new Error('secret phrase cancelled')
+          }
+          const v0secret = await hashSecretPhrase(chosen)
+          if (kdfHandle.stale()) throw new Error('secret acquisition superseded')
+          const derived = await kdfHandle.derive(chosen, profile)
+          if (!kdfHandle.adopt(v0secret, profile.salt, derived))
+            throw new Error('secret acquisition superseded')
+          return v0secret // adopt published both halves (secret + storage + bound envelope)
+        }
+      }
     }
 
     // SESSION-OWNED ACQUISITION (review 87 §2.1/§2.3): with the kdf flag on, the session runs
-    // profile-first, selects and raises the ONE prompt (upgrade / existing-phrase /
-    // new-phrase-on-authoritatively-empty), validates the candidate against corpus evidence, and
-    // publishes BOTH regimes — the component no longer publishes a phrase and offers it after
+    // profile-first, selects and raises the prompt/establish loop (upgrade / existing-phrase /
+    // new-phrase-on-authoritatively-empty, re-prompting on a wrong required phrase), validates
+    // the candidate against corpus evidence, and publishes BOTH regimes
     let provisional = false
     if (kdfEnabled() && !fixed) {
       kdfSecretViaSession = true // exclude THIS flight from the session's pendingV0 join
+      let outcome: KdfAcquireOutcome
       try {
-        const outcome = await kdfSession.acquire()
-        if (outcome.kind == 'ready') {
-          const published = localStorage.getItem('mindpage_secret')
-          if (published) return published // publishV0 set both stores
-        } else if (outcome.reason == 'cancelled') {
-          // a REQUIRED session prompt was cancelled: the legacy contract (callers often swallow
-          // the rejection, which used to leave the page signed in and re-prompting per save)
-          if (!signingOut) signOut()
-          throw new Error('secret phrase cancelled')
-        }
+        outcome = mapKdfOutcome(await kdfSession.acquire())
       } finally {
         kdfSecretViaSession = false
       }
-      // any other not-ready (offline; account not yet validatable): the READER-PHASE PROVISIONAL
-      // FALLBACK — the legacy prompt below still serves the v0 regime, but its result stays IN
-      // MEMORY ONLY (review 87 §2.1): an unestablished candidate must never become trusted
-      // stored history. the session persists the real hash when it later establishes
+      if (outcome.kind == 'ready') return outcome.keys.v0Secret // the complete bound result
+      // the remaining not-ready states (offline; account not yet validatable): the PROVISIONAL
+      // fallback is READER-ONLY (review 88 §2.5) — an existing-phrase READ may continue, since
+      // the very next decrypt authenticates the candidate, but a NEW-PHRASE WRITE must not
+      // durably encrypt under an unestablished phrase and fails observably instead
+      if (new_phrase)
+        throw new Error(`cannot establish encryption keys for a new phrase yet (${outcome.reason})`)
+      // the fallback result stays IN MEMORY ONLY: an unestablished candidate never becomes
+      // trusted stored history; the session persists the real hash when it later establishes
       provisional = true
     }
 
@@ -4172,10 +4185,13 @@
     // fallback prompt), joined by the session before it would prompt — but NEVER the
     // session-owned acquisition itself, which is awaiting the session and would deadlock
     pendingV0: () => (!kdfSecretViaSession && secret && typeof secret.then == 'function' ? secret : null),
-    // AUTHORITATIVE EMPTINESS (review 87 §2.2): initialization completed (an empty CACHE
-    // snapshot never initializes — see snapshotDecision — so a completed empty init is
-    // server-confirmed) and no classified ciphertext was ever encountered. NEVER caller intent
-    corpusConfirmedEmpty: () => initialized && !kdfCipherSeen,
+    // AUTHORITATIVE EMPTINESS (reviews 87-88 §2.2): FULL-ACCOUNT initialization completed (an
+    // empty CACHE snapshot never initializes — see snapshotDecision — so a completed empty init
+    // is server-confirmed) with no classified ciphertext encountered. NEVER caller intent, and
+    // NEVER a fixed page: its listener reads a shared SUBSET of the account, so private
+    // ciphertext under the real phrase can exist outside everything it initialized from — the
+    // fixed emptiness authority is the resolver's full-account scan in getSecretPhrase
+    corpusConfirmedEmpty: () => !fixed && initialized && !kdfCipherSeen,
     // ONE store per acquisition, bound to the uid at construction, so a principal change between
     // a transaction's read and write cannot retarget the document (review 85 §2.5). MERGE-set
     // inside the transaction (a bare tx.set would be authorized on a kdf-less document while
@@ -4211,6 +4227,14 @@
     // REQUIRED prompts (cancel maps to the legacy sign-out contract at the call sites)
     promptPhrase: () => promptExistingPhraseFlow(),
     promptNewPhrase: () => promptNewPhraseFlow(),
+    // the blocking notice between required attempts (the same copy the fixed resolver shows)
+    reportWrongPhrase: async () => {
+      await modal.show({
+        content: "Secret phrase appears incorrect. Let's try again ...",
+        confirm: 'Try Again',
+        background: 'confirm',
+      })
+    },
     hashPhrase: phrase => hashSecretPhrase(phrase),
     publishV0: v0secret => {
       secret = v0secret
@@ -4245,6 +4269,24 @@
     importKey: keyBytes => importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt']),
     onWarn: message => void _modal_alert(message),
   })
+  // maps a session outcome for every consumer that can own or join a REQUIRED prompt (review 88
+  // §2.5): 'cancelled' signs out once and rejects with the legacy message (callers often swallow
+  // the rejection, which used to leave the page signed in and re-prompting per save); a
+  // cancelled/rejected LEGACY join and a superseding clear() are terminal for this attempt
+  // WITHOUT another prompt. every other outcome passes through
+  function mapKdfOutcome(outcome: KdfAcquireOutcome): KdfAcquireOutcome {
+    if (outcome.kind == 'not-ready') {
+      if (outcome.reason == 'cancelled') {
+        if (!signingOut) signOut()
+        throw new Error('secret phrase cancelled')
+      }
+      if (outcome.reason == 'v0 acquisition cancelled or failed')
+        // the legacy flight's own cancel already signed out; do not sign out twice or re-prompt
+        throw new Error('secret phrase cancelled')
+      if (outcome.reason == 'superseded') throw new Error('secret acquisition superseded')
+    }
+    return outcome
+  }
   // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure and
   // principal mismatch clear EVERYTHING — the in-memory v0 secret (resetUser deliberately
   // preserves it), the v1 session with its flights and evidence, the persisted v0 secret and v1
@@ -4277,12 +4319,16 @@
   async function acquireV0Secret(new_phrase: boolean = false): Promise<string> {
     if (!secret) {
       const flight = kdfSession.pending()
-      // the session path reports its own failures; here a settled flight just ends the join
-      if (flight)
-        await flight.then(
-          () => undefined,
-          () => undefined
+      if (flight) {
+        // the joined outcome is INSPECTED (review 88 §2.5): a cancelled required prompt or a
+        // superseding clear() must not fall through into a second prompt below. flight
+        // REJECTIONS have no session outcome and are their owner's to report
+        const outcome = await flight.then(
+          o => o,
+          () => null
         )
+        if (outcome) mapKdfOutcome(outcome)
+      }
     }
     if (!secret) secret = getSecretPhrase(new_phrase)
     const pending = secret
@@ -4318,15 +4364,8 @@
       case 'v1': {
         kdfCipherSeen = true
         kdfSession.noteEvidence('v1', { kind: 'text', cipher })
-        const outcome = await kdfSession.acquire()
-        if (outcome.kind != 'ready') {
-          // a cancelled REQUIRED session prompt keeps the legacy contract (see getSecretPhrase)
-          if (outcome.reason == 'cancelled') {
-            if (!signingOut) signOut()
-            throw new Error('secret phrase cancelled')
-          }
-          throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
-        }
+        const outcome = mapKdfOutcome(await kdfSession.acquire())
+        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Text(cipher, outcome.keys.key)
       }
       case 'v0':
@@ -4347,14 +4386,8 @@
       case 'v1': {
         kdfCipherSeen = true
         kdfSession.noteEvidence('v1', { kind: 'bytes', cipher })
-        const outcome = await kdfSession.acquire()
-        if (outcome.kind != 'ready') {
-          if (outcome.reason == 'cancelled') {
-            if (!signingOut) signOut()
-            throw new Error('secret phrase cancelled')
-          }
-          throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
-        }
+        const outcome = mapKdfOutcome(await kdfSession.acquire())
+        if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Bytes(cipher, outcome.keys.key)
       }
       case 'v0':
@@ -6662,7 +6695,7 @@
     type Delivery,
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
-  import { createKdfSession } from '../kdf_session'
+  import { createKdfSession, type KdfAcquireOutcome } from '../kdf_session'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'
@@ -7691,6 +7724,11 @@
             if (!admin && kdfEnabled())
               kdfSession.acquire().then(
                 outcome => {
+                  try {
+                    mapKdfOutcome(outcome) // review 88 §2.5: a cancelled required prompt signs out
+                  } catch {
+                    return // the mapper performed the sign-out; nothing more to do here
+                  }
                   if (outcome.kind != 'ready') console.warn('kdf reader acquisition:', outcome.reason)
                 },
                 e => console.error('kdf reader acquisition failed:', e)

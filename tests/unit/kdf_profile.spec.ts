@@ -39,9 +39,13 @@ test('metadata: only a MISSING field is absent; VALID adopts; present-but-invali
     expect(() => decodeKdfMetadata(bad), JSON.stringify(bad)).toThrow()
 })
 
-test('the envelope round-trips through its canonical encodings', () => {
-  const decoded = decodeKeyEnvelope(encodeKeyEnvelope({ uid: 'u', salt: SALT_B64, keyBytes: KEY }), 'u')
+test('the envelope round-trips through its canonical encodings, v0 binding included', () => {
+  const decoded = decodeKeyEnvelope(
+    encodeKeyEnvelope({ uid: 'u', salt: SALT_B64, keyBytes: KEY, v0Secret: 'v0:phrase' }),
+    'u'
+  )
   expect(decoded?.salt).toBe(SALT_B64)
+  expect(decoded?.v0Secret, 'the establishment that produced the key is carried with it').toBe('v0:phrase')
   expect(Array.from(decoded!.keyBytes)).toEqual(Array.from(KEY))
 })
 
@@ -98,7 +102,7 @@ test('provisioning FAILS on present-but-invalid metadata instead of overwriting 
 })
 
 test('the envelope decodes only its EXACT shape, bound to the expected uid', () => {
-  const good = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY })
+  const good = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY, v0Secret: 'v0:phrase' })
   expect(decodeKeyEnvelope(good, 'uid-1')).not.toBeNull()
   expect(decodeKeyEnvelope(good, 'uid-2'), "another principal's envelope is not usable").toBeNull()
   // ONE FIELD CHANGED PER ROW, from the parsed GOOD envelope — a table whose rows also carried a
@@ -119,6 +123,27 @@ test('the envelope decodes only its EXACT shape, bound to the expected uid', () 
       'uid-1'
     ),
     'missing key'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => delete p.v0),
+      'uid-1'
+    ),
+    'UNBOUND (pre-rollout) envelope: re-acquire rather than trust it (review 88 §2.1)'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.v0 = '')),
+      'uid-1'
+    ),
+    'empty v0 binding'
+  ).toBeNull()
+  expect(
+    decodeKeyEnvelope(
+      mutate(p => (p.v0 = 42)),
+      'uid-1'
+    ),
+    'non-string v0 binding'
   ).toBeNull()
   expect(
     decodeKeyEnvelope(
@@ -170,12 +195,15 @@ test('decodeSalt/encodeSalt: an independent literal vector, both directions', ()
   expect(() => decodeSalt('AAECAwQFBgcICQoLDA0ODx==')).toThrow() // same bytes, noncanonical
 })
 
-test('encodeKeyEnvelope refuses an invalid salt: the codec invariant is self-contained', () => {
-  expect(() => encodeKeyEnvelope({ uid: 'u', salt: 'not-canonical', keyBytes: KEY })).toThrow()
+test('encodeKeyEnvelope refuses an invalid salt or missing v0: the codec invariant is self-contained', () => {
+  expect(() => encodeKeyEnvelope({ uid: 'u', salt: 'not-canonical', keyBytes: KEY, v0Secret: 'v0:x' })).toThrow()
+  expect(() => encodeKeyEnvelope({ uid: 'u', salt: SALT_B64, keyBytes: KEY, v0Secret: '' })).toThrow(
+    'established v0 secret'
+  )
 })
 
 test('a valid envelope whose salt differs from the server profile is DISCARDED, never restored', () => {
-  const stored = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY })
+  const stored = encodeKeyEnvelope({ uid: 'uid-1', salt: SALT_B64, keyBytes: KEY, v0Secret: 'v0:phrase' })
   expect(restoreKeyEnvelope(stored, 'uid-1', { v: 1, salt: SALT_B64 })).not.toBeNull()
   const otherSalt = encodeSalt(new Uint8Array(16).fill(9))
   expect(

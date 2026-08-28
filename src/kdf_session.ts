@@ -1,39 +1,40 @@
 // The SESSION KEY ORCHESTRATOR (see the KDF migration design in the vault repo,
-// notes/design/mind_page_kdf_migration.md, and reviews 85-87): ONE component-owned state machine
+// notes/design/mind_page_kdf_migration.md, and reviews 85-88): ONE component-owned state machine
 // for everything between "signed-in principal confirmed" and "keys usable".
 //
 // Everything effectful is injected, so the ORCHESTRATION — profile-first, envelope-vs-profile,
-// the one prompt, corpus establishment, generation fencing at every effect boundary, and the
+// the prompt/establish loop, generation fencing at every effect boundary, and the
 // retryable-vs-declined distinction — is unit-tested in milliseconds.
 //
 // The rules it owns:
 // - the SESSION OWNS THE PROMPT AND BOTH PUBLICATIONS when the kdf flag is on (review 87 §2.1/
-//   §2.3): the component's v0 path calls acquire() instead of publishing a phrase first and
-//   offering it after. There is no offer pipeline. READY means COMPLETE — the v0 secret and the
-//   v1 key both established from one phrase; a v1 envelope alone is never a complete session;
-// - TRUST COMES FROM ESTABLISHMENT, not from mutable storage: a stored v0 hash is honored only
-//   if it predates this generation (the BASELINE, anchored before any prompt could have written
-//   it) — anything newer validates against corpus evidence like any other candidate. A newly
-//   CHOSEN phrase may seal without evidence only on an authoritative, generation-current
-//   "account has no ciphertext" fact from deps, never on caller intent (§2.2);
+//   §2.3): the component's v0 path calls acquire() instead of publishing a phrase first. READY
+//   means COMPLETE AND BOUND (review 88 §2.1): the persisted envelope carries the v0 hash the
+//   SAME establishment produced, and a restore requires the current store, the envelope binding
+//   and the generation BASELINE to agree — a v1 key beside an unrelated v0 hash, however stable,
+//   is never a session;
+// - TRUST COMES FROM ESTABLISHMENT, not from mutable storage: the baseline is anchored at the
+//   session's first touch of the generation (flights, evidence notes and the external handle all
+//   touch it before any prompt can run) and advances only through the session's own established
+//   publications. A newly CHOSEN phrase may seal without evidence only on an authoritative,
+//   generation-current "account has no ciphertext" fact from deps, never on caller intent
+//   (reviews 87-88 §2.2);
+// - a REQUIRED candidate that fails establishment RE-PROMPTS inside the flight (review 88 §2.4;
+//   the design's pre-establishment re-prompt policy), recomputing the prompt regime from current
+//   state each round; the optional trusted-hash upgrade stays one-shot with a no-nag decline,
+//   which also releases the collected evidence (§4);
+// - EVIDENCE is generation-bound, promotable, retained in full until establishment, and LIVE
+//   THROUGH establishment (review 88 §2.3): the verdict must be computed over rows still current
+//   after every await — the establishment attempts and the final derivation included — or a late
+//   v0 row could bypass the mixed-corpus exact-v0 requirement and a late cipher could slip past
+//   a fresh seal. establishCandidate (src/secret.ts) requires an exact v0 authentication
+//   whenever v0 evidence exists and iterates v1 evidence past corrupt rows; derivation is LAZY
+//   and memoized per candidate;
 // - ONE per-generation PROFILE flight, shared by proactive acquisition and the fixed-owner
-//   external handle; its try/catch covers ONLY the server read, so present-invalid metadata or a
-//   failed provisioning transaction FAILS rather than being mistaken for offline (review 85
-//   §2.4). Transient outcomes never wedge the generation, and a clear() between the read and
-//   provisioning stops before the transaction (review 87 §2.5);
-// - EVERY consumer of an online-confirmed profile runs the envelope comparison: a valid same-uid
-//   envelope naming a different salt is removed on the spot (§2.4), so a decline or an
-//   interrupted fixed-owner flow followed by an offline load cannot resurrect an obsolete key;
-// - EVIDENCE is generation-bound, promotable, and RETAINED IN FULL until establishment (§3.1):
-//   the component notes every classified cipher, and the flight consults the current collection
-//   at its decision points. establishCandidate (src/secret.ts) requires an exact v0
-//   authentication whenever v0 evidence exists and iterates v1 evidence past corrupt rows;
-//   derivation is LAZY — a candidate refused by v0 evidence or by no-evidence never pays Argon
-//   (§3.2), and at most one derivation runs per flight;
-// - a "not ready" outcome is NEVER cached. Declining the OPTIONAL upgrade prompt (a device with
-//   a trusted stored v0 secret) is a session no-nag marker; cancelling a REQUIRED prompt (first
-//   phrase or new phrase) is reported as 'cancelled' for the component's legacy sign-out
-//   contract; and
+//   external handle; transient outcomes never wedge the generation, and a clear() between the
+//   read and provisioning stops before the transaction. EVERY consumer of an online-confirmed
+//   profile runs the envelope comparison and removes a contradicted envelope on the spot
+//   (§2.4/§2.5 of review 87); and
 // - `clear()` advances the generation, forgets all state, disposes the in-flight worker, and
 //   clears persisted state through deps — for sign-out, sign-in start, confirmed-null and
 //   mismatch; `invalidate()` is the fence-only variant for the external-auth-transition reload.
@@ -49,7 +50,8 @@ import {
   type KdfProfile,
 } from './kdf_profile.js'
 
-export type KdfSessionKeys = { uid: string; salt: string; key: CryptoKey }
+// the COMPLETE session value: one establishment's v0 secret and v1 key together (review 88 §2.1)
+export type KdfSessionKeys = { uid: string; salt: string; key: CryptoKey; v0Secret: string }
 
 export type KdfAcquireOutcome =
   | { kind: 'ready'; keys: KdfSessionKeys }
@@ -87,15 +89,16 @@ export type KdfSessionDeps = {
   // confirmed obsolete (the v0 secret stays useful and stays put)
   clearEnvelope: () => undefined
   clearPersisted: () => undefined // both v0 and v1 persisted state
-  // the component's IN-FLIGHT LEGACY v0 acquisition (fixed-owner resolve, or the offline
+  // the component's IN-FLIGHT LEGACY v0 acquisition (fixed-owner resolve, or the provisional
   // fallback prompt), if one is pending; null otherwise — and NEVER the session-driven
   // acquisition itself (the component excludes it, or the join would deadlock on its own
   // flight). `acquire` joins it before prompting, since its settlement may adopt a session or
   // publish a v0 secret
   pendingV0: () => Promise<unknown> | null
-  // AUTHORITATIVE EMPTINESS (review 87 §2.2): true only when initialization has completed from a
-  // server-confirmed snapshot for this principal and no classified ciphertext was encountered —
-  // the one state where a newly CHOSEN phrase is definitionally correct. NEVER caller intent
+  // AUTHORITATIVE EMPTINESS (review 88 §2.2): true only when FULL-ACCOUNT initialization has
+  // completed from a server-confirmed snapshot for this principal and no classified ciphertext
+  // was encountered — the one state where a newly CHOSEN phrase is definitionally correct. NEVER
+  // caller intent, and NEVER a fixed page (its query is a shared subset of the account)
   corpusConfirmedEmpty: () => boolean
   // ONE profile store per profile flight, bound to the uid at construction: a principal change
   // between a transaction's read and write cannot retarget it (review 85 §2.5)
@@ -115,6 +118,9 @@ export type KdfSessionDeps = {
   // the REQUIRED new-phrase flow (authoritatively empty account): the component's choose+confirm
   // loop; phrase, or null on cancel
   promptNewPhrase: () => Promise<string | null>
+  // the blocking wrong-phrase notice shown between required attempts (the same policy the fixed
+  // resolver applies): resolves when the user acknowledges, and the flight re-prompts
+  reportWrongPhrase: () => Promise<void>
   // the v0 stored form of a phrase (uid-bound hash)
   hashPhrase: (phrase: string) => Promise<string>
   // publishes the v0 secret (in-memory `secret` and its persisted form) — called ONLY on
@@ -137,14 +143,15 @@ export function createKdfSession(deps: KdfSessionDeps) {
   let declined = false
   let activeWorker: { dispose: (reason?: string) => undefined } | null = null
   // classified corpus evidence for the current generation (see noteEvidence); retained in FULL
-  // until establishment (review 87 §3.1 — a bounded sample froze corrupt rows in), released on
-  // establishment and on forget()
+  // until establishment, with a REVISION so establishment can prove it validated the complete
+  // collection (review 88 §2.3). released on establishment, decline and forget()
   let evidence: CandidateEvidence<EvidenceCipher>[] = []
-  // the TRUST BASELINE (review 87 §2.1): the stored v0 hash as anchored before any prompt of
-  // this generation could have written storage, advanced only by the session's own established
-  // publications. a stored hash that differs from the baseline is a mid-generation write by an
-  // UNESTABLISHED flow and is never honored by the exact-hash comparison; it validates against
-  // corpus evidence like any other candidate
+  let evidenceRevision = 0
+  // the TRUST BASELINE (reviews 87-88 §2.1): the stored v0 hash as anchored at the session's
+  // first touch of this generation — before any prompt could have written storage — advanced
+  // only by the session's own established publications. a stored hash that differs from the
+  // baseline is a mid-generation write by an UNESTABLISHED flow and is never honored by the
+  // exact-hash comparison or an envelope restore
   let baselineV0: { value: string | null } | null = null
   // the ONE per-generation profile flight (kept across not-ready outcomes so a stronger caller
   // never pays a second read; transient outcomes clear it so nothing wedges)
@@ -153,8 +160,8 @@ export function createKdfSession(deps: KdfSessionDeps) {
   const notReady = (reason: string): KdfAcquireOutcome => ({ kind: 'not-ready', reason })
 
   // lazy first-touch anchor (never at construction: deps read origin storage, and the component
-  // constructs the session during SSR-safe setup). every flight and every noteEvidence touches
-  // it before any prompt of the generation can run
+  // constructs the session during SSR-safe setup). every flight, every evidence note and the
+  // external handle touch it before any prompt of the generation can run
   const baseline = () => (baselineV0 ??= { value: deps.storedV0() }).value
 
   // forget all in-memory state and advance the generation (shared by clear/invalidate; a plain
@@ -165,6 +172,7 @@ export function createKdfSession(deps: KdfSessionDeps) {
     inflight = null
     declined = false
     evidence = []
+    evidenceRevision++
     baselineV0 = null
     profileFlight = null
     activeWorker?.dispose(reason)
@@ -216,15 +224,23 @@ export function createKdfSession(deps: KdfSessionDeps) {
   }
 
   // EVERY consumer of an online-confirmed profile runs this comparison (review 87 §2.4): returns
-  // the envelope's key bytes when it matches the profile exactly, and REMOVES a valid same-uid
+  // the decoded envelope when its salt matches the profile exactly, and REMOVES a valid same-uid
   // envelope whose salt the profile contradicts — confirmed obsolete, it must not survive to be
   // resurrected by a later offline load
-  const confirmEnvelope = (uid: string, profile: KdfProfile): Uint8Array | null => {
+  const confirmEnvelope = (uid: string, profile: KdfProfile) => {
     const decoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
     if (!decoded) return null
-    if (decoded.salt === profile.salt) return decoded.keyBytes
+    if (decoded.salt === profile.salt) return decoded
     deps.clearEnvelope()
     return null
+  }
+
+  // a decoded envelope restores ONLY as the complete bound state (review 88 §2.1): the current
+  // store, the envelope's own v0 binding, and the generation baseline must all agree — a v1 key
+  // beside an unrelated or mid-generation v0 hash is not a session
+  const boundV0 = (decoded: { v0Secret: string }): string | null => {
+    const stored = deps.storedV0()
+    return stored && stored === decoded.v0Secret && stored === baseline() ? stored : null
   }
 
   // the ONE derivation seam: a per-call worker held in the SINGLE activeWorker slot (disposed in
@@ -245,6 +261,17 @@ export function createKdfSession(deps: KdfSessionDeps) {
     return { key: await deps.importKey(keyBytes), keyBytes }
   }
 
+  // seal one COMPLETE establishment: v0 published (and the baseline advanced — the session's own
+  // publication is trusted), then the BOUND phrase-free envelope, then the session value
+  const seal = (uid: string, salt: string, v0secret: string, derived: DerivedKey): KdfSessionKeys => {
+    deps.publishV0(v0secret)
+    baselineV0 = { value: v0secret }
+    deps.persistEnvelope(encodeKeyEnvelope({ uid, salt, keyBytes: derived.keyBytes, v0Secret: v0secret }))
+    evidence = []
+    evidenceRevision++
+    return (session = { uid, salt, key: derived.key, v0Secret: v0secret })
+  }
+
   const acquireOnce = async (myGeneration: number): Promise<KdfAcquireOutcome> => {
     const stale = () => myGeneration != generation
     void baseline() // anchor the trust baseline before anything of this flight can prompt
@@ -255,23 +282,25 @@ export function createKdfSession(deps: KdfSessionDeps) {
     const profile = await getProfile(uid)
     if (stale()) return notReady('superseded')
     if (!profile) {
-      // OFFLINE: reuse is COMPLETE-STATE ONLY (review 87 §2.1) — the previously committed
-      // envelope AND the stored v0 secret together. a lone envelope is not a session: reporting
-      // it ready would let the next save collect an unrelated phrase for the missing v0 half
+      // OFFLINE: reuse is COMPLETE-AND-BOUND only (review 88 §2.1) — the envelope, the current
+      // store and the baseline must name one establishment's v0 secret. anything less fails
+      // closed rather than splitting the regimes
       const decoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
-      if (!decoded || !deps.storedV0()) return notReady('offline without complete persisted keys')
+      const v0secret = decoded && boundV0(decoded)
+      if (!decoded || !v0secret) return notReady('offline without complete persisted keys')
       const key = await deps.importKey(decoded.keyBytes)
       if (stale()) return notReady('superseded')
-      return { kind: 'ready', keys: (session = { uid, salt: decoded.salt, key }) }
+      return { kind: 'ready', keys: (session = { uid, salt: decoded.salt, key, v0Secret: v0secret }) }
     }
 
-    // 2. the ENVELOPE, against the confirmed profile (mismatches are removed — §2.4). COMPLETE
-    //    state restores silently; an envelope without the v0 half falls through to establishment
+    // 2. the ENVELOPE, against the confirmed profile (mismatches are removed — review 87 §2.4),
+    //    restoring ONLY the complete bound state; anything else falls through to establishment
     const confirmed = confirmEnvelope(uid, profile)
-    if (confirmed && deps.storedV0()) {
-      const key = await deps.importKey(confirmed)
+    const confirmedV0 = confirmed && boundV0(confirmed)
+    if (confirmed && confirmedV0) {
+      const key = await deps.importKey(confirmed.keyBytes)
       if (stale()) return notReady('superseded')
-      return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key }) }
+      return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: confirmedV0 }) }
     }
 
     // 3. a PENDING component LEGACY v0 acquisition is joined before any prompt: a fixed-owner
@@ -290,92 +319,121 @@ export function createKdfSession(deps: KdfSessionDeps) {
       if (rejected) return notReady('v0 acquisition cancelled or failed')
     }
 
-    // 4. the ONE PROMPT, selected by state. the stored hash is TRUSTED only at the baseline
-    //    (§2.1): a value written mid-generation by an unestablished flow validates against
-    //    corpus evidence instead
-    const storedV0 = deps.storedV0()
-    const trustedV0 = storedV0 && storedV0 === baseline() ? storedV0 : null
-    let phrase: string | null
-    let required: boolean
-    let freshSeal = false
-    if (trustedV0) {
-      if (declined) return notReady('upgrade declined this session')
-      phrase = await deps.promptUpgrade()
-      required = false
-    } else if (evidence.length || storedV0) {
-      // corpus evidence exists (or an UNTRUSTED stored hash suggests ciphertext somewhere):
-      // the phrase is validated by establishment below
-      phrase = await deps.promptPhrase()
-      required = true
-    } else if (deps.corpusConfirmedEmpty()) {
-      // the ONE state where a newly chosen phrase is definitionally correct: the account is
-      // authoritatively empty (§2.2). evidence arriving before establishment still validates
-      phrase = await deps.promptNewPhrase()
-      required = true
-      freshSeal = true
-    } else {
-      return notReady('no evidence to validate a first phrase')
-    }
-    if (stale()) return notReady('superseded')
-    if (phrase == null) {
-      if (required) return notReady('cancelled')
-      declined = true
-      return notReady('declined')
-    }
-    const candidate = phrase
+    // 4. the PROMPT/ESTABLISH loop (review 88 §2.4): a required candidate that fails corpus
+    //    establishment re-prompts, with the regime recomputed from CURRENT state each round —
+    //    evidence may have arrived while a new-phrase prompt was open, and the next prompt must
+    //    then be the existing-phrase flow. the optional trusted-hash upgrade stays one-shot
+    while (true) {
+      const storedV0 = deps.storedV0()
+      const trustedV0 = storedV0 && storedV0 === baseline() ? storedV0 : null
+      let phrase: string | null
+      let required: boolean
+      let freshSeal = false
+      if (trustedV0) {
+        if (declined) return notReady('upgrade declined this session')
+        phrase = await deps.promptUpgrade()
+        required = false
+      } else if (evidence.length || storedV0) {
+        // corpus evidence exists (or an UNTRUSTED stored hash suggests ciphertext somewhere):
+        // the phrase is validated by establishment below
+        phrase = await deps.promptPhrase()
+        required = true
+      } else if (deps.corpusConfirmedEmpty()) {
+        // the ONE state where a newly chosen phrase is definitionally correct: the account is
+        // authoritatively empty (reviews 87-88 §2.2). evidence arriving before the seal still
+        // validates (the stable-revision loop below)
+        phrase = await deps.promptNewPhrase()
+        required = true
+        freshSeal = true
+      } else {
+        return notReady('no evidence to validate a first phrase')
+      }
+      if (stale()) return notReady('superseded')
+      if (phrase == null) {
+        if (required) return notReady('cancelled')
+        declined = true
+        // a declined upgrade also releases the collected evidence (review 88 §4): no future
+        // attempt of this generation can consume it before clear()/invalidate() resets both
+        evidence = []
+        evidenceRevision++
+        return notReady('declined')
+      }
+      const candidate = phrase
 
-    // 5. the candidate's v0 hash; the trusted-hash comparison is the cheap pre-derivation refusal
-    const v0secret = await deps.hashPhrase(candidate)
-    if (stale()) return notReady('superseded')
-    if (trustedV0 && v0secret != trustedV0) {
-      deps.onWarn('phrase does not match this device’s stored secret; upgrade skipped')
-      return notReady('wrong phrase')
-    }
+      // 5. the candidate's v0 hash; the trusted-hash comparison is the cheap one-shot refusal
+      const v0secret = await deps.hashPhrase(candidate)
+      if (stale()) return notReady('superseded')
+      if (trustedV0) {
+        if (v0secret != trustedV0) {
+          deps.onWarn('phrase does not match this device’s stored secret; upgrade skipped')
+          return notReady('wrong phrase')
+        }
+        const derived = await deriveKey(candidate, profile)
+        if (stale()) return notReady('superseded')
+        return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, derived) }
+      }
 
-    // 6. ESTABLISHMENT with LAZY derivation (§3.2): v0 attempts and the no-evidence refusal pay
-    //    no Argon; the first v1 attempt (or the final seal) derives exactly once
-    let derivedMemo: Promise<DerivedKey> | null = null
-    const deriveOnce = () => (derivedMemo ??= deriveKey(candidate, profile))
-    if (!trustedV0) {
-      const rows = evidence // consulted LIVE: rows noted after the flight began still count
-      if (rows.length) {
+      // 6. ESTABLISHMENT against a STABLE evidence revision (review 88 §2.3), with LAZY memoized
+      //    derivation (§3.2): the verdict — and the final derivation — must both complete with
+      //    the revision unchanged, or the policy re-runs over the fuller collection (memoized
+      //    attempts keep the re-run cheap). refusals pay no Argon
+      let derivedMemo: Promise<DerivedKey> | null = null
+      const deriveOnce = () => (derivedMemo ??= deriveKey(candidate, profile))
+      let outcome: 'established' | 'wrong' | 'no-evidence' | 'superseded' | undefined
+      while (outcome === undefined) {
+        const revision = evidenceRevision
+        const rows = evidence.slice()
+        if (!rows.length) {
+          if (!freshSeal) {
+            outcome = 'no-evidence'
+            break
+          }
+          await deriveOnce() // fresh seal: the derivation is the last await before publication
+          if (stale()) return notReady('superseded')
+          if (evidenceRevision != revision) continue // rows arrived during the seal derivation
+          outcome = 'established'
+          break
+        }
         const verdict = await establishCandidate(rows, {
           tryV0: row => deps.attemptV0(row, v0secret),
           tryV1: async row => deps.attemptV1(row, (await deriveOnce()).key),
         })
         if (stale()) return notReady('superseded')
+        if (evidenceRevision != revision) continue // late rows: revisit REGARDLESS of the verdict
         if (verdict.kind != 'established') {
-          deps.onWarn('phrase did not open the encrypted data; upgrade skipped')
-          return notReady('wrong phrase')
+          outcome = 'wrong'
+          break
         }
-      } else if (!freshSeal) {
-        // no evidence and not an authoritatively-fresh phrase: nothing can establish it
-        return notReady('no evidence to validate a first phrase')
+        await deriveOnce()
+        if (stale()) return notReady('superseded')
+        if (evidenceRevision != revision) continue // rows arrived during the final derivation
+        outcome = 'established'
       }
-    }
+      if (outcome == 'no-evidence') return notReady('no evidence to validate a first phrase')
+      if (outcome == 'wrong') {
+        deps.onWarn('phrase did not open the encrypted data')
+        await deps.reportWrongPhrase()
+        if (stale()) return notReady('superseded')
+        continue // re-prompt, regime recomputed from current state
+      }
 
-    // 7. derive (memoized — at most once per flight) and seal LAST, on this still-current
-    //    established success. the session owns BOTH publications: v0 before resolving (one
-    //    phrase, both regimes), the phrase-free envelope after
-    const derived = await deriveOnce()
-    if (stale()) return notReady('superseded')
-    deps.publishV0(v0secret)
-    baselineV0 = { value: v0secret } // the session's own established publication is trusted
-    deps.persistEnvelope(encodeKeyEnvelope({ uid, salt: profile.salt, keyBytes: derived.keyBytes }))
-    evidence = []
-    return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key: derived.key }) }
+      // 7. seal LAST, on this still-current established success (one publication point)
+      const derived = await deriveOnce()
+      if (stale()) return notReady('superseded')
+      return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, derived) }
+    }
   }
 
   return {
     /**
      * Notes one classified cipher as corpus evidence for candidate validation. Called by the
      * component's decrypt paths as ciphers stream through them; deduplicated, inert when
-     * disabled/ineligible/established, retained until establishment or forget. Evidence is
-     * generation-scoped and consulted LIVE by the acquisition flight (promotable — review 86
-     * §2.1).
+     * disabled/ineligible/established/declined, retained until establishment or forget.
+     * Evidence is generation-scoped, revisioned, and consulted LIVE by the acquisition flight —
+     * through establishment itself (review 88 §2.3).
      */
     noteEvidence(regime: 'v0' | 'v1', row: EvidenceCipher): undefined {
-      if (!deps.enabled() || !deps.eligible() || session) return undefined
+      if (!deps.enabled() || !deps.eligible() || session || declined) return undefined
       void baseline() // evidence implies ciphertext existed before any prompt of this generation
       const duplicate = evidence.some(
         e =>
@@ -384,16 +442,18 @@ export function createKdfSession(deps: KdfSessionDeps) {
             ? e.cipher.kind == 'text' && e.cipher.cipher == row.cipher
             : e.cipher.kind == 'bytes' && e.cipher.cipher === row.cipher)
       )
-      if (!duplicate) evidence.push({ kind: regime, cipher: row })
+      if (!duplicate) {
+        evidence.push({ kind: regime, cipher: row })
+        evidenceRevision++
+      }
       return undefined
     },
     /**
-     * Acquires (or returns) the session keys — READY always means the COMPLETE one-phrase state
-     * (v0 secret published and v1 key held). Single-flight; a `not-ready` outcome is NEVER
-     * retained — the slot clears on every settle — so a later call retries what a race made
-     * impossible earlier, and a flight in progress consults evidence that arrives after it
-     * began. When the kdf flag is on, THIS is the prompt owner: the component's v0 path calls it
-     * instead of prompting first and offering after (review 87 §2.1/§2.3).
+     * Acquires (or returns) the session keys — READY always means the COMPLETE BOUND one-phrase
+     * state (v0 secret published and v1 key held, from one establishment). Single-flight; a
+     * `not-ready` outcome is NEVER retained — the slot clears on every settle — and a flight in
+     * progress consults evidence that arrives after it began, through establishment itself. When
+     * the kdf flag is on, THIS is the prompt owner.
      */
     acquire(): Promise<KdfAcquireOutcome> {
       if (!deps.enabled()) return Promise.resolve(notReady('kdf disabled'))
@@ -410,12 +470,13 @@ export function createKdfSession(deps: KdfSessionDeps) {
     /**
      * The EXTERNAL acquisition handle for the fixed-owner resolver (src/secret.ts), whose prompt
      * is corpus-validated with retry/sign-out flows this session does not own. The handle binds
-     * the current generation and principal at creation; `profile` reuses the session's
-     * per-generation profile flight, runs BEFORE the resolver's prompt, and performs the same
-     * envelope confirmation as the ordinary path (review 87 §2.4); `derive` uses the session's
-     * single worker slot; `adopt` publishes externally derived keys only if no clear()
-     * intervened. Both effectful calls check the fence BEFORE starting work (§2.5), so a stale
-     * handle cannot begin a server read or a Worker under a new generation.
+     * the current generation and principal at creation; `profile` anchors the baseline, reuses
+     * the session's per-generation profile flight, runs BEFORE the resolver's prompt, and
+     * performs the same envelope confirmation as the ordinary path; `derive` uses the session's
+     * single worker slot; `adopt` is ONE SYNCHRONOUS COMPLETE PUBLICATION (review 88 §2.1) — it
+     * publishes the v0 half, advances the baseline, persists the BOUND envelope and caches the
+     * session, or refuses entirely if a clear() intervened. Both effectful calls check the fence
+     * BEFORE starting work, so a stale handle cannot begin a server read or a Worker.
      */
     external() {
       const myGeneration = generation
@@ -431,10 +492,11 @@ export function createKdfSession(deps: KdfSessionDeps) {
         profile: async (): Promise<KdfProfile | null> => {
           if (!deps.enabled() || !deps.eligible() || !boundUid) return null
           if (stale()) throw new Error('kdf acquisition superseded')
+          void baseline() // anchor before the generation's first external effect too
           const profile = await getProfile(boundUid)
           if (stale()) throw new Error('kdf acquisition superseded')
           if (!profile) throw new Error('could not read the account kdf profile')
-          confirmEnvelope(boundUid, profile) // §2.4: this consumer revokes mismatches too
+          confirmEnvelope(boundUid, profile) // review 87 §2.4: this consumer revokes mismatches too
           return profile
         },
         derive: async (phrase: string, profile: KdfProfile): Promise<DerivedKey> => {
@@ -443,16 +505,15 @@ export function createKdfSession(deps: KdfSessionDeps) {
           if (stale()) throw new Error('kdf acquisition superseded')
           return derived
         },
-        adopt: (salt: string, derived: DerivedKey): boolean => {
+        adopt: (v0secret: string, salt: string, derived: DerivedKey): boolean => {
           if (stale() || !boundUid) return false
-          deps.persistEnvelope(encodeKeyEnvelope({ uid: boundUid, salt, keyBytes: derived.keyBytes }))
-          session = { uid: boundUid, salt, key: derived.key }
-          evidence = []
+          seal(boundUid, salt, v0secret, derived)
           return true
         },
       }
     },
-    /** The current keys, if this session holds them (readiness observable for the checklist). */
+    /** The current keys, if this session holds them (readiness observable for the checklist —
+     * per the completeness rule, it attests BOTH bound regimes). */
     current: () => session,
     /** The in-flight acquisition, if any. */
     pending: () => inflight,
