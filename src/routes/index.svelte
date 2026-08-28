@@ -4291,12 +4291,14 @@
         // the legacy flight's own cancel already signed out; do not sign out twice or re-prompt
         throw new Error('secret phrase cancelled')
       if (outcome.reason == 'superseded') throw new Error('secret acquisition superseded')
-      // TERMINAL (review 90 §2.5): a binding conflict must not initiate another provisional
-      // prompt — this device holds keys from two different phrases, and every session consumer
+      // TERMINAL (reviews 90-91): a binding conflict or a representation that drifted under a
+      // cached session must not initiate another provisional prompt — every session consumer
       // fails observably. (existing preloaded v0 reads continue under the legacy key; the Stage 3
       // writer will consume the complete session, never the preloaded-string early return)
       if (outcome.reason == 'key binding conflict')
         throw new Error('encryption key state conflict: this device holds keys from two different phrases')
+      if (outcome.reason == 'representation changed')
+        throw new Error('encryption key state changed underneath this session: reload to re-evaluate')
     }
     return outcome
   }
@@ -7794,8 +7796,17 @@
                 outcome => {
                   try {
                     mapKdfOutcome(outcome) // review 88 §2.5: a cancelled required prompt signs out
-                  } catch {
-                    return // the mapper performed the sign-out; nothing more to do here
+                  } catch (e) {
+                    // cancellation/supersession need nothing more (the mapper signed out or the
+                    // state moved on) — but a TERMINAL key-state error must be REPORTED, not
+                    // swallowed (review 91 §3): the owner is looking at a device whose keys
+                    // disagree, and silence would read as a healthy not-ready
+                    const message = e instanceof Error ? e.message : String(e)
+                    if (message.startsWith('encryption key state')) {
+                      console.error('kdf reader acquisition:', message)
+                      _modal_alert(message)
+                    }
+                    return
                   }
                   if (outcome.kind != 'ready') console.warn('kdf reader acquisition:', outcome.reason)
                 },

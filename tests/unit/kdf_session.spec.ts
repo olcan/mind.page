@@ -18,8 +18,9 @@ const FAKE_KEY = { fake: 'CryptoKey' } as unknown as CryptoKey
 const reasonOf = (o: KdfAcquireOutcome) => (o.kind == 'not-ready' ? o.reason : o.kind)
 
 // a COMPLETE bound envelope (review 88 §2.1): the v0 hash of the establishment that derived it
-const envelope = (v0Secret = 'v0:phrase', salt = SALT_B64) =>
-  encodeKeyEnvelope({ uid: 'uid-1', salt, keyBytes: KEY, v0Secret })
+const OTHER_KEY = new Uint8Array(32).fill(9)
+const envelope = (v0Secret = 'v0:phrase', salt = SALT_B64, keyBytes: Uint8Array = KEY) =>
+  encodeKeyEnvelope({ uid: 'uid-1', salt, keyBytes, v0Secret })
 
 function harness(overrides: Partial<KdfSessionDeps> = {}) {
   const log: string[] = []
@@ -721,7 +722,7 @@ test('BOUND RESTORE: a v0 hash written MID-GENERATION cannot complete a parked r
   expect(h.log, 'it fell through to the REQUIRED prompt instead').toContain('promptPhrase')
 })
 
-test('external adopt() is ONE COMPLETE PUBLICATION: v0 published, baseline advanced, envelope bound (review 88 §2.1)', async () => {
+test('external adopt() is ONE COMPLETE PUBLICATION: v0 published, envelope bound, session cached (review 88 §2.1)', async () => {
   const h = harness()
   const handle = h.session.external()
   const profile = await handle.profile()
@@ -920,6 +921,114 @@ test('BOUND RESTORE is rechecked after importKey: a store changed mid-import is 
   releaseImport2(FAKE_KEY)
   expect(reasonOf(await flight2)).toBe('offline without complete persisted keys')
   expect(h2.session.current()).toBeNull()
+})
+
+test('ENVELOPE IDENTITY: a same-v0 KEY swap across a parked import is never cached (review 91 §2.1)', async () => {
+  // E1(A,K1) is being restored; E2(A,K2) replaces it mid-import. the v0 binding still matches,
+  // but the imported key is not what storage promises — nothing may cache, and the fallthrough
+  // candidate (deriving K1) refuses at the key-aware seal guard
+  let imports = 0
+  let releaseImport: (k: CryptoKey) => void = () => {}
+  const h = harness({
+    importKey: () =>
+      ++imports == 1 ? new Promise<CryptoKey>(resolve => (releaseImport = resolve)) : Promise.resolve(FAKE_KEY),
+  })
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, KEY)) // E1: key K1
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0)) // parked inside importKey(K1)
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, OTHER_KEY)) // E2: same v0, key K2
+  releaseImport(FAKE_KEY)
+  expect(reasonOf(await flight), 'K1 beside persisted K2 is a contradiction').toBe('key binding conflict')
+  expect(h.session.current(), 'no mismatched key cached').toBeNull()
+  expect(JSON.parse(h.storage.get('env')!).key, 'E2 preserved').toBe(JSON.parse(envelope('v0:phrase', SALT_B64, OTHER_KEY)).key)
+})
+
+test('ENVELOPE IDENTITY offline: a same-v0 salt/key replacement across a parked import fails closed (review 91 §2.1)', async () => {
+  let imports = 0
+  let releaseImport: (k: CryptoKey) => void = () => {}
+  const h = harness({
+    importKey: () =>
+      ++imports == 1 ? new Promise<CryptoKey>(resolve => (releaseImport = resolve)) : Promise.resolve(FAKE_KEY),
+    profileStore: () => ({
+      read: async () => {
+        throw new Error('offline')
+      },
+      runTransaction: async () => {
+        throw new Error('unreachable')
+      },
+    }),
+  })
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, KEY))
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0))
+  h.storage.set('env', envelope('v0:phrase', OTHER_SALT_B64, OTHER_KEY)) // same v0, new salt AND key
+  releaseImport(FAKE_KEY)
+  expect(reasonOf(await flight)).toBe('offline without complete persisted keys')
+  expect(h.session.current()).toBeNull()
+})
+
+test('the SEAL/ADOPT guard is key-aware: K1 cannot overwrite a same-v0 K2 envelope (review 91 §2.1)', async () => {
+  const h = harness()
+  const handle = h.session.external()
+  const profile = await handle.profile()
+  const derived = await handle.derive('phrase', profile!) // keyBytes K1 (harness KEY)
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase', SALT_B64, OTHER_KEY)) // same v0, key K2
+  expect(handle.adopt('v0:phrase', SALT_B64, derived), 'contradictory key representation').toBe(false)
+  expect(h.log.filter(l => l.startsWith('publishV0') || l == 'persistEnvelope'), 'nothing adopted').toEqual([])
+  expect(h.session.current()).toBeNull()
+})
+
+test('CACHED READINESS is validated against the current representation (review 91 §2.2)', async () => {
+  // (a) a full B/K2 replacement under a ready A/K1 session
+  const h = harness()
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase'))
+  expect((await h.session.acquire()).kind).toBe('ready')
+  h.storage.set('v0', 'v0:other')
+  h.storage.set('env', envelope('v0:other', SALT_B64, OTHER_KEY))
+  expect(h.session.current(), 'readiness is false the moment it is polled').toBeNull()
+  expect(reasonOf(await h.session.acquire()), 'the cached call fails closed').toBe('representation changed')
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt from the cached-return path').toEqual([])
+  expect(h.storage.get('v0'), 'stores preserved').toBe('v0:other')
+  // within THIS generation the drifted pair stays untrusted (the baseline still names A) —
+  // only a fresh generation (reload / auth transition) re-anchors on the surviving stores and
+  // may legitimately restore the complete bound B/K2 state
+  expect(reasonOf(await h.session.acquire()), 'B is mid-generation: not silently adopted').toBe(
+    'no evidence to validate a first phrase'
+  )
+  h.session.invalidate('cross-tab change noticed')
+  const later = await h.session.acquire()
+  expect(later.kind == 'ready' && later.keys.v0Secret, 'the fresh generation restores B').toBe('v0:other')
+
+  // (b) a key-only swap (same salt and v0) also invalidates readiness
+  const h2 = harness()
+  h2.storage.set('v0', 'v0:phrase')
+  h2.storage.set('env', envelope('v0:phrase'))
+  expect((await h2.session.acquire()).kind).toBe('ready')
+  h2.storage.set('env', envelope('v0:phrase', SALT_B64, OTHER_KEY))
+  expect(h2.session.current()).toBeNull()
+  expect(reasonOf(await h2.session.acquire())).toBe('representation changed')
+
+  // (c) either persisted half disappearing invalidates readiness with no prompt or publication
+  const h3 = harness()
+  h3.storage.set('v0', 'v0:phrase')
+  h3.storage.set('env', envelope('v0:phrase'))
+  expect((await h3.session.acquire()).kind).toBe('ready')
+  h3.storage.delete('v0')
+  expect(h3.session.current()).toBeNull()
+  expect(reasonOf(await h3.session.acquire())).toBe('representation changed')
+  expect(h3.log.filter(l => l.startsWith('prompt') || l.startsWith('publishV0')), 'zero effects').toEqual([])
+})
+
+test('a PRESENT empty-string store is a value, not absence: it conflicts with a bound envelope (review 91 §3)', async () => {
+  const h = harness()
+  h.storage.set('env', envelope('v0:phrase'))
+  h.storage.set('v0', '')
+  expect(reasonOf(await h.session.acquire())).toBe('key binding conflict')
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt over the contradiction').toEqual([])
 })
 
 test('disabled and ineligible are not-ready without any effect', async () => {

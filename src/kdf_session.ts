@@ -156,8 +156,33 @@ export function createKdfSession(deps: KdfSessionDeps) {
   // the ONE per-generation profile flight (kept across not-ready outcomes so a stronger caller
   // never pays a second read; transient outcomes clear it so nothing wedges)
   let profileFlight: { generation: number; uid: string; promise: Promise<ProfileResolution> } | null = null
+  // the SEMANTIC ENVELOPE IDENTITY behind the cached session (review 91): salt, v0 binding and
+  // the exact key bytes the session's key was imported/derived from. a cached ready result is
+  // returned only while the CURRENT persisted representation still names this identity
+  let sessionIdentity: { salt: string; v0Secret: string; keyBytes: Uint8Array } | null = null
 
   const notReady = (reason: string): KdfAcquireOutcome => ({ kind: 'not-ready', reason })
+
+  const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length == b.length && a.every((v, i) => v == b[i])
+
+  // does the CURRENT persisted representation (store + decoded envelope) still name this exact
+  // identity? synchronous and read-only — used against the pre-import identity after importKey
+  // and against the session identity before any cached ready result (review 91 §§2.1-2.2)
+  const representationNames = (uid: string, identity: { salt: string; v0Secret: string; keyBytes: Uint8Array }) => {
+    const stored = deps.storedV0()
+    if (stored == null || stored !== identity.v0Secret) return false
+    const decoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
+    if (!decoded || decoded.salt !== identity.salt || decoded.v0Secret !== identity.v0Secret) return false
+    return bytesEqual(decoded.keyBytes, identity.keyBytes)
+  }
+
+  // the cached session, VALIDATED against the current representation — readiness becomes false
+  // the moment the persisted state drifts (another tab swapped or removed a half). the caller
+  // fails closed; a LATER call re-evaluates the new representation from scratch
+  const cachedReady = (): KdfSessionKeys | null => {
+    if (!session || !sessionIdentity) return null
+    return representationNames(session.uid, sessionIdentity) ? session : null
+  }
 
   // lazy first-touch anchor (never at construction: deps read origin storage, and the component
   // constructs the session during SSR-safe setup). every flight, every evidence note and the
@@ -169,6 +194,7 @@ export function createKdfSession(deps: KdfSessionDeps) {
   const forget = (reason: string) => {
     generation++
     session = null
+    sessionIdentity = null
     inflight = null
     declined = false
     evidence = []
@@ -267,16 +293,27 @@ export function createKdfSession(deps: KdfSessionDeps) {
   // a current same-profile envelope's binding differs from the current stored v0 (when present)
   // or from C. the baseline decides TRUST; it never dissolves a contradiction — the only allowed
   // divergence-from-baseline is stored == envelope == candidate (all naming one establishment)
-  const representationConflict = (uid: string, salt: string, candidate: string | null): boolean => {
+  const representationConflict = (
+    uid: string,
+    salt: string,
+    candidate: string | null,
+    candidateKey?: Uint8Array
+  ): boolean => {
+    // `!= null`, not truthiness (review 91 §3): a PRESENT empty string is a contradictory value,
+    // not absence — the fail-closed rule covers it
     const stored = deps.storedV0()
     const decoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
     const sameProfile = decoded && decoded.salt === salt ? decoded : null
     if (candidate != null) {
-      if (stored && stored !== candidate) return true
+      if (stored != null && stored !== candidate) return true
       if (sameProfile && sameProfile.v0Secret !== candidate) return true
+      // the KEY representation too (review 91 §2.1): a same-v0 envelope holding DIFFERENT key
+      // bytes than the candidate's derivation is contradictory — one cannot open what the other
+      // writes — even though the v0-only comparison accepts it
+      if (sameProfile && candidateKey && !bytesEqual(sameProfile.keyBytes, candidateKey)) return true
       return false
     }
-    return !!(sameProfile && stored && stored !== sameProfile.v0Secret)
+    return !!(sameProfile && stored != null && stored !== sameProfile.v0Secret)
   }
 
   // seal one COMPLETE establishment — REFUSING (null) when the current representation
@@ -285,12 +322,13 @@ export function createKdfSession(deps: KdfSessionDeps) {
   // v0 published (and the baseline advanced — the session's own publication is trusted), then
   // the BOUND phrase-free envelope, then the session value
   const seal = (uid: string, salt: string, v0secret: string, derived: DerivedKey): KdfSessionKeys | null => {
-    if (representationConflict(uid, salt, v0secret)) return null
+    if (representationConflict(uid, salt, v0secret, derived.keyBytes)) return null
     deps.publishV0(v0secret)
     baselineV0 = { value: v0secret }
     deps.persistEnvelope(encodeKeyEnvelope({ uid, salt, keyBytes: derived.keyBytes, v0Secret: v0secret }))
     evidence = []
     evidenceRevision++
+    sessionIdentity = { salt, v0Secret: v0secret, keyBytes: derived.keyBytes }
     return (session = { uid, salt, key: derived.key, v0Secret: v0secret })
   }
 
@@ -312,13 +350,13 @@ export function createKdfSession(deps: KdfSessionDeps) {
       if (!decoded || !v0secret) return notReady('offline without complete persisted keys')
       const key = await deps.importKey(decoded.keyBytes)
       if (stale()) return notReady('superseded')
-      // the binding is PROMPT-AGED across the import (review 90 §2.2): the CURRENT stores must
-      // still name the same establishment, or nothing is cached
-      const redecoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
-      const rebound = redecoded && boundV0(redecoded)
-      if (!redecoded || !rebound || redecoded.v0Secret !== decoded.v0Secret)
-        return notReady('offline without complete persisted keys')
-      return { kind: 'ready', keys: (session = { uid, salt: redecoded.salt, key, v0Secret: rebound }) }
+      // the representation is PROMPT-AGED across the import (reviews 90-91 §2.2/§2.1): the
+      // CURRENT stores must still name the EXACT pre-import identity — salt, v0 binding and key
+      // bytes — or the imported key is not what storage promises and nothing is cached
+      const identity = { salt: decoded.salt, v0Secret: decoded.v0Secret, keyBytes: decoded.keyBytes }
+      if (!representationNames(uid, identity)) return notReady('offline without complete persisted keys')
+      sessionIdentity = identity
+      return { kind: 'ready', keys: (session = { uid, salt: decoded.salt, key, v0Secret: decoded.v0Secret }) }
     }
 
     // 2. the ENVELOPE, against the confirmed profile (mismatches are removed — review 87 §2.4),
@@ -328,13 +366,15 @@ export function createKdfSession(deps: KdfSessionDeps) {
     if (confirmed && confirmedV0) {
       const key = await deps.importKey(confirmed.keyBytes)
       if (stale()) return notReady('superseded')
-      // the binding is PROMPT-AGED across the import (review 90 §2.2): re-evaluate the CURRENT
-      // representation before caching — a changed store falls through to the conflict and
-      // establishment decisions below instead of returning ready beside a contradictory store
-      const recheck = confirmEnvelope(uid, profile)
-      const recheckV0 = recheck && boundV0(recheck)
-      if (recheck && recheckV0 && recheck.v0Secret === confirmed.v0Secret)
-        return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: recheckV0 }) }
+      // the representation is PROMPT-AGED across the import (reviews 90-91): the CURRENT stores
+      // must still name the EXACT pre-import identity — salt, v0 binding AND key bytes (a
+      // same-v0 envelope swap must not leave K1 in memory beside persisted K2). anything else
+      // falls through to the conflict and establishment decisions below
+      const identity = { salt: profile.salt, v0Secret: confirmed.v0Secret, keyBytes: confirmed.keyBytes }
+      if (representationNames(uid, identity)) {
+        sessionIdentity = identity
+        return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: confirmed.v0Secret }) }
+      }
     }
     // a BINDING CONFLICT is terminal, never "recovered" (reviews 89-90 §2.1): a same-profile
     // envelope bound to establishment A beside ANY current differing stored hash B means v1(A)
@@ -357,7 +397,14 @@ export function createKdfSession(deps: KdfSessionDeps) {
         () => void (rejected = true)
       )
       if (stale()) return notReady('superseded')
-      if (session) return { kind: 'ready', keys: session } // established meanwhile (e.g. fixed adoption)
+      if (session) {
+        // established meanwhile (e.g. fixed adoption) — validated like every cached return
+        const cached = cachedReady()
+        if (cached) return { kind: 'ready', keys: cached }
+        session = null
+        sessionIdentity = null
+        return notReady('representation changed')
+      }
       if (rejected) return notReady('v0 acquisition cancelled or failed')
     }
 
@@ -504,7 +551,17 @@ export function createKdfSession(deps: KdfSessionDeps) {
     acquire(): Promise<KdfAcquireOutcome> {
       if (!deps.enabled()) return Promise.resolve(notReady('kdf disabled'))
       if (!deps.eligible()) return Promise.resolve(notReady('ineligible page mode'))
-      if (session) return Promise.resolve({ kind: 'ready', keys: session })
+      if (session) {
+        // a cached ready result is VALIDATED against the current representation (review 91
+        // §2.2): on drift the cache is dropped and THIS call fails closed — never silently
+        // returning the old keys, adopting the replacement, or prompting over it. a later call
+        // re-evaluates from scratch
+        const cached = cachedReady()
+        if (cached) return Promise.resolve({ kind: 'ready', keys: cached })
+        session = null
+        sessionIdentity = null
+        return Promise.resolve(notReady('representation changed'))
+      }
       if (inflight) return inflight
       const myGeneration = generation
       const attempt = acquireOnce(myGeneration).finally(() => {
@@ -559,9 +616,11 @@ export function createKdfSession(deps: KdfSessionDeps) {
         },
       }
     },
-    /** The current keys, if this session holds them (readiness observable for the checklist —
-     * per the completeness rule, it attests BOTH bound regimes). */
-    current: () => session,
+    /** The current keys, if this session holds them AND the current persisted representation
+     * still names their exact identity (review 91 §2.2) — readiness becomes false the moment
+     * the stores drift, so the checklist observable cannot attest a stale pair. Read-only: the
+     * cache itself is dropped by the next acquire(). */
+    current: () => cachedReady(),
     /** The in-flight acquisition, if any. */
     pending: () => inflight,
     /** The clear() counter: the component's legacy publish sites fence on it (review 85 §2.5 — a
