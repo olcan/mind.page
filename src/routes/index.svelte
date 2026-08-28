@@ -3966,13 +3966,16 @@
       // retry dialogs and a human-length phrase prompt blocked every other producer for as long as
       // the user took to type, and then registered PROMPT-AGED documents
       const kdfHandle = kdfSession.external()
+      // the ONE server full-account query, shared by the resolver's scan and the fixed-empty
+      // re-confirmation (review 90 §4): the two presence decisions cannot drift
+      const fetchAccountDocs = async () =>
+        (
+          await getDocsFromServer(
+            query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
+          )
+        ).docs
       const established = await resolveFixedOwnerSecret({
-        fetchAccountDocs: async () =>
-          (
-            await getDocsFromServer(
-              query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
-            )
-          ).docs,
+        fetchAccountDocs,
         promptPhrase: () => promptExistingPhraseFlow(),
         confirmRetry: async () =>
           (await modal.show({
@@ -4085,12 +4088,7 @@
           adopt: (v0secret, salt, derived) => kdfHandle.adopt(v0secret, salt, derived),
           promptNewPhrase: () => promptNewPhraseFlow(),
           hashPhrase: phrase => hashSecretPhrase(phrase),
-          fetchAccountDocs: async () =>
-            (
-              await getDocsFromServer(
-                query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), orderBy('time', 'desc'))
-              )
-            ).docs,
+          fetchAccountDocs,
           signOut,
         })
         if (adopted != null) return adopted // both halves published (secret + storage + bound envelope)
@@ -4136,7 +4134,7 @@
     const validated = await hashSecretPhrase(phrase)
     if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
     secret = validated
-    if (provisional) provisionalSecret = validated
+    if (provisional) v0Provenance.markProvisional(validated)
     else localStorage.setItem('mindpage_secret', secret)
     return secret
   }
@@ -4165,11 +4163,10 @@
   // TRUE while getSecretPhrase's session-owned branch is awaiting the session itself: excludes
   // that flight from the pendingV0 join below (the session would otherwise await its own caller)
   let kdfSecretViaSession = false
-  // the PROVISIONAL candidate (review 89 §2.4): the hash the reader-only fallback published into
-  // the in-memory slot without establishment. writers re-check AFTER awaiting the shared slot —
-  // a candidate is not writable merely because a reader's flight resolved first — and a real v0
-  // authentication failure clears it so a later writer cannot take the early return under it
-  let provisionalSecret: string | null = null
+  // the v0 slot/provenance bookkeeping (src/v0_provenance.ts, table-tested — review 90
+  // §§2.3-2.4): provisional-candidate provenance with reader-authentication accounting, and the
+  // post-await verdict that keeps a cleared or superseded slot from being republished
+  const v0Provenance = createV0Provenance()
   // any classified ciphertext seen this principal generation — the negative half of the
   // authoritative-emptiness fact (review 87 §2.2)
   let kdfCipherSeen = false
@@ -4247,7 +4244,7 @@
     hashPhrase: phrase => hashSecretPhrase(phrase),
     publishV0: v0secret => {
       secret = v0secret
-      provisionalSecret = null // establishment supersedes any provisional candidate
+      v0Provenance.established() // establishment supersedes any provisional candidate
       localStorage.setItem('mindpage_secret', v0secret)
       return undefined
     },
@@ -4294,17 +4291,31 @@
         // the legacy flight's own cancel already signed out; do not sign out twice or re-prompt
         throw new Error('secret phrase cancelled')
       if (outcome.reason == 'superseded') throw new Error('secret acquisition superseded')
+      // TERMINAL (review 90 §2.5): a binding conflict must not initiate another provisional
+      // prompt — this device holds keys from two different phrases, and every session consumer
+      // fails observably. (existing preloaded v0 reads continue under the legacy key; the Stage 3
+      // writer will consume the complete session, never the preloaded-string early return)
+      if (outcome.reason == 'key binding conflict')
+        throw new Error('encryption key state conflict: this device holds keys from two different phrases')
     }
     return outcome
   }
-  // a REAL v0 authentication failure under the PROVISIONAL candidate clears it (review 89
-  // §2.4): the fallback phrase was wrong — the slot must not keep answering with it, or a later
-  // writer would take the early return and persist ciphertext under an unestablished phrase
-  function clearProvisionalOnAuthFailure(error: unknown, used: string): undefined {
-    if (!(error instanceof DOMException && error.name == 'OperationError')) return undefined
-    if (!provisionalSecret || used !== provisionalSecret) return undefined
-    provisionalSecret = null
-    if (secret === used) secret = null
+  // settle one provisional read attempt (review 90 §2.4): the WRONG-CANDIDATE decision lives in
+  // v0Provenance — cleared only when every overlapping attempt settled with a real
+  // authentication failure and no success, so a corrupt row cannot erase an authenticated key
+  function settleProvisionalRead(
+    token: ReturnType<typeof v0Provenance.beginRead>,
+    error: unknown,
+    used: string
+  ): undefined {
+    if (!token) return undefined
+    const outcome =
+      error === null
+        ? ('ok' as const)
+        : error instanceof DOMException && error.name == 'OperationError'
+          ? ('auth-failed' as const)
+          : ('other' as const)
+    if (token.settle(outcome) == 'clear-candidate' && secret === used) secret = null
     return undefined
   }
   // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure and
@@ -4316,7 +4327,7 @@
   // come here — they use the fence-only invalidateKeyState below
   function clearAllKeyState(reason: string): undefined {
     secret = null
-    provisionalSecret = null
+    v0Provenance.clear()
     kdfCipherSeen = false
     kdfSession.clear(reason)
     return undefined
@@ -4328,7 +4339,7 @@
   // stored keys; a different account is caught by the principal-mismatch check on the next load
   function invalidateKeyState(reason: string): undefined {
     secret = null
-    provisionalSecret = null
+    v0Provenance.clear()
     kdfCipherSeen = false
     kdfSession.invalidate(reason)
     return undefined
@@ -4349,19 +4360,31 @@
       if (flight) mapKdfOutcome(await flight)
     }
     if (!secret) secret = getSecretPhrase(new_phrase)
+    // FENCED RESOLUTION (review 90 §2.3): Promise.resolve yields even on an already-resolved
+    // value, and a lifecycle clear or a newer establishment can land in that gap — the captured
+    // generation and slot identity decide ownership AFTER the await, and a superseded value is
+    // never returned or republished. the writer-provenance refusal is decided after ownership
+    // and OUTSIDE the rejection cleanup, so refusing a write never clears a reader's candidate
+    const generationAtStart = kdfSession.generation()
     const pending = secret
+    let resolved: string
     try {
-      const resolved = (secret = await Promise.resolve(pending))
-      // POST-AWAIT provenance check (review 89 §2.4): a writer that joined a shared flight must
-      // re-check what it resolved to — a PROVISIONAL reader candidate is not establishment, and
-      // encrypting under it could persist split-key ciphertext
-      if (new_phrase && provisionalSecret && resolved === provisionalSecret)
-        throw new Error('cannot encrypt yet: the session phrase is provisional (unestablished)')
-      return resolved
+      resolved = await Promise.resolve(pending)
     } catch (e) {
       if (secret === pending) secret = null
       throw e
     }
+    const verdict = v0Provenance.guardResolved({
+      resolved,
+      generationChanged: kdfSession.generation() != generationAtStart,
+      slotCurrent: secret === pending || secret === resolved,
+      forWrite: new_phrase,
+    })
+    if (verdict == 'superseded') throw new Error('secret acquisition superseded')
+    if (verdict == 'refuse-write')
+      throw new Error('cannot encrypt yet: the session phrase is provisional (unestablished)')
+    secret = resolved // assigned only while this call still owns the slot
+    return resolved
   }
 
   async function encrypt(text: string): Promise<string> {
@@ -4398,10 +4421,13 @@
         kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'text', cipher })
         const v0secret = await acquireV0Secret()
+        const token = v0Provenance.beginRead(v0secret)
         try {
-          return await decryptWithSecret(cipher, v0secret)
+          const plain = await decryptWithSecret(cipher, v0secret)
+          settleProvisionalRead(token, null, v0secret)
+          return plain
         } catch (e) {
-          clearProvisionalOnAuthFailure(e, v0secret)
+          settleProvisionalRead(token, e, v0secret)
           throw e
         }
       }
@@ -4425,10 +4451,13 @@
         kdfCipherSeen = true
         kdfSession.noteEvidence('v0', { kind: 'bytes', cipher })
         const v0secret = await acquireV0Secret()
+        const token = v0Provenance.beginRead(v0secret)
         try {
-          return await decryptBytesWithSecret(cipher, v0secret)
+          const plain = await decryptBytesWithSecret(cipher, v0secret)
+          settleProvisionalRead(token, null, v0secret)
+          return plain
         } catch (e) {
-          clearProvisionalOnAuthFailure(e, v0secret)
+          settleProvisionalRead(token, e, v0secret)
           throw e
         }
       }
@@ -6734,6 +6763,7 @@
   } from '../hidden_delivery'
   import { createKdfWorker } from '../kdf_client'
   import { createKdfSession, type KdfAcquireOutcome } from '../kdf_session'
+  import { createV0Provenance } from '../v0_provenance'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence } from '../hidden_persistence'
   import { authStateAction } from '../session'

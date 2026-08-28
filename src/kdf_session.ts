@@ -261,9 +261,31 @@ export function createKdfSession(deps: KdfSessionDeps) {
     return { key: await deps.importKey(keyBytes), keyBytes }
   }
 
-  // seal one COMPLETE establishment: v0 published (and the baseline advanced — the session's own
-  // publication is trusted), then the BOUND phrase-free envelope, then the session value
-  const seal = (uid: string, salt: string, v0secret: string, derived: DerivedKey): KdfSessionKeys => {
+  // the CURRENT-REPRESENTATION conflict predicate (review 90 §2.1), read-only and synchronous —
+  // the ONE rule behind the early no-prompt refusal AND the pre-publication guard inside seal.
+  // publishing candidate C is contradictory when a current non-null stored v0 differs from C, or
+  // a current same-profile envelope's binding differs from the current stored v0 (when present)
+  // or from C. the baseline decides TRUST; it never dissolves a contradiction — the only allowed
+  // divergence-from-baseline is stored == envelope == candidate (all naming one establishment)
+  const representationConflict = (uid: string, salt: string, candidate: string | null): boolean => {
+    const stored = deps.storedV0()
+    const decoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
+    const sameProfile = decoded && decoded.salt === salt ? decoded : null
+    if (candidate != null) {
+      if (stored && stored !== candidate) return true
+      if (sameProfile && sameProfile.v0Secret !== candidate) return true
+      return false
+    }
+    return !!(sameProfile && stored && stored !== sameProfile.v0Secret)
+  }
+
+  // seal one COMPLETE establishment — REFUSING (null) when the current representation
+  // contradicts the candidate (review 90 §2.1: the early check is an aging snapshot; this is the
+  // synchronous pre-publication authority, and external adoption cannot bypass it). on success:
+  // v0 published (and the baseline advanced — the session's own publication is trusted), then
+  // the BOUND phrase-free envelope, then the session value
+  const seal = (uid: string, salt: string, v0secret: string, derived: DerivedKey): KdfSessionKeys | null => {
+    if (representationConflict(uid, salt, v0secret)) return null
     deps.publishV0(v0secret)
     baselineV0 = { value: v0secret }
     deps.persistEnvelope(encodeKeyEnvelope({ uid, salt, keyBytes: derived.keyBytes, v0Secret: v0secret }))
@@ -290,7 +312,13 @@ export function createKdfSession(deps: KdfSessionDeps) {
       if (!decoded || !v0secret) return notReady('offline without complete persisted keys')
       const key = await deps.importKey(decoded.keyBytes)
       if (stale()) return notReady('superseded')
-      return { kind: 'ready', keys: (session = { uid, salt: decoded.salt, key, v0Secret: v0secret }) }
+      // the binding is PROMPT-AGED across the import (review 90 §2.2): the CURRENT stores must
+      // still name the same establishment, or nothing is cached
+      const redecoded = decodeKeyEnvelope(deps.storedEnvelope(), uid)
+      const rebound = redecoded && boundV0(redecoded)
+      if (!redecoded || !rebound || redecoded.v0Secret !== decoded.v0Secret)
+        return notReady('offline without complete persisted keys')
+      return { kind: 'ready', keys: (session = { uid, salt: redecoded.salt, key, v0Secret: rebound }) }
     }
 
     // 2. the ENVELOPE, against the confirmed profile (mismatches are removed — review 87 §2.4),
@@ -300,19 +328,22 @@ export function createKdfSession(deps: KdfSessionDeps) {
     if (confirmed && confirmedV0) {
       const key = await deps.importKey(confirmed.keyBytes)
       if (stale()) return notReady('superseded')
-      return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: confirmedV0 }) }
+      // the binding is PROMPT-AGED across the import (review 90 §2.2): re-evaluate the CURRENT
+      // representation before caching — a changed store falls through to the conflict and
+      // establishment decisions below instead of returning ready beside a contradictory store
+      const recheck = confirmEnvelope(uid, profile)
+      const recheckV0 = recheck && boundV0(recheck)
+      if (recheck && recheckV0 && recheck.v0Secret === confirmed.v0Secret)
+        return { kind: 'ready', keys: (session = { uid, salt: profile.salt, key, v0Secret: recheckV0 }) }
     }
-    // a BINDING CONFLICT is terminal, never "recovered" (review 89 §2.1): a same-profile envelope
-    // bound to establishment A beside a STABLE stored hash B means v1(A) ciphertext may exist —
-    // exact-hashing B and sealing over A would strand it while attesting completeness. both
-    // stores are preserved; which side to recover is a corpus question for a later design. the
-    // DISTINCT case where the stored hash matches the envelope but not the baseline (a
-    // mid-generation write) still falls through to ordinary corpus establishment
-    if (confirmed) {
-      const stored = deps.storedV0()
-      if (stored && stored !== confirmed.v0Secret && stored === baseline())
-        return notReady('key binding conflict')
-    }
+    // a BINDING CONFLICT is terminal, never "recovered" (reviews 89-90 §2.1): a same-profile
+    // envelope bound to establishment A beside ANY current differing stored hash B means v1(A)
+    // ciphertext may exist — sealing B over A would strand it while attesting completeness. the
+    // baseline decides trust, never dissolves contradiction, so this holds for mid-generation
+    // stores too; the only fallthrough is stored == envelope binding (one establishment), which
+    // still validates through corpus establishment before the guarded seal republishes it. both
+    // stores are preserved; which side to recover is a corpus question for a later design
+    if (representationConflict(uid, profile.salt, null)) return notReady('key binding conflict')
 
     // 3. a PENDING component LEGACY v0 acquisition is joined before any prompt: a fixed-owner
     //    resolve may adopt a session, and any settlement may publish a v0 secret this flight can
@@ -381,7 +412,9 @@ export function createKdfSession(deps: KdfSessionDeps) {
         }
         const derived = await deriveKey(candidate, profile)
         if (stale()) return notReady('superseded')
-        return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, derived) }
+        const sealed = seal(uid, profile.salt, v0secret, derived)
+        if (!sealed) return notReady('key binding conflict')
+        return { kind: 'ready', keys: sealed }
       }
 
       // 6. ESTABLISHMENT against a STABLE evidence revision (review 88 §2.3), with LAZY memoized
@@ -429,8 +462,11 @@ export function createKdfSession(deps: KdfSessionDeps) {
         continue
       }
 
-      // 7. seal in THIS continuation — no await separates the final revision check from the seal
-      return { kind: 'ready', keys: seal(uid, profile.salt, v0secret, established!) }
+      // 7. seal in THIS continuation — no await separates the final revision check from the
+      //    seal, and the seal itself re-reads the current representation (the ONE guard)
+      const sealed = seal(uid, profile.salt, v0secret, established!)
+      if (!sealed) return notReady('key binding conflict')
+      return { kind: 'ready', keys: sealed }
     }
   }
 
@@ -517,8 +553,9 @@ export function createKdfSession(deps: KdfSessionDeps) {
         },
         adopt: (v0secret: string, salt: string, derived: DerivedKey): boolean => {
           if (stale() || !boundUid) return false
-          seal(boundUid, salt, v0secret, derived)
-          return true
+          // the seal's representation guard applies here too (review 90 §2.1): a fixed-owner
+          // candidate cannot overwrite stores that meanwhile name a different establishment
+          return seal(boundUid, salt, v0secret, derived) != null
         },
       }
     },

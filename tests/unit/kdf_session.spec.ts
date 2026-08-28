@@ -311,13 +311,16 @@ test('POISON GUARD: a stored hash written MID-GENERATION is not trusted — it v
   expect(h.log, 'refused by establishment, not accepted by the hash').toContain('wrongNotice')
   expect(h.log.filter(l => l == 'persistEnvelope'), 'no envelope from a poisoned hash').toEqual([])
   expect(h.session.current()).toBeNull()
-  // the RIGHT phrase establishes despite the poisoned storage
+  // the RIGHT phrase now also REFUSES at the seal guard (review 90 §2.1): a current stored value
+  // differing from the candidate is a contradiction — the poison is preserved for inspection,
+  // never silently replaced, and nothing seals over it
   const ok = harness({ promptPhrase: async () => 'phrase' })
   await ok.session.acquire() // anchor baseline on empty storage
   ok.storage.set('v0', 'v0:wrong')
   ok.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
-  expect((await ok.session.acquire()).kind).toBe('ready')
-  expect(ok.storage.get('v0'), 'the ESTABLISHED hash replaced the poison').toBe('v0:phrase')
+  expect(reasonOf(await ok.session.acquire())).toBe('key binding conflict')
+  expect(ok.storage.get('v0'), 'the contradictory store is preserved, not overwritten').toBe('v0:wrong')
+  expect(ok.log.filter(l => l == 'persistEnvelope')).toEqual([])
 })
 
 test('a FIRST phrase validates against collected evidence, then publishes BOTH regimes', async () => {
@@ -546,17 +549,23 @@ test('EXTERNAL handle: the profile flight is SHARED, and profile() ANCHORS the b
   expect(h.log[0], 'the pre-anchored hash was trusted (upgrade prompt)').toBe('promptUpgrade')
 
   // and a v0 hash written AFTER the external profile() anchored the baseline is NOT trusted:
-  // the required existing-phrase prompt runs instead of the upgrade comparison
-  const h2 = harness()
+  // the required existing-phrase prompt runs instead of the upgrade comparison, and the
+  // candidate can only establish AS the stored value (the seal guard forbids diverging from a
+  // current non-null store — review 90 §2.1)
+  const h2 = harness({
+    promptPhrase: async () => (h2.log.push('promptPhrase'), 'late'),
+    attemptV0: async (row, v0secret) => row.kind == 'text' && row.cipher == 'v0-good' && v0secret == 'v0:late',
+  })
   const handle2 = h2.session.external()
   await handle2.profile()
   h2.storage.set('v0', 'v0:late') // post-anchor write (unestablished flow)
   h2.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
-  expect((await h2.session.acquire()).kind).toBe('ready')
+  const outcome2 = await h2.session.acquire()
+  expect(outcome2.kind).toBe('ready')
   expect(h2.log.filter(l => l.startsWith('prompt'))[0], 'required prompt, not the trusted-hash upgrade').toBe(
     'promptPhrase'
   )
-  expect(h2.storage.get('v0'), 'the established hash replaced the late write').toBe('v0:phrase')
+  expect(outcome2.kind == 'ready' && outcome2.keys.v0Secret, 'established as itself, corpus-validated').toBe('v0:late')
 })
 
 test('external adoption after clear() is REFUSED: nothing persisted, nothing cached (review 85 §2.5)', async () => {
@@ -722,7 +731,8 @@ test('external adopt() is ONE COMPLETE PUBLICATION: v0 published, baseline advan
   expect(h.storage.get('v0'), 'the v0 half is published, not assumed').toBe('v0:phrase')
   expect(JSON.parse(h.storage.get('env')!).v0, 'the envelope carries its establishment').toBe('v0:phrase')
   expect(h.session.current()?.v0Secret).toBe('v0:phrase')
-  // and the adopted publication is TRUSTED (baseline advanced): a fresh acquire restores silently
+  // a fresh generation restores silently from the surviving BOUND stores (invalidate resets the
+  // baseline, so this observes re-anchoring on the adopted publication — not baseline advance)
   h.session.invalidate('reload')
   expect((await h.session.acquire()).kind).toBe('ready')
   expect(h.log.filter(l => l.startsWith('prompt'))).toEqual([])
@@ -806,6 +816,7 @@ test('REQUIRED RETRY: wrong then right establishes in ONE flight (review 88 §2.
   const outcome = await h.session.acquire()
   expect(outcome.kind).toBe('ready')
   expect(h.log.filter(l => l == 'wrongNotice'), 'one notice between the attempts').toHaveLength(1)
+  expect(h.log.filter(l => l.startsWith('warn:')), 'and NO second (non-blocking) warning').toEqual([])
   expect(h.derivations(), 'the refused candidate paid no derivation; the established one derived once').toBe(1)
   expect(outcome.kind == 'ready' && outcome.keys.v0Secret).toBe('v0:phrase')
 })
@@ -821,6 +832,94 @@ test('DECLINE releases the evidence and notes become inert until the next genera
   expect(reasonOf(await h.session.acquire()), 'no evidence survives the decline').toBe(
     'no evidence to validate a first phrase'
   )
+})
+
+test('CONFLICT is representation-wide: a MID-GENERATION store against envelope A refuses pre-prompt (review 90 §2.1)', async () => {
+  // review 90's counterexample: baseline anchors null; the profile read parks; B plus
+  // B-authenticating evidence arrive; the old baseline-conditioned guard missed this and let B
+  // seal over envelope A
+  let releaseRead: (data: Record<string, unknown>) => void = () => {}
+  const h = harness({
+    profileStore: () => ({
+      read: () => new Promise<Record<string, unknown>>(resolve => (releaseRead = resolve)),
+      runTransaction: async () => {
+        throw new Error('unreachable')
+      },
+    }),
+  })
+  h.storage.set('env', envelope('v0:phrase')) // establishment A
+  const flight = h.session.acquire() // baseline anchors: stored v0 is null
+  await new Promise(r => setTimeout(r, 0))
+  h.storage.set('v0', 'v0:other') // mid-generation B
+  h.session.noteEvidence('v0', { kind: 'text', cipher: 'v0-good' })
+  releaseRead({ kdf: { v: 1, salt: SALT_B64 } })
+  expect(reasonOf(await flight)).toBe('key binding conflict')
+  expect(h.log.filter(l => l.startsWith('prompt')), 'no prompt over a contradiction').toEqual([])
+  expect(h.storage.get('env'), 'envelope preserved').toBeTruthy()
+  expect(h.storage.get('v0'), 'store preserved').toBe('v0:other')
+})
+
+test('the SEAL GUARD refuses a publication over a representation that changed mid-prompt (review 90 §2.1)', async () => {
+  const h = harness({
+    promptUpgrade: async () => {
+      h.log.push('promptUpgrade')
+      h.storage.set('v0', 'v0:other') // the store changes while the prompt is open
+      return 'phrase'
+    },
+  })
+  h.storage.set('v0', 'v0:phrase') // trusted at the baseline
+  expect(reasonOf(await h.session.acquire())).toBe('key binding conflict')
+  expect(h.log.filter(l => l.startsWith('publishV0') || l == 'persistEnvelope'), 'nothing published').toEqual([])
+  expect(h.storage.get('v0'), 'the newer store wins preservation').toBe('v0:other')
+  expect(h.session.current()).toBeNull()
+})
+
+test('external adopt() is guarded by the same predicate: a contradictory store refuses adoption (review 90 §2.1)', async () => {
+  const h = harness()
+  const handle = h.session.external()
+  const profile = await handle.profile()
+  const derived = await handle.derive('phrase', profile!)
+  h.storage.set('v0', 'v0:other') // a different establishment landed before adoption
+  expect(handle.adopt('v0:phrase', SALT_B64, derived)).toBe(false)
+  expect(h.log.filter(l => l.startsWith('publishV0') || l == 'persistEnvelope'), 'nothing adopted').toEqual([])
+  expect(h.session.current()).toBeNull()
+})
+
+test('BOUND RESTORE is rechecked after importKey: a store changed mid-import is never cached (review 90 §2.2)', async () => {
+  let releaseImport: (k: CryptoKey) => void = () => {}
+  const h = harness({ importKey: () => new Promise<CryptoKey>(resolve => (releaseImport = resolve)) })
+  h.storage.set('v0', 'v0:phrase')
+  h.storage.set('env', envelope('v0:phrase')) // complete bound state A
+  const flight = h.session.acquire()
+  await new Promise(r => setTimeout(r, 0)) // parked inside importKey
+  h.storage.set('v0', 'v0:other') // the store changes to B across the import
+  releaseImport(FAKE_KEY)
+  expect(reasonOf(await flight), 'routed through the conflict decision, not cached ready').toBe(
+    'key binding conflict'
+  )
+  expect(h.session.current(), 'no A session cached beside store B').toBeNull()
+
+  // offline variant: the same parked import must stay not-ready
+  let releaseImport2: (k: CryptoKey) => void = () => {}
+  const h2 = harness({
+    importKey: () => new Promise<CryptoKey>(resolve => (releaseImport2 = resolve)),
+    profileStore: () => ({
+      read: async () => {
+        throw new Error('offline')
+      },
+      runTransaction: async () => {
+        throw new Error('unreachable')
+      },
+    }),
+  })
+  h2.storage.set('v0', 'v0:phrase')
+  h2.storage.set('env', envelope('v0:phrase'))
+  const flight2 = h2.session.acquire()
+  await new Promise(r => setTimeout(r, 0))
+  h2.storage.set('v0', 'v0:other')
+  releaseImport2(FAKE_KEY)
+  expect(reasonOf(await flight2)).toBe('offline without complete persisted keys')
+  expect(h2.session.current()).toBeNull()
 })
 
 test('disabled and ineligible are not-ready without any effect', async () => {

@@ -90,7 +90,6 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
   // string, a number or an object is a PRESENT, corrupt field, and filtering it out before the
   // presence check silently rerouted a corrupt account into the new-phrase path (review 83)
   const rawCiphers = docs.map(doc => doc.data().cipher).filter(value => value !== null && value !== undefined)
-  // (presence itself is the accountHasCipher rule; the classification below decides usability)
   const evidence: CandidateEvidence[] = []
   for (const cipher of rawCiphers) {
     if (typeof cipher != 'string' || !cipher) continue // present but not usable
@@ -98,7 +97,9 @@ export async function resolveFixedOwnerSecret(deps: FixedOwnerSecretDeps): Promi
     if (kind == 'v0' || kind == 'v1') evidence.push({ kind, cipher })
     // malformed-frame / unsupported-version: not evidence about any phrase
   }
-  if (!rawCiphers.length) return null // no ciphertext anywhere (server-confirmed): caller runs the new-phrase flow
+  // presence is THE shared accountHasCipher rule (review 90 §4): the resolver and the
+  // fixed-empty re-confirmation cannot drift on what counts as a present cipher value
+  if (!accountHasCipher(docs)) return null // no ciphertext anywhere (server-confirmed): new-phrase flow
   if (!evidence.length)
     throw new Error('account ciphertext is unsupported or corrupt: no phrase can be validated against it')
 
