@@ -4081,10 +4081,15 @@
     if (generationAtEntry != kdfSession.generation()) throw new Error('secret acquisition superseded')
     secret = validated
     localStorage.setItem('mindpage_secret', secret)
-    // ONE PHRASE, BOTH REGIMES (review 85 §2.2): the v1 half derives from this same phrase — not
-    // awaited (a save must not wait on Argon), but REGISTERED synchronously, so a concurrent v1
-    // acquisition parked on this flight joins the offer instead of raising a second prompt
-    kdfSession.offerPhrase(phrase).catch(e => console.error('could not derive v1 keys from the entered phrase:', e))
+    // ONE PHRASE, BOTH REGIMES (review 85 §2.2): the phrase is OFFERED to the session as the
+    // acquisition candidate — not awaited (a save must not wait on Argon), but registered
+    // synchronously, so a concurrent v1 acquisition consumes it instead of raising a second
+    // prompt. the session validates it against collected corpus evidence before sealing anything
+    // (review 86 §2.3); `fresh` marks the newly CHOSEN phrase of an account with no ciphertext,
+    // the one case with nothing to validate against
+    kdfSession
+      .offerPhrase(phrase, { fresh: new_phrase })
+      .catch(e => console.error('could not derive v1 keys from the entered phrase:', e))
     return secret
   }
 
@@ -4109,9 +4114,6 @@
   // only after the new Firestore rules are deployed and confirmed (design: rollout order — a
   // resident old tab's bare profile set is made harmless only by the live no-drop rule).
   const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
-  // the v1 evidence that triggered acquisition this session, for validating a FIRST phrase (a
-  // v1-only corpus on a device with no stored v0 secret)
-  let kdfEvidence: { kind: 'text'; cipher: string } | { kind: 'bytes'; cipher: Uint8Array<ArrayBuffer> } | null = null
   const kdfSession = createKdfSession({
     uid: () => user?.uid,
     enabled: kdfEnabled,
@@ -4121,6 +4123,9 @@
     storedV0: () => localStorage.getItem('mindpage_secret'),
     storedEnvelope: () => localStorage.getItem('mindpage_key1'),
     persistEnvelope: encoded => void localStorage.setItem('mindpage_key1', encoded),
+    // ONLY the envelope: for a valid envelope whose salt an online profile read confirmed
+    // obsolete (review 86 §2.4) — the v0 secret stays useful and stays put
+    clearEnvelope: () => void localStorage.removeItem('mindpage_key1'),
     clearPersisted: () => {
       localStorage.removeItem('mindpage_secret')
       localStorage.removeItem('mindpage_key1')
@@ -4179,31 +4184,43 @@
       localStorage.setItem('mindpage_secret', v0secret)
       return undefined
     },
-    validateV1: async key => {
-      const evidence = kdfEvidence
-      if (!evidence) return false // acquire refuses to prompt without evidence, so normally unreachable
+    // one authentication attempt of a candidate against one collected evidence row. ONLY a real
+    // authentication failure is evidence against the candidate; anything else — a parser or
+    // integration bug — propagates, never becoming "wrong phrase" (the same rule as the
+    // fixed-owner resolver's attempts in src/secret.ts)
+    attemptV0: async (row, v0secret) => {
       try {
-        if (evidence.kind == 'text') await decryptV1Text(evidence.cipher, key)
-        else await decryptV1Bytes(evidence.cipher, key)
+        if (row.kind == 'text') await decryptWithSecret(row.cipher, v0secret)
+        else await decryptBytesWithSecret(row.cipher as Uint8Array<ArrayBuffer>, v0secret)
+        return true
+      } catch (e) {
+        if (e instanceof DOMException && e.name == 'OperationError') return false
+        throw e
+      }
+    },
+    attemptV1: async (row, key) => {
+      try {
+        if (row.kind == 'text') await decryptV1Text(row.cipher, key)
+        else await decryptV1Bytes(row.cipher as Uint8Array<ArrayBuffer>, key)
         return true
       } catch (e) {
         if (e instanceof CipherError && e.kind == 'authentication-failed') return false
-        throw e // structural failures cannot reach here (evidence was classified v1); integration errors propagate
+        throw e // structural failures cannot reach here (rows were classified); integration errors propagate
       }
     },
     createWorker: () => createKdfWorker(),
     importKey: keyBytes => importV1Key(keyBytes as Uint8Array<ArrayBuffer>, ['encrypt', 'decrypt']),
     onWarn: message => void _modal_alert(message),
   })
-  // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure,
-  // principal mismatch and external auth transitions all clear EVERYTHING — the in-memory v0
-  // secret (resetUser deliberately preserves it), the v1 session and its single-flights, the
-  // persisted v0 secret and v1 envelope, and any in-flight derivation (disposed, so a late
-  // result cannot publish into a session that no longer exists). the generation it advances also
-  // fences the v0 prompt tails, so a pending prompt cannot repopulate any of it afterwards
+  // THE key-lifecycle primitive (review 85 §2.5): sign-out, sign-in start, sign-in failure and
+  // principal mismatch clear EVERYTHING — the in-memory v0 secret (resetUser deliberately
+  // preserves it), the v1 session with its flights and evidence, the persisted v0 secret and v1
+  // envelope, and any in-flight derivation (disposed, so a late result cannot publish into a
+  // session that no longer exists). the generation it advances also fences the v0 prompt tails,
+  // so a pending prompt cannot repopulate any of it afterwards. external auth transitions do NOT
+  // come here — they use the fence-only invalidateKeyState below
   function clearAllKeyState(reason: string): undefined {
     secret = null
-    kdfEvidence = null
     kdfSession.clear(reason)
     return undefined
   }
@@ -4214,7 +4231,6 @@
   // stored keys; a different account is caught by the principal-mismatch check on the next load
   function invalidateKeyState(reason: string): undefined {
     secret = null
-    kdfEvidence = null
     kdfSession.invalidate(reason)
     return undefined
   }
@@ -4265,12 +4281,15 @@
       case 'unsupported-version':
         throw new CipherError('unsupported-version', 'ciphertext version is not supported by this build')
       case 'v1': {
-        kdfEvidence ??= { kind: 'text', cipher } // first-phrase validation evidence
-        const outcome = await kdfSession.acquire({ validationCipherKnown: true })
+        kdfSession.noteEvidence('v1', { kind: 'text', cipher })
+        const outcome = await kdfSession.acquire()
         if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Text(cipher, outcome.keys.key)
       }
       case 'v0':
+        // noted as corpus evidence too: a first phrase on a MIXED corpus must authenticate a v0
+        // row exactly, not just open a v1 row (review 86 §2.2)
+        kdfSession.noteEvidence('v0', { kind: 'text', cipher })
         return decryptWithSecret(cipher, await acquireV0Secret())
     }
   }
@@ -4282,12 +4301,13 @@
       case 'unsupported-version':
         throw new CipherError('unsupported-version', 'byte cipher version is not supported by this build')
       case 'v1': {
-        kdfEvidence ??= { kind: 'bytes', cipher }
-        const outcome = await kdfSession.acquire({ validationCipherKnown: true })
+        kdfSession.noteEvidence('v1', { kind: 'bytes', cipher })
+        const outcome = await kdfSession.acquire()
         if (outcome.kind != 'ready') throw new Error(`v1 ciphertext but no v1 key on this device (${outcome.reason})`)
         return decryptV1Bytes(cipher, outcome.keys.key)
       }
       case 'v0':
+        kdfSession.noteEvidence('v0', { kind: 'bytes', cipher })
         return decryptBytesWithSecret(cipher, await acquireV0Secret())
     }
   }

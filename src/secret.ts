@@ -228,7 +228,10 @@ export async function adoptValidatedSecret<Row, Run>(
 // corruption and must never re-prompt — that rule lives with the caller, which stops consulting
 // this policy after establishment.
 
-export type CandidateEvidence = { kind: 'v0' | 'v1'; cipher: string }
+// generic over the cipher representation: the fixed-owner resolver validates text ciphers
+// (strings), while the session orchestrator (src/kdf_session.ts) validates the classified
+// text-or-bytes evidence its decrypt paths collected
+export type CandidateEvidence<C = string> = { kind: 'v0' | 'v1'; cipher: C }
 
 export type CandidateVerdict =
   | { kind: 'established' }
@@ -239,13 +242,13 @@ export type CandidateVerdict =
 // list — and a verdict only an artificial input could produce is a state to delete, not to keep
 // (review 82)
 
-export async function establishCandidate(
-  evidence: CandidateEvidence[],
+export async function establishCandidate<C>(
+  evidence: CandidateEvidence<C>[],
   deps: {
     // one authentication attempt per row; resolves true on success, false on authentication
     // failure. malformed/unsupported classification happens BEFORE rows enter `evidence`
-    tryV0: (cipher: string) => Promise<boolean>
-    tryV1: (cipher: string) => Promise<boolean>
+    tryV0: (cipher: C) => Promise<boolean>
+    tryV1: (cipher: C) => Promise<boolean>
   }
 ): Promise<CandidateVerdict> {
   const v0 = evidence.filter(row => row.kind == 'v0')

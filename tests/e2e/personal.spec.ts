@@ -861,8 +861,10 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
   const { encryptWithSecret, encryptV1Text, encryptV1Bytes, importV1Key } = await import('../../src/crypto.js')
   const v1key = await importV1Key(KEY_BYTES)
   const BYTES_PLAINTEXT = 'v1 bytes plaintext 424242'
-  const seededDocs = ['e2e-v0-item', 'e2e-v1-item', 'e2e-v1-store']
-  let ownerId: string | null = null
+  // ALL FIXED IDS, all seeded before the one login (review 86 §4): the hidden store names its
+  // visible owner by the owner's DOCUMENT id, so seeding both makes the v1 hidden adoption
+  // observable on the initial load — no UI save, no poll for a generated id, no reload
+  const seededDocs = ['e2e-v0-item', 'e2e-v1-item', 'e2e-v1-owner', 'e2e-v1-store']
   await firestore()
     .collection('users')
     .doc(ALICE.uid)
@@ -891,6 +893,40 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
       text: null,
       attr: null,
       cipher: await encryptV1Text(JSON.stringify({ text: '#e2e_v1item decrypted-from-v1 xyz789', attr: null }), v1key),
+    })
+  // the visible OWNER of the hidden store (v0-encrypted, like the app would have written it)...
+  await firestore()
+    .collection('items')
+    .doc('e2e-v1-owner')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: false,
+      text: null,
+      attr: null,
+      cipher: await encryptWithSecret(
+        JSON.stringify({ text: '#e2e_v1store store owner', attr: null }),
+        secretFor(ALICE, PHRASE)
+      ),
+    })
+  // ...and its global store, seeded as V1 ciphertext: initialization must decrypt it through the
+  // session and expose the value on the owner (hidden state is an encrypted consumer too)
+  await firestore()
+    .collection('items')
+    .doc('e2e-v1-store')
+    .set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: true,
+      text: null,
+      attr: null,
+      cipher: await encryptV1Text(
+        JSON.stringify({
+          text: JSON.stringify({ name: 'global_store_e2e-v1-owner', item: { marker: 'v1-hidden' } }),
+          attr: null,
+        }),
+        v1key
+      ),
     })
   try {
     await withSecret(page)
@@ -921,31 +957,8 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
       cipherBytes
     )
     expect(new TextDecoder().decode(new Uint8Array(decryptedBytes))).toBe(BYTES_PLAINTEXT)
-    // v1 HIDDEN adoption in the same session: an item owns a global store whose backing document
-    // is seeded as v1 ciphertext; after a reload the initialization scan must decrypt it through
-    // the session and expose the value (hidden state is an encrypted consumer too — review 85 §3)
-    await page.evaluate(() => void window._create('#e2e_v1store store owner'))
-    await expect.poll(() => savedId(page, '#e2e_v1store'), { timeout: 30_000 }).toBeTruthy()
-    ownerId = await savedId(page, '#e2e_v1store')
-    await firestore()
-      .collection('items')
-      .doc('e2e-v1-store')
-      .set({
-        user: ALICE.uid,
-        time: Date.now(),
-        hidden: true,
-        text: null,
-        attr: null,
-        cipher: await encryptV1Text(
-          JSON.stringify({
-            text: JSON.stringify({ name: `global_store_${ownerId}`, item: { marker: 'v1-hidden' } }),
-            attr: null,
-          }),
-          v1key
-        ),
-      })
-    await page.reload()
-    await waitForApp(page)
+    // v1 HIDDEN adoption, same initial load: the seeded v1 store document was decrypted through
+    // the session during initialization and its value reached the seeded owner
     await expect
       .poll(() => page.evaluate(() => (window._item('#e2e_v1store') as any)?._global_store?.marker ?? null), {
         timeout: 30_000,
@@ -955,19 +968,10 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
     expect(await page.getByText(/upgrade the encryption/).count()).toBe(0)
   } finally {
     for (const id of seededDocs) await firestore().collection('items').doc(id).delete()
-    if (ownerId)
-      await firestore()
-        .collection('items')
-        .doc(ownerId)
-        .delete()
-        .catch(() => {})
     // FieldValue.delete(), NOT `kdf: null` (review 85 §3): the field was originally ABSENT, and a
-    // null residue is exactly the present-invalid state the decoder rejects
-    await firestore()
-      .collection('users')
-      .doc(ALICE.uid)
-      .update({ kdf: FieldValue.delete() })
-      .catch(() => {})
+    // null residue is exactly the present-invalid state the decoder rejects. NOT swallowed — a
+    // failed cleanup here must fail the row rather than silently poison the next one (review 86)
+    await firestore().collection('users').doc(ALICE.uid).update({ kdf: FieldValue.delete() })
     await page.evaluate(() => {
       localStorage.removeItem('mindpage_kdf')
       localStorage.removeItem('mindpage_key1')
@@ -999,6 +1003,14 @@ test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in
         )
       })(),
     })
+  // PRECONDITION established here, not assumed from the previous row's cleanup (review 86 §4):
+  // the profile must be ABSENT, or the row would silently prove adoption instead of provisioning
+  await firestore()
+    .collection('users')
+    .doc(ALICE.uid)
+    .update({ kdf: FieldValue.delete() })
+    .catch(() => {}) // the document or field may not exist yet — absence is what matters
+  expect((await firestore().collection('users').doc(ALICE.uid).get()).data()?.kdf, 'absent profile').toBeUndefined()
   try {
     await withSecret(page)
     await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
@@ -1022,11 +1034,7 @@ test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in
     expect(kdf?.salt).toMatch(/^[A-Za-z0-9+/]{21}[AQgw]==$/)
   } finally {
     await firestore().collection('items').doc('e2e-v0-trigger').delete()
-    await firestore()
-      .collection('users')
-      .doc(ALICE.uid)
-      .update({ kdf: FieldValue.delete() })
-      .catch(() => {})
+    await firestore().collection('users').doc(ALICE.uid).update({ kdf: FieldValue.delete() })
     await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
   }
 })
