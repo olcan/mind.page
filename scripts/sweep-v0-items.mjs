@@ -147,9 +147,14 @@ async function loadAppModules() {
   const dir = await mkdtemp(join(tmpdir(), 'sweep-app-'))
   let crypto, profile
   try {
+    // root is pinned to the REPO, not process.cwd(): the script must behave identically from any
+    // working directory (the runbook invokes it by absolute path), and cwd-relative resolution
+    // both renamed outputs and could pick up a foreign vite/postcss config
+    const repoRoot = new URL('..', import.meta.url).pathname
     await build({
       configFile: false,
       logLevel: 'silent',
+      root: repoRoot,
       build: {
         lib: {
           entry: {
@@ -157,6 +162,7 @@ async function loadAppModules() {
             kdf_profile: new URL('../src/kdf_profile.ts', import.meta.url).pathname,
           },
           formats: ['es'],
+          fileName: (_format, name) => `${name}.js`,
         },
         outDir: dir,
         emptyOutDir: true,
