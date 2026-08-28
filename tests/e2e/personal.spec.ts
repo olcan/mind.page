@@ -28,7 +28,14 @@ async function stored(page: Page, name: string) {
 // stores the secret as a returning device would have it, before signing in (see secretFor)
 async function withSecret(page: Page) {
   await page.goto('/')
-  await page.evaluate(secret => localStorage.setItem('mindpage_secret', secret), secretFor(ALICE, PHRASE))
+  await page.evaluate(secret => {
+    localStorage.setItem('mindpage_secret', secret)
+    // the reader now DEFAULTS ON (absent flag = enabled; exact 'off' is the emergency/legacy
+    // override — see kdfEnabled in index.svelte). the legacy v0 rows of this suite keep their
+    // intentional pre-KDF semantics via explicit 'off'; the KDF rows deliberately CLEAR the flag
+    // to exercise the production default
+    localStorage.setItem('mindpage_kdf', 'off')
+  }, secretFor(ALICE, PHRASE))
 }
 
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
@@ -87,6 +94,11 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
 })
 
 test('a new device must enter the phrase; a wrong one can only sign out', async ({ page }) => {
+  // LEGACY (reader 'off' override) contract: under the default-on reader a wrong phrase enters
+  // the session's retry flow (unit-pinned in kdf_session.spec) instead of this terminal modal;
+  // this row pins the frozen v0 path, so the emergency override is seeded deliberately
+  await page.goto('/')
+  await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'off'))
   await loadUser(page, ALICE) // fresh context: no secret in localStorage
   await enterPhrase(page, /Enter your secret phrase/, 'wrong phrase', 'Continue')
   await expect(page.getByText(/Unable to access your account/)).toBeVisible({ timeout: 60_000 })
@@ -851,7 +863,7 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
   // the stage-2 deployability row (KDF design): the production application opens frozen v0 AND v1
   // — visible text, bytes, and a hidden global store — in ONE session with ZERO Argon cost: the
   // v1 key arrives via a seeded persisted envelope, the profile via seeded users/{uid} metadata,
-  // and the owner flag is on for this page only. writes remain v0 throughout (the writer switch
+  // and the reader runs at its production DEFAULT (absent flag). writes remain v0 throughout (the writer switch
   // is stage 3). SELF-CONTAINED (review 85 §3): every fixture is seeded here — v0 included — and
   // encrypted at seed time with the same frozen primitives the unit fixtures pin, so a focused
   // run needs no serial predecessor
@@ -932,13 +944,16 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
     await withSecret(page)
     await page.evaluate(
       ([uid, salt, key, v0]) => {
-        localStorage.setItem('mindpage_kdf', 'on')
+        // DELIBERATE: the flag is cleared, not set — this mixed corpus opens under the
+        // PRODUCTION DEFAULT (absent = reader enabled; withSecret seeds legacy 'off')
+        localStorage.removeItem('mindpage_kdf')
         // the envelope is BOUND to the v0 secret its establishment produced (review 88 §2.1):
         // the session restores only the complete matched pair
         localStorage.setItem('mindpage_key1', JSON.stringify({ uid, v: 1, salt, key, v0 }))
       },
       [ALICE.uid, SALT, KEY_B64, secretFor(ALICE, PHRASE)]
     )
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_kdf')), 'absent reader flag').toBeNull()
     await loadUser(page, ALICE)
     await waitForApp(page)
     // the v1 item decrypted through decryptItem -> the session single-flight -> decryptV1Text
@@ -981,7 +996,7 @@ test('MIXED CORPUS: seeded v1 text, bytes and hidden state open through the appl
   }
 })
 
-test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in; declining stays v0 and cheap', async ({
+test('ALL-V0 TRIGGER: the reader default prompts a returning device once at sign-in; declining stays v0 and cheap', async ({
   page,
 }) => {
   // review 85 §2.1: an all-v0 account never decrypts a v1 cipher, so the upgrade must be driven
@@ -1015,7 +1030,10 @@ test('ALL-V0 TRIGGER: the reader flag prompts a returning device once at sign-in
   expect((await firestore().collection('users').doc(ALICE.uid).get()).data()?.kdf, 'absent profile').toBeUndefined()
   try {
     await withSecret(page)
-    await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
+    // DELIBERATE: absent flag — the trigger must fire under the PRODUCTION DEFAULT (absent =
+    // reader enabled), not an explicit opt-in
+    await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_kdf')), 'absent reader flag').toBeNull()
     await loadUser(page, ALICE)
     // the trigger runs off the confirmed principal: profile provisions (absent -> candidate) and
     // the one-time upgrade prompt appears WITHOUT any v1 ciphertext in the account
@@ -1067,13 +1085,15 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
   const seededDocs = ['e2e-w-edit', 'e2e-w-keep', 'e2e-w-old', 'e2e-w-v1seed']
   let createdItemId: string | null = null
   try {
-    // A. REAL ACQUISITION: stored v0 secret, reader flag on, NO envelope — the sign-in trigger
-    // raises the one-time upgrade prompt, and the entered phrase pays production Argon once
+    // A. REAL ACQUISITION: stored v0 secret, reader at the PRODUCTION DEFAULT (absent flag =
+    // enabled), NO envelope — the sign-in trigger raises the one-time upgrade prompt, and the
+    // entered phrase pays production Argon once
     await withSecret(page)
     await page.evaluate(() => {
-      localStorage.setItem('mindpage_kdf', 'on')
+      localStorage.removeItem('mindpage_kdf') // DELIBERATE: the default, not an opt-in
       localStorage.removeItem('mindpage_key1')
     })
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_kdf')), 'absent reader flag').toBeNull()
     await loadUser(page, ALICE)
     await enterPhrase(page, /upgrade the encryption/, PHRASE, 'Upgrade')
     await waitForApp(page)
@@ -1097,6 +1117,43 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
     await expect
       .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null), { timeout: 30_000 })
       .toContain('external v1 333')
+
+    // B2. FRESH-KDF-STATE RECOVERY (the 2026-08-28 production incident, pinned): the
+    // KDF-relevant state of a fresh origin/profile — NO stored secret, NO envelope, NEITHER
+    // flag (same context/auth/cache otherwise) — opens this MIXED corpus under the reader
+    // default — sign-in prompts once for the phrase, fail-closed
+    // initialization completes across v0 AND v1, and the session is reader-ready. Before the
+    // reader default, this exact state hard-locked the whole account ("Unable to access your
+    // account"; `v1 ciphertext but no v1 key on this device (kdf disabled)`)
+    expect(
+      await page.evaluate(() => {
+        localStorage.removeItem('mindpage_secret')
+        localStorage.removeItem('mindpage_key1')
+        localStorage.removeItem('mindpage_kdf')
+        localStorage.removeItem('mindpage_kdf_write')
+        // the four-part precondition IS the incident contract (review 107 §2.1): secret, bound
+        // envelope and both flags must all be absent before the reload proves recovery
+        return [
+          localStorage.getItem('mindpage_secret'),
+          localStorage.getItem('mindpage_key1'),
+          localStorage.getItem('mindpage_kdf'),
+          localStorage.getItem('mindpage_kdf_write'),
+        ]
+      }),
+      'the fresh-KDF-state precondition: all four keys absent'
+    ).toEqual([null, null, null, null])
+    await page.reload()
+    // the ENTRY prompt, not the upgrade prompt: a fresh origin holds no v0 secret at all (the
+    // upgrade modal is for devices that have the secret but no v1 key)
+    await enterPhrase(page, /Enter your secret phrase/, PHRASE, 'Continue')
+    await waitForApp(page)
+    await expect.poll(() => page.evaluate(() => (window as any).__kdfReady), { timeout: 60_000 }).toBe(true)
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_v1seed', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('external v1 333')
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_w_keep', true)?.text ?? null), { timeout: 30_000 })
+      .toContain('untouched v0 text 222')
 
     // C. LAZY TEXT UPGRADE: writer on; ONE edit produces a v1 document; the untouched item stays v0
     await page.evaluate(() => localStorage.setItem('mindpage_kdf_write', 'on'))
@@ -1173,8 +1230,10 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       .toContain('old writer v0 666')
 
     // G. OBSERVABLE REFUSAL, never a silent v0 downgrade: with the writer flag on but the reader
-    // flag off (a misconfigured device), an encrypted write FAILS with the session's reason
-    await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
+    // EXPLICITLY 'off' (the emergency override — under the reader default, absence means ON, so
+    // only the exact override can produce this misconfiguration), an encrypted write FAILS with
+    // the session's reason
+    await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'off'))
     const refusal = await page.evaluate(async () => {
       try {
         await (window as any)._encrypt('refused 777')
@@ -1241,7 +1300,9 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       'no document was created'
     ).toBe(itemCountBefore)
     await page.evaluate(() => window._item('#e2e_w_fail')!.delete(false)) // local-only cleanup
-    await page.evaluate(() => localStorage.setItem('mindpage_kdf', 'on'))
+    // cleanup: remove the override, restoring the default-on CONFIGURATION for the rest of
+    // the row (the absent default's behavior is observed by MIXED CORPUS and B2, not here)
+    await page.evaluate(() => localStorage.removeItem('mindpage_kdf'))
 
     // H. ROLLBACK: writer off; a new edit returns to v0 while existing v1 stays readable
     await page.evaluate(() => localStorage.removeItem('mindpage_kdf_write'))

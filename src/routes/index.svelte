@@ -4005,8 +4005,8 @@
         // profile is fetched/provisioned BEFORE the resolver prompts (present-invalid fails
         // closed before a phrase is collected), each candidate derivation runs in the session's
         // single worker slot (disposed on clear), and adoption below is generation-fenced. the
-        // seam itself is undefined when the owner flag is off, which keeps this path exactly v0
-        // until rules are confirmed deployed
+        // seam itself is undefined when the reader is explicitly 'off', which keeps this path
+        // exactly v0 in deliberately-legacy setups (the reader is otherwise enabled by default)
         v1: kdfEnabled()
           ? {
               profile: () => kdfHandle.profile(),
@@ -4105,7 +4105,7 @@
       }
     }
 
-    // SESSION-OWNED ACQUISITION (review 87 §2.1/§2.3): with the kdf flag on, the session runs
+    // SESSION-OWNED ACQUISITION (review 87 §2.1/§2.3): with the reader enabled (the default), the session runs
     // profile-first, selects and raises the prompt/establish loop (upgrade / existing-phrase /
     // new-phrase-on-authoritatively-empty, re-prompting on a wrong required phrase), validates
     // the candidate against corpus evidence, and publishes BOTH regimes
@@ -4166,10 +4166,15 @@
   // ---- the v1 KEY SESSION (component-owned; design: "Acquisition ownership") ------------------
   // ONE orchestrator (src/kdf_session.ts, table-tested) beside the existing `secret` state —
   // never a module singleton (SSR shares module state across requests; module state has no
-  // sign-out/HMR lifetime). All of it is inert until the OWNER FLAG below is set, which happens
-  // only after the new Firestore rules are deployed and confirmed (design: rollout order — a
-  // resident old tab's bare profile set is made harmless only by the live no-drop rule).
-  const kdfEnabled = () => localStorage.getItem('mindpage_kdf') == 'on'
+  // sign-out/HMR lifetime).
+  // READER DEFAULT-ON (2026-08-28 lockout lesson): the flag lives in per-ORIGIN, per-profile
+  // localStorage, and once the corpus holds v1 ciphertext a reader-off origin hard-locks the
+  // WHOLE account at the fail-closed corpus decrypt — so an ABSENT flag must mean enabled.
+  // Exact 'off' is the emergency override for deliberately-legacy setups (NOT a safe rollback:
+  // reader 'off' hard-locks a v1-bearing account; only the writer has one). The historical
+  // opt-in ('on'-required) contract belonged to the pre-activation rollout, whose rules
+  // deploy/confirm ordering completed 2026-08-28; the WRITER below remains exact-'on'.
+  const kdfEnabled = () => localStorage.getItem('mindpage_kdf') != 'off'
   // the DISTINCT stage-3 WRITER flag (design: rollout order; reviews 85/88): deployment must not
   // activate writers, and rollback must not disable reader/provisioning behavior. activation is
   // owner-gated on the full checklist (rules deployed+confirmed, reader flag fleet-wide,

@@ -77,7 +77,7 @@ export type KdfSessionDeps = {
   // the confirmed principal for THIS acquisition. the caller confirms it against firebase auth
   // before calling; the session re-reads it only to fence generations
   uid: () => string | undefined
-  // the reader/provisioning owner flag
+  // the reader/provisioning enablement predicate (default-enabled; exact 'off' overrides)
   enabled: () => boolean
   // page-mode eligibility (never anonymous/readonly/foreign-shared)
   eligible: () => boolean
@@ -549,7 +549,7 @@ export function createKdfSession(deps: KdfSessionDeps) {
      * state (v0 secret published and v1 key held, from one establishment). Single-flight; a
      * `not-ready` outcome is NEVER retained — the slot clears on every settle — and a flight in
      * progress consults evidence that arrives after it began, through establishment itself. When
-     * the kdf flag is on, THIS is the prompt owner.
+     * the reader is enabled (the default), THIS is the prompt owner.
      */
     acquire(): Promise<KdfAcquireOutcome> {
       if (!deps.enabled()) return Promise.resolve(notReady('kdf disabled'))

@@ -143,8 +143,13 @@ test('bridge replies to encrypted personal-account requests', async ({ page }) =
   const secret = secretFor(BRIDGE_USER, PHRASE)
   const listener = await spawnBridge(BRIDGE_USER.uid, { MIND_BRIDGE_USER_SECRET: secret })
   try {
-    // seed the secret as a returning device would have it, before signing in
-    await page.addInitScript(secret => localStorage.setItem('mindpage_secret', secret), secret)
+    // seed the secret as a returning device would have it, before signing in; the reader flag is
+    // EXPLICITLY 'off' — this row is a deliberate v0 PoC (the Python port speaks only v0), and
+    // under the reader default an absent flag would enable acquisition and prompt
+    await page.addInitScript(secret => {
+      localStorage.setItem('mindpage_secret', secret)
+      localStorage.setItem('mindpage_kdf', 'off')
+    }, secret)
     await loadUser(page, BRIDGE_USER)
     // brand-new empty account: loadUser only waits for initialization to START (and writability);
     // welcome copying/reconstruction/rendering may still be in flight, so wait for the app proper
