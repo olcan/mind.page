@@ -7380,7 +7380,14 @@
   function reserveHiddenAuthority({ policy }: { policy: 'candidate' | 'revoke' | 'preserve' }) {
     const lease = hiddenIngress.reserveAuthority(policy == 'candidate')
     if (policy == 'revoke') {
-      console.warn('hidden-index authority revoked: cached revision')
+      // EDGE-TRIGGERED level: a cached revision that strips USABLE authority is a live loss and
+      // warns; one arriving while authority is already unusable (startup's fail-closed posture,
+      // or an offline burst after the first strip) is expected and logs at debug — the level
+      // carries the signal, the message and the revocation are identical (owner-directed
+      // 2026-08-29: a warning on every ordinary cache-backed owner reload is noise that hides
+      // the real one)
+      const level = hiddenAuthorityUsable() ? 'warn' : 'debug'
+      console[level]('hidden-index authority revoked: cached revision')
       lease.revoke() // synchronously, in the receipt turn, before any await
     }
     let settled = false

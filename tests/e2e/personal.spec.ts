@@ -583,7 +583,17 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     .poll(async () => (storeId = await findStoreDoc(`global_store_${ownerId}`)), { timeout: 30_000 })
     .not.toBeNull()
   // an undecryptable hidden change arrives: the revision fails to apply it, so authority is
-  // revoked AND the id stays dirty — later confirmations must not re-grant past the gap
+  // revoked AND the id stays dirty — later confirmations must not re-grant past the gap.
+  // this is the UNCHANGED application-failure path (a server candidate that blocks, not a
+  // cached revision): it must keep its unconditional console WARNING under the edge-triggered
+  // levels, matched by exact text so no other warning can satisfy the waiter (review 134 §2.1
+  // — the changed ternary's warn arm has no browser schedule and is code-reviewed instead)
+  const strippingRevocation = page.waitForEvent('console', {
+    predicate: m =>
+      m.text() == 'hidden-index authority revoked: hidden change for e2e-corrupt-hidden could not be applied' &&
+      m.type() == 'warning',
+    timeout: 30_000,
+  })
   await firestore().collection('items').doc('e2e-corrupt-hidden').set({
     user: ALICE.uid,
     time: Date.now(),
@@ -591,6 +601,7 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     cipher: 'not decryptable',
   })
   await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+  await strippingRevocation
   // /_gc refuses without authority (review 129): the maintenance command must not classify from
   // an unusable index -- nothing is scanned, previewed, or deleted
   const gcRefusal = String(
@@ -1396,9 +1407,18 @@ test('/_gc deletes exactly the previewed orphans, and an owner restored mid-conf
     const ownerDocA = (await firestore().collection('items').doc(ownerA!).get()).data()!
     await firestore().collection('items').doc(ownerA!).delete()
     await firestore().collection('items').doc(ownerB!).delete()
+    // the reload starts from the persistent cache, so the fail-closed cached-revision
+    // revocation fires during startup -- it must log at DEBUG, never as a warning: nothing
+    // usable is stripped at startup (edge-triggered levels, owner-directed 2026-08-29)
+    const cachedRevocations: string[] = []
+    page.on('console', m => {
+      if (m.text().includes('authority revoked: cached revision')) cachedRevocations.push(m.type())
+    })
     await page.reload()
     await waitForApp(page)
     await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+    expect(cachedRevocations.length, 'cached first snapshot revoked at startup').toBeGreaterThan(0)
+    expect(cachedRevocations.every(type => type == 'debug'), 'startup revocations are exactly debug').toBe(true)
     // /_gc: the preview must include BOTH of this row's orphans. the suite is STATEFUL --
     // earlier rows deliberately leave orphaned stores behind (report-only contract), so the
     // count is >= 2 and this run also sweeps that residue
