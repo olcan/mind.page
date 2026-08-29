@@ -394,3 +394,35 @@ test('invalidateAdopters finds adopters that are absent from byId as targets', a
   invalidateAdopters(idx, 'srv')
   expect([one.adopt_id, two.adopt_id]).toEqual([null, 'other'])
 })
+
+// /_gc candidate projection and preview intersection (src/hidden_gc.ts; reviews 129-130).
+// rows arrive PARSED (id, name) from the coordinated scan, which fails closed on indeterminate
+// rows and excludes admitted ids (pinned in hidden_scan.spec.ts) -- that is why no unreadable
+// row can reach this projection
+import { gcCandidates, gcIntersect } from '../../src/hidden_gc.js'
+
+test('gc candidates: unique canonical ownerless stores only', () => {
+  const rows = [
+    { id: 'a1', name: 'global_store_gone' }, // unique orphan: candidate
+    { id: 'b1', name: 'global_store_alive' }, // owner exists: revalidated, not a candidate
+    { id: 'c1', name: 'global_store_dup' }, // duplicate-name group: excluded entirely
+    { id: 'c2', name: 'global_store_dup' },
+    { id: 'd1', name: 'not_a_store' }, // non-store hidden record: never a candidate
+  ]
+  expect(gcCandidates(rows, id => id == 'alive')).toEqual([{ id: 'a1', name: 'global_store_gone' }])
+  // owner ARRIVAL revalidates: the same rows with the owner now present select nothing
+  expect(gcCandidates(rows, () => true)).toEqual([])
+})
+
+test('gc intersection: the modal authorizes an exact (id, name) preview', () => {
+  const preview = [
+    { id: 'a1', name: 'global_store_x' },
+    { id: 'b1', name: 'global_store_y' },
+  ]
+  const execution = [
+    { id: 'a1', name: 'global_store_RENAMED' }, // same id, different name: misses
+    { id: 'b1', name: 'global_store_y' }, // exact match: targeted
+    { id: 'c1', name: 'global_store_new' }, // appeared while the modal was open: not previewed
+  ]
+  expect(gcIntersect(preview, execution)).toEqual([{ id: 'b1', name: 'global_store_y' }])
+})

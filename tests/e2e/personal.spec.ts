@@ -591,6 +591,13 @@ test('a corrupt hidden change revokes authority until healed, and invalid record
     cipher: 'not decryptable',
   })
   await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+  // /_gc refuses without authority (review 129): the maintenance command must not classify from
+  // an unusable index -- nothing is scanned, previewed, or deleted
+  const gcRefusal = String(
+    await page.evaluate(async () => await (window._create('/_gc', { command: true, return_alerts: true }) as any))
+  )
+  expect(gcRefusal, '/_gc refusal while unauthoritative').toContain('authority')
+  expect(gcRefusal, '/_gc refusal reports the fail-closed result').toContain('nothing was deleted')
   // the classification pass REPORTS what it found, and a deletion would have followed that
   // report — so the report is the causal signal that "kept" can be distinguished from "not yet
   // deleted". armed BEFORE the delete that orphans the store
@@ -1348,5 +1355,94 @@ test('STAGE 3 WRITER: real acquisition, lazy v1 text/bytes writes, coexistence, 
       localStorage.removeItem('mindpage_kdf_write')
       localStorage.removeItem('mindpage_key1')
     })
+  }
+})
+
+test('/_gc deletes exactly the previewed orphans, and an owner restored mid-confirm survives', async ({ page }) => {
+  // the explicit maintenance path (review 129; design notes/design/mind_page_hidden_gc.md in the
+  // vault): two stores are orphaned server-side and take the STARTUP-invalid path via reload
+  // (never indexed -- the class the live classifier cannot see), then /_gc previews both; one
+  // owner is restored under its EXACT old id while the confirm modal is open, and execution must
+  // delete only the still-orphaned store while the restored owner's store survives
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
+  await expect.poll(authority, { timeout: 15_000 }).toBe(true)
+  // cleanup scope opens BEFORE the first fixture creation (review 130 §3): any failure from
+  // here on runs the finally, so a half-created pair cannot poison a focused rerun
+  let ownerA: string | null = null
+  let ownerB: string | null = null
+  let storeA: string | null = null
+  let storeB: string | null = null
+  try {
+    await page.evaluate(() => {
+      void window._create('#e2e_gc_a gc owner a')
+      void window._create('#e2e_gc_b gc owner b')
+    })
+    await expect.poll(async () => (ownerA = await savedId(page, '#e2e_gc_a')), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(async () => (ownerB = await savedId(page, '#e2e_gc_b')), { timeout: 30_000 }).toBeTruthy()
+    await page.evaluate(() => {
+      void (window._item('#e2e_gc_a')!.global_store._gc = 'a')
+      void (window._item('#e2e_gc_b')!.global_store._gc = 'b')
+    })
+    await expect
+      .poll(async () => (storeA = await findStoreDoc(`global_store_${ownerA}`)), { timeout: 30_000 })
+      .not.toBeNull()
+    await expect
+      .poll(async () => (storeB = await findStoreDoc(`global_store_${ownerB}`)), { timeout: 30_000 })
+      .not.toBeNull()
+    // capture owner A's full document so it can be restored under its EXACT old id
+    const ownerDocA = (await firestore().collection('items').doc(ownerA!).get()).data()!
+    await firestore().collection('items').doc(ownerA!).delete()
+    await firestore().collection('items').doc(ownerB!).delete()
+    await page.reload()
+    await waitForApp(page)
+    await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+    // /_gc: the preview must include BOTH of this row's orphans. the suite is STATEFUL --
+    // earlier rows deliberately leave orphaned stores behind (report-only contract), so the
+    // count is >= 2 and this run also sweeps that residue
+    const result = page.evaluate(async () => await (window._create('/_gc', { command: true, return_alerts: true }) as any))
+    // ALL locators scoped to .modal: the same ids also render in the on-page console feed
+    const modal = page.locator('.modal')
+    await expect(modal.getByText(/Permanently delete \d+ orphaned/)).toBeVisible({ timeout: 30_000 })
+    await expect(modal.locator('p').filter({ hasText: storeA! }).first()).toBeVisible()
+    await expect(modal.locator('p').filter({ hasText: storeB! }).first()).toBeVisible()
+    // restore owner A while the modal is open; wait for it to arrive locally so the execute-time
+    // recomputation sees it (owner existence is checked against local items)
+    await firestore().collection('items').doc(ownerA!).set(ownerDocA)
+    await expect
+      .poll(() => page.evaluate(id => window.__items.some(item => item.savedId == id), ownerA), { timeout: 30_000 })
+      .toBe(true)
+    // make the command's precondition explicit rather than timing-dependent: authority must be
+    // usable again (the restored owner's revision granted) before execution is authorized
+    await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+    await modal.getByText('Delete', { exact: true }).click()
+    // exactly ONE previewed target is dropped (the restored owner's store); everything else
+    // previewed -- this row's victim plus any prior residue -- is deleted, with no failures
+    const summary = String(await result)
+    const split = summary.match(/deleted (\d+) of (\d+) previewed/)
+    expect(split, `summary shape: ${summary}`).toBeTruthy()
+    expect(+split![1], `summary split: ${summary}`).toBe(+split![2] - 1)
+    // the restored owner is a PREVIEW-TIME skip and must be reported as such (review 130 §2.3)
+    expect(summary, `revalidated partition: ${summary}`).toContain('skipped 1 revalidated')
+    expect(summary, `no failures: ${summary}`).not.toContain('FAILED')
+    // the victim reaches a durable 404 at the emulator; the survivor remains (Bearer owner is
+    // the emulator admin bypass -- rules 403 unauthenticated REST, indistinguishable from present)
+    const status = (id: string) =>
+      fetch(`http://localhost:8080/v1/projects/olcanswiki/databases/(default)/documents/items/${id}`, {
+        headers: { Authorization: 'Bearer owner' },
+      }).then(r => r.status)
+    await expect.poll(() => status(storeB!), { message: 'victim store durably deleted', timeout: 30_000 }).toBe(404)
+    expect(await status(storeA!), 'restored owner store survives').toBe(200)
+  } finally {
+    // best-effort residue cleanup on every exit, both pairs (reviews 130-132): ids not yet
+    // captured are recovered from the fixed labels before deleting whatever exists
+    ownerA ??= await savedId(page, '#e2e_gc_a').catch(() => null)
+    ownerB ??= await savedId(page, '#e2e_gc_b').catch(() => null)
+    if (ownerA && !storeA) storeA = await findStoreDoc(`global_store_${ownerA}`).catch(() => null)
+    if (ownerB && !storeB) storeB = await findStoreDoc(`global_store_${ownerB}`).catch(() => null)
+    for (const id of [ownerA, ownerB, storeA, storeB])
+      if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
   }
 })

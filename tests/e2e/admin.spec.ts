@@ -25,6 +25,15 @@ test('admin signs in and acts on the anonymous account with write access', async
   // exact assertion holds in either admin file order -- admin_live.spec.ts may legitimately
   // self-install providers before this file when live validation is enabled
   expect(await page.evaluate(() => window._items().filter(item => !item.attr?.source).length)).toBe(121)
+  // /_gc explicitly refuses the synthetic-anonymous principal (review 130 §2.2): this app's
+  // anonymous mode is the component-level `anonymous` flag, not user.isAnonymous -- the command
+  // must refuse before any scan even though readonly is false here (asserted, so the anonymous
+  // flag is uniquely causal)
+  expect(await page.evaluate(() => window._readonly), 'admin mode is not read-only').toBe(false)
+  expect(
+    await page.evaluate(async () => await (window._create('/_gc', { command: true, return_alerts: true }) as any)),
+    '/_gc anonymous refusal'
+  ).toContain('signed-in owner')
 })
 
 test('installs mind.items with tests', async ({ page }) => {

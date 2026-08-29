@@ -4995,6 +4995,116 @@
                 })
                 .catch(console.error)
               return
+            } else if (cmd == '/_gc') {
+              // explicit maintenance deletion of orphaned hidden global_store_* records (design:
+              // notes/design/mind_page_hidden_gc.md in the vault repo; reviews 129-131).
+              // GUARANTEE: execute-time evidence plus per-target transactional IDENTITY — the
+              // transaction skips any target whose identity is no longer established (changed
+              // name, hidden->visible, unclassifiable plaintext, or a different owner uid); a
+              // same-id same-name content replacement remains the exact previewed target and is
+              // DELETED. NOT owner-absence atomicity at the server commit. the residual, by
+              // race (review 132 §2.1): (a) exact old-owner-id recreation (out-of-band tooling
+              // only — app paths mint new ids) revalidates the old store, which is still
+              // deleted; (b) a different-id same-name hidden create (ordinary persistence or
+              // tooling) SURVIVES /_gc; (c) a same-id same-name hidden update from a stale/live
+              // owner session (hidden_persistence updateDoc) CAN be deleted with its new
+              // payload — when it commits before the successful transaction read or is observed
+              // on a retry; if /_gc commits first the update fails and persistence may recover
+              // via a fresh create. no additional pre-delete read by itself closes the commit
+              // window; a scan-derived fingerprint carried into the transaction could fence (c)
+              // but not (a) or (b) — those need a server-side conditional operation. the
+              // accepted policy deliberately chooses neither.
+              // owner-accepted (2026-08-29, informed of all three races) for this
+              // manual, preview-confirmed command, run with other writing sessions quiescent.
+              // the reporter's report-only contract is unchanged; this is the explicit
+              // maintenance path it reserves
+              lastEditorChangeTime = 0 // disable debounce even if editor focused
+              onEditorChange('')
+              return (window['_mindbox_return'] = (async () => {
+                // ONE liveness predicate for the whole command: the component-level `anonymous`
+                // flag IS this app's anonymous mode, and the captured principal must still be
+                // signed in at every boundary — turn entry, post-scan, and pre-transaction
+                if (readonly || anonymous || !user?.uid) return alert(`${cmd} requires a signed-in owner`)
+                const principal = user.uid
+                const live = () => !readonly && !anonymous && user?.uid === principal
+                const errmsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
+                // ONE serialized corpus turn per acquisition (reviews 130-131 §2.1-2.2): the
+                // coordinated scanner supplies the bounded prefix, membership, point-read
+                // precedence, fail-closed indeterminate rows and admitted evidence — and the
+                // CANDIDATES are derived inside the turn, before the serialization boundary is
+                // released, with the scan queries bound to the captured principal
+                const acquireCandidates = async (): Promise<GcTarget[]> =>
+                  hiddenCorpus.run(async run => {
+                    if (!live()) throw new Error('principal changed or signed out')
+                    if (!hiddenAuthorityUsable()) throw new Error('hidden-index authority is not usable')
+                    const result = await scanHiddenDocuments(hiddenScanDeps(run, undefined, principal))
+                    if (result.admittedIds.length)
+                      throw new Error(`admitted deliveries own ${result.admittedIds.length} scanned id(s)`)
+                    if (!live()) throw new Error('principal changed or signed out')
+                    if (!hiddenAuthorityUsable()) throw new Error('hidden-index authority was lost during the scan')
+                    return gcCandidates(
+                      result.apply.map(row => ({ id: row.id, name: row.name })),
+                      id => _exists(tempIdFromSavedId.get(id) ?? id)
+                    )
+                  })
+                // phase-local failure handling (review 130 §2.4): an acquisition failure BEFORE
+                // any transaction reports that nothing was deleted; transaction failures below
+                // belong in the settled outcome summary instead
+                let preview: GcTarget[]
+                try {
+                  preview = await acquireCandidates()
+                } catch (e) {
+                  console.error(`${cmd} preview scan failed:`, e)
+                  return alert(`${cmd}: no conclusive corpus (${errmsg(e)}); nothing was deleted — retry or reload`)
+                }
+                if (!preview.length) return alert(`${cmd}: no orphaned hidden store records found`)
+                await _modal_close() // close/cancel all modals
+                const confirmed = await _modal({
+                  content:
+                    `Permanently delete ${preview.length} orphaned hidden store record(s)?\n\n` +
+                    preview.map(t => `\`${t.name}\` (${t.id})`).join('  \n'),
+                  confirm: 'Delete',
+                  cancel: 'Cancel',
+                  background: 'cancel', // destructive: background click cancels
+                })
+                if (!confirmed) return
+                // the modal authorized an EXACT preview: recompute inside a second turn and
+                // target only the (id, name) intersection
+                let targets: GcTarget[]
+                try {
+                  targets = gcIntersect(preview, await acquireCandidates())
+                } catch (e) {
+                  console.error(`${cmd} execution scan failed:`, e)
+                  return alert(`${cmd}: no conclusive corpus (${errmsg(e)}); nothing was deleted — retry`)
+                }
+                if (!live()) return alert(`${cmd}: principal changed; nothing was deleted`)
+                // previewed targets the recomputation no longer classifies are preview-time
+                // skips (e.g. an owner restored while the modal was open); transaction-time
+                // identity failures join them below
+                const skipped = preview.filter(p => !targets.some(t => t.id === p.id && t.name === p.name))
+                const db = getFirestore(firebase)
+                const outcomes = await Promise.allSettled(targets.map(target => gcDeleteExact(db, target, principal)))
+                const deleted: GcTarget[] = []
+                const failed: string[] = []
+                outcomes.forEach((outcome, i) => {
+                  if (outcome.status != 'fulfilled')
+                    return void failed.push(`${targets[i].name} (${targets[i].id}): ${errmsg(outcome.reason)}`)
+                  if (outcome.value == 'deleted') deleted.push(targets[i])
+                  else skipped.push(targets[i]) // 'revalidated': identity no longer established
+                })
+                // ledger: deleted records are definitively absent — listener removal clears only
+                // indexed records, which startup orphans never were. (a target that DISAPPEARED
+                // before its transaction read rejects under the rules — a read of a missing
+                // document is denied — and is reported as a failure to retry, not cleared)
+                const absent = new Set(deleted.map(t => t.id))
+                hiddenItemsInvalid = (hiddenItemsInvalid ?? []).filter(entry => !absent.has(entry.wrapper.id))
+                const summary =
+                  `${cmd}: deleted ${deleted.length} of ${preview.length} previewed` +
+                  (skipped.length ? `, skipped ${skipped.length} revalidated` : '') +
+                  (failed.length ? `, FAILED ${failed.length}: ${failed.join('; ')}` : '')
+                console.warn(summary, { deleted, skipped })
+                return alert(summary)
+              })())
             } else if (cmd == '/_watch') {
               if (hostname != 'localhost') return alert(`/_watch: can not watch on ${hostname}`)
               let [name, file] = args.split(/\s+/)
@@ -6903,6 +7013,7 @@
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { autodepParent } from '../install_deps'
+  import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)
@@ -7121,10 +7232,10 @@
   // server-confirmed read of `user == uid && hidden == true`. shaped this way because a direct get
   // of a DELETED id is denied by the rules and a documentId()-constrained query reproduces the
   // denial (pinned in tests/e2e/rules.spec.ts) — absence from this set IS the answer
-  const queryHiddenSet = async () =>
+  const queryHiddenSet = async (uid = user.uid) =>
     (
       await getDocsFromServer(
-        query(collection(getFirestore(firebase), 'items'), where('user', '==', user.uid), where('hidden', '==', true))
+        query(collection(getFirestore(firebase), 'items'), where('user', '==', uid), where('hidden', '==', true))
       )
     ).docs
   const decryptHiddenDoc = (data: any, id: string) => decryptItem(Object.assign(data, { id }))
@@ -7134,7 +7245,10 @@
     // decrypts ONE raw document. the session `secret` is not always the right key: the post-prompt
     // scan runs BEFORE the validated phrase is published (a save that saw it early could duplicate
     // a record this scan has not registered yet), so it supplies a candidate-keyed decryptor
-    decrypt: (data: any, id: string) => Promise<any> = (data, id) => decryptItem(Object.assign(data, { id }))
+    decrypt: (data: any, id: string) => Promise<any> = (data, id) => decryptItem(Object.assign(data, { id })),
+    // the principal the scan is BOUND to: /_gc passes its captured principal so a sign-out or
+    // account switch mid-turn cannot make an acquisition combine another principal's state
+    uid: string = user?.uid
   ): ScanDeps {
     const classify = async (id: string, data: any) => {
       const item = await decrypt(data, id)
@@ -7147,7 +7261,7 @@
           await getDocsFromServer(
             query(
               collection(getFirestore(firebase), 'items'),
-              where('user', '==', user.uid),
+              where('user', '==', uid),
               where('hidden', '==', true)
             )
           )
@@ -7159,7 +7273,7 @@
       cancellation: run.cancellation,
       classify,
       pointRead: async id => {
-        const m = await readHiddenMembership(id, { queryHiddenSet, stopped: () => ingressStopped, decrypt })
+        const m = await readHiddenMembership(id, { queryHiddenSet: () => queryHiddenSet(uid), stopped: () => ingressStopped, decrypt })
         return m.kind == 'hidden' ? { kind: 'hidden' as const, wrapper: m.wrapper } : { kind: 'not-hidden' as const }
       },
     }
@@ -7307,13 +7421,36 @@
   }
 
 
+  // deletes ONE hidden record iff its exact (id, name, owner-uid) hidden-store IDENTITY is
+  // still established: rereads and decrypts INSIDE the transaction; a changed name, a
+  // hidden->visible transition, unclassifiable plaintext, or a document no longer owned by the
+  // captured principal returns 'revalidated' (identity no longer established — a same-id
+  // same-name content replacement remains the exact target and is deleted). rejects on real
+  // failures — including a target that DISAPPEARED, since the rules deny reading a missing
+  // document, which the caller reports as a retryable failure. the principal check is the
+  // command's identity fence across transaction retries; the rules stay the authorization layer.
+  // used by /_gc, and by the deferred deleteItem cascade when that slice lands (design §5)
+  async function gcDeleteExact(db, target: { id: string; name: string }, principal: string) {
+    return runTransaction(db, async tx => {
+      const ref = doc(db, 'items', target.id)
+      const snap = await tx.get(ref)
+      if (!snap.exists()) return 'revalidated' // unreachable under current rules; fail-safe
+      if (snap.data().user !== principal) return 'revalidated'
+      const item = await decryptItem(Object.assign(snap.data(), { id: target.id }))
+      const c = classifyHiddenDocument(target.id, !!item.hidden, item.text)
+      if (c.kind != 'hidden' || c.wrapper.name != target.name) return 'revalidated'
+      tx.delete(ref)
+      return 'deleted'
+    })
+  }
+
   // recomputes and REPORTS invalid hidden records from CURRENT state — runs INSIDE the
   // serialized snapshot chain on a false -> true authority grant, so classification cannot race
   // remote applications. startup candidates are not deleted from their (stale) provisional
   // classification: startup ORPHANS were never indexed (see buildHiddenIndex), so one whose
   // owner has since arrived is REGISTERED (valid again, and the owner's in-memory global_store
   // is synced), one re-keyed into the index by a remote change defers to current-state rules,
-  // and only one still ownerless is deleted; duplicates and post-init arrivals are recomputed
+  // and only one still ownerless is reported; duplicates and post-init arrivals are recomputed
   // from the live index by classifyInvalidHidden (a record renamed to a unique name, or a store
   // whose owner arrived, is simply no longer classified). malformed stays quarantined.
   // REPORTS invalid hidden records; it no longer deletes any. automatic client-side deletion is
