@@ -5,7 +5,8 @@
 // but is included only when the local server actually responds; providers without keys skip.
 // a separate file rather than a row in admin.spec.ts: trace must be off for this test (the
 // default retain-on-failure trace would retain page-evaluate arguments and provider request
-// headers, i.e. real api keys) and playwright rejected a describe-scoped trace option in this
+// headers, i.e. real api keys -- keyless local providers (ollama, the llama fleet) are the
+// exception) and playwright rejected a describe-scoped trace option in this
 // suite ("Make it top-level in the test file or put in the configuration file"); file scope is
 // also the clean boundary for standalone selection and secret-output isolation. it still runs
 // in the admin project lane (see playwright.config.ts).
@@ -19,29 +20,56 @@ test.setTimeout(600_000)
 // stray truthy value like '0' or 'false' must not enable paid/network calls
 test.skip(
   process.env.MIND_ITEMS_LIVE !== '1',
-  'live validation is explicit: set MIND_ITEMS_LIVE=1 (hosted providers need api keys in env; ollama needs a local server with the gemma3 + qwen3:4b test models)'
+  'live validation is explicit: set MIND_ITEMS_LIVE=1 (hosted providers need api keys in env; ollama needs a local server with the gemma3 + qwen3:4b test models; llama needs BOTH tailnet fleet servers up via vault bin/serve_model.sh)'
 )
 
-const LIVE: { item: string; key?: string }[] = [
+// keyless local providers carry a readiness probe instead of a key; a probed provider is
+// included only when its probe passes (availability-gated), and never has a key to inject
+const LIVE: { item: string; key?: string; probe?: () => Promise<boolean> }[] = [
   { item: 'agent/chat/claude', key: process.env.ANTHROPIC_API_KEY },
   { item: 'agent/chat/gpt', key: process.env.OPENAI_API_KEY },
   { item: 'agent/chat/gemini', key: process.env.GEMINI_API_KEY },
   { item: 'agent/chat/together', key: process.env.TOGETHER_API_KEY },
   { item: 'agent/chat/groq', key: process.env.GROQ_API_KEY },
-  { item: 'agent/chat/ollama', key: 'none' }, // local server, no key needed (availability-gated below)
+  {
+    item: 'agent/chat/ollama', // local server, no key needed
+    probe: () =>
+      fetch('http://localhost:11434/api/version', { signal: AbortSignal.timeout(2_000) })
+        .then(r => r.ok)
+        .catch(() => false),
+  },
+  {
+    item: 'agent/chat/llama', // tailnet llama-server fleet, no key by design
+    // BOTH fleet endpoints must be up: live_smoke uses the default dsv4 url on m3ultra,
+    // live_tool_use overrides to flash-next on tinybox. both down = availability-skip (like a
+    // hosted provider without a key); EXACTLY ONE up THROWS -- an explicitly opted-in half-up
+    // fleet must fail fast with a diagnostic, never produce a false "validated" skip; servers
+    // are manual-start via vault bin/serve_model.sh
+    probe: async () => {
+      const up = (host: string) =>
+        fetch(`https://${host}.tail10a0fe.ts.net:8443/health`, { signal: AbortSignal.timeout(2_000) })
+          .then(r => r.ok)
+          .catch(() => false)
+      const [m3ultra, tinybox] = await Promise.all([up('m3ultra'), up('tinybox')])
+      if (m3ultra != tinybox)
+        throw new Error(
+          `half-up llama fleet: m3ultra=${m3ultra} tinybox=${tinybox} -- start both via vault bin/serve_model.sh`
+        )
+      return m3ultra && tinybox
+    },
+  },
   { item: 'agent/chat/openrouter', key: process.env.OPENROUTER_API_KEY },
 ]
 
 test('live smokes pass for opted-in providers', async ({ page }) => {
-  // ollama's row has no key to gate on: include it only when the local server responds. NOTE
-  // reachability is necessary, not sufficient -- the item's live tests also need their models
-  // present (gemma3 default for live_smoke, qwen3:4b for live_tool_use); a server without them
-  // fails the rows rather than skipping (deliberate: this is explicit opt-in validation)
-  const ollama = await fetch('http://localhost:11434/api/version', { signal: AbortSignal.timeout(2_000) })
-    .then(r => r.ok)
-    .catch(() => false)
-  const live = LIVE.filter(p => (p.key == 'none' ? ollama : p.key))
-  test.skip(live.length == 0, 'no provider keys in env and no local ollama')
+  // probed rows have no key to gate on: include each only when its probe passes. NOTE
+  // reachability is necessary, not sufficient -- the items' live tests also need their models
+  // present (ollama: gemma3 for live_smoke, qwen3:4b for live_tool_use; llama: whatever each
+  // fleet server was started with); an up server without them fails the rows rather than
+  // skipping (deliberate: this is explicit opt-in validation)
+  const live: typeof LIVE = []
+  for (const p of LIVE) if (p.probe ? await p.probe() : p.key) live.push(p)
+  test.skip(live.length == 0, 'no provider keys in env and no reachable local servers')
   // NOTE: no blanket page-console relay here -- providers log request details (gemini carries its
   // key in the request url, claude in an x-api-key header), so raw console text can leak real
   // keys into stdout and the html report; the structured non-secret diagnostics below suffice
@@ -65,7 +93,7 @@ test('live smokes pass for opted-in providers', async ({ page }) => {
   for (const { item, key } of live) {
     const name = `#${item}`
     expect(await exists(name), name).toBe(true)
-    if (key != 'none')
+    if (key)
       await page.evaluate(
         ([name, key]) => (((window as any)._item(name).global_store.api_key = key), undefined),
         [name, key] as [string, string]

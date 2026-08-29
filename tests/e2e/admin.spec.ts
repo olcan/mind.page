@@ -13,7 +13,7 @@ test.setTimeout(300_000)
 // arrive as a dependency of the providers (via agent/chat's #_///agent), since providers cannot
 // function without it -- the framework is what runs them on chat item changes. the /native test
 // asserts this, keeping the dependency edge continuously verified for fresh-account installs
-const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample', 'util/sim', 'util/plot', 'logger', 'agent/chat/claude', 'agent/chat/gpt', 'agent/chat/gemini', 'agent/chat/together', 'agent/chat/groq', 'agent/chat/ollama', 'agent/chat/openrouter']
+const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample', 'util/sim', 'util/plot', 'logger', 'agent/chat/claude', 'agent/chat/gpt', 'agent/chat/gemini', 'agent/chat/together', 'agent/chat/groq', 'agent/chat/ollama', 'agent/chat/openrouter', 'agent/chat/llama']
 
 type TestResult = { ok: boolean; ms?: number; log?: string }
 
@@ -55,6 +55,10 @@ test('/test passes for all installed items', async ({ page }) => {
   // every installed root must have survived the reload (see the save wait in the install test);
   // a lost item would otherwise only show as a smaller test count
   for (const path of INSTALL) expect(await page.evaluate(name => window._exists(name), `#${path}`), path).toBe(true)
+  // catalog-driven transitive installs: the #chat catalog lists the llama-server aliases, so
+  // they must arrive without being INSTALL roots (as every alias does)
+  for (const name of ['#chat/next', '#chat/dsv4'])
+    expect(await page.evaluate(name => window._exists(name), name), `${name} via the #chat catalog`).toBe(true)
   // /test confirms completion with a modal, so it is not awaited; results land in each item's global_store
   await page.evaluate(() => void window._create('/test', { command: true, return_alerts: true }))
   const done = page.getByText(/Completed \d+ tests? in \d+ items?\./)
