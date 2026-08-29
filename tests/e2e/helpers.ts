@@ -31,6 +31,15 @@ declare global {
     _decrypt_bytes: (cipher: Uint8Array) => Promise<Uint8Array> // the application bytes wrapper (v0 and v1)
     _create: (text: string, options?: object) => unknown
     _exists: (name: string) => boolean
+    _autodep_parent: (opts: {
+      label: string
+      text: string
+      owner: string
+      repo: string
+      branch: string
+      path: string
+      token?: string
+    }) => Promise<string | null>
     __items: {
       id: string
       savedId?: string

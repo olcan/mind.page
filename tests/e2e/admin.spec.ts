@@ -124,6 +124,7 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   // parent e2e_autodep/b/c.md is reachable ONLY via the label-prefix autodep edge resolved AFTER
   // text dependencies settle -- the corpus itself cannot provide this fixture while its explicit
   // workaround tags close the same edge
+  let sha = 'e2e-autodep' // mutable: the updater-cycle stage below advances the synthetic repo
   const files: Record<string, string> = {
     'e2e_autodep.md': '#e2e_autodep #_autodep defines the root of a synthetic autodep hierarchy.\n',
     'e2e_autodep/b/c.md': '#e2e_autodep/b/c is a middle level with no dependencies of its own.\n',
@@ -147,7 +148,16 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     if (path == 'commits') {
       const file = url.searchParams.get('path') ?? ''
       if (!(file in files)) return json(200, [])
-      return json(200, [{ sha: 'e2e-autodep', commit: { message: 'synthetic', author: { date: new Date().toISOString() } } }])
+      return json(200, [{ sha, commit: { message: 'synthetic', author: { date: new Date().toISOString() } } }])
+    }
+    if (path.startsWith('commits/')) {
+      // single-commit fetch: update_item validates the target sha, and check_updates'
+      // pushable marking reads the commit's files listing
+      return json(200, {
+        sha: path.slice('commits/'.length),
+        commit: { message: 'synthetic', author: { date: new Date().toISOString() } },
+        files: Object.keys(files).map(filename => ({ filename, sha })),
+      })
     }
     if (path.startsWith('contents/')) {
       const file = decodeURIComponent(path.slice('contents/'.length))
@@ -156,7 +166,7 @@ test('an autodep parent absent from every text tag is installed and joins the ru
         type: 'file',
         path: file,
         name: file.split('/').pop(),
-        sha: 'e2e-autodep',
+        sha,
         content: Buffer.from(files[file]).toString('base64'),
         encoding: 'base64',
       })
@@ -175,6 +185,69 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     await page.evaluate(() => window._item('#e2e_autodep/b/c/d')!.dependencies.includes(window._item('#e2e_autodep/b/c')!.id)),
     'parent in runtime dependencies'
   ).toBe(true)
+  // THE REAL UPDATER CYCLE (review 126 §3): prove the new update_item seam branch end to end.
+  // Stage the broken state an update must heal -- delete the text-dep root AND the autodep
+  // parent -- then advance the synthetic repo one sha with updated child text. The REAL
+  // #updater's update_item (installed only for this row, never in the shared INSTALL; its
+  // function evaluated from the item) must then: pass 1 -- reinstall the text dependency via
+  // /_install and restart; restart pass -- with text deps local, consult window._autodep_parent
+  // and install the missing parent through the same flow; land the new sha. Removing the
+  // updater's seam branch fails the parent assertions below with everything else green.
+  await page.evaluate(() => {
+    for (const name of ['#e2e_autodep', '#e2e_autodep/b/c']) window._item(name)!.delete(false)
+  })
+  files['e2e_autodep/b/c/d.md'] = '#e2e_autodep/b/c/d depends on #e2e_autodep explicitly and nothing else. v2\n'
+  sha = 'e2e-autodep-2'
+  expect(await install(page, 'updater'), '/_install updater').toBeNull()
+  await page.evaluate(() => {
+    // init_updater runs only on welcome (page load), which this mid-session install skips --
+    // seed the store fields the update/restart path reads
+    const store = (window._item('#updater') as any).store
+    store.modified_ids ??= []
+    store.pending_updates ??= {}
+  })
+  // root /_install commands (which the updater's dependency flow issues via MindBox.create)
+  // finish with REAL modals -- the "Installed <item>" OK confirmation, the updater's own
+  // Continue confirmation for missing dependencies, and (once #updater exists as a welcome
+  // item) a Reload/Skip recommendation. Production is interactive; the row clicks through
+  // exactly as the install() helper does, never clicking Reload
+  let clicking = true
+  const clicks = (async () => {
+    while (clicking)
+      for (const label of ['Continue', 'OK', 'Skip'])
+        await page.getByText(label, { exact: true }).click({ timeout: 200 }).catch(() => {})
+  })()
+  let updated: unknown
+  try {
+    updated = await page.evaluate(async () => {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('update_item timed out in 90s')), 90_000)
+      )
+      const run = (async () => {
+        const update_item = await (window._item('#updater') as any).eval('update_item', {
+          async: true,
+          async_simple: true,
+        })
+        return update_item(window._item('#e2e_autodep/b/c/d'), { 'e2e_autodep/b/c/d.md': 'e2e-autodep-2' })
+      })()
+      return Promise.race([run, timeout])
+    })
+  } finally {
+    clicking = false
+    await clicks
+  }
+  expect(updated, 'update_item completed').toBe(true)
+  // the healed closure: the text dependency reinstalled by pass 1, the autodep parent by the
+  // updater's seam branch on the restart pass, and the updated text landed
+  expect(await exists('#e2e_autodep'), 'text dependency reinstalled by the update').toBe(true)
+  expect(await exists('#e2e_autodep/b/c'), 'autodep parent reinstalled by the updater seam branch').toBe(true)
+  expect(await page.evaluate(() => window._item('#e2e_autodep/b/c/d')!.text), 'updated text landed').toContain('v2')
+  expect(
+    await page.evaluate(() =>
+      window._item('#e2e_autodep/b/c/d')!.dependencies.includes(window._item('#e2e_autodep/b/c')!.id)
+    ),
+    'parent back in runtime dependencies'
+  ).toBe(true)
   // wait for saves before deleting below, so no create can land after its delete
   await expect
     .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 120_000 })
@@ -184,11 +257,14 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   // unmocked local-preview seam. delete the three synthetic items and confirm the deletions are
   // durable in the emulator (local removal is immediate; the remote write can still be pending)
   const ids = await page.evaluate(() =>
-    window.__items.filter(item => item.labelText?.startsWith('#e2e_autodep')).map(item => item.savedId!)
+    window.__items
+      .filter(item => item.labelText?.startsWith('#e2e_autodep') || item.labelText == '#updater')
+      .map(item => item.savedId!)
   )
-  expect(ids, 'three saved synthetic items').toHaveLength(3)
+  expect(ids, 'three synthetic items plus #updater').toHaveLength(4)
   await page.evaluate(() => {
-    for (const name of ['#e2e_autodep/b/c/d', '#e2e_autodep/b/c', '#e2e_autodep']) window._item(name)!.delete(false)
+    for (const name of ['#e2e_autodep/b/c/d', '#e2e_autodep/b/c', '#e2e_autodep', '#updater'])
+      window._item(name)!.delete(false)
   })
   // Bearer owner is the emulator's admin bypass: rules otherwise 403 unauthenticated REST reads,
   // which cannot distinguish a deleted document from a present one

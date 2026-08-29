@@ -358,6 +358,17 @@
     window['_items'] = _items
     window['_exists'] = _exists
     window['_create'] = _create
+    // item-land seam for the install-time autodep parent decision — ONE implementation (see
+    // installTimeAutodepParent): lets #updater close the same runtime-graph edge the app's
+    // install loops do when applying item updates. token falls back to the stored github token
+    // off the shared origin, like the install command; resolves null when no parent belongs in
+    // the closure (not autodep, no prefix, or the parent is unresolvable/ambiguous)
+    window['_autodep_parent'] = async ({ label, text, owner, repo, branch, path, token }) => {
+      if (!token && !isSharedOrigin(hostname)) token = localStorage.getItem('mindpage_github_token')
+      const Octokit = window['Octokit']
+      const github = token ? new Octokit({ auth: token }) : new Octokit()
+      return installTimeAutodepParent(github, { owner, repo, branch, path }, label, text)
+    }
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
     window['_host'] = hostname
