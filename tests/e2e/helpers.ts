@@ -20,6 +20,7 @@ declare global {
       elem: HTMLElement | null
       text: string
       saved_id?: string
+      dependencies: string[] // runtime dependency ids (itemDeps)
       global_store: Record<string, unknown>
       write: (text: string) => void
       delete: (confirm?: boolean) => void

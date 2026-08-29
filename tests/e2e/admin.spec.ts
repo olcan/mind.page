@@ -82,8 +82,10 @@ test('/test passes for all installed items', async ({ page }) => {
   // no installed item may macro-error during rendering: console errors are otherwise unasserted
   // noise, which is how a doc item once shipped with unescaped delimiter macros (evaluated even
   // inside inline code spans) without failing any test. requires complete install closures --
-  // /_install walks text tags only (label-prefix autodeps are runtime-only), so items invoking
-  // parent-defined macros must declare the parent explicitly (e.g. #_///template)
+  // /_install resolves text tags plus label-prefix autodep parents (src/install_deps.ts). the
+  // synthetic autodep.test row below exercises that edge; THIS lane still follows the corpus's
+  // explicit workaround tags (e.g. #_///template) and flips to the autodep path only when those
+  // tags are removed after the fixed app deploys
   const errors = [...macroErrors].sort()
   expect(errors, `macro errors: ${errors.join(', ')}`).toEqual([])
 })
@@ -112,6 +114,96 @@ test('/native creates a tagged request item without breaking the agent framework
   // let the agent framework react to the change (start_agent on #agent/native must not fatal)
   await page.waitForTimeout(2_000)
   expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('an autodep parent absent from every text tag is installed and joins the runtime graph', async ({ page }) => {
+  await loadAdmin(page)
+  // synthetic four-level hierarchy on a dedicated repo route (review 118 §4): the root depends
+  // on #e2e_autodep in TEXT only, e2e_autodep.md's #_autodep makes the hierarchy autodep,
+  // e2e_autodep/b.md is a genuine 404 (exercising the known-source probe), and the immediate
+  // parent e2e_autodep/b/c.md is reachable ONLY via the label-prefix autodep edge resolved AFTER
+  // text dependencies settle -- the corpus itself cannot provide this fixture while its explicit
+  // workaround tags close the same edge
+  const files: Record<string, string> = {
+    'e2e_autodep.md': '#e2e_autodep #_autodep defines the root of a synthetic autodep hierarchy.\n',
+    'e2e_autodep/b/c.md': '#e2e_autodep/b/c is a middle level with no dependencies of its own.\n',
+    'e2e_autodep/b/c/d.md': '#e2e_autodep/b/c/d depends on #e2e_autodep explicitly and nothing else.\n',
+  }
+  // successful installs start watchLocalRepo(repo) without awaiting, which on localhost calls
+  // fetchPreview for each installed source item via /file/<repo>/<path> BEFORE the (already
+  // intercepted) /watch/... loop -- serve those from the same map, 404 fail-closed, so the
+  // fixture stays hermetic (an unintercepted miss throws via the app fetch wrapper and opens an
+  // error modal concurrently with the install modals)
+  await page.route('**/file/autodep.test/**', route => {
+    const file = decodeURIComponent(new URL(route.request().url()).pathname.replace(/^.*\/file\/autodep\.test\//, ''))
+    if (!(file in files)) return route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not Found' })
+    return route.fulfill({ status: 200, contentType: 'text/plain', body: files[file] })
+  })
+  await page.route('https://api.github.com/repos/olcan/autodep.test/**', route => {
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace('/repos/olcan/autodep.test/', '')
+    const json = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    if (path == 'commits') {
+      const file = url.searchParams.get('path') ?? ''
+      if (!(file in files)) return json(200, [])
+      return json(200, [{ sha: 'e2e-autodep', commit: { message: 'synthetic', author: { date: new Date().toISOString() } } }])
+    }
+    if (path.startsWith('contents/')) {
+      const file = decodeURIComponent(path.slice('contents/'.length))
+      if (!(file in files)) return json(404, { message: 'Not Found' })
+      return json(200, {
+        type: 'file',
+        path: file,
+        name: file.split('/').pop(),
+        sha: 'e2e-autodep',
+        content: Buffer.from(files[file]).toString('base64'),
+        encoding: 'base64',
+      })
+    }
+    // FAIL CLOSED, matching the mind.items interceptor: nothing may reach real github
+    return json(404, { message: `unmodeled autodep.test api path in e2e interception: ${path}` })
+  })
+  expect(await install(page, 'e2e_autodep/b/c/d autodep.test master olcan'), '/_install e2e_autodep/b/c/d').toBeNull()
+  const exists = (name: string) => page.evaluate(name => window._exists(name), name)
+  expect(await exists('#e2e_autodep'), '#e2e_autodep via text dependency').toBe(true)
+  expect(await exists('#e2e_autodep/b/c'), '#e2e_autodep/b/c via the autodep edge').toBe(true)
+  expect(await exists('#e2e_autodep/b/c/d'), 'the installed root').toBe(true)
+  expect(await exists('#e2e_autodep/b'), '#e2e_autodep/b stays uninstalled (genuine 404)').toBe(false)
+  // the root's runtime dependency list must include its immediate parent
+  expect(
+    await page.evaluate(() => window._item('#e2e_autodep/b/c/d')!.dependencies.includes(window._item('#e2e_autodep/b/c')!.id)),
+    'parent in runtime dependencies'
+  ).toBe(true)
+  // wait for saves before deleting below, so no create can land after its delete
+  await expect
+    .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 120_000 })
+    .toBe(0)
+  // durable cleanup (review 120 §3): the /file route above is page-local but saved items are not --
+  // every later page's startup would call watchLocalRepo('autodep.test') for them and hit the
+  // unmocked local-preview seam. delete the three synthetic items and confirm the deletions are
+  // durable in the emulator (local removal is immediate; the remote write can still be pending)
+  const ids = await page.evaluate(() =>
+    window.__items.filter(item => item.labelText?.startsWith('#e2e_autodep')).map(item => item.savedId!)
+  )
+  expect(ids, 'three saved synthetic items').toHaveLength(3)
+  await page.evaluate(() => {
+    for (const name of ['#e2e_autodep/b/c/d', '#e2e_autodep/b/c', '#e2e_autodep']) window._item(name)!.delete(false)
+  })
+  // Bearer owner is the emulator's admin bypass: rules otherwise 403 unauthenticated REST reads,
+  // which cannot distinguish a deleted document from a present one
+  for (const id of ids)
+    await expect
+      .poll(
+        async () =>
+          (
+            await fetch(`http://localhost:8080/v1/projects/olcanswiki/databases/(default)/documents/items/${id}`, {
+              headers: { Authorization: 'Bearer owner' },
+            })
+          ).status,
+        { message: `durable deletion of ${id}`, timeout: 30_000 }
+      )
+      .toBe(404)
 })
 
 test('an item created by admin syncs to a read-only visitor, and so does its deletion', async ({ page, browser }) => {

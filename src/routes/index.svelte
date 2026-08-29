@@ -3523,6 +3523,44 @@
     return tags.map(tag => resolveTag(label, tag)).filter(t => t) // drop unresolved tags
   }
 
+  // close the runtime dependency graph at install time: an autodep item's label-prefix parent is
+  // a runtime dependency (see itemDeps) but need not appear in the text tags, so both install-time
+  // dependency loops must resolve it from local state or the source repo — AFTER ordinary text
+  // dependencies settle, since those can make a shorter autodep ancestor local
+  async function installTimeAutodepParent(github, { owner, repo, branch, path }, label, text) {
+    // github can mask a private repo or bad/revoked credentials as 404, so a prefix 404 counts as
+    // absence only once a probe of the known source path succeeds on the same client/owner/repo/ref
+    // (probed lazily, at most once); a failing probe aborts the install/preview instead
+    let sourceProbe
+    return autodepParent(
+      {
+        local: tag => {
+          const ids = idsFromLabel.get(tag)
+          if (!ids?.length) return null
+          if (ids.length > 1) return 'ambiguous'
+          return { autodep: !!__item(ids[0]).autodep }
+        },
+        fetchRawTags: async tag => {
+          let data
+          try {
+            ;({ data } = await github.repos.getContent({ owner, repo, ref: branch, path: tag.slice(1) + '.md' }))
+          } catch (e) {
+            // the app's fetch wrapper (see window.fetch below) throws on ANY http error, so
+            // octokit never sees the response and rewraps as status-500 RequestError with the
+            // wrapper's error as cause — the true status survives at e.cause.resp.status
+            const status = e?.cause?.resp?.status ?? e?.status
+            if (status != 404) throw e // fail closed: never classify a failure as "file absent"
+            await (sourceProbe ??= github.repos.getContent({ owner, repo, ref: branch, path }))
+            return null // authenticated absence: the source path is reachable, this prefix is not
+          }
+          return parseTags(decode_base64(data.content).toLowerCase()).raw
+        },
+      },
+      label,
+      parseTags(text.toLowerCase()).raw
+    )
+  }
+
   // callback triggered by (successful) macro expansion during rendering
   function onMacrosExpanded(index: number, expanded: any) {
     const item = items[index]
@@ -5184,8 +5222,8 @@
                       label,
                       parseTags(text).all.filter(t => t != label && !isSpecialTag(t))
                     )
-                    for (let dep of deps) {
-                      if (_exists(dep)) continue // already installed
+                    const installDep = async dep => {
+                      if (_exists(dep)) return // already installed
                       const dep_path = dep.slice(1) // path assumed same as tag
                       if (dep_path.startsWith('/'))
                         // should not happen w/ resolved tags
@@ -5193,7 +5231,7 @@
                       // skip circular dependencies
                       if (dependents.includes(dep)) {
                         console.debug(`${cmd}: skipping circular dependency ${dep} for ${label}`)
-                        continue
+                        return
                       }
                       console.debug(`installing dependency ${dep} for ${label} ...`)
                       const command = `/_install ${dep_path} ${repo} ${branch} ${owner} ${token || ''} <- ${[
@@ -5210,6 +5248,11 @@
                         )
                       }
                     }
+                    for (const dep of deps) await installDep(dep)
+                    // resolve the autodep parent only AFTER ordinary dependencies settle: they can
+                    // make a shorter autodep ancestor local, changing the decision
+                    const parent = await installTimeAutodepParent(github, { owner, repo, branch, path }, label, text)
+                    if (parent && !_exists(parent)) await installDep(parent)
                   }
 
                   // replace existing item or create new item
@@ -6745,11 +6788,11 @@
         label,
         parseTags(text).all.filter(t => t != label && !isSpecialTag(t))
       )
-      for (let dep of deps) {
+      const installDep = async dep => {
         if (_exists(dep)) {
           if (!_exists(dep, false /*allow_multiple*/))
             console.warn(`invalid (ambiguous) preview dependency ${dep} for ${label}`)
-          continue
+          return
         }
         console.debug(`installing preview dependency ${dep} for ${label} ...`)
         const dep_path = dep.slice(1) // path assumed same as tag
@@ -6763,6 +6806,20 @@
         }
         console.debug(`installed preview dependency ${dep} for ${label}`)
       }
+      for (const dep of deps) await installDep(dep)
+      // resolve the autodep parent only AFTER ordinary dependencies settle (they can make a
+      // shorter autodep ancestor local); resolution goes against github (not the local /file
+      // route) because dependency installs go through github — see /_install command below
+      const Octokit = window['Octokit']
+      const token = attr.token || (!isSharedOrigin(hostname) && localStorage.getItem('mindpage_github_token')) || null
+      const github = token ? new Octokit({ auth: token }) : new Octokit()
+      const parent = await installTimeAutodepParent(
+        github,
+        { owner: attr.owner, repo, branch: attr.branch, path: attr.path },
+        label,
+        text
+      )
+      if (parent && !_exists(parent)) await installDep(parent)
     }
 
     item.pushable = true // mark pushable until pushed
@@ -6834,6 +6891,7 @@
   } from '../crypto'
   import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
+  import { autodepParent } from '../install_deps'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)
