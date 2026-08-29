@@ -10,8 +10,9 @@
 // admin-installed corpus, which contains the #agent/native provider item itself, and a second
 // visible #agent/native label would make _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
+import { FieldValue } from 'firebase-admin/firestore'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
 import { delimiter, resolve } from 'path'
 import { type Page } from '@playwright/test'
 import { firestore, loadAdmin, loadUser, secretFor, waitForApp, type TestUser } from './helpers.js'
@@ -41,6 +42,11 @@ async function spawnBridge(user: string, env: Record<string, string> = {}): Prom
     env: {
       ...process.env,
       PYTHONPATH: `${VAULT}/lib${process.env.PYTHONPATH ? delimiter + process.env.PYTHONPATH : ''}`,
+      // scrub BOTH ambient credentials (the vault .env may define them and the child's
+      // load_dotenv does not override set vars); empty means absent to the CLI, and each
+      // row overrides exactly the credential it needs
+      MIND_BRIDGE_USER_SECRET: '',
+      MIND_BRIDGE_USER_ENVELOPE_FILE: '',
       ...env,
     } as NodeJS.ProcessEnv,
   })
@@ -135,17 +141,17 @@ test('bridge replies to encrypted personal-account requests', async ({ page }) =
   // `cipher` field with `text` null; the bridge decrypts with the account's stored
   // secret (the localStorage.mindpage_secret form) and writes back a re-encrypted
   // reply the app can decrypt -- proving v0 crypto compatibility in both directions.
-  // NOTE: this row pins the v0 scheme on a fresh emulator account (KDF flags off), as
-  // an explicit v0 PoC. The Python port must gain v1/mixed-corpus support BEFORE the
-  // bridge ever serves a writer-enabled (mindpage_kdf_write) personal account; that
-  // port change should add an explicit v1 row rather than repurpose this one.
+  // NOTE: this row pins the legacy v0-only mode on a fresh emulator account (KDF
+  // flags off) as an explicit v0 PoC; the v1/mixed-corpus port is pinned by the
+  // envelope row below, which serves both frames and writes replies as v1.
   const PHRASE = 'bridge-e2e-phrase'
   const secret = secretFor(BRIDGE_USER, PHRASE)
   const listener = await spawnBridge(BRIDGE_USER.uid, { MIND_BRIDGE_USER_SECRET: secret })
   try {
     // seed the secret as a returning device would have it, before signing in; the reader flag is
-    // EXPLICITLY 'off' — this row is a deliberate v0 PoC (the Python port speaks only v0), and
-    // under the reader default an absent flag would enable acquisition and prompt
+    // EXPLICITLY 'off' — this ROW deliberately pins the legacy v0-only MODE (the port itself
+    // is mixed-corpus), and under the reader default an absent flag would enable acquisition
+    // and prompt
     await page.addInitScript(secret => {
       localStorage.setItem('mindpage_secret', secret)
       localStorage.setItem('mindpage_kdf', 'off')
@@ -170,5 +176,109 @@ test('bridge replies to encrypted personal-account requests', async ({ page }) =
     expect(JSON.stringify(doc)).not.toContain('secret ping')
   } finally {
     await stopBridge(listener)
+  }
+})
+
+test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', async ({ page }) => {
+  // the v1/mixed-corpus port row (vault review 101 §2, landed with the port): a personal
+  // account holding BOTH cipher versions is served by a bridge running on the account's key
+  // ENVELOPE (the localStorage.mindpage_key1 form: v1 key + bound v0 secret in one
+  // account-bound value, via MIND_BRIDGE_USER_ENVELOPE_FILE). the bridge must decrypt each
+  // frame with its own credential and write EVERY reply as v1 -- a v0 write would re-create
+  // retired-KDF ciphertext in a swept corpus. cross-parity is real in both directions: the
+  // envelope comes from the app's own ENCODER and the v0 request from its v0 primitive
+  // (src/kdf_profile.js, src/crypto.js), the v1 request is written by the BROWSER (writer on)
+  // and asserted v1 at rest BEFORE the listener starts (so the mixed corpus is established,
+  // not assumed), and the app decrypts and renders both bridge replies live
+  const PHRASE = 'bridge-v1-phrase'
+  const V1_USER: TestUser = { uid: 'bridge_v1_e2e', displayName: 'Bridge V1', email: 'bridge_v1@e2e.test' }
+  const SALT = Buffer.from(new Uint8Array(16).fill(8)).toString('base64')
+  const KEY_BYTES = new Uint8Array(32).map((_, i) => 96 + i)
+  const { encryptWithSecret, importV1Key, decryptV1Text } = await import('../../src/crypto.js')
+  const { encodeKeyEnvelope } = await import('../../src/kdf_profile.js')
+  const v1key = await importV1Key(KEY_BYTES)
+  const secret = secretFor(V1_USER, PHRASE)
+  // the app's own envelope encoder: the same value a real device persists as mindpage_key1
+  const envelope = encodeKeyEnvelope({ uid: V1_USER.uid, salt: SALT, keyBytes: KEY_BYTES, v0Secret: secret })
+  // the committed profile (the metadata shape the app's session and the bridge's startup
+  // fence both confirm against), and a v0-encrypted REQUEST already at rest
+  await firestore().collection('users').doc(V1_USER.uid).set({ kdf: { v: 1, salt: SALT } }, { merge: true })
+  await firestore()
+    .collection('items')
+    .doc('e2e-bridge-v0req')
+    .set({
+      user: V1_USER.uid,
+      time: Date.now(),
+      hidden: false,
+      text: null,
+      attr: null,
+      cipher: await encryptWithSecret(
+        JSON.stringify({ text: '#e2e_bridge_v0req #_agent/native\n<<user>> v0 ping', attr: null }),
+        secret
+      ),
+    })
+  let browserId: string | undefined
+  let listener: ChildProcessWithoutNullStreams | undefined
+  try {
+    // a returning v1 device: secret + envelope + writer ON (reader at its production default)
+    await page.addInitScript(
+      ([secret, envelope]) => {
+        localStorage.setItem('mindpage_secret', secret)
+        localStorage.setItem('mindpage_key1', envelope)
+        localStorage.setItem('mindpage_kdf_write', 'on')
+      },
+      [secret, envelope]
+    )
+    await loadUser(page, V1_USER)
+    await waitForApp(page)
+    // the browser writes its request and it SETTLES BEFORE the listener exists, so the
+    // browser-v1 direction is proven on the initial cipher -- were the writer flag ignored
+    // and this stored as v0, the bridge's later v1 rewrite would mask it
+    await page.evaluate(() => void window._create('#e2e_bridge_v1req #_agent/native\n<<user>> v1 ping'))
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_bridge_v1req', true)?.saved_id), { timeout: 30_000 })
+      .toBeTruthy()
+    browserId = (await page.evaluate(() => window._item('#e2e_bridge_v1req', true)?.saved_id))!
+    const initial = (await firestore().collection('items').doc(browserId).get()).data()!
+    expect(initial.cipher, 'browser request is v1 at rest BEFORE any bridge ran').toMatch(/^1![0-9a-f]{24}/)
+    const seeded = (await firestore().collection('items').doc('e2e-bridge-v0req').get()).data()!
+    expect(seeded.cipher, 'seeded request is still v0 (untagged) -- a genuinely mixed corpus').toMatch(
+      /^[0-9a-f]{24}/
+    )
+    // only NOW start the listener: its initial catch-up snapshot serves the mixed corpus.
+    // the envelope reaches it as a 0600 file, exactly like production operation
+    const envelopePath = test.info().outputPath('envelope.json')
+    writeFileSync(envelopePath, envelope, { mode: 0o600 })
+    listener = await spawnBridge(V1_USER.uid, { MIND_BRIDGE_USER_ENVELOPE_FILE: envelopePath })
+    // both replies -- to the seeded v0 request and the browser's v1 request -- render live
+    await expect
+      .poll(() => itemText(page, '#e2e_bridge_v0req'), { timeout: 30_000 })
+      .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): v0 ping")
+    await expect
+      .poll(() => itemText(page, '#e2e_bridge_v1req'), { timeout: 30_000 })
+      .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): v1 ping")
+    // at rest, BOTH replied items are v1 (`1!`-tagged): the bridge upgraded the v0 item on
+    // write and never re-created v0; the ciphers decrypt under the app's own v1 primitive,
+    // and no exact request/reply plaintext appears outside the cipher field
+    for (const id of ['e2e-bridge-v0req', browserId]) {
+      const doc = (await firestore().collection('items').doc(id).get()).data()!
+      expect(doc.text, 'text must not be stored').toBeNull()
+      expect(doc.attr, 'attr must not be stored').toBeNull()
+      expect(doc.cipher, `cipher of ${id} is v1 at rest`).toMatch(/^1![0-9a-f]{24}/)
+      const plain = JSON.parse(await decryptV1Text(doc.cipher, v1key))
+      expect(plain.text).toContain("<<agent('native/default')>> echo(")
+      for (const phrase of ['v0 ping', 'v1 ping', 'agent/native']) {
+        expect(JSON.stringify({ ...doc, cipher: null }), `no '${phrase}' outside cipher`).not.toContain(phrase)
+      }
+    }
+  } finally {
+    await stopBridge(listener)
+    await firestore().collection('items').doc('e2e-bridge-v0req').delete()
+    if (browserId) await firestore().collection('items').doc(browserId).delete()
+    await firestore().collection('users').doc(V1_USER.uid).update({ kdf: FieldValue.delete() })
+    await page.evaluate(() => {
+      localStorage.removeItem('mindpage_key1')
+      localStorage.removeItem('mindpage_kdf_write')
+    })
   }
 })
