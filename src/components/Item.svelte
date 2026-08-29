@@ -2542,6 +2542,16 @@
     background: linear-gradient(-70deg, #171717 10%, #999 50%, #171717 90%);
     background-size: 1000% 100%;
   }
+  /* failed images (download given up, see onImageFailed): keep the placeholder box visible,
+     without the shimmer, so the failure has a visible footprint instead of an invisible pixel */
+  .item > :global(.content img[_failed]:not([_pending])) {
+    width: 128px;
+    height: 48px;
+    border-radius: 4px;
+    animation: none;
+    background: #411;
+    border: 1px dashed #944;
+  }
   @keyframes shimmer {
     0% {
       background-position: 500% 0;

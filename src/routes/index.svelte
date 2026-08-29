@@ -2103,42 +2103,77 @@
     if (images[src]) {
       img.src = images[src]
       img.removeAttribute('_pending') // done loading alternate _src
+          img.removeAttribute('_failed'), img.removeAttribute('_retries') // recovered
       return img.src // return url directly, no need to wrap in a promise
     }
-    function retryIfStillPending(e) {
-      // if still pending, retry after 1x time since pending (exponential backoff w/ factor >~2x)
-      if (img.hasAttribute('_pending')) {
-        const delay = Date.now() - parseInt(img.getAttribute('_pending'))
-        console.debug(`retrying downloading image ${src} after ${delay}ms ...`)
-        setTimeout(() => onImageRendered(img), delay)
+    function onImageFailed(e) {
+      // the FIRST failure releases the page (owner-directed 2026-08-29): the img is counted as
+      // rendered in its failed state, so item.pendingElems stops holding the page-level loading
+      // overlay while any retries continue underneath (a later success repaints the img). before
+      // this, one invalid src (e.g. an image hash pasted from another account, which resolves
+      // under this account's prefix and 404s forever) held the overlay over the whole page
+      img.setAttribute('_failed', Date.now().toString())
+      if (!img.hasAttribute('_rendered')) {
+        img.setAttribute('_rendered', Date.now().toString())
+        img.onload?.(new Event('load')) // the rendering path's completion hook: resize + pendingElems recount
       }
+      if (!img.hasAttribute('_pending')) return // already resolved or terminal
+      // EXACT-code terminal set (review 135 §2.3 — substring matching accidentally caught
+      // storage/unauthorized-app, and unauthenticated can recover after token refresh since
+      // every attempt fetches fresh tokens): a missing (404) or forbidden (403) object cannot
+      // appear by retrying, and cipher failures (CipherError, or the raw v0 OperationError)
+      // are deterministic for the same bytes and key. everything else — unauthenticated,
+      // unauthorized-app, retry-limit, unknown — takes the bounded retry path: the existing
+      // backoff (1x TOTAL time since pending), capped at 5 retries, which with the 15s sdk
+      // window means surfaced failures at ~15s/45s/105s/225s/465s/945s — give-up after ~16
+      // minutes of quiet background retrying (the page was already released at first failure)
+      const terminal =
+        e?.code == 'storage/object-not-found' ||
+        e?.code == 'storage/unauthorized' ||
+        e instanceof CipherError ||
+        e?.name == 'OperationError'
+      const retries = parseInt(img.getAttribute('_retries') ?? '0')
+      if (terminal || retries >= 5) {
+        console.error(`image ${src} failed ${terminal ? 'terminally' : `after ${retries} retries`}`, e)
+        img.removeAttribute('_pending') // give up: img stays in its failed (_failed) state
+        return
+      }
+      img.setAttribute('_retries', (retries + 1).toString())
+      const delay = Date.now() - parseInt(img.getAttribute('_pending'))
+      console.debug(`retrying downloading image ${src} (${retries + 1}/5) after ${delay}ms ...`)
+      setTimeout(() => onImageRendered(img), delay)
     }
-    // if another image is loading same source, just wait for that to be done and use the same url
-    if (images_loading[src]) {
-      return Promise.resolve(images_loading[src])
-        .then(url => {
-          if (!url) throw new Error(`load failed for ${src}`)
-          console.debug(`reusing loaded image ${src}`)
-          img.src = url
-          img.removeAttribute('_pending') // done loading alternate _src
-          return img.src
-        })
-        .catch(retryIfStillPending) // if other load failed, we need to retry this image also
-    }
-    console.debug(`downloading image ${src} ...`)
-    const start = Date.now()
-    return (images_loading[src] = getBlob(ref(getStorage(firebase), src))
-      .then(blob => {
+    // ONE raw load per source, kept in images_loading WITHOUT a catch so it rejects with the
+    // ORIGINAL storage/cipher error for EVERY coalesced consumer (review 135 §2.1: a catch
+    // here fulfilled with undefined, converting a terminal 404 into a retryable generic error
+    // for the second image of the same source). each consuming image attaches its own
+    // success/failure handling below
+    let load = images_loading[src]
+    if (!load) {
+      console.debug(`downloading image ${src} ...`)
+      const start = Date.now()
+      const storage = getStorage(firebase)
+      // bound the sdk's INTERNAL 5xx/network retry window (default 2 minutes) so transient
+      // failures surface to onImageFailed promptly. REQUEST-SCOPED: getBlob captures the value
+      // synchronously into its request before any async token work, so restoring immediately
+      // after the call cannot race, and every other storage operation keeps the default policy
+      const prev_retry_time = storage.maxOperationRetryTime
+      storage.maxOperationRetryTime = 15_000
+      let blob_promise: Promise<Blob>
+      try {
+        blob_promise = getBlob(ref(storage, src))
+      } finally {
+        storage.maxOperationRetryTime = prev_retry_time
+      }
+      load = images_loading[src] = blob_promise.then(blob => {
         if (src.startsWith('anonymous/') || src.startsWith(`${sharer}/uploads/public/images/`)) {
           // user is anonymous OR image is public, so we can use blob as is ...
           console.debug(
             `downloaded unencrypted image ${src} (${blob.type}, ${blob.size} bytes) in ${Date.now() - start}ms`
           )
-          img.src = URL.createObjectURL(blob)
-          img.setAttribute('_type', blob.type)
-          img.removeAttribute('_pending') // done loading alternate _src
-          images[src] = img.src // add to cache
-          return img.src
+          const url = URL.createObjectURL(blob)
+          images[src] = url // add to cache
+          return { url, type: blob.type }
         } else {
           // we need to decrypt the image blob using personal secret ...
           return blob.arrayBuffer().then(buffer => {
@@ -2150,24 +2185,36 @@
                 type = byteArrayToString(array.subarray(0, array.indexOf(';'.charCodeAt(0))))
                 array = array.subarray(array.indexOf(';'.charCodeAt(0)) + 1)
               }
-              blob = new Blob([array], { type }) // decrypted blob
+              const decrypted = new Blob([array], { type }) // decrypted blob
               console.debug(
                 `downloaded encrypted image ${src} (${type}, ${array.length} bytes) in ${Date.now() - start}ms ` +
                   `(decryption took ${Date.now() - decrypt_start}ms)`
               )
-              img.src = URL.createObjectURL(blob)
-              img.setAttribute('_type', blob.type)
-              img.removeAttribute('_pending') // done loading alternate _src
-              images[src] = img.src // add to cache
-              return img.src
+              const url = URL.createObjectURL(decrypted)
+              images[src] = url // add to cache
+              return { url, type }
             })
           })
         }
       })
-      .catch(retryIfStillPending)
-      .finally(() => {
-        delete images_loading[src] // no longer loading (though may retry if still pending)
-      }))
+      // identity-guarded cleanup: only THIS load removes its entry (a later reload of the same
+      // source must not be deleted by this settling), and the branch never leaks a rejection
+      const this_load = load
+      void this_load
+        .finally(() => {
+          if (images_loading[src] === this_load) delete images_loading[src]
+        })
+        .catch(() => {})
+    }
+    return load
+      .then(({ url, type }) => {
+        img.src = url
+        img.setAttribute('_type', type)
+        img.removeAttribute('_pending') // done loading alternate _src
+        img.removeAttribute('_failed'), img.removeAttribute('_retries') // recovered
+        return img.src
+      })
+      .catch(onImageFailed)
   }
 
   function onEditorFocused(focused: boolean) {

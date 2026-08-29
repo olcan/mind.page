@@ -391,3 +391,140 @@ test('the run button works on an installed item whose input blocks are all hidde
   expect(runText).toContain('js_input_removed')
   expect(runText).not.toContain('_removed_removed')
 })
+
+test('a data-selection over url text maps past the zero-width spaces in the editor', async ({ page }) => {
+  await loadAdmin(page)
+  // the todoer-shaped case: raw-domain offsets over an item whose long urls get ZWSP-augmented
+  // in the textarea (src/zwsp.ts) — unmapped, a full-text selection ends one raw character
+  // short per preceding ZWSP, leaving the url tail unselected (the 2026-08-29 todoer bug)
+  const TODO =
+    '#e2e_zwsp Ask vedant about the mail thread below ' +
+    '[gmail](https://mail.google.com/mail/u/0/#inbox/19f0c2748522c278) ' +
+    '[mail](message://%3CCAFXOJNHzgNtJc7CbqiMf%2BNeH%2B0gGYVpZYT%3DyNoKquDvL3Vo5Lw%40mail.gmail.com%3E)'
+  await page.evaluate(text => void window._create(text), TODO)
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_zwsp')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_zwsp', true)?.elem), { timeout: 10_000 }).toBe(true)
+  const id = await page.evaluate(() => window._item('#e2e_zwsp')!.id)
+  // record the raw-domain selection the way MindBox.select_in_target does for a non-editing
+  // target: the FULL raw text range on the container's data-selection attribute
+  await page.evaluate(
+    ({ id, len }) => document.querySelector(`#item-${id}`)!.closest('.container')!.setAttribute('data-selection', `0,${len}`),
+    { id, len: TODO.length }
+  )
+  // click the plain text (mid-paragraph is inside the long plain prefix, clear of the links)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  const textarea = page.locator(`#textarea-${id}`)
+  await expect(textarea).toBeVisible()
+  const { value, start, end } = await textarea.evaluate((el: HTMLTextAreaElement) => ({
+    value: el.value,
+    start: el.selectionStart,
+    end: el.selectionEnd,
+  }))
+  expect(value.length, 'the urls really are ZWSP-augmented').toBeGreaterThan(TODO.length)
+  expect(start).toBe(0)
+  expect(end, 'the mapped selection reaches the true end of the augmented value').toBe(value.length)
+  expect(value.slice(start, end).replaceAll('\u200B', ''), 'the selection strips back to the exact raw text').toBe(TODO)
+  await page.keyboard.press('Escape') // nothing was changed: closes without the discard modal
+  await expect(textarea).toBeHidden()
+})
+
+test('an invalid image src fails without holding the page loading overlay, and retries are bounded', async ({
+  page,
+}) => {
+  // the reported bug: an image hash pasted from another account resolves under this account's
+  // storage prefix and 404s forever — the download retried unboundedly, the img never counted
+  // as rendered, and the page-level loading overlay covered the page until dev-tools surgery.
+  // policy (owner-directed 2026-08-29): first failure releases the page; 4xx-class failures are
+  // terminal (no retry); transient failures retry on backoff, capped at 5
+  const fetches = { e2e404: 0, e2e500: 0 }
+  let transiently = true // while true the e2e500 image fails 500 (transient); then 404 (terminal)
+  await page.route(/firebasestorage\.googleapis\.com/, async route => {
+    const url = route.request().url()
+    const hash = url.includes('e2e404') ? 'e2e404' : url.includes('e2e500') ? 'e2e500' : null
+    if (!hash) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+    fetches[hash]++
+    const status = hash == 'e2e404' || !transiently ? 404 : 500
+    await route.fulfill({ status, contentType: 'application/json', body: '{}' })
+  })
+  await loadAdmin(page)
+  let badimg: string | null = null
+  let slowimg: string | null = null
+  try {
+    await page.evaluate(() => {
+      // both hashes are valid hex, so they resolve to <uid>/images/<hash> storage paths; the
+      // 404 item carries TWO images of the SAME source to pin the coalesced terminal path
+      // (review 135 §2.1/§3.2: the shared raw load must reject each consumer with the
+      // ORIGINAL error, and the source is still fetched only once)
+      void window._create(
+        '#e2e_badimg pasted from another account\n<img src="e2e404" style="zoom:0.5"> <img src="e2e404" style="zoom:0.5">'
+      )
+      void window._create('#e2e_slowimg transiently failing\n<img src="e2e500" style="zoom:0.5">')
+    })
+    await page.evaluate(() => void (location.hash = '#e2e_badimg'))
+    const attrs = (name: string) =>
+      page.evaluate(name => {
+        const imgs = [...(window._item(name, true)?.elem?.querySelectorAll('.content img') ?? [])]
+        return (
+          imgs.length > 0 && {
+            pending: imgs.some(img => img.hasAttribute('_pending')),
+            failed: imgs.every(img => img.hasAttribute('_failed')),
+          }
+        )
+      }, name)
+    const rendered = (name: string) =>
+      page.evaluate(name => (window.__items.find(item => item.labelText == name) as any)?.rendered ?? false, name)
+    // BOTH 404 images give up terminally after exactly ONE shared fetch: the coalesced
+    // consumer received the original storage/object-not-found, not a swallowed undefined
+    await expect.poll(() => attrs('#e2e_badimg'), { timeout: 15_000 }).toEqual({ pending: false, failed: true })
+    expect(fetches.e2e404).toBe(1)
+    // the item completes rendering in the imgs' failed state and the page overlay releases —
+    // this is the assertion that failed before the fix (rendered stayed false forever)
+    await expect.poll(() => rendered('#e2e_badimg'), { timeout: 15_000 }).toBe(true)
+    // no visible item is still rendering (the renderingVisibleItems condition; asserted
+    // through the item list so a failure names the stuck item) ...
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (window.__items as any[])
+              .slice(0, window.__hideIndex as any)
+              .filter(item => !item.rendered && !item.editing)
+              .map(item => item.labelText)
+              .join(',')
+          ),
+        { timeout: 45_000 } // covers the transient image's first surfaced failure (15s sdk window)
+      )
+      .toBe('')
+    // ... and the page-covering overlay itself — the user-visible symptom — is released
+    await expect(page.locator('#sapper > .loading')).not.toHaveClass(/visible/)
+    // the transient (500) image also releases the page after its FIRST SURFACED failure — the
+    // sdk's internal retry window is bounded to 15s (maxOperationRetryTime), so the item
+    // renders in failed-but-STILL-PENDING state while app-level retries continue underneath
+    await page.evaluate(() => void (location.hash = '#e2e_slowimg'))
+    await expect.poll(() => rendered('#e2e_slowimg'), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => attrs('#e2e_slowimg'), { timeout: 30_000 }).toEqual({ pending: true, failed: true })
+    const surfaced = fetches.e2e500
+    expect(surfaced).toBeGreaterThan(0)
+    // the app-level retry loop really RUNS a retry (review 135 §3.1): flip the fixture to 404
+    // so the next executed attempt terminates — settlement requires the fetch count to have
+    // GROWN past the first surfaced failure (a first-failure-terminal implementation fails
+    // here), and nothing fetches after give-up. (the 5-retry cap value itself is
+    // code-reviewed, not browser-timed: total time since pending doubles per round)
+    transiently = false
+    await expect.poll(() => attrs('#e2e_slowimg'), { timeout: 90_000 }).toEqual({ pending: false, failed: true })
+    expect(fetches.e2e500).toBeGreaterThan(surfaced)
+    const settled = fetches.e2e500
+    await page.waitForTimeout(1_000)
+    expect(fetches.e2e500).toBe(settled) // no fetch after give-up
+  } finally {
+    // the invalid-image fixtures must not outlive this row (review 135 §3.4): the editor
+    // account feeds the dependent bridge lane, where this page-scoped route no longer exists
+    // and the items would issue real storage requests
+    badimg ??= await savedId(page, '#e2e_badimg').catch(() => null)
+    slowimg ??= await savedId(page, '#e2e_slowimg').catch(() => null)
+    for (const id of [badimg, slowimg]) if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})

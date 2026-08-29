@@ -39,6 +39,7 @@
     exclusionRegExp,
     skipExclusions,
   } from '../util.js'
+  import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
 
   const placeholder = ' '
   let spellcheck = false
@@ -824,23 +825,6 @@
     }
   }
 
-  function insertZWSP(text, insertions = null) {
-    return text.replace(urlRegExp({ suffix: /[^\s)<>:,.]/ }), (m, pfx, _url, offset) => {
-      offset += pfx.length
-      let [_, scheme, url] = _url.match(/^((?:.+?:\/\/)?)(.+)$/)
-      offset += scheme.length
-      url = url.replace(/([^\u200B]{5,}?[^a-zA-Z\u200B])(?!\u200B)/g, (m, url_pfx, url_offset) => {
-        insertions?.push(offset + url_offset) // record (pre-)insertion offset
-        return url_pfx + '\u200B'
-      })
-      return pfx + scheme + url
-    })
-  }
-
-  function removeZWSP(text) {
-    return text.replaceAll('\u200B', '')
-  }
-
   function onCopy(e: ClipboardEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -1036,7 +1020,13 @@
     // check for data-selection attribute on container, consume if it exists
     const selectionAttrib = editor.closest('.container')?.getAttribute('data-selection')
     if (selectionAttrib) {
-      ;[selectionStart, selectionEnd] = selectionAttrib.split(',').map(Number)
+      // data-selection carries RAW text offsets (its writers index the item's text, e.g.
+      // MindBox select_in_target); the textarea holds the ZWSP-AUGMENTED value, so unmapped
+      // offsets end the selection one raw character early per preceding ZWSP (the todoer
+      // tail-truncation bug) — map both ends into the augmented domain before applying
+      ;[selectionStart, selectionEnd] = selectionAttrib
+        .split(',')
+        .map(offset => zwspOffset(textarea.value, +offset))
       editor.closest('.container').removeAttribute('data-selection') // consume attrib
     }
     setSelection(selectionStart, selectionEnd)
