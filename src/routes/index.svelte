@@ -440,6 +440,10 @@
   class _Item {
     id: string
     read_only: boolean
+    // capability marker for the boolean write-acceptance contract (review 146 §3): the
+    // updater fences on this BEFORE any work, so a stale runtime (whose write() returns
+    // undefined after side effects) is never called at all
+    write_accepts = true
     constructor(id, read_only = false) {
       this.id = id
       this.read_only = read_only
@@ -1058,16 +1062,19 @@
       return log.reverse()
     }
 
-    write(text: string, type: string = '_output', options = {}) {
+    // returns whether the write was ACCEPTED (false on read-only mode or a cancelled
+    // large-write confirmation): text equality is not a success signal for same-text
+    // writes, so callers that must know (e.g. the updater) use this result
+    write(text: string, type: string = '_output', options = {}): boolean {
       if (this.read_only) {
         console.warn(`ignoring write (${text.length} bytes, type '${type}') to item ${this.name} in read_only mode`)
-        return
+        return false
       }
       text = typeof text == 'string' ? text : '' + stringify(text)
       // confirm if write is too big
       const writeConfirmLength = 256 * 1024
       if (text.length >= writeConfirmLength) {
-        if (!confirm(`Write ${text.length} bytes (type '${type}') into ${this.name}?`)) return // cancel write
+        if (!confirm(`Write ${text.length} bytes (type '${type}') into ${this.name}?`)) return false // cancel write
       }
       // maintain selection on textarea if editing and textarea is available (may not be for newly created item)
       if (item(this.id)?.editing) {
@@ -1125,6 +1132,7 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // item time/text has changed
       })
+      return true // the synchronous write path completed: accepted
     }
 
     clear(type: string, options) {

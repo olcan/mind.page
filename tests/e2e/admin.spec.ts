@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
 import { install, loadAdmin, loadAnonymous } from './helpers.js'
 
@@ -165,11 +166,16 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     }
     if (path.startsWith('commits/')) {
       // single-commit fetch: update_item validates the target sha, and check_updates'
-      // pushable marking reads the commit's files listing
+      // pushable marking reads the commit's files listing. file shas must be REAL git
+      // blob shas of the served content -- the pusher/updater compare github_sha(text)
+      // against them, and a placeholder could never match, permanently re-marking every
+      // updated item pushable (which hid the pushable-clear assertion below)
+      const blobSha = (content: string) =>
+        createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0${content}`).digest('hex')
       return json(200, {
         sha: path.slice('commits/'.length),
         commit: { message: 'synthetic', author: { date: new Date().toISOString() } },
-        files: Object.keys(files).map(filename => ({ filename, sha })),
+        files: Object.keys(files).map(filename => ({ filename, sha: blobSha(files[filename]) })),
       })
     }
     if (path.startsWith('contents/')) {
@@ -261,6 +267,110 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     ),
     'parent back in runtime dependencies'
   ).toBe(true)
+
+  // THE PUSHABLE-CANCEL PHASE (review 143 §3.4): update_item must be able to CANCEL without
+  // leaving metadata over old text -- the exact production stuck-item class (sha/token/embeds
+  // advanced before the confirm; a later attr save then persisted new metadata with old text).
+  // The candidate is EMBED-BEARING so one phase covers main sha AND embed metadata staging.
+  files['e2e_autodep/b/c/d.md'] =
+    '#e2e_autodep/b/c/d depends on #e2e_autodep explicitly and nothing else. v3\n```js:e.js\nplaceholder\n```\n'
+  files['e2e_autodep/b/c/e.js'] = 'served_embed_body_v3()'
+  sha = 'e2e-autodep-3'
+  const updates3 = { 'e2e_autodep/b/c/d.md': 'e2e-autodep-3', 'e2e_autodep/b/c/e.js': 'e2e-autodep-3' }
+  const itemState = () =>
+    page.evaluate(() => {
+      const item = window._item('#e2e_autodep/b/c/d')! as any
+      return {
+        text: item.text as string,
+        sha: item.attr.sha as string,
+        embeds: JSON.stringify(item.attr.embeds ?? null),
+        pushable: !!item.pushable,
+        // _global_store is the NON-auto-saving accessor (review 144 §5): reading
+        // item.global_store itself schedules a save, polluting the observation
+        marker: JSON.stringify(item._global_store?._updater ?? null),
+      }
+    })
+  await page.evaluate(() => void ((window._item('#e2e_autodep/b/c/d') as any).pushable = true))
+  const before = await itemState()
+  expect(before.sha, 'phase precondition: at v2 sha').toBe('e2e-autodep-2')
+  const runUpdate = async (clickLabel: string) => {
+    let going = true
+    const clicker = (async () => {
+      while (going) await page.getByText(clickLabel, { exact: true }).click({ timeout: 200 }).catch(() => {})
+    })()
+    try {
+      return await page.evaluate(async updates => {
+        const update_item = await (window._item('#updater') as any).eval('update_item', {
+          async: true,
+          async_simple: true,
+        })
+        return update_item(window._item('#e2e_autodep/b/c/d'), updates)
+      }, updates3)
+    } finally {
+      going = false
+      await clicker
+    }
+  }
+  // CANCEL: the marker must still be the PREVIOUS one while the modal is open (review
+  // 144 §3/§5 -- publishing it early was durable and visible to other tabs, which
+  // consume it as a completed update; restoring after Cancel cannot undo that), and the
+  // complete item state must be preserved after the false return
+  const pending = page.evaluate(async updates => {
+    const update_item = await (window._item('#updater') as any).eval('update_item', {
+      async: true,
+      async_simple: true,
+    })
+    return update_item(window._item('#e2e_autodep/b/c/d'), updates)
+  }, updates3)
+  await expect(page.getByText('Overwrite unpushed changes', { exact: false })).toBeVisible({ timeout: 30_000 })
+  expect((await itemState()).marker, 'marker unpublished while the modal is open').toBe(before.marker)
+  await page.getByText('Cancel', { exact: true }).click()
+  expect(await pending, 'cancelled update returns false').toBe(false)
+  const cancelled = await itemState()
+  expect(cancelled, 'cancel preserved the targeted state (text/sha/embeds/pushable/marker)').toEqual(before)
+  // drive the exact persistence opportunity that stuck the production items, AWAITED
+  await page.evaluate(() => (window._item('#e2e_autodep/b/c/d') as any).save())
+  expect(await itemState(), 'state intact after an awaited save').toEqual(before)
+  // OVERWRITE: the same update completes -- new sha, embed metadata staged then committed
+  // together, served embed body inlined, pushable cleared by the post-write path
+  expect(await runUpdate('Overwrite'), 'accepted update returns true').toBe(true)
+  const accepted = await itemState()
+  expect(accepted.sha).toBe('e2e-autodep-3')
+  expect(accepted.text).toContain('v3')
+  expect(accepted.text).toContain('served_embed_body_v3()')
+  expect(JSON.parse(accepted.embeds)).toMatchObject([{ path: 'e2e_autodep/b/c/e.js', sha: 'e2e-autodep-3' }])
+  expect(accepted.pushable, 'pushable cleared after a completed update').toBe(false)
+  // the success MARKER published once per accepted write (review 145 §4: without
+  // this, deleting the success assignment would still pass the phase)
+  expect(JSON.parse(accepted.marker), 'marker equals the accepted updates').toEqual({ last_update: updates3 })
+  // the CAPABILITY FENCE (review 146 §3/§4): the live wrapper reports the boolean
+  // acceptance contract, and a capability-absent proxy fails closed without its writer
+  // ever being called (the in-function fence precedes token/staging work by source
+  // order; this row pins the failed-closed result and writer non-invocation)
+  expect(
+    await page.evaluate(() => (window._item('#e2e_autodep/b/c/d') as any).write_accepts),
+    'live wrapper reports the acceptance capability'
+  ).toBe(true)
+  expect(
+    await page.evaluate(async updates => {
+      const update_item = await (window._item('#updater') as any).eval('update_item', {
+        async: true,
+        async_simple: true,
+      })
+      const real = window._item('#e2e_autodep/b/c/d') as any
+      const stale = Object.create(real, {
+        write_accepts: { value: undefined }, // the stale-runtime shape
+        write: {
+          value: () => {
+            throw new Error('stale writer must never be called')
+          },
+        },
+      })
+      return update_item(stale, { 'e2e_autodep/b/c/d.md': 'e2e-autodep-4' })
+    }),
+    'stale wrapper fails closed without calling its writer'
+  ).toBe(false)
+
   // wait for saves before deleting below, so no create can land after its delete
   await expect
     .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 120_000 })
@@ -305,6 +415,15 @@ test('an item created by admin syncs to a read-only visitor, and so does its del
     expect(await exists()).toBe(false)
     await page.evaluate(() => void window._create('#e2e_sync created by admin during e2e tests'))
     await expect.poll(exists, { timeout: 30_000 }).toBe(true) // remote add
+    // the writer's explicit acceptance result (review 145 §4): a READ-ONLY wrapper
+    // (via the _item options object) refuses with false -- the updater's capability
+    // fence depends on this contract
+    expect(
+      await page.evaluate(() => (window._item as any)('#e2e_sync', { read_only: true }).write('nope')),
+      'read-only write refused with false'
+    ).toBe(false)
+    const textBefore = await page.evaluate(() => window._item('#e2e_sync')!.text)
+    expect(textBefore, 'text exactly unchanged by the refusal').toBe('#e2e_sync created by admin during e2e tests')
     // delete(false) skips the window.confirm prompt, which is auto-dismissed in headless browsers
     await page.evaluate(() => window._item('#e2e_sync')!.delete(false))
     await expect.poll(exists, { timeout: 30_000 }).toBe(false) // remote delete
