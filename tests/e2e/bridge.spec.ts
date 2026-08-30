@@ -113,9 +113,9 @@ test('bridge replies to a request item created in the browser', async ({ page })
   // the vault reply appears in item text via realtime sync, no reload
   await expect
     .poll(() => itemText(page, '#e2e_bridge_roundtrip'), { timeout: 30_000 })
-    .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): hello bridge")
+    .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): hello bridge")
   // and renders in the app like any other chat reply
-  await expect(page.getByText(/echo\(sandbox=read_only/).first()).toBeVisible()
+  await expect(page.getByText(/echo\(cost_limit=/).first()).toBeVisible()
   // a replied item must not be answered again (trailing agent message guard, echo suppression)
   await page.waitForTimeout(2_000)
   const text = await itemText(page, '#e2e_bridge_roundtrip')
@@ -129,7 +129,7 @@ test('personas resolve on the vault side, unknown personas get error replies', a
   // opus resolves to the registry entry with its own authority (cost_limit=5.0)
   await expect
     .poll(() => itemText(page, '#e2e_bridge_opus'), { timeout: 30_000 })
-    .toContain("<<agent('vault/opus')>> echo(sandbox=read_only, cost_limit=5.0): ping")
+    .toContain("<<agent('vault/opus')>> echo(cost_limit=5.0): ping")
   // unknown personas fail as replies listing available personas -- no request dies silently
   await expect
     .poll(() => itemText(page, '#e2e_bridge_unknown'), { timeout: 30_000 })
@@ -164,7 +164,7 @@ test('bridge replies to encrypted personal-account requests', async ({ page }) =
     // the decrypted vault reply appears in item text via realtime sync
     await expect
       .poll(() => itemText(page, '#e2e_bridge_secret'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): secret ping")
+      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): secret ping")
     // and the item is encrypted at rest, exactly as the personal suite pins it: text and attr
     // null, cipher base64, and no plaintext anywhere in the stored document
     const id = await page.evaluate(() => window._item('#e2e_bridge_secret', true)?.saved_id)
@@ -267,10 +267,10 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
     // both replies -- to the seeded v0 request and the browser's v1 request -- render live
     await expect
       .poll(() => itemText(page, '#e2e_bridge_v0req'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): v0 ping")
+      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): v0 ping")
     await expect
       .poll(() => itemText(page, '#e2e_bridge_v1req'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): v1 ping")
+      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): v1 ping")
     // warm-cache no-error-modal (owner-observed 2026-08-30, design §2.2): the collector
     // installed BEFORE the listener has observed both live reply rewrites; wait past the
     // ~2s reconciliation window and require nothing surfaced at any point in the span
