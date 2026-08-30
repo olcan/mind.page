@@ -1,14 +1,14 @@
-// e2e proof of the native-web agent bridge PoC (see vault ideas/native_web_agent_bridge.md):
+// e2e proof of the vault-web agent bridge PoC (design: vault notes/design/mind_bridge_v2.md):
 // a request item created in the browser is answered by the vault's Python bridge listener
 // (bin/mind_bridge.py) through the Firestore emulator, and the signed reply renders back in
 // the app as a realtime remote update. Full round trip:
-//   browser -> Firestore (emulator) -> native listener -> Firestore -> browser
+//   browser -> Firestore (emulator) -> vault listener -> Firestore -> browser
 // The listener is spawned from the vault checkout (VAULT_DIR, default ~/vault) using its venv;
 // the whole spec is skipped when no vault checkout is available.
-// Request items carry a unique test-owned visible label plus a hidden #_agent/native routing
-// tag (the real /native request shape): in the configured gate this lane runs behind the
-// admin-installed corpus, which contains the #agent/native provider item itself, and a second
-// visible #agent/native label would make _item(name, true) return null on the ambiguity.
+// Request items carry a unique test-owned visible label plus a hidden #_agent/vault routing
+// tag (the real /vault request shape): in the configured gate this lane runs behind the
+// admin-installed corpus, which contains the #agent/vault provider item itself, and a second
+// visible #agent/vault label would make _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
 import { FieldValue } from 'firebase-admin/firestore'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
@@ -106,34 +106,34 @@ function itemText(page: Page, name: string): Promise<string> {
 test('bridge replies to a request item created in the browser', async ({ page }) => {
   page.on('console', m => {
     const text = m.text()
-    if (/bridge|native/.test(text)) console.log(`[page] ${text.slice(0, 200)}`)
+    if (/bridge|vault/.test(text)) console.log(`[page] ${text.slice(0, 200)}`)
   })
   await loadAdmin(page)
-  await page.evaluate(() => void window._create('#e2e_bridge_roundtrip #_agent/native\n<<user>> hello bridge'))
-  // the native reply appears in item text via realtime sync, no reload
+  await page.evaluate(() => void window._create('#e2e_bridge_roundtrip #_agent/vault\n<<user>> hello bridge'))
+  // the vault reply appears in item text via realtime sync, no reload
   await expect
     .poll(() => itemText(page, '#e2e_bridge_roundtrip'), { timeout: 30_000 })
-    .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): hello bridge")
+    .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): hello bridge")
   // and renders in the app like any other chat reply
   await expect(page.getByText(/echo\(sandbox=read_only/).first()).toBeVisible()
   // a replied item must not be answered again (trailing agent message guard, echo suppression)
   await page.waitForTimeout(2_000)
   const text = await itemText(page, '#e2e_bridge_roundtrip')
-  expect(text.match(/<<agent\('native\/default'\)>>/g)?.length, text).toBe(1)
+  expect(text.match(/<<agent\('vault\/default'\)>>/g)?.length, text).toBe(1)
 })
 
-test('personas resolve on the native side, unknown personas get error replies', async ({ page }) => {
+test('personas resolve on the vault side, unknown personas get error replies', async ({ page }) => {
   await loadAdmin(page)
-  await page.evaluate(() => void window._create('#e2e_bridge_opus #_agent/native/opus\n<<user>> ping'))
-  await page.evaluate(() => void window._create('#e2e_bridge_unknown #_agent/native/nope\n<<user>> ping'))
+  await page.evaluate(() => void window._create('#e2e_bridge_opus #_agent/vault/opus\n<<user>> ping'))
+  await page.evaluate(() => void window._create('#e2e_bridge_unknown #_agent/vault/nope\n<<user>> ping'))
   // opus resolves to the registry entry with its own authority (cost_limit=5.0)
   await expect
     .poll(() => itemText(page, '#e2e_bridge_opus'), { timeout: 30_000 })
-    .toContain("<<agent('native/opus')>> echo(sandbox=read_only, cost_limit=5.0): ping")
+    .toContain("<<agent('vault/opus')>> echo(sandbox=read_only, cost_limit=5.0): ping")
   // unknown personas fail as replies listing available personas -- no request dies silently
   await expect
     .poll(() => itemText(page, '#e2e_bridge_unknown'), { timeout: 30_000 })
-    .toContain("<<agent('native')>> error: unknown persona 'nope' (available: default, opus)")
+    .toContain("<<agent('vault')>> error: unknown persona 'nope' (available: default, opus)")
 })
 
 test('bridge replies to encrypted personal-account requests', async ({ page }) => {
@@ -160,11 +160,11 @@ test('bridge replies to encrypted personal-account requests', async ({ page }) =
     // brand-new empty account: loadUser only waits for initialization to START (and writability);
     // welcome copying/reconstruction/rendering may still be in flight, so wait for the app proper
     await waitForApp(page)
-    await page.evaluate(() => void window._create('#e2e_bridge_secret #_agent/native\n<<user>> secret ping'))
-    // the decrypted native reply appears in item text via realtime sync
+    await page.evaluate(() => void window._create('#e2e_bridge_secret #_agent/vault\n<<user>> secret ping'))
+    // the decrypted vault reply appears in item text via realtime sync
     await expect
       .poll(() => itemText(page, '#e2e_bridge_secret'), { timeout: 30_000 })
-      .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): secret ping")
+      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): secret ping")
     // and the item is encrypted at rest, exactly as the personal suite pins it: text and attr
     // null, cipher base64, and no plaintext anywhere in the stored document
     const id = await page.evaluate(() => window._item('#e2e_bridge_secret', true)?.saved_id)
@@ -213,7 +213,7 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
       text: null,
       attr: null,
       cipher: await encryptWithSecret(
-        JSON.stringify({ text: '#e2e_bridge_v0req #_agent/native\n<<user>> v0 ping', attr: null }),
+        JSON.stringify({ text: '#e2e_bridge_v0req #_agent/vault\n<<user>> v0 ping', attr: null }),
         secret
       ),
     })
@@ -234,7 +234,7 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
     // the browser writes its request and it SETTLES BEFORE the listener exists, so the
     // browser-v1 direction is proven on the initial cipher -- were the writer flag ignored
     // and this stored as v0, the bridge's later v1 rewrite would mask it
-    await page.evaluate(() => void window._create('#e2e_bridge_v1req #_agent/native\n<<user>> v1 ping'))
+    await page.evaluate(() => void window._create('#e2e_bridge_v1req #_agent/vault\n<<user>> v1 ping'))
     await expect
       .poll(() => page.evaluate(() => window._item('#e2e_bridge_v1req', true)?.saved_id), { timeout: 30_000 })
       .toBeTruthy()
@@ -253,10 +253,10 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
     // both replies -- to the seeded v0 request and the browser's v1 request -- render live
     await expect
       .poll(() => itemText(page, '#e2e_bridge_v0req'), { timeout: 30_000 })
-      .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): v0 ping")
+      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): v0 ping")
     await expect
       .poll(() => itemText(page, '#e2e_bridge_v1req'), { timeout: 30_000 })
-      .toContain("<<agent('native/default')>> echo(sandbox=read_only, cost_limit=0.5): v1 ping")
+      .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): v1 ping")
     // at rest, BOTH replied items are v1 (`1!`-tagged): the bridge upgraded the v0 item on
     // write and never re-created v0; the ciphers decrypt under the app's own v1 primitive,
     // and no exact request/reply plaintext appears outside the cipher field
@@ -266,8 +266,8 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
       expect(doc.attr, 'attr must not be stored').toBeNull()
       expect(doc.cipher, `cipher of ${id} is v1 at rest`).toMatch(/^1![0-9a-f]{24}/)
       const plain = JSON.parse(await decryptV1Text(doc.cipher, v1key))
-      expect(plain.text).toContain("<<agent('native/default')>> echo(")
-      for (const phrase of ['v0 ping', 'v1 ping', 'agent/native']) {
+      expect(plain.text).toContain("<<agent('vault/default')>> echo(")
+      for (const phrase of ['v0 ping', 'v1 ping', 'agent/vault']) {
         expect(JSON.stringify({ ...doc, cipher: null }), `no '${phrase}' outside cipher`).not.toContain(phrase)
       }
     }

@@ -11,7 +11,7 @@ test.setTimeout(300_000)
 // defining _test_* functions (see `grep -l _test_` in mind.items) plus #tester, which runs them
 // note the agent framework (#agent, welcome hook + check_agents task) is NOT listed: it must
 // arrive as a dependency of the providers (via agent/chat's #_///agent), since providers cannot
-// function without it -- the framework is what runs them on chat item changes. the /native test
+// function without it -- the framework is what runs them on chat item changes. the /vault test row
 // asserts this, keeping the dependency edge continuously verified for fresh-account installs
 const INSTALL = ['tester', 'util/core', 'util/math', 'util/stat', 'util/sample', 'util/sim', 'util/plot', 'logger', 'agent/chat/claude', 'agent/chat/gpt', 'agent/chat/gemini', 'agent/chat/together', 'agent/chat/groq', 'agent/chat/ollama', 'agent/chat/openrouter', 'agent/chat/llama']
 
@@ -103,13 +103,13 @@ test('/test passes for all installed items', async ({ page }) => {
   expect(errors, `macro errors: ${errors.join(', ')}`).toEqual([])
 })
 
-test('/native creates a tagged request item without breaking the agent framework', async ({ page }) => {
-  // the native "provider" (#agent/native) is an agent item like every #agent/* item: the framework
+test('/vault creates a tagged request item without breaking the agent framework', async ({ page }) => {
+  // the vault "provider" (#agent/vault) is an agent item like every #agent/* item: the framework
   // starts it as an agent on change events (e.g. a request item created as its dependent), and
   // start_agent fatals unless the item carries a (deliberately inert) js_input block -- a doc-only
-  // item shipped exactly that bug, caught only in a live account. this covers the /native command,
-  // the explicit #_agent/native tag on request items (the vault bridge parses item text only), and
-  // the agent-framework contract
+  // item shipped exactly that bug, caught only in a live account. this covers the /vault command,
+  // the explicit #_agent/vault tag on request items (the vault bridge parses item text only), and
+  // the agent-framework contract (the tombstones at the old names are inspected statically)
   const errors: string[] = []
   page.on('console', m => {
     const match = m.text().match(/^\[(#[^\]]+)\] Error: (.*)$/s)
@@ -120,11 +120,11 @@ test('/native creates a tagged request item without breaking the agent framework
   // it is deliberately not in INSTALL, so this continuously verifies the install-time dependency
   // edge that fresh accounts rely on (without it, installed providers never reply at all)
   expect(await page.evaluate(() => window._exists('#agent')), '#agent installed as dependency').toBe(true)
-  await page.evaluate(() => void window._create('/native hello bridge', { command: true }))
-  const text = () => page.evaluate(() => window._item('#chat/native/0', true)?.text ?? '')
-  await expect.poll(text, { message: 'request item #chat/native/0' }).toContain('<<user>> hello bridge')
-  expect(await text()).toContain('#_agent/native') // explicit tag for the text-parsing vault bridge
-  // let the agent framework react to the change (start_agent on #agent/native must not fatal)
+  await page.evaluate(() => void window._create('/vault hello bridge', { command: true }))
+  const text = () => page.evaluate(() => window._item('#chat/vault/0', true)?.text ?? '')
+  await expect.poll(text, { message: 'request item #chat/vault/0' }).toContain('<<user>> hello bridge')
+  expect(await text()).toContain('#_agent/vault') // explicit tag for the text-parsing vault bridge
+  // let the agent framework react to the change (start_agent on #agent/vault must not fatal)
   await page.waitForTimeout(2_000)
   expect(errors, errors.join('\n')).toEqual([])
 })
