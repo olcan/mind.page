@@ -371,6 +371,50 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     'stale wrapper fails closed without calling its writer'
   ).toBe(false)
 
+  // THE MARKER SIDE-CHANNEL REFUSAL (review 151 §2.2): a candidate inside a REAL embed
+  // body renders as a source-local marker in the grammar view; embed_text is a side
+  // channel later spliced into fetched main text, so the updater must REFUSE the update
+  // outright rather than let a literal marker persist. (the pusher applies the same
+  // one-line policy to its embed capture; its refusal throws before the AFFECTED
+  // side-push write -- an earlier clean destination in the loop may already have pushed)
+  await page.evaluate(() => {
+    const item = window._item('#e2e_autodep/b/c/d') as any
+    item.write(
+      item.text.replace('served_embed_body_v3()', 'served_embed_body_v3()\n```vault_result_v1\nnot base64\n```'),
+      ''
+    )
+  })
+  files['e2e_autodep/b/c/d.md'] =
+    '#e2e_autodep/b/c/d depends on #e2e_autodep explicitly and nothing else. v4\n```js:e.js\nplaceholder\n```\n'
+  sha = 'e2e-autodep-4'
+  const beforeRefusal = await itemState()
+  expect(
+    await page.evaluate(async () => {
+      const update_item = await (window._item('#updater') as any).eval('update_item', {
+        async: true,
+        async_simple: true,
+      })
+      return update_item(window._item('#e2e_autodep/b/c/d'), { 'e2e_autodep/b/c/d.md': 'e2e-autodep-4' })
+    }),
+    'marker-bearing real embed refuses the update'
+  ).toBe(false)
+  const afterRefusal = await itemState()
+  expect(afterRefusal, 'refusal preserved the item exactly').toEqual(beforeRefusal)
+  // the check_updates branch refuses the same shape (review 152 §2.2: its early
+  // preflight runs before token and mark_pushables undo work)
+  expect(
+    await page.evaluate(async () => {
+      const check_updates = await (window._item('#updater') as any).eval('check_updates', {
+        async: true,
+        async_simple: true,
+      })
+      return check_updates(window._item('#e2e_autodep/b/c/d'), true)
+    }),
+    'check_updates refuses the marker-bearing embed'
+  ).toBe(false)
+  expect(afterRefusal.text, 'the candidate raw bytes are intact').toContain('```vault_result_v1\nnot base64\n```')
+  expect(afterRefusal.text, 'no literal marker was persisted').not.toContain('\u27e6vault_result_v1:')
+
   // wait for saves before deleting below, so no create can land after its delete
   await expect
     .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 120_000 })
@@ -429,5 +473,95 @@ test('an item created by admin syncs to a read-only visitor, and so does its del
     await expect.poll(exists, { timeout: 30_000 }).toBe(false) // remote delete
   } finally {
     await context.close()
+  }
+})
+
+test('vault routing: start, completion, and catch fences suppress web dispatch', async ({ page }) => {
+  // the THREE-fence routing witness (bridge design §2.1, reviews 143 §3.2, 148 §4). fixture
+  // uses the REAL corpus path -- the installed #chat/ollama provider and its /ollama
+  // command -- with its endpoint intercepted, so no model or network call happens and
+  // the in-flight request is directly observable and releasable.
+  await loadAdmin(page)
+  let calls = 0
+  let release: (() => void) | null = null
+  await page.route('**/api/chat**', async route => {
+    calls++
+    await new Promise<void>(resolve => (release = resolve))
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: { role: 'assistant', content: 'fake web reply' } }),
+    })
+  })
+  const runAgent = (name: string) =>
+    page.evaluate(async name => {
+      const run = await (window._item('#agent/chat') as any).eval('run_on_chat_item', {
+        async: true,
+        async_simple: true,
+      })
+      return run(window._item(name))
+    }, name)
+  const textOf = (name: string) => page.evaluate(name => window._item(name, true)?.text ?? '', name)
+  const cleanup = () =>
+    page.evaluate(() => {
+      for (const name of ['#chat/ollama/0', '#chat/ollama/1', '#chat/ollama/2'])
+        if (window._exists(name)) window._item(name)!.delete(false)
+    })
+  await cleanup() // clear any residue from an earlier failed run (fixed /N names)
+  try {
+    // PHASE 1 (start fence): the owner adds a vault marker to a web-routed chat item --
+  // the web provider must never be invoked at all
+  await page.evaluate(() => void window._create('/ollama hello', { command: true }))
+  await expect.poll(() => textOf('#chat/ollama/0'), { timeout: 30_000 }).toContain('hello')
+  await page.evaluate(() => {
+    const item = window._item('#chat/ollama/0')!
+    const [first, ...rest] = item.text.split('\n')
+    item.write([first + ' #_agent/vault', ...rest].join('\n'), '')
+  })
+  expect(await textOf('#chat/ollama/0'), 'the vault marker is on the item').toContain('#_agent/vault')
+  const callsBefore = calls
+  await runAgent('#chat/ollama/0')
+  expect(calls, 'start fence: the web provider was never invoked').toBe(callsBefore)
+  expect(await textOf('#chat/ollama/0'), 'start fence: nothing was appended').not.toContain('fake web reply')
+  // PHASE 2 (completion fence): a web-only chat item starts, the provider blocks, the
+  // owner adds the vault route, the provider is released -- the reply must NOT publish
+  await page.evaluate(() => void window._create('/ollama hello again', { command: true }))
+  await expect.poll(() => textOf('#chat/ollama/1'), { timeout: 30_000 }).toContain('hello again')
+  const pending = runAgent('#chat/ollama/1').catch(error => `run failed: ${error}`)
+  await expect.poll(() => calls, { message: 'the web provider REALLY ran', timeout: 30_000 }).toBe(callsBefore + 1)
+  await page.evaluate(() => {
+    const item = window._item('#chat/ollama/1')!
+    const [first, ...rest] = item.text.split('\n')
+    item.write([first + ' #_agent/vault', ...rest].join('\n'), '')
+  })
+  const routedText = await textOf('#chat/ollama/1')
+  release!()
+  expect(await pending, 'completion run settles normally (fence returns undefined)').toBeUndefined()
+  expect(await textOf('#chat/ollama/1'), 'completion fence: exact routed text, no reply appended').toBe(routedText)
+  // CATCH fence (review 148 §4): a provider REJECTION after the vault marker is added
+  // must not publish a web _log either. a fresh web-only item, provider set to reject.
+  let rejectRoute: (() => void) | null = null
+  await page.unroute('**/api/chat**')
+  await page.route('**/api/chat**', async route => {
+    calls++
+    await new Promise<void>(resolve => (rejectRoute = resolve))
+    await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+  })
+  await page.evaluate(() => void window._create('/ollama and again', { command: true }))
+  await expect.poll(() => textOf('#chat/ollama/2'), { timeout: 30_000 }).toContain('and again')
+  const rejecting = runAgent('#chat/ollama/2')
+  await expect.poll(() => calls, { message: 'the rejecting provider ran', timeout: 30_000 }).toBe(callsBefore + 2)
+  await page.evaluate(() => {
+    const item = window._item('#chat/ollama/2')!
+    const [first, ...rest] = item.text.split('\n')
+    item.write([first + ' #_agent/vault', ...rest].join('\n'), '')
+  })
+  const routedText2 = await textOf('#chat/ollama/2')
+  rejectRoute!()
+  expect(await rejecting, 'catch run settles normally (fence returns undefined)').toBeUndefined()
+  expect(await textOf('#chat/ollama/2'), 'catch fence: no web _log published into the routed item').toBe(routedText2)
+    expect(await textOf('#chat/ollama/2'), 'catch fence: no error log block').not.toContain('```_log')
+  } finally {
+    await cleanup()
   }
 })

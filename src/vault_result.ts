@@ -9,6 +9,11 @@
 // candidate renders as the fixed placeholder while sibling text stays ordinary
 // owner-authored item text (the trusted publisher is the only source of model bytes).
 
+// the app's global tag parser (untyped util.js; the app tsconfig is non-strict and the
+// tests tsconfig needs the suppression, as in src/zwsp.ts)
+// @ts-ignore
+import { parseTags } from './util.js'
+
 export const RESULT_FENCE = 'vault_result_v1'
 
 // claimant padding is EXPLICITLY spaces/tabs in both languages (review 142 §2.5 --
@@ -34,6 +39,7 @@ const LOG_CLOSE = /^\s*```/
 export type VaultCandidate = {
   marker: string // the collision-free inert token substituted into grammarText
   body: string // the raw claimed body (lines between opener and close/EOF), joined by LF
+  source: string // the EXACT raw claimed text (opener line through close/EOF), for restore
   closed: boolean // whether a bare-only close line was found (unclosed claims run to EOF)
   canonical: boolean // literal opener line + exactly ONE body line + literal bare close
   value: string | null // strictly decoded result text, or null if the BODY is invalid
@@ -95,6 +101,7 @@ export function scanVaultResults(text: string): VaultScan {
   const candidates: VaultCandidate[] = []
   let state: 'plain' | 'log' | 'result' = 'plain'
   let body: string[] = []
+  let source: string[] = [] // opener + body (+ close), the exact claimed raw text
   let openerLiteral = false
   const finish = (closed: boolean, closeLiteral: boolean) => {
     const marker = `⟦${RESULT_FENCE}:${k}:${candidates.length}⟧`
@@ -104,12 +111,14 @@ export function scanVaultResults(text: string): VaultScan {
     // canonical empty result), literal bare close
     const canonical = closed && openerLiteral && closeLiteral && body.length === 1
     const value = closed ? decodeResultBody(raw) : null
-    candidates.push({ marker, body: raw, closed, canonical, value })
+    candidates.push({ marker, body: raw, source: source.join('\n'), closed, canonical, value })
     out.push(marker)
     body = []
+    source = []
   }
   for (const line of lines) {
     if (state === 'result') {
+      source.push(line)
       if (RESULT_CLOSE.test(line)) {
         state = 'plain'
         finish(true, line === CANONICAL_CLOSE)
@@ -119,6 +128,7 @@ export function scanVaultResults(text: string): VaultScan {
       if (LOG_CLOSE.test(line)) state = 'plain'
     } else if (RESULT_OPEN.test(line)) {
       state = 'result'
+      source.push(line)
       openerLiteral = line === CANONICAL_OPEN
     } else if (LOG_OPEN.test(line)) {
       state = 'log'
@@ -195,4 +205,69 @@ export function associateVaultResults(grammarText: string, candidates: VaultCand
     const valid = sole && candidate.canonical && candidate.value !== null
     return { marker: candidate.marker, valid, value: valid ? candidate.value : null }
   })
+}
+
+// fixed inert placeholder text rendered for an INVALID candidate (design §2.2: never a
+// fallback to markup; the renderer assigns decoded values and this constant only via
+// textContent, so neither ever meets the html/macro/tag grammar)
+export const INVALID_RESULT_PLACEHOLDER = '⟦invalid vault result⟧'
+
+// restore raw candidate sources into a text whose candidate ranges are still markers:
+// each retained marker (exactly one occurrence) is replaced with its exact raw source.
+function restoreVaultCandidates(text: string, candidates: VaultCandidate[]): string {
+  for (const candidate of candidates)
+    if (text.includes(candidate.marker)) text = text.replace(candidate.marker, () => candidate.source)
+  return text
+}
+
+// a bounded source-preserving edit (design §2.3 read-modify-write safety, reviews 148-149):
+// run `transform` over the grammar view -- so a candidate's fake checkboxes/inputs/
+// delimiters cannot shift indices or be matched -- then restore the EXACT raw envelopes.
+// the contract the restore alone cannot guarantee (review 149 §1.1):
+//   - DUPLICATE a marker: rejected (String.replace would persist the second opaque marker)
+//   - DROP a marker: rejected UNLESS `allowDrop` (silent loss is unsafe for a checkbox
+//     toggle; it is the intended result for chat's explicit "delete messages below")
+//   - MOVE a marker into a position where the next scan no longer claims the restored
+//     bytes (inline, or beneath an outer _log|_output opener): rejected by the
+//     postcondition that the retained source multiset stays exactly claimed
+export function editVaultText(
+  rawText: string,
+  transform: (grammarText: string) => string,
+  { allowDrop = false }: { allowDrop?: boolean } = {}
+): string {
+  const scan = scanVaultResults(rawText)
+  const transformed = transform(scan.grammarText)
+  const occurrences = (text: string, marker: string) => text.split(marker).length - 1
+  for (const candidate of scan.candidates) {
+    const count = occurrences(transformed, candidate.marker)
+    if (count > 1) throw new Error('vault edit duplicated a result candidate')
+    if (count === 0 && !allowDrop) throw new Error('vault edit dropped a result candidate')
+  }
+  const restored = restoreVaultCandidates(transformed, scan.candidates)
+  // POSTCONDITION: every retained candidate's exact source must still be claimed by a
+  // fresh scan (catches a move that unclaims the restored bytes; permits whole-line
+  // reordering between plain positions)
+  const retained = scan.candidates
+    .filter(candidate => occurrences(transformed, candidate.marker) === 1)
+    .map(candidate => candidate.source)
+    .sort()
+  const claimed = scanVaultResults(restored)
+    .candidates.map(candidate => candidate.source)
+    .sort()
+  if (retained.length !== claimed.length || retained.some((source, i) => source !== claimed[i]))
+    throw new Error('vault edit moved a result candidate out of a claimable position')
+  return restored
+}
+
+// the browser routing predicate (design §2.1, reviews 137-146): computed from the
+// SCANNER'S grammar view with the app's global tag parser -- never resolved item state
+// (tags_raw is label-resolved after init) -- so a route inside a malformed candidate is
+// invisible, exactly as on the Python side. any direct tag equal to one of the four
+// canonical/legacy visible/hidden roots, or such a root plus a '/' descendant, routes
+// to the vault and SUPPRESSES web dispatch (an invalid/unregistered persona fails
+// closed to the vault rather than falling through to a web provider).
+const VAULT_ROOTS = ['#agent/vault', '#_agent/vault', '#agent/native', '#_agent/native']
+export function isVaultRouted(rawText: string): boolean {
+  const tags: string[] = (parseTags(scanVaultResults(rawText).grammarText.toLowerCase()) as { raw: string[] }).raw
+  return tags.some(tag => VAULT_ROOTS.some(root => tag === root || tag.startsWith(root + '/')))
 }

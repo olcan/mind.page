@@ -1,9 +1,18 @@
 import { expect, test } from '@playwright/test'
+import _ from 'lodash'
+
+// parseTags (reached by isVaultRouted via util.js) reads the browser globals `_` (lodash)
+// and `window._shortcut_hosts` at call time; stub both before the imports below
+;(globalThis as any)._ = _
+;(globalThis as any).window = { _shortcut_hosts: [] }
+
 import {
   associateVaultResults,
   decodeResultBody,
+  editVaultText,
   encodeResult,
   formatFooter,
+  isVaultRouted,
   scanVaultResults,
   FOOTER_NAME,
 } from '../../src/vault_result.js'
@@ -214,5 +223,56 @@ test('case folding is ASCII-scoped in both languages (review 144 §2.1)', () => 
   expect(associateVaultResults(scan.grammarText, scan.candidates)[0].valid).toBe(false)
   // dotless-i is not the app's _log_hidden suffix: no log region, one claimed candidate
   expect(scanVaultResults('```_log_h\u0131dden\n```vault_result_v1\nZg==\n```\ntail').candidates.length).toBe(1)
+})
+
+test('isVaultRouted: exact roots and slash descendants, over the grammar view', () => {
+  // review 148 §4: the predicate owns scan + the global parser; a route inside a
+  // candidate does NOT count, and an unregistered persona still routes to the vault
+  for (const yes of [
+    '#agent/vault\n<<user>> q',
+    '#_agent/vault/opus\n<<user>> q', // hidden + persona
+    '#agent/native\n<<user>> q', // legacy alias
+    '#_agent/native/default\n<<user>> q',
+    '#agent/vault/anything\n<<user>> q', // unknown persona still routes to vault
+    '#agent/vault//x\n<<user>> q', // design sibling-tag form: still a slash descendant
+  ])
+    expect(isVaultRouted(yes), yes).toBe(true)
+  for (const no of [
+    '#agent/vaultish\n<<user>> q', // near-prefix, not a slash boundary
+    '#agent\n#/vault\n<<user>> q', // relative tag (label-resolved elsewhere; raw parse only)
+    '#chat/gpt\n<<user>> q', // a web provider
+    // a route ONLY inside a (malformed, literal-body) result candidate is invisible
+    '#chat/gpt\n<<user>> q\n```vault_result_v1\nnot base64\n#agent/vault\n```',
+    '```_log\n#agent/vault\n```\n<<user>> q', // a route inside a log block
+  ])
+    expect(isVaultRouted(no), no).toBe(false)
+})
+
+test('editVaultText: retain, drop, safe reorder, reject duplicate/unsafe move', () => {
+  // review 149 §1: the fake content is in a MALFORMED candidate's RAW body (not base64),
+  // so calling transform(rawText) instead of the grammar view would corrupt it -- causal
+  const candidate = '```vault_result_v1\nnot base64\n- [ ] fake checkbox\n```'
+  const item = '#topic\n- [ ] real one\n' + candidate + '\n- [ ] real two'
+  // RETAIN: toggle the FIRST real checkbox; the raw candidate is exact, index unshifted
+  const toggled = editVaultText(item, grammar => {
+    let i = 0
+    return grammar.replace(/- \[[ xX]\] /g, m => (i++ === 0 ? '- [x] ' : m))
+  })
+  expect(toggled).toBe('#topic\n- [x] real one\n' + candidate + '\n- [ ] real two')
+  // DROP is rejected by default, permitted with allowDrop (chat "delete below")
+  const dropTail = (grammar: string) => grammar.split('\n').slice(0, 2).join('\n')
+  expect(() => editVaultText(item, dropTail)).toThrow(/dropped/)
+  expect(editVaultText(item, dropTail, { allowDrop: true })).toBe('#topic\n- [ ] real one')
+  // SAFE whole-line reorder: move the MARKER LINE itself up one (review 150 §1.2 --
+  // the earlier vector left the marker in place and was non-causal); exact output pinned
+  const moveMarkerUp = (grammar: string) => {
+    const lines = grammar.split('\n') // [label, real one, marker, real two]
+    return [lines[0], lines[2], lines[1], lines[3]].join('\n')
+  }
+  expect(editVaultText(item, moveMarkerUp)).toBe('#topic\n' + candidate + '\n- [ ] real one\n- [ ] real two')
+  // REJECT duplicate (String.replace would persist a second opaque marker)
+  expect(() => editVaultText(item, grammar => grammar + '\n' + grammar.match(/⟦[^⟧]+⟧/)![0])).toThrow(/duplicated/)
+  // REJECT an unsafe move: inline the marker so its restored opener no longer begins a line
+  expect(() => editVaultText(item, grammar => grammar.replace(/\n(⟦[^⟧]+⟧)/, ' $1'))).toThrow(/claimable/)
 })
 

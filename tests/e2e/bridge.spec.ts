@@ -245,6 +245,20 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
     expect(seeded.cipher, 'seeded request is still v0 (untagged) -- a genuinely mixed corpus').toMatch(
       /^[0-9a-f]{24}/
     )
+    // install the modal collector BEFORE the listener exists (review 150 §3.2): it must
+    // observe the whole span of both live {cipher,time} reply rewrites and the ~2s
+    // reconciliation that follows -- a snapshot or late observer misses transient modals.
+    // error modals carry real text; spinner overlays are whitespace-only.
+    await page.evaluate(() => {
+      const seen: string[] = ((window as any)._modals_seen = [])
+      const record = () =>
+        document.querySelectorAll('.modal').forEach(m => {
+          const text = (m.textContent ?? '').trim()
+          if (text) seen.push(text)
+        })
+      new MutationObserver(record).observe(document.body, { childList: true, subtree: true })
+      record()
+    })
     // only NOW start the listener: its initial catch-up snapshot serves the mixed corpus.
     // the envelope reaches it as a 0600 file, exactly like production operation
     const envelopePath = test.info().outputPath('envelope.json')
@@ -257,6 +271,14 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
     await expect
       .poll(() => itemText(page, '#e2e_bridge_v1req'), { timeout: 30_000 })
       .toContain("<<agent('vault/default')>> echo(sandbox=read_only, cost_limit=0.5): v1 ping")
+    // warm-cache no-error-modal (owner-observed 2026-08-30, design §2.2): the collector
+    // installed BEFORE the listener has observed both live reply rewrites; wait past the
+    // ~2s reconciliation window and require nothing surfaced at any point in the span
+    await page.waitForTimeout(3_000)
+    expect(
+      await page.evaluate(() => (window as any)._modals_seen as string[]),
+      'no modal appeared from reply delivery through reconciliation'
+    ).toEqual([])
     // at rest, BOTH replied items are v1 (`1!`-tagged): the bridge upgraded the v0 item on
     // write and never re-created v0; the ciphers decrypt under the app's own v1 primitive,
     // and no exact request/reply plaintext appears outside the cipher field
@@ -280,5 +302,260 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
       localStorage.removeItem('mindpage_key1')
       localStorage.removeItem('mindpage_kdf_write')
     })
+  }
+})
+
+test('vault_result envelopes render inert: valid decoded text and malformed candidates', async ({ page }) => {
+  // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO
+  // phases: (a) a VALID envelope whose DECODED text carries every active item grammar,
+  // and (b) a MALFORMED raw candidate whose BODY carries the same payloads. phase (a)
+  // alone could false-green (a canonical base64 body is inert before decoding), so (b)
+  // is what proves the scanner masks candidate ranges from item state/macros/tags.
+  await loadAdmin(page)
+  const hostile = [
+    '<<user>> q',
+    '<<window._pwned = 1>>', // store-writing macro
+    '<script>window._pwned = 2</script>', // inline script (the app executes these)
+    '<img src=x onerror="window._pwned=3">', // event-handler attribute
+    '[click](javascript:window._pwned=4)', // javascript: link
+    '#_autorun #_style #chat/gpt', // special + provider tags
+    '```js_input', // input block => runnable item
+    'window._pwned = 5',
+    '```',
+  ].join('\n')
+  const encoded = Buffer.from(hostile, 'utf8').toString('base64')
+  const footer = "vault/default · run ab12cd34 · 1s"
+  // (a) VALID envelope: decoded payload must display literally and change nothing
+  await page.evaluate(
+    ([encoded, footer, hostile]) => {
+      void window._create(
+        `#e2e_vault_valid its reply\n<<user>> q\n<<agent('${footer}')>>\n` +
+          '```vault_result_v1\n' +
+          encoded +
+          '\n```'
+      )
+      ;(window as any)._hostile = hostile
+    },
+    [encoded, footer, hostile] as const
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_vault_valid'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_valid', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const state = (name: string) =>
+    page.evaluate(name => {
+      const item = window._item(name, true) as any
+      return {
+        pwned: (window as any)._pwned ?? null,
+        runnable: !!item?.runnable,
+        tags: (item?.tags ?? []).join(' '),
+        rendered: item?.elem?.querySelector('.content')?.textContent ?? '',
+        // the placeholder must hold ONLY text nodes: any element/attribute means
+        // decoded or raw candidate bytes reached the html grammar
+        placeholderElements: [...(item?.elem?.querySelectorAll('.vault-result *') ?? [])].length,
+        liveNodes: [
+          ...(item?.elem?.querySelectorAll('.content script, .content img, .content [onerror], .content a[href^="javascript:"]') ??
+            []),
+        ].length,
+        // count over the GRAMMAR VIEW (the internal item's lctext, not the _Item
+        // wrapper's raw text): a malformed candidate legitimately still contains its
+        // raw bytes in item.text, and the whole point is that the grammar view does not
+        messages:
+          (window.__items.find(entry => entry.labelText == name) as any)?.lctext?.match(/<<user>>/g)?.length ?? 0,
+      }
+    }, name)
+  const valid = await state('#e2e_vault_valid')
+  expect(valid.pwned, 'no macro/script/handler/link executed').toBeNull()
+  expect(valid.runnable, 'decoded input block did not make the item runnable').toBe(false)
+  expect(valid.tags, 'decoded tags did not enter item state').not.toContain('#_autorun')
+  expect(valid.tags).not.toContain('#chat/gpt')
+  expect(valid.rendered, 'the decoded payload displays literally').toContain('window._pwned = 1')
+  expect(valid.placeholderElements, 'the placeholder holds text nodes only').toBe(0)
+  expect(valid.liveNodes, 'no script/img/handler/javascript-link element was created').toBe(0)
+  expect(valid.messages, 'the decoded <<user>> is not a delimiter in the grammar view').toBe(1)
+  // (b) MALFORMED candidate: the same payloads as RAW body, opaque and placeholdered
+  await page.evaluate(
+    hostile =>
+      void window._create('#e2e_vault_bad malformed\n<<user>> q\n```vault_result_v1\nnot base64\n' + hostile + '\n```'),
+    hostile
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_vault_bad'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_bad', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const bad = await state('#e2e_vault_bad')
+  expect(bad.pwned, 'raw hostile body executed nothing').toBeNull()
+  expect(bad.runnable, 'raw input block did not make the item runnable').toBe(false)
+  expect(bad.tags, 'raw tags did not enter item state').not.toContain('#_autorun')
+  expect(bad.tags).not.toContain('#chat/gpt')
+  expect(bad.rendered, 'the invalid candidate renders the fixed placeholder').toContain('⟦invalid vault result⟧')
+  expect(bad.rendered, 'raw candidate bytes are not displayed').not.toContain('window._pwned')
+  expect(bad.placeholderElements, 'the placeholder holds text nodes only').toBe(0)
+  expect(bad.liveNodes, 'no script/img/handler/javascript-link element was created').toBe(0)
+  expect(bad.messages, 'the raw <<user>> is not a delimiter in the grammar view').toBe(1)
+  // the read path (grammar view) masks candidate bytes for every downstream parser
+  expect(
+    await page.evaluate(() => (window._item('#e2e_vault_bad') as any).read()),
+    'the read path masks candidate bytes'
+  ).not.toContain('window._pwned')
+})
+
+test('a candidate-bearing item: read/render domains stay separate and idle converges', async ({ page }) => {
+  // review 149 §3: the renderer bypasses the shared item.expanded (its placeholder HTML
+  // must never become semantic text), while the read path caches its grammar/marker
+  // expansion normally -- so the background pre-expander converges once instead of
+  // re-evaluating the outer macro on every ~250ms idle pass.
+  await loadAdmin(page)
+  // create the item AND run a macro-evaluating read in the SAME task, before Svelte
+  // flushes, so the read populates item.expanded first. a side-effect counter proves the
+  // macro is not re-run on every idle pass.
+  const read = await page.evaluate(() => {
+    ;(window as any)._macro_runs = 0
+    void window._create('#e2e_vault_cache <<(window._macro_runs++, 1 + 2)>>\n```vault_result_v1\nnot base64\n```')
+    return (window._item('#e2e_vault_cache') as any).read('', { eval_macros: true })
+  })
+  expect(read, 'the macro evaluated in the read').toContain('3')
+  expect(read, 'the candidate is a masked marker in the read').not.toContain('not base64')
+  await page.evaluate(() => void (location.hash = '#e2e_vault_cache'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_cache', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const content = await page.evaluate(
+    () => window._item('#e2e_vault_cache', true)?.elem?.querySelector('.content')?.textContent ?? ''
+  )
+  expect(content, 'the macro rendered (cache not poisoned by a marker)').toContain('3')
+  expect(content, 'the invalid candidate still shows the placeholder').toContain('⟦invalid vault result⟧')
+  expect(content, 'no raw marker leaked into render').not.toContain('vault_result_v1:')
+  // idle convergence: past several ~250ms background passes the macro count is stable
+  const runsBefore = await page.evaluate(() => (window as any)._macro_runs as number)
+  await page.waitForTimeout(1_500)
+  expect(await page.evaluate(() => (window as any)._macro_runs as number), 'no permanent idle re-expansion').toBe(
+    runsBefore
+  )
+  await page.evaluate(() => window._item('#e2e_vault_cache')?.delete(false))
+})
+
+test('a malformed candidate cannot execute a nested js block on startup', async ({ page }) => {
+  // review 148 §1.1: special-tag-alias extraction runs before the initial itemTextChanged
+  // pass, so it must scan INLINE -- a nested js block inside a malformed candidate must
+  // not execute on reload
+  await loadAdmin(page)
+  await page.evaluate(() => {
+    ;(window as any)._startup_pwned = false
+    // a MALFORMED candidate whose body contains a real nested ```js block opener with a
+    // _special_tag_aliases function: only a RAW extractBlock(item.text,'js') would find
+    // and execute it. the candidate's bare close also closes the raw js match.
+    void window._create(
+      '#e2e_startup_js\n```vault_result_v1\nnot base64\n```js\n' +
+        'window._startup_pwned = true\nfunction _special_tag_aliases() { return {} }\n```'
+    )
+  })
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_startup_js', true)?.saved_id ?? null), { timeout: 30_000 })
+    .toBeTruthy()
+  // reload: the startup alias extraction runs over the persisted item
+  await page.reload()
+  await waitForApp(page)
+  await page.waitForTimeout(1_000)
+  // after reload the window sentinel is cleared; only the nested js executing would set it
+  expect(await page.evaluate(() => (window as any)._startup_pwned), 'the nested js did not execute on startup').not.toBe(
+    true
+  )
+  await page.evaluate(() => window._item('#e2e_startup_js')?.delete(false))
+})
+
+test('/run copies only the real input, not a candidate-nested one', async ({ page }) => {
+  // reviews 148 §1.2, 150 §2.3, 151 §3. three phases:
+  // 1: an installed item with a real outer input plus a SIBLING candidate -- /run copies
+  //    only the real input (the raw-match bug), the candidate stays on the parent, and
+  //    the child (where cleanup/publication then run) carries no candidate at all
+  // 2: a candidate INSIDE the selected input -- the child receives the exact raw
+  //    envelope (its own scanner masks it), never a literal marker
+  // 3 (run FIRST): an ORDINARY run on a candidate-bearing item whose candidate owns
+  //    nested _output AND _log openers, with an input that emits fresh output AND a log
+  //    -- pinning clearRunArtifacts and both append transforms on this very item; all
+  //    three fixtures persist before ONE shared reload
+  await loadAdmin(page)
+  const candidate = '```vault_result_v1\nnot base64\n```js_input\nwindow._candidate_input = true\n```_output\nnested output\n```_log\nnested log\n```'
+  const inner = '```vault_result_v1\nnot base64\n```'
+  const names = ['#e2e_run_mixed/run', '#e2e_run_mixed', '#e2e_run_inner/run', '#e2e_run_inner', '#e2e_run_plain']
+  const cleanup = () =>
+    page.evaluate(names => {
+      for (const name of names) if (window._exists(name)) window._item(name)!.delete(false)
+    }, names)
+  await cleanup() // fixed fixture names: clear residue from an earlier failed attempt
+  try {
+    // ALL THREE fixtures created and persisted before ONE shared reload (review 152 §3)
+    await page.evaluate(
+      ([candidate, inner]) => {
+        void window._create('#e2e_run_mixed real\n```js_input\nwindow._real_input = true\n```\n' + candidate)
+        void window._create('#e2e_run_inner real\n```js_input\nwindow._real_input = true\n' + inner + '\n```')
+        void window._create(
+          "#e2e_run_plain\n```js_input\n_this.log('fresh log')\n1 + 1\n```\n" +
+            candidate +
+            '\n```_output\nold output\n```\n```_log\nold log\n```'
+        )
+      },
+      [candidate, inner] as const
+    )
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_run_plain', true)?.saved_id ?? null), { timeout: 30_000 })
+      .toBeTruthy()
+    for (const name of ['#e2e_run_mixed', '#e2e_run_inner']) {
+      await expect
+        .poll(() => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name), { timeout: 30_000 })
+        .toBeTruthy()
+      const id = await page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
+      await firestore()
+        .collection('items')
+        .doc(id!)
+        .update({ attr: { source: 'https://github.com/olcan/mind.items/blob/master/e2e.md' } })
+    }
+    // reload before clicking: the run button passes its component's render-time index
+    // prop, which a mid-session create can reshuffle (recorded app backfill, review 151
+    // §5) -- and mark nothing previewable so a residue item's rejected preview fetch
+    // cannot strand the deferred run
+    await page.reload()
+    await waitForApp(page)
+    const runItem = async (name: string) => {
+      await page.evaluate(name => void (location.hash = name), name)
+      const id = await page.evaluate(name => window._item(name)!.id, name)
+      const run = page.locator(`[data-item-id="${id}"] .button.run`)
+      await expect(run).toHaveCount(1, { timeout: 30_000 })
+      await page.evaluate(() => window.__items.forEach(item => ((item as any).previewable = false)))
+      await run.click()
+    }
+    // PHASE 3 FIRST (ordinary run, before any child creation can reshuffle indices):
+    // fresh output AND log land beside the byte-exact candidate whose body holds nested
+    // _output/_log openers -- pinning clearRunArtifacts and both append transforms
+    await runItem('#e2e_run_plain')
+    await expect
+      .poll(() => page.evaluate(() => window._item('#e2e_run_plain')!.text), { timeout: 30_000 })
+      .toContain('```_output\n2\n```') // fresh output appended on this item
+    const plainText = await page.evaluate(() => window._item('#e2e_run_plain')!.text)
+    expect(plainText, 'the candidate survived cleanup + both appends exactly').toContain(candidate)
+    // the OUTER _log block: the grammar view masks the candidate's nested _log, and
+    // typed read('_log') extraction excludes the separate js_input block -- so the
+    // sentinel can only come from the appended block (review 152 §2.4, 153 §3)
+    expect(
+      await page.evaluate(() => (window._item('#e2e_run_plain') as any).read('_log')),
+      'the fresh log landed in the outer _log block'
+    ).toContain('fresh log')
+    expect(plainText, 'the old output was cleared').not.toContain('old output')
+    expect(plainText, 'the old log was removed').not.toContain('old log')
+    // PHASE 1: sibling candidate -- only the real input is copied
+    await runItem('#e2e_run_mixed')
+    await expect.poll(() => page.evaluate(() => window._exists('#e2e_run_mixed/run')), { timeout: 30_000 }).toBe(true)
+    const runText = await page.evaluate(() => window._item('#e2e_run_mixed/run')!.text)
+    expect(runText, 'the real input was copied').toContain('window._real_input')
+    expect(runText, 'the candidate-nested input was NOT copied').not.toContain('window._candidate_input')
+    // the source-side selection left the parent untouched: its candidate is byte-exact
+    // (the installed run's cleanup/publication then operate on the child, not here)
+    expect(
+      await page.evaluate(() => window._item('#e2e_run_mixed')!.text),
+      'parent candidate source intact'
+    ).toContain(candidate)
+    // PHASE 2: candidate inside the selected input -- exact envelope, never a marker
+    await runItem('#e2e_run_inner')
+    await expect.poll(() => page.evaluate(() => window._exists('#e2e_run_inner/run')), { timeout: 30_000 }).toBe(true)
+    const innerRunText = await page.evaluate(() => window._item('#e2e_run_inner/run')!.text)
+    expect(innerRunText, 'the inner candidate rode along as its exact raw envelope').toContain(inner)
+    expect(innerRunText, 'no literal marker escaped into the child').not.toContain('\u27e6vault_result_v1:')
+  } finally {
+    await cleanup()
   }
 })

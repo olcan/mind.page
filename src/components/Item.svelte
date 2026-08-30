@@ -26,6 +26,7 @@
   } from '../util.js'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
+  import { associateVaultResults, editVaultText, scanVaultResults, INVALID_RESULT_PLACEHOLDER } from '../vault_result'
   import Editor from './Editor.svelte'
   export let editable = true
   export let pushable = false
@@ -280,6 +281,21 @@
     dependentsString: string,
     version: number
   ) {
+    // bridge design §2.2-2.3: derive the grammar view and replace each candidate
+    // marker with a TRUSTED inert placeholder element before macro/Marked processing --
+    // model bytes never meet the html/macro/tag grammar. computed before the cache
+    // check so the values refresh even on cached html. the decoded value (or the fixed
+    // invalid placeholder) is assigned post-render via textContent only.
+    const vaultScan = scanVaultResults(text)
+    if (vaultScan.candidates.length) {
+      const decisions = associateVaultResults(vaultScan.grammarText, vaultScan.candidates)
+      vaultValues = decisions.map(decision => (decision.valid ? decision.value! : INVALID_RESULT_PLACEHOLDER))
+      text = vaultScan.grammarText
+      vaultScan.candidates.forEach((candidate, i) => {
+        text = text.replace(candidate.marker, `<div class="vault-result" data-vault-result="${i}"></div>`)
+      })
+    } else if (vaultValues.length) vaultValues = []
+
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
     window['_html_cache'][id] ??= new Map()
@@ -298,7 +314,8 @@
     // we also re-expand on version changes in case macros depend on external state (e.g. global_store)
     // we do NOT re-expand on changes to search/highlight-related state (e.g. matchingTerms, contextLabel, etc)
     // NOTE: even if we re-expand on ANY change to cache_key (see above), background expansions can still dramatically improve responsiveness when large numbers of previously-unrendered items are brought up based on re-ranking or toggling of items on page, so it is important to support in all cases.
-    if (expanded && !expanded.error && expanded.deephash == deephash && expanded.version == version) {
+    const hasVaultCandidates = vaultScan.candidates.length > 0
+    if (!hasVaultCandidates && expanded && !expanded.error && expanded.deephash == deephash && expanded.version == version) {
       text = expanded.text // use prior expansion
       cacheIndex = expanded.count
     } else {
@@ -320,8 +337,10 @@
         }
       }
       text = text.replace(/<<(.*?)>>/g, skipEscaped(replaceMacro))
-      // save expansion if no errors
-      if (!expanded.error) {
+      // save expansion if no errors -- but NEVER for candidate-bearing items (review
+      // 148 §3): this text contains renderer placeholder HTML, which a macro-evaluating
+      // read must never receive as semantic text
+      if (!expanded.error && !hasVaultCandidates) {
         expanded.text = text
         expanded.deephash = deephash
         expanded.version = version
@@ -430,7 +449,7 @@
     )
 
     // extract _log blocks (processed for summary at bottom)
-    const log = extractBlock(text, '_log')
+    const log = extractBlock(scanVaultResults(text).grammarText, '_log')
 
     // introduce a line break between any styling html and first tag
     text = text.replace(/^(<.*>)\s+#/, '$1\n#')
@@ -940,6 +959,9 @@
   import { afterUpdate, onDestroy } from 'svelte'
   let container: HTMLDivElement
   let itemdiv: HTMLDivElement
+  // decoded vault-result values (or the fixed invalid placeholder), assigned to the
+  // rendered placeholder elements via textContent only (bridge design §2.2)
+  let vaultValues: string[] = []
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1052,6 +1074,13 @@
   let highlightDispatchCount = 0
 
   afterUpdate(() => {
+    // populate vault-result placeholders via textContent ONLY (bridge design §2.2):
+    // decoded model bytes never enter html/attributes, and repopulation survives the
+    // app's forced rerenders
+    itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
+      const value = vaultValues[+elem.getAttribute('data-vault-result')!] ?? INVALID_RESULT_PLACEHOLDER
+      if (elem.textContent !== value) elem.textContent = value
+    })
     // always report container height for potential changes
     // WARNING: afterUpdate can be triggered for _multiple_ items on every key press in the editor of a single item, so it is critical for onResized to be efficient. These updates were traced to binding such as editor.focused when focusing on an editor or editor.selectionStart when typing into an editor, and then seem to always get propagated to every item that is rendered on the page
     // console.trace()
@@ -1476,11 +1505,15 @@
         e.preventDefault()
         let item = window['_item'](id)
         // alert("checkbox index " + index + " on item " + item.name);
-        let text = item.read()
-        let checkboxIndex = 0
-        text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => {
-          if (checkboxIndex++ == index) return m.replace(/\[[xX ]\]/, elem.hasAttribute('checked') ? '[ ]' : '[x]')
-          else return m
+        // read-modify-write over the GRAMMAR VIEW then restore raw envelopes (review
+        // 148 §2): reading item.read() (grammar view) and writing it back would persist
+        // opaque markers, and a fake checkbox inside a candidate would shift the index
+        const text = editVaultText(item.text, grammar => {
+          let checkboxIndex = 0
+          return grammar.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => {
+            if (checkboxIndex++ == index) return m.replace(/\[[xX ]\]/, elem.hasAttribute('checked') ? '[ ]' : '[x]')
+            else return m
+          })
         })
         item.write(text, '' /* replace whole item*/)
       }
@@ -1520,8 +1553,11 @@
               })
               .join('\n')
             let item = window['_item'](id)
-            let text = item.read()
-            text = text.replace(/<input\s(?:"[^"]*"|[^>"])*?type\s*=\s*["']?file(?:"[^"]*"|[^>"])*>|<input>/gi, images)
+            // grammar-view edit + raw restore (review 148 §2): a fake file input inside
+            // a candidate must not be a replacement target
+            const text = editVaultText(item.text, grammar =>
+              grammar.replace(/<input\s(?:"[^"]*"|[^>"])*?type\s*=\s*["']?file(?:"[^"]*"|[^>"])*>|<input>/gi, images)
+            )
             item.write(text, '' /* replace whole item*/)
           })
           .catch(console.error)
@@ -2530,6 +2566,10 @@
     max-height: 100%;
     min-width: 0; /* enable images to shrink, e.g. in a flex row */
     vertical-align: middle;
+  }
+  .item > :global(.content .vault-result) {
+    white-space: pre-wrap; /* decoded vault results keep their line structure */
+    overflow-wrap: anywhere;
   }
   /* set default size/padding of pending images */
   .item > :global(.content img[_pending]) {

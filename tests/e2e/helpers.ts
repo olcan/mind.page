@@ -22,7 +22,7 @@ declare global {
       saved_id?: string
       dependencies: string[] // runtime dependency ids (itemDeps)
       global_store: Record<string, unknown>
-      write: (text: string) => void
+      write: (text: string, type?: string) => boolean | void
       delete: (confirm?: boolean) => void
       share: (key: string, index?: number) => void
       unshare: (key: string) => void
