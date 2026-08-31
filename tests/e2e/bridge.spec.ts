@@ -401,35 +401,54 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   // fence cannot materialize a dead-frame element (Marked escapes html there), so it
   // renders the fixed non-leaking placeholder text -- never internal markup, never a
   // marker, never the body
-  // (c1) RENDER inside an outer FOUR-backtick fence with a shorter NON-CLOSING ``` line
-  // (review 181 §1): the 3-backtick line must not close the 4-backtick Marked block, so
-  // the region stays fenced and renders the fixed placeholder -- proving stepMarkedFence's
-  // run-length rule in the real Marked pipeline
-  const nestedText = [
-    '#e2e_vault_nested',
-    '````js',
-    '```not-a-close',
-    '<!--inert-->',
-    'fenced body',
-    '<!--/inert-->',
-    '````',
-    'after',
-  ].join('\n')
-  await page.evaluate(text => void window._create(text), nestedText)
-  await page.evaluate(() => void (location.hash = '#e2e_vault_nested'))
-  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_nested', true)?.elem), { timeout: 15_000 }).toBe(true)
-  const nested = await page.evaluate(() => {
-    const item = window._item('#e2e_vault_nested', true) as any
-    return {
-      rendered: item?.elem?.querySelector('.content')?.textContent ?? '',
-      frames: [...(item?.elem?.querySelectorAll('.vault-result') ?? [])].length,
-    }
-  })
-  expect(nested.rendered, 'the shorter fence does not close the outer block; placeholder shown').toContain('⟦inert region⟧')
-  expect(nested.rendered, 'no internal markup leaked as code text').not.toContain('vault-result')
-  expect(nested.rendered, 'no marker leaked').not.toContain('vault_result_v1:')
-  expect(nested.rendered, 'the fenced body is not displayed').not.toContain('fenced body')
-  expect(nested.frames, 'no dead frame materializes inside the outer fence').toBe(0)
+  // (c1) RENDER classified by MARKED ITSELF (review 182 §1): each case places a
+  // canonical region in a context whose fence ownership only Marked's real grammar
+  // knows. A region Marked lexes inside code -> fixed placeholder, no frame; a region
+  // Marked lexes at top level -> dead frame. None may leak a marker or the body.
+  const renderCases: Array<{ name: string; lines: string[]; framed: boolean }> = [
+    // a shorter run does not close a longer fence (Marked run-length rule)
+    { name: 'nested_len', lines: ['````js', '```not-a-close', '<!--inert-->', 'nested_body', '<!--/inert-->', '````'], framed: false },
+    // a tab-tailed would-be closer does NOT close (Marked accepts spaces only) -> code
+    { name: 'tab_tail', lines: ['```js', '```\t', '<!--inert-->', 'tab_body', '<!--/inert-->', '```'], framed: false },
+    // a mixed backtick/tilde closer DOES close a backtick opener (Marked 18) -> the
+    // region after it is TOP-LEVEL
+    { name: 'mixed_close', lines: ['```js', 'code', '```~', '<!--inert-->', 'answer', '<!--/inert-->'], framed: true },
+    // a fence created by a MACRO after Item's own transforms -> code
+    { name: 'macro_fence', lines: ["<<'```js'>>", '<!--inert-->', 'macro_body', '<!--/inert-->', '```'], framed: false },
+    // a region nested inside a list-item's fenced code (Marked recursive ownership)
+    { name: 'list_nested', lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'], framed: false },
+  ]
+  for (const rc of renderCases) {
+    const hashName = `#e2e_vault_${rc.name}`
+    await page.evaluate(text => void window._create(text), `${hashName}\n${rc.lines.join('\n')}`)
+    await page.evaluate(name => void (location.hash = name), hashName)
+    await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem, hashName), { timeout: 15_000 }).toBe(true)
+    const r = await page.evaluate(name => {
+      const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+      return {
+        rendered: content?.textContent ?? '',
+        innerHTML: content?.innerHTML ?? '',
+        frames: [...(content?.querySelectorAll('.vault-result') ?? [])].length,
+        // THE §1 invariant: a dead-frame element must NEVER sit inside a code block
+        // (that is exactly what Marked would escape as markup) -- and no code text may
+        // contain the injected class name
+        framesInCode: [...(content?.querySelectorAll('pre code .vault-result') ?? [])].length,
+        codeText: [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent).join(''),
+        // frames hold ONLY text nodes (decoded bytes never become elements/attributes)
+        frameChildElements: [...(content?.querySelectorAll('.vault-result *') ?? [])].length,
+      }
+    }, hashName)
+    // invariants that hold for EVERY placement Marked chooses (review 182 §1):
+    expect(r.rendered, `${rc.name}: no marker leaks into rendered text`).not.toContain('vault_result_v1:')
+    expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
+    expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
+    expect(r.frameChildElements, `${rc.name}: frames hold only text nodes`).toBe(0)
+    // a region Marked lexes at top level shows the decoded body in a dead frame; one it
+    // lexes in code shows the fixed placeholder -- exactly one holds, never a leak
+    const bodyLine = rc.lines[rc.lines.indexOf('<!--inert-->') + 1]
+    if (r.frames > 0) expect(r.rendered, `${rc.name}: top-level region shows the decoded body`).toContain(bodyLine)
+    else expect(r.rendered, `${rc.name}: code region shows the fixed placeholder`).toContain('⟦inert region⟧')
+  }
 
   // (c2) EDITOR keeps its open block across the candidate (review 181 §2): a simple
   // ```js block (matching the editor's own fence grammar) with code before AND after the

@@ -29,10 +29,9 @@
   import {
     editInertText,
     scanInert,
-    stepMarkedFence,
     INERT_FENCED_PLACEHOLDER,
+    INERT_MARKER_SOURCE,
     INVALID_INERT_REGION,
-    type FenceState,
   } from '../inert'
   import Editor from './Editor.svelte'
   export let editable = true
@@ -299,26 +298,20 @@
     // Markdown/raw-HTML owner). Fence state uses Marked's REAL grammar, not a boolean
     // toggle. Computed before the cache check so values refresh on cached html; values
     // are assigned post-render via textContent only.
+    // bridge reviews 177-182: the grammar view's opaque markers flow UNCHANGED through
+    // macro expansion and every block transform below; MARKED itself then classifies
+    // each marker's placement (review 182 §1.3) via the inert extension registered on
+    // the parser -- a marker Marked lexes at top level becomes a dead-frame span
+    // (decoded value assigned post-render via textContent), a marker Marked lexes inside
+    // a code token is left as literal text and swapped for the fixed placeholder after
+    // parse. No pre-parse fence prediction; the decoded bytes never enter Markdown.
     const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
-      const markerInfo = new Map(vaultScan.candidates.map(candidate => [candidate.marker, candidate]))
-      vaultValues = []
-      let fence: FenceState = null
+      vaultValues = new Map(
+        vaultScan.candidates.map(candidate => [candidate.marker, candidate.value ?? INVALID_INERT_REGION])
+      )
       text = vaultScan.grammarText
-        .split('\n')
-        .map(line => {
-          const candidate = markerInfo.get(line)
-          if (candidate === undefined) {
-            fence = stepMarkedFence(fence, line)
-            return line
-          }
-          if (fence !== null) return INERT_FENCED_PLACEHOLDER // inside an open Marked fence
-          const i = vaultValues.length
-          vaultValues.push(candidate.value ?? INVALID_INERT_REGION)
-          return `<div class="vault-result" data-vault-result="${i}"></div>`
-        })
-        .join('\n')
-    } else if (vaultValues.length) vaultValues = []
+    } else if (vaultValues.size) vaultValues = new Map()
 
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
@@ -790,11 +783,48 @@
       )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
     marked.use({ renderer }) // note a bare renderer instance is silently ignored by marked.use
+    // the INERT extension (bridge review 182 §1.3): an inline tokenizer for the grammar
+    // markers of THIS render's claimed regions. Marked runs inline tokenizers only where
+    // it lexes ordinary text, NEVER inside a code token, so a marker at top level becomes
+    // a dead-frame span here while a marker inside code is swapped for the fixed
+    // placeholder in the markedHighlight callback below. The span is populated post-render
+    // via textContent by its data-vault-marker (afterUpdate); decoded bytes never enter
+    // html. Only markers of the current scan match (owner-typed lookalikes are ignored).
+    const inertGlobal = new RegExp(INERT_MARKER_SOURCE, 'g')
+    if (vaultValues.size) {
+      const inertOpen = new RegExp('^' + INERT_MARKER_SOURCE)
+      marked.use({
+        extensions: [
+          {
+            name: 'inertRegion',
+            level: 'inline',
+            start: (src: string) => src.indexOf('⟦vault_result_v1:'),
+            tokenizer(src: string) {
+              const match = inertOpen.exec(src)
+              if (match && vaultValues.has(match[0]))
+                return { type: 'inertRegion', raw: match[0], marker: match[0] }
+              return undefined
+            },
+            renderer: (token: any) =>
+              `<span class="vault-result" data-vault-marker="${token.marker}"></span>`,
+          },
+        ],
+      })
+    }
     marked.use(markedExtendedTables())
     marked.use(
       markedHighlight({
         langPrefix: '',
         highlight: (code, language) => {
+          // a claimed region MARKED lexed inside this code block becomes the fixed
+          // placeholder HERE, at the exact seam where raw code enters highlight.js --
+          // before highlight.js can fragment the marker into spans and leak it (review
+          // 182 §1.1). Top-level markers never reach this callback (the inline extension
+          // renders them as dead-frame spans); so exactly one path handles every marker.
+          if (vaultValues.size)
+            code = code.replace(inertGlobal, (m: string) =>
+              vaultValues.has(m) ? INERT_FENCED_PLACEHOLDER : m
+            )
           // leave _html(_*) block as is to be "unwrapped" below
           // except add a closing comment to allow html itself to contain </code></pre>
           if (language.match(/^_html(_|$)/)) {
@@ -819,6 +849,17 @@
 
     // parse markdown, adding <br> on a each single line break, see https://marked.js.org/using_advanced#options
     text = marked.parse(text, { breaks: true })
+
+    // BACKSTOP (review 182 §1.2): any contiguous marker Marked left as literal text
+    // outside a highlighted code block and outside a dead-frame span (e.g. a marker at
+    // the top level of a structure Marked did not tokenize as code) becomes the fixed
+    // placeholder. The negative lookbehind spares the marker the inert extension wrote
+    // into a span's own data-vault-marker attribute (afterUpdate reads the value there).
+    if (vaultValues.size)
+      text = text.replace(
+        new RegExp('(?<!data-vault-marker=")' + INERT_MARKER_SOURCE, 'g'),
+        m => (vaultValues.has(m) ? _.escape(INERT_FENCED_PLACEHOLDER) : m)
+      )
 
     // remove all whitespace before </code></pre> close tag (mainly to remove single space added by marked)
     // NOTE: you can test by creating an empty block and seeing its size and non-matching of :empty
@@ -985,7 +1026,7 @@
   let itemdiv: HTMLDivElement
   // decoded vault-result values (or the fixed invalid placeholder), assigned to the
   // rendered placeholder elements via textContent only (bridge design §2.2)
-  let vaultValues: string[] = []
+  let vaultValues = new Map<string, string>() // marker -> decoded value / invalid text
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1102,7 +1143,7 @@
     // decoded model bytes never enter html/attributes, and repopulation survives the
     // app's forced rerenders
     itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
-      const value = vaultValues[+elem.getAttribute('data-vault-result')!] ?? INVALID_INERT_REGION
+      const value = vaultValues.get(elem.getAttribute('data-vault-marker')!) ?? INVALID_INERT_REGION
       if (elem.textContent !== value) elem.textContent = value
     })
     // always report container height for potential changes
