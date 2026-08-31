@@ -18,6 +18,7 @@ import {
   escapeInertBody,
   isVaultRouted,
   scanInert,
+  stepMarkedFence,
   unescapeInertBody,
 } from '../../src/inert.js'
 
@@ -195,6 +196,25 @@ test('crlf text forms no regions', () => {
   const { grammarText, candidates } = scanInert(crlf)
   expect(candidates).toHaveLength(0)
   expect(grammarText).toBe(crlf)
+})
+
+test('stepMarkedFence tracks Marked fence grammar, not a boolean toggle', () => {
+  // review 181 §1: only a same-char, >= length, clean-tail closer closes a fence
+  const run = (lines: string[]) => lines.reduce((s, l) => stepMarkedFence(s, l), null as any)
+  expect(run(['```js', 'code'])).not.toBeNull() // open, no close
+  expect(run(['```js', 'code', '```'])).toBeNull() // exact close
+  // a shorter run does not close a longer fence
+  expect(run(['````js', '```not-a-close', 'x'])).not.toBeNull()
+  // the other fence char does not close
+  expect(run(['```js', '~~~', 'x'])).not.toBeNull()
+  // a suffixed would-be closer is body
+  expect(run(['```js', '```still-code'])).not.toBeNull()
+  // an opener info string may not contain the fence char
+  expect(run(['```has`tick'])).toBeNull() // not a valid opener -> stays plain
+  // <=3 indentation opens; deeper is not a fence line
+  expect(run(['   ```js', 'x'])).not.toBeNull()
+  // a longer closer for a shorter fence still closes (>= length)
+  expect(run(['```js', '`````'])).toBeNull()
 })
 
 test('containsOpaqueMarker is the one containment predicate', () => {

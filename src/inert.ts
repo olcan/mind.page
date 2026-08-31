@@ -224,6 +224,31 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 }
 
+// a conservative fenced-code tracker matching MARKED's real grammar (review 181 §1):
+// a fence opens on `` ``` ``/`~~~` (>= 3 of ONE character), and closes ONLY on a line of
+// the SAME character, at least the opener's run length, with no non-whitespace tail --
+// so a shorter run, the other character, or a suffixed `` ```still-code `` inside a
+// longer fence does NOT close it. Used by the item renderer to decide whether a claimed
+// region sits inside ordinary fenced code (fixed placeholder) or at top level (dead
+// frame). Deliberately NOT the `_log|_output` scanner grammar: this mirrors what Marked
+// will parse, so a top-level dead-frame div is never injected into a still-open block.
+export type FenceState = { char: string; len: number } | null
+
+export function stepMarkedFence(state: FenceState, line: string): FenceState {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+  if (!match) return state
+  const [, run, tail] = match
+  if (state === null) {
+    // an opener's info string may not contain the fence character (Marked rule);
+    // otherwise it is not a fence opener and the line is ordinary text
+    if (run[0] === '`' && tail.includes('`')) return null
+    return { char: run[0], len: run.length }
+  }
+  // inside a fence: close only on the same char, >= length, no non-whitespace tail
+  if (run[0] === state.char && run.length >= state.len && tail.trim() === '') return null
+  return state
+}
+
 // EDITOR BACKDROP DECORATION (178 §4.2 as corrected by 180 §1.2): one classed span
 // per candidate, emitted STRUCTURALLY by the editor's line loop in place of the marker
 // line -- never by post-hoc replacement over highlighted html, where highlight.js

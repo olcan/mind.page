@@ -401,23 +401,87 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   // fence cannot materialize a dead-frame element (Marked escapes html there), so it
   // renders the fixed non-leaking placeholder text -- never internal markup, never a
   // marker, never the body
-  await page.evaluate(
-    () => void window._create('#e2e_vault_fenced\n```js\n<!--inert-->\nfenced body\n<!--/inert-->\n```\nafter')
-  )
-  await page.evaluate(() => void (location.hash = '#e2e_vault_fenced'))
-  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_fenced', true)?.elem), { timeout: 15_000 }).toBe(true)
-  const fenced = await page.evaluate(() => {
-    const item = window._item('#e2e_vault_fenced', true) as any
+  // (c1) RENDER inside an outer FOUR-backtick fence with a shorter NON-CLOSING ``` line
+  // (review 181 §1): the 3-backtick line must not close the 4-backtick Marked block, so
+  // the region stays fenced and renders the fixed placeholder -- proving stepMarkedFence's
+  // run-length rule in the real Marked pipeline
+  const nestedText = [
+    '#e2e_vault_nested',
+    '````js',
+    '```not-a-close',
+    '<!--inert-->',
+    'fenced body',
+    '<!--/inert-->',
+    '````',
+    'after',
+  ].join('\n')
+  await page.evaluate(text => void window._create(text), nestedText)
+  await page.evaluate(() => void (location.hash = '#e2e_vault_nested'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_nested', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const nested = await page.evaluate(() => {
+    const item = window._item('#e2e_vault_nested', true) as any
     return {
       rendered: item?.elem?.querySelector('.content')?.textContent ?? '',
       frames: [...(item?.elem?.querySelectorAll('.vault-result') ?? [])].length,
     }
   })
-  expect(fenced.rendered, 'the fenced placement renders the fixed placeholder').toContain('⟦inert region⟧')
-  expect(fenced.rendered, 'no internal markup leaked as code text').not.toContain('vault-result')
-  expect(fenced.rendered, 'no marker leaked').not.toContain('vault_result_v1:')
-  expect(fenced.rendered, 'the fenced body is not displayed').not.toContain('fenced body')
-  expect(fenced.frames, 'no dead frame materializes inside the fence').toBe(0)
+  expect(nested.rendered, 'the shorter fence does not close the outer block; placeholder shown').toContain('⟦inert region⟧')
+  expect(nested.rendered, 'no internal markup leaked as code text').not.toContain('vault-result')
+  expect(nested.rendered, 'no marker leaked').not.toContain('vault_result_v1:')
+  expect(nested.rendered, 'the fenced body is not displayed').not.toContain('fenced body')
+  expect(nested.frames, 'no dead frame materializes inside the outer fence').toBe(0)
+
+  // (c2) EDITOR keeps its open block across the candidate (review 181 §2): a simple
+  // ```js block (matching the editor's own fence grammar) with code before AND after the
+  // region -- both segments stay block-highlighted, and the region renders the fixed
+  // fallback (its dimmed source span is present in the backdrop)
+  const fencedText = [
+    '#e2e_vault_fenced',
+    '```js',
+    'const before = 1',
+    '<!--inert-->',
+    'fenced body',
+    '<!--/inert-->',
+    'const after = 2',
+    '```',
+    'after',
+  ].join('\n')
+  await page.evaluate(text => void window._create(text), fencedText)
+  await page.evaluate(() => void (location.hash = '#e2e_vault_fenced'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_fenced', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const fencedRender = await page.evaluate(
+    () => window._item('#e2e_vault_fenced', true)?.elem?.querySelector('.content')?.textContent ?? ''
+  )
+  expect(fencedRender, 'the simple-fence placement also renders the placeholder').toContain('⟦inert region⟧')
+  const fencedId = await page.evaluate(() => window._item('#e2e_vault_fenced')!.id)
+  const fencedItem = page.locator(`[data-item-id="${fencedId}"]`)
+  const fencedParagraph = fencedItem.locator('.content').first()
+  const fBox = (await fencedParagraph.boundingBox())!
+  await fencedParagraph.click({ position: { x: fBox.width / 2, y: 5 } })
+  await expect(fencedItem.locator('textarea')).toBeVisible()
+  const fencedEditor = await page.evaluate(id => {
+    const elem = document.querySelector(`[data-item-id="${id}"]`)!
+    const backdrop = elem.querySelector('.backdrop')!
+    const blocks = [...backdrop.querySelectorAll('.block')]
+    return {
+      beforeHighlighted: blocks.some(b => b.textContent?.includes('const before')),
+      afterHighlighted: blocks.some(b => b.textContent?.includes('const after')),
+      regionSpan: backdrop.querySelector('.inert-region')?.textContent ?? null,
+      backdropText: backdrop.textContent ?? '',
+      value: (elem.querySelector('textarea') as HTMLTextAreaElement).value,
+    }
+  }, fencedId)
+  expect(fencedEditor.beforeHighlighted, 'code before the region stays block-highlighted').toBe(true)
+  expect(fencedEditor.afterHighlighted, 'code after the region stays block-highlighted').toBe(true)
+  expect(fencedEditor.regionSpan, 'the editor shows the exact region source').toBe(
+    '<!--inert-->\nfenced body\n<!--/inert-->'
+  )
+  expect(
+    fencedEditor.backdropText === fencedEditor.value || fencedEditor.backdropText === fencedEditor.value + '\n',
+    'the fenced editor backdrop reconstructs the textarea value'
+  ).toBe(true)
+  await fencedItem.locator('textarea').press('Escape')
+  await expect(fencedItem.locator('textarea')).toBeHidden()
 
   // (d) EDITOR witness (review 180 §§1.2+2+4): open the editor on the VALID item --
   // the backdrop must carry the dimmed source span, reconstruct the exact textarea

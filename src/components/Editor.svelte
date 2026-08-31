@@ -246,16 +246,16 @@
       // sees the marker; the span's numeric-entity content is immune to the later
       // section/delimiter regex passes
       if (markerSpans.has(line)) {
-        // emit the BARE marker (flushing any open block first so highlight.js never
-        // tokenizes it): the collision-free marker carries no backticks and no `&lt;`,
-        // so it survives every later block-delimiter and section regex pass untouched.
-        // the classed source span is substituted for it AFTER all those passes (180
-        // §1.2) -- placing the span here would expose its backtick-bearing source to
-        // the block-delimiter regex and drop a newline.
+        // emit the BARE marker (the collision-free marker carries no backticks and no
+        // `&lt;`, so it survives every later block-delimiter and section regex pass
+        // untouched; the classed source span is substituted AFTER those passes -- 180
+        // §1.2). If the candidate sits INSIDE an open code block, flush the code
+        // accumulated so far as a highlighted block but KEEP insideBlock/language so the
+        // block CONTINUES after the region (181 §2): highlight.js never sees the marker,
+        // and code before and after it stays highlighted in the block's language.
         if (insideBlock) {
           html += '<div class="block">' + highlight(code, language.replace(/^_+/, '')) + '</div>'
           code = ''
-          insideBlock = false
         }
         html += line + '\n'
         return

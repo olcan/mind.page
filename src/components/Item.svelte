@@ -26,7 +26,14 @@
   } from '../util.js'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
-  import { editInertText, scanInert, INERT_FENCED_PLACEHOLDER, INVALID_INERT_REGION } from '../inert'
+  import {
+    editInertText,
+    scanInert,
+    stepMarkedFence,
+    INERT_FENCED_PLACEHOLDER,
+    INVALID_INERT_REGION,
+    type FenceState,
+  } from '../inert'
   import Editor from './Editor.svelte'
   export let editable = true
   export let pushable = false
@@ -281,33 +288,31 @@
     dependentsString: string,
     version: number
   ) {
-    // bridge design §2.2-2.3 as revised by reviews 177-178: derive the INERT grammar
-    // view and replace each claimed region's marker with a TRUSTED dead-frame element
-    // before macro/Marked processing -- region bytes never meet the html/macro/tag
-    // grammar. rendering is PURELY LEXICAL (178 §4.1): every canonical region displays
-    // its decoded body, every claimed-but-valueless one the fixed invalid placeholder;
-    // bridge trust lives solely in the Python transcript. computed before the cache
-    // check so the values refresh even on cached html; values are assigned post-render
-    // via textContent only.
+    // bridge design §2.2-2.3 as revised by reviews 177-181: derive the INERT grammar
+    // view and replace each claimed region's marker before macro/Marked processing --
+    // region bytes never meet the html/macro/tag grammar in ANY placement (global
+    // claiming/opacity). The TRUSTED publisher emits its region in normal TOP-LEVEL
+    // flow, which materializes a dead-frame element populated via textContent; a claimed
+    // region inside ordinary FENCED CODE (where Marked would escape an injected div as
+    // code text) renders the fixed non-leaking INERT_FENCED_PLACEHOLDER instead (181
+    // §§1,3 -- a proportionate first cut, not a promise of decoded display in every
+    // Markdown/raw-HTML owner). Fence state uses Marked's REAL grammar, not a boolean
+    // toggle. Computed before the cache check so values refresh on cached html; values
+    // are assigned post-render via textContent only.
     const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
-      // the dead frame is guaranteed for TOP-LEVEL placements (the trusted publisher's
-      // shape); a marker inside an ordinary fenced-code context cannot materialize an
-      // element (Marked escapes html there -- 180 §1.1), so those placements render the
-      // fixed, non-leaking INERT_FENCED_PLACEHOLDER text instead. bytes stay claimed
-      // and opaque in every placement.
       const markerInfo = new Map(vaultScan.candidates.map(candidate => [candidate.marker, candidate]))
       vaultValues = []
-      let fenced = false
+      let fence: FenceState = null
       text = vaultScan.grammarText
         .split('\n')
         .map(line => {
           const candidate = markerInfo.get(line)
           if (candidate === undefined) {
-            if (line.match(/^\s*(```|~~~)/)) fenced = !fenced
+            fence = stepMarkedFence(fence, line)
             return line
           }
-          if (fenced) return INERT_FENCED_PLACEHOLDER
+          if (fence !== null) return INERT_FENCED_PLACEHOLDER // inside an open Marked fence
           const i = vaultValues.length
           vaultValues.push(candidate.value ?? INVALID_INERT_REGION)
           return `<div class="vault-result" data-vault-result="${i}"></div>`
