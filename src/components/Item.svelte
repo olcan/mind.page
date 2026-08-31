@@ -26,7 +26,7 @@
   } from '../util.js'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
-  import { associateVaultResults, editVaultText, scanVaultResults, INVALID_RESULT_PLACEHOLDER } from '../vault_result'
+  import { editInertText, scanInert, INVALID_INERT_REGION } from '../inert'
   import Editor from './Editor.svelte'
   export let editable = true
   export let pushable = false
@@ -281,15 +281,17 @@
     dependentsString: string,
     version: number
   ) {
-    // bridge design §2.2-2.3: derive the grammar view and replace each candidate
-    // marker with a TRUSTED inert placeholder element before macro/Marked processing --
-    // model bytes never meet the html/macro/tag grammar. computed before the cache
-    // check so the values refresh even on cached html. the decoded value (or the fixed
-    // invalid placeholder) is assigned post-render via textContent only.
-    const vaultScan = scanVaultResults(text)
+    // bridge design §2.2-2.3 as revised by reviews 177-178: derive the INERT grammar
+    // view and replace each claimed region's marker with a TRUSTED dead-frame element
+    // before macro/Marked processing -- region bytes never meet the html/macro/tag
+    // grammar. rendering is PURELY LEXICAL (178 §4.1): every canonical region displays
+    // its decoded body, every claimed-but-valueless one the fixed invalid placeholder;
+    // bridge trust lives solely in the Python transcript. computed before the cache
+    // check so the values refresh even on cached html; values are assigned post-render
+    // via textContent only.
+    const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
-      const decisions = associateVaultResults(vaultScan.grammarText, vaultScan.candidates)
-      vaultValues = decisions.map(decision => (decision.valid ? decision.value! : INVALID_RESULT_PLACEHOLDER))
+      vaultValues = vaultScan.candidates.map(candidate => candidate.value ?? INVALID_INERT_REGION)
       text = vaultScan.grammarText
       vaultScan.candidates.forEach((candidate, i) => {
         text = text.replace(candidate.marker, `<div class="vault-result" data-vault-result="${i}"></div>`)
@@ -449,7 +451,7 @@
     )
 
     // extract _log blocks (processed for summary at bottom)
-    const log = extractBlock(scanVaultResults(text).grammarText, '_log')
+    const log = extractBlock(scanInert(text).grammarText, '_log')
 
     // introduce a line break between any styling html and first tag
     text = text.replace(/^(<.*>)\s+#/, '$1\n#')
@@ -1078,7 +1080,7 @@
     // decoded model bytes never enter html/attributes, and repopulation survives the
     // app's forced rerenders
     itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
-      const value = vaultValues[+elem.getAttribute('data-vault-result')!] ?? INVALID_RESULT_PLACEHOLDER
+      const value = vaultValues[+elem.getAttribute('data-vault-result')!] ?? INVALID_INERT_REGION
       if (elem.textContent !== value) elem.textContent = value
     })
     // always report container height for potential changes
@@ -1508,7 +1510,7 @@
         // read-modify-write over the GRAMMAR VIEW then restore raw envelopes (review
         // 148 §2): reading item.read() (grammar view) and writing it back would persist
         // opaque markers, and a fake checkbox inside a candidate would shift the index
-        const text = editVaultText(item.text, grammar => {
+        const text = editInertText(item.text, grammar => {
           let checkboxIndex = 0
           return grammar.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => {
             if (checkboxIndex++ == index) return m.replace(/\[[xX ]\]/, elem.hasAttribute('checked') ? '[ ]' : '[x]')
@@ -1555,7 +1557,7 @@
             let item = window['_item'](id)
             // grammar-view edit + raw restore (review 148 §2): a fake file input inside
             // a candidate must not be a replacement target
-            const text = editVaultText(item.text, grammar =>
+            const text = editInertText(item.text, grammar =>
               grammar.replace(/<input\s(?:"[^"]*"|[^>"])*?type\s*=\s*["']?file(?:"[^"]*"|[^>"])*>|<input>/gi, images)
             )
             item.write(text, '' /* replace whole item*/)
@@ -2568,8 +2570,15 @@
     vertical-align: middle;
   }
   .item > :global(.content .vault-result) {
-    white-space: pre-wrap; /* decoded vault results keep their line structure */
+    white-space: pre-wrap; /* decoded inert bodies keep their line structure */
     overflow-wrap: anywhere;
+    /* the DEAD FRAME (reviews 177-178): machine text, visibly inert -- a quiet frame
+       around a pure text node; content is only ever assigned via textContent */
+    display: block;
+    padding: 4px 8px;
+    border-left: 2px solid #555;
+    border-radius: 2px;
+    background: rgba(128, 128, 128, 0.08);
   }
   /* set default size/padding of pending images */
   .item > :global(.content img[_pending]) {

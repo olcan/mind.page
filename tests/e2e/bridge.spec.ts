@@ -305,7 +305,7 @@ test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', a
   }
 })
 
-test('vault_result envelopes render inert: valid decoded text and malformed candidates', async ({ page }) => {
+test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {
   // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO
   // phases: (a) a VALID envelope whose DECODED text carries every active item grammar,
   // and (b) a MALFORMED raw candidate whose BODY carries the same payloads. phase (a)
@@ -323,20 +323,20 @@ test('vault_result envelopes render inert: valid decoded text and malformed cand
     'window._pwned = 5',
     '```',
   ].join('\n')
-  const encoded = Buffer.from(hostile, 'utf8').toString('base64')
   const footer = "vault/default · run ab12cd34 · 1s"
-  // (a) VALID envelope: decoded payload must display literally and change nothing
+  // (a) VALID region: the escaped body IS the hostile text (it contains no
+  // close-shaped sequences), and the decoded display must change nothing
   await page.evaluate(
-    ([encoded, footer, hostile]) => {
+    ([footer, hostile]) => {
       void window._create(
         `#e2e_vault_valid its reply\n<<user>> q\n<<agent('${footer}')>>\n` +
-          '```vault_result_v1\n' +
-          encoded +
-          '\n```'
+          '<!--inert-->\n' +
+          hostile +
+          '\n<!--/inert-->'
       )
       ;(window as any)._hostile = hostile
     },
-    [encoded, footer, hostile] as const
+    [footer, hostile] as const
   )
   await page.evaluate(() => void (location.hash = '#e2e_vault_valid'))
   await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_valid', true)?.elem), { timeout: 15_000 }).toBe(true)
@@ -374,7 +374,9 @@ test('vault_result envelopes render inert: valid decoded text and malformed cand
   // (b) MALFORMED candidate: the same payloads as RAW body, opaque and placeholdered
   await page.evaluate(
     hostile =>
-      void window._create('#e2e_vault_bad malformed\n<<user>> q\n```vault_result_v1\nnot base64\n' + hostile + '\n```'),
+      void window._create(
+        '#e2e_vault_bad malformed\n<<user>> q\n<!--inert-->\nnot canonical <!--/inert--> x\n' + hostile + '\n<!--/inert-->'
+      ),
     hostile
   )
   await page.evaluate(() => void (location.hash = '#e2e_vault_bad'))
@@ -384,7 +386,7 @@ test('vault_result envelopes render inert: valid decoded text and malformed cand
   expect(bad.runnable, 'raw input block did not make the item runnable').toBe(false)
   expect(bad.tags, 'raw tags did not enter item state').not.toContain('#_autorun')
   expect(bad.tags).not.toContain('#chat/gpt')
-  expect(bad.rendered, 'the invalid candidate renders the fixed placeholder').toContain('⟦invalid vault result⟧')
+  expect(bad.rendered, 'the invalid candidate renders the fixed placeholder').toContain('⟦invalid inert region⟧')
   expect(bad.rendered, 'raw candidate bytes are not displayed').not.toContain('window._pwned')
   expect(bad.placeholderElements, 'the placeholder holds text nodes only').toBe(0)
   expect(bad.liveNodes, 'no script/img/handler/javascript-link element was created').toBe(0)
@@ -407,18 +409,20 @@ test('a candidate-bearing item: read/render domains stay separate and idle conve
   // macro is not re-run on every idle pass.
   const read = await page.evaluate(() => {
     ;(window as any)._macro_runs = 0
-    void window._create('#e2e_vault_cache <<(window._macro_runs++, 1 + 2)>>\n```vault_result_v1\nnot base64\n```')
+    void window._create(
+      '#e2e_vault_cache <<(window._macro_runs++, 1 + 2)>>\n<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->'
+    )
     return (window._item('#e2e_vault_cache') as any).read('', { eval_macros: true })
   })
   expect(read, 'the macro evaluated in the read').toContain('3')
-  expect(read, 'the candidate is a masked marker in the read').not.toContain('not base64')
+  expect(read, 'the candidate is a masked marker in the read').not.toContain('not canonical')
   await page.evaluate(() => void (location.hash = '#e2e_vault_cache'))
   await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_cache', true)?.elem), { timeout: 15_000 }).toBe(true)
   const content = await page.evaluate(
     () => window._item('#e2e_vault_cache', true)?.elem?.querySelector('.content')?.textContent ?? ''
   )
   expect(content, 'the macro rendered (cache not poisoned by a marker)').toContain('3')
-  expect(content, 'the invalid candidate still shows the placeholder').toContain('⟦invalid vault result⟧')
+  expect(content, 'the invalid candidate still shows the placeholder').toContain('⟦invalid inert region⟧')
   expect(content, 'no raw marker leaked into render').not.toContain('vault_result_v1:')
   // idle convergence: past several ~250ms background passes the macro count is stable
   const runsBefore = await page.evaluate(() => (window as any)._macro_runs as number)
@@ -436,12 +440,12 @@ test('a malformed candidate cannot execute a nested js block on startup', async 
   await loadAdmin(page)
   await page.evaluate(() => {
     ;(window as any)._startup_pwned = false
-    // a MALFORMED candidate whose body contains a real nested ```js block opener with a
+    // a CLAIMED region whose body contains a real nested ```js block with a
     // _special_tag_aliases function: only a RAW extractBlock(item.text,'js') would find
-    // and execute it. the candidate's bare close also closes the raw js match.
+    // and execute it (the region masks it from every inline/grammar-view scan).
     void window._create(
-      '#e2e_startup_js\n```vault_result_v1\nnot base64\n```js\n' +
-        'window._startup_pwned = true\nfunction _special_tag_aliases() { return {} }\n```'
+      '#e2e_startup_js\n<!--inert-->\n```js\n' +
+        'window._startup_pwned = true\nfunction _special_tag_aliases() { return {} }\n```\n<!--/inert-->'
     )
   })
   await expect
@@ -470,8 +474,9 @@ test('/run copies only the real input, not a candidate-nested one', async ({ pag
   //    -- pinning clearRunArtifacts and both append transforms on this very item; all
   //    three fixtures persist before ONE shared reload
   await loadAdmin(page)
-  const candidate = '```vault_result_v1\nnot base64\n```js_input\nwindow._candidate_input = true\n```_output\nnested output\n```_log\nnested log\n```'
-  const inner = '```vault_result_v1\nnot base64\n```'
+  const candidate =
+    '<!--inert-->\nnot canonical <!--/inert--> x\n```js_input\nwindow._candidate_input = true\n```_output\nnested output\n```_log\nnested log\n<!--/inert-->'
+  const inner = '<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->'
   const names = ['#e2e_run_mixed/run', '#e2e_run_mixed', '#e2e_run_inner/run', '#e2e_run_inner', '#e2e_run_plain']
   const cleanup = () =>
     page.evaluate(names => {

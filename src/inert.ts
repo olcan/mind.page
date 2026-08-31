@@ -16,9 +16,16 @@
 // the decoded body reproduces the exact escaped body -- a residual bare close-shaped
 // spelling is noncanonical). Only canonical candidates expose a value.
 
-// markers keep the existing ephemeral prefix (178 §2.2): never persisted, and retaining
-// it keeps the already-loaded stored-consumer marker refusals effective across cutover
-import { RESULT_FENCE } from './vault_result.js'
+// the app's global tag parser (untyped util.js; the app tsconfig is non-strict and the
+// tests tsconfig needs the suppression, as in src/vault_result.ts)
+// @ts-ignore
+import { parseTags } from './util.js'
+
+// markers keep the existing ephemeral v1-named prefix (178 §2.2): the token is never
+// persisted, and retaining it keeps the already-loaded stored-consumer marker refusals
+// effective across cutover skew. OWNED LOCALLY (179 §3.2): a literal, not an import
+// from the v1 module, so v1 deletion at cutover needs no change here.
+const MARKER_FENCE = 'vault_result_v1'
 
 export const INERT_OPEN = '<!--inert-->'
 export const INERT_CLOSE = '<!--/inert-->'
@@ -100,7 +107,7 @@ export type InertScan = {
 // text); each source is scanned separately.
 export function scanInert(text: string): InertScan {
   let k = 0
-  while (text.includes(`⟦${RESULT_FENCE}:${k}:`)) k++
+  while (text.includes(`⟦${MARKER_FENCE}:${k}:`)) k++
   const lines = text.split('\n')
   const out: string[] = []
   const candidates: InertCandidate[] = []
@@ -109,7 +116,7 @@ export function scanInert(text: string): InertScan {
   let regionStart = 0
   let offset = 0 // UTF-16 code-unit offset of the current line's first character
   const finish = (closed: boolean, end: number) => {
-    const marker = `⟦${RESULT_FENCE}:${k}:${candidates.length}⟧`
+    const marker = `⟦${MARKER_FENCE}:${k}:${candidates.length}⟧`
     const source = region.join('\n')
     const framed = closed && region.length >= 3 // opener + >=1 body line + close
     const value = framed ? decodeInertSource(source) : null
@@ -155,3 +162,82 @@ export function scanInert(text: string): InertScan {
 // fixed placeholder for a claimed candidate WITHOUT a value (unclosed, unframed, or
 // noncanonical) -- assigned only via textContent, exactly like the v1 placeholder
 export const INVALID_INERT_REGION = '⟦invalid inert region⟧'
+
+// the centralized opaque-marker containment predicate (178 §5.1): whether TEXT (a whole
+// embed/caption/body capture, not one token) contains any generated grammar marker.
+// stored consumers call this through the versioned capability object instead of the
+// eight historical literal `⟦vault_result_v1:` checks.
+export function containsOpaqueMarker(text: string): boolean {
+  return text.includes(`⟦${MARKER_FENCE}:`)
+}
+
+// restore raw candidate sources into a text whose candidate ranges are still markers
+function restoreInertCandidates(text: string, candidates: InertCandidate[]): string {
+  for (const candidate of candidates)
+    if (text.includes(candidate.marker)) text = text.replace(candidate.marker, () => candidate.source)
+  return text
+}
+
+// the bounded source-preserving edit seam over INERT regions -- the successor of
+// editVaultText with the identical contract (design §2.3, reviews 148-149, carried
+// forward per 178): the transform runs over the grammar view, exact raw sources are
+// restored per retained marker, duplicates are rejected, drops are rejected unless
+// `allowDrop`, and a fresh-scan postcondition rejects any move that unclaims restored
+// bytes -- which also means transforms cannot MINT new regions (the fresh scan would
+// claim more sources than were retained).
+export function editInertText(
+  rawText: string,
+  transform: (grammarText: string) => string,
+  { allowDrop = false }: { allowDrop?: boolean } = {}
+): string {
+  const scan = scanInert(rawText)
+  const transformed = transform(scan.grammarText)
+  const occurrences = (text: string, marker: string) => text.split(marker).length - 1
+  for (const candidate of scan.candidates) {
+    const count = occurrences(transformed, candidate.marker)
+    if (count > 1) throw new Error('inert edit duplicated a region')
+    if (count === 0 && !allowDrop) throw new Error('inert edit dropped a region')
+  }
+  const restored = restoreInertCandidates(transformed, scan.candidates)
+  const retained = scan.candidates
+    .filter(candidate => occurrences(transformed, candidate.marker) === 1)
+    .map(candidate => candidate.source)
+    .sort()
+  const claimed = scanInert(restored)
+    .candidates.map(candidate => candidate.source)
+    .sort()
+  if (retained.length !== claimed.length || retained.some((source, i) => source !== claimed[i]))
+    throw new Error('inert edit moved a region out of a claimable position')
+  return restored
+}
+
+// minimal html escape for decorated candidate sources (no lodash dependency here)
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+}
+
+// EDITOR BACKDROP DECORATION (178 §4.2): the pure helper of the prescribed seam --
+// highlight the scan's grammar text through the editor's existing transforms, then
+// replace each collision-free marker with its escaped candidate source inside a classed
+// span. NORMAL/dimmed for canonical candidates; WARNING for every claimed candidate
+// without a value (unclosed EOF, missing structural LF, noncanonical escape spelling) --
+// all objectively known from the scanner; no early-close detector (178 §3). The
+// resulting backdrop textContent must equal the scanned input exactly (the span
+// contributes precisely candidate.source).
+export function decorateInertHtml(html: string, candidates: InertCandidate[]): string {
+  for (const candidate of candidates) {
+    const cls = candidate.value !== null ? 'inert-region' : 'inert-region inert-invalid'
+    html = html.replace(candidate.marker, () => `<span class="${cls}">${escapeHtml(candidate.source)}</span>`)
+  }
+  return html
+}
+
+// the browser routing predicate over the INERT grammar view -- the successor of the v1
+// isVaultRouted with the identical roots table and fail-closed semantics (design §2.1):
+// computed from the scanner's grammar view with the app's global tag parser, never
+// resolved item state, so a route inside a claimed region is invisible.
+const VAULT_ROOTS = ['#agent/vault', '#_agent/vault', '#agent/native', '#_agent/native']
+export function isVaultRouted(rawText: string): boolean {
+  const tags: string[] = (parseTags(scanInert(rawText).grammarText.toLowerCase()) as { raw: string[] }).raw
+  return tags.some(tag => VAULT_ROOTS.some(root => tag === root || tag.startsWith(root + '/')))
+}

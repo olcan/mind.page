@@ -1,11 +1,22 @@
 import { expect, test } from '@playwright/test'
 
+import _ from 'lodash'
+
+// parseTags (reached by isVaultRouted via util.js) reads the browser globals `_`
+// (lodash) and `window._shortcut_hosts` at call time; stub both before the imports
+;(globalThis as any)._ = _
+;(globalThis as any).window = { _shortcut_hosts: [] }
+
 import {
   INERT_CLOSE,
   INERT_OPEN,
+  containsOpaqueMarker,
   decodeInertSource,
+  decorateInertHtml,
+  editInertText,
   encodeInert,
   escapeInertBody,
+  isVaultRouted,
   scanInert,
   unescapeInertBody,
 } from '../../src/inert.js'
@@ -184,4 +195,66 @@ test('crlf text forms no regions', () => {
   const { grammarText, candidates } = scanInert(crlf)
   expect(candidates).toHaveLength(0)
   expect(grammarText).toBe(crlf)
+})
+
+test('containsOpaqueMarker is the one containment predicate', () => {
+  expect(containsOpaqueMarker('plain text')).toBe(false)
+  expect(containsOpaqueMarker('x ⟦vault_result_v1:0:0⟧ y')).toBe(true)
+  const { grammarText } = scanInert(`${INERT_OPEN}\nbody\n${INERT_CLOSE}`)
+  expect(containsOpaqueMarker(grammarText)).toBe(true) // generated markers are caught
+})
+
+test('editInertText: retain, drop, reject duplicate/unsafe move/minted region', () => {
+  const region = encodeInert('reply')
+  const raw = `a\n${region}\nb`
+  // retain via whole-line reorder between plain positions
+  const reordered = editInertText(raw, g => {
+    const [first, marker, last] = g.split('\n')
+    return [last, marker, first].join('\n')
+  })
+  expect(reordered).toBe(`b\n${region}\na`)
+  // drop requires allowDrop
+  expect(() => editInertText(raw, g => g.split('\n').filter(l => !l.startsWith('⟦')).join('\n'))).toThrow('dropped')
+  expect(editInertText(raw, g => g.split('\n').filter(l => !l.startsWith('⟦')).join('\n'), { allowDrop: true })).toBe(
+    'a\nb'
+  )
+  // duplicate marker rejected
+  expect(() => editInertText(raw, g => g + '\n' + g.split('\n')[1])).toThrow('duplicated')
+  // moving the marker under a log opener unclaims the restored bytes
+  expect(() => editInertText(raw, g => '```_log\n' + g)).toThrow('claimable')
+  // transforms cannot MINT regions (179 §2.3 / the landed postcondition): a new inert
+  // region introduced by the transform makes the fresh scan claim more than retained
+  expect(() => editInertText(raw, g => g + '\n' + encodeInert('minted'))).toThrow('claimable')
+})
+
+test('decorateInertHtml: classed escaped sources with exact textContent reconstruction', () => {
+  // the 178 §4.2 vectors: hostile html, astral prefix, ZWSP, repeated candidates --
+  // and the backdrop contract: reconstructed textContent equals the scanned input
+  const hostile = encodeInert('<script>alert(1)</script> & "quotes" <img onerror=x>')
+  const zwsp = 'https://example.com/very​long​url'
+  const text = `\u{1f680} ${zwsp}\n${hostile}\nmid\n${hostile}\n${INERT_OPEN}\nunclosed`
+  const scan = scanInert(text)
+  expect(scan.candidates).toHaveLength(3)
+  // the editor mini-pipeline: escape the grammar view, then decorate
+  const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+  const decorated = decorateInertHtml(escapeHtml(scan.grammarText), scan.candidates)
+  expect(decorated).toContain('class="inert-region"') // canonical: dimmed
+  expect(decorated).toContain('class="inert-region inert-invalid"') // unclosed: warning
+  expect(decorated).not.toContain('<script>') // hostile source arrives escaped
+  // textContent reconstruction: strip tags, decode numeric entities
+  const textContent = decorated
+    .replace(/<[^>]*>/g, '')
+    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(+code))
+  expect(textContent).toBe(text)
+})
+
+test('isVaultRouted: exact roots and descendants over the INERT grammar view', () => {
+  expect(isVaultRouted('#agent/vault\nhello')).toBe(true)
+  expect(isVaultRouted('#_agent/vault/opus\nhello')).toBe(true)
+  expect(isVaultRouted('#agent/vaultish\nhello')).toBe(false) // slash boundary
+  expect(isVaultRouted('note about #agent/openai')).toBe(false)
+  // a route inside a CLAIMED region is invisible (the grammar view sees a marker)
+  expect(isVaultRouted(`${INERT_OPEN}\n#agent/vault\n${INERT_CLOSE}`)).toBe(false)
+  // a route inside an UNCLOSED region is equally claimed to EOF
+  expect(isVaultRouted(`${INERT_OPEN}\n#agent/vault`)).toBe(false)
 })

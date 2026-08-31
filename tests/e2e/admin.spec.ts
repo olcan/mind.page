@@ -380,7 +380,10 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   await page.evaluate(() => {
     const item = window._item('#e2e_autodep/b/c/d') as any
     item.write(
-      item.text.replace('served_embed_body_v3()', 'served_embed_body_v3()\n```vault_result_v1\nnot base64\n```'),
+      item.text.replace(
+        'served_embed_body_v3()',
+        'served_embed_body_v3()\n<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->'
+      ),
       ''
     )
   })
@@ -412,7 +415,9 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     }),
     'check_updates refuses the marker-bearing embed'
   ).toBe(false)
-  expect(afterRefusal.text, 'the candidate raw bytes are intact').toContain('```vault_result_v1\nnot base64\n```')
+  expect(afterRefusal.text, 'the candidate raw bytes are intact').toContain(
+    '<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->'
+  )
   expect(afterRefusal.text, 'no literal marker was persisted').not.toContain('\u27e6vault_result_v1:')
 
   // wait for saves before deleting below, so no create can land after its delete

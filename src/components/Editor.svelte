@@ -40,6 +40,7 @@
     skipExclusions,
   } from '../util.js'
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
+  import { decorateInertHtml, scanInert } from '../inert'
 
   const placeholder = ' '
   let spellcheck = false
@@ -220,7 +221,14 @@
   }
 
   function updateTextDivs() {
-    let text = textarea.value || placeholder
+    // the editor decoration scan (bridge reviews 177-178 §4.2) runs over the EXACT
+    // textarea value -- the ZWSP-augmented editing domain -- so candidate ranges and
+    // markers align with this input, never with raw item offsets. the grammar view
+    // flows through the existing highlight transforms (claimed bytes never meet them),
+    // and decorateInertHtml restores each marker as an escaped, classed source span
+    // just before the backdrop assignment below.
+    const inertScan = scanInert(textarea.value || placeholder)
+    let text = inertScan.grammarText
     let insideBlock = false
     let language = ''
     let code = ''
@@ -297,6 +305,7 @@
         // note the \n before the closing delimiter was added after block div, so we drop it here
         `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close.substring(1)}</span>`
     )
+    html = decorateInertHtml(html, inertScan.candidates)
     highlights.innerHTML = html
 
     // linkify urls & tags in comments (regexes from util.js)
@@ -1204,6 +1213,18 @@
     border-radius: 4px;
     padding: 1px;
     margin: -1px;
+  }
+  .editor > .backdrop :global(.inert-region) {
+    /* machine text, visibly DEAD while editing (reviews 177-178 §4.2): dimmed via the
+       existing backdrop overlay; the span's textContent is exactly the raw region */
+    opacity: 0.55;
+  }
+  .editor > .backdrop :global(.inert-region.inert-invalid) {
+    /* every claimed candidate WITHOUT a value (unclosed, unframed, noncanonical) --
+       the objectively knowable warning states only, no early-close detector */
+    opacity: 0.8;
+    background: rgba(255, 180, 60, 0.12);
+    text-decoration: underline wavy rgba(255, 180, 60, 0.6);
   }
   .editor > .backdrop :global(.block-delimiter) {
     color: #666;
