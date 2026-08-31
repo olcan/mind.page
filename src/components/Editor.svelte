@@ -40,7 +40,7 @@
     skipExclusions,
   } from '../util.js'
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
-  import { decorateInertHtml, scanInert } from '../inert'
+  import { inertCandidateSpan, scanInert } from '../inert'
 
   const placeholder = ' '
   let spellcheck = false
@@ -221,20 +221,45 @@
   }
 
   function updateTextDivs() {
-    // the editor decoration scan (bridge reviews 177-178 §4.2) runs over the EXACT
-    // textarea value -- the ZWSP-augmented editing domain -- so candidate ranges and
-    // markers align with this input, never with raw item offsets. the grammar view
-    // flows through the existing highlight transforms (claimed bytes never meet them),
-    // and decorateInertHtml restores each marker as an escaped, classed source span
-    // just before the backdrop assignment below.
-    const inertScan = scanInert(textarea.value || placeholder)
-    let text = inertScan.grammarText
+    // the editor decoration scan (reviews 177-180) runs over the EXACT textarea value
+    // -- the ZWSP-augmented editing domain -- so candidate markers align with this
+    // input, never with raw item offsets. TWO coordinate domains, kept apart (180 §2):
+    // the GRAMMAR view feeds the highlight transforms below (claimed bytes never meet
+    // them; marker lines are emitted structurally as classed source spans in the line
+    // loop, since post-hoc replacement over highlighted html cannot survive
+    // highlight.js tokenization); RAW text feeds every caret/delimiter computation,
+    // matching the reconstructed backdrop's textContent. an empty textarea shows the
+    // placeholder in both domains (nothing is scanned).
+    const inertScan = scanInert(textarea.value)
+    const rawText = textarea.value || placeholder
+    const markerSpans = new Map(inertScan.candidates.map(c => [c.marker, inertCandidateSpan(c)]))
+    let text = textarea.value ? inertScan.grammarText : placeholder
     let insideBlock = false
     let language = ''
     let code = ''
     let html = ''
     const tags = parseTags(_.unescape(text)).raw
     text.split('\n').map(line => {
+      // a candidate marker line becomes its classed source span DIRECTLY (180 §1.2):
+      // inside an open block the accumulated code is flushed through the highlighter
+      // first (the block visually continues after the region), so highlight.js never
+      // sees the marker; the span's numeric-entity content is immune to the later
+      // section/delimiter regex passes
+      if (markerSpans.has(line)) {
+        // emit the BARE marker (flushing any open block first so highlight.js never
+        // tokenizes it): the collision-free marker carries no backticks and no `&lt;`,
+        // so it survives every later block-delimiter and section regex pass untouched.
+        // the classed source span is substituted for it AFTER all those passes (180
+        // §1.2) -- placing the span here would expose its backtick-bearing source to
+        // the block-delimiter regex and drop a newline.
+        if (insideBlock) {
+          html += '<div class="block">' + highlight(code, language.replace(/^_+/, '')) + '</div>'
+          code = ''
+          insideBlock = false
+        }
+        html += line + '\n'
+        return
+      }
       // note marked seems to allow anything after block delimiter, so we do the same
       if (!insideBlock && line.match(/^\s*```/)) {
         insideBlock = true
@@ -305,7 +330,9 @@
         // note the \n before the closing delimiter was added after block div, so we drop it here
         `${pfx}<span class="block-delimiter">${open}</span>${block}<span class="block-delimiter">${close.substring(1)}</span>`
     )
-    html = decorateInertHtml(html, inertScan.candidates)
+    // substitute each surviving bare marker with its classed source span, now that the
+    // block-delimiter and section passes are done (180 §1.2)
+    for (const [marker, span] of markerSpans) html = html.split(marker).join(span)
     highlights.innerHTML = html
 
     // linkify urls & tags in comments (regexes from util.js)
@@ -323,7 +350,7 @@
     // also watch out for ligatures (e.g. << or >> or [||]) that will change color _together_
     const matched_positions = []
     const unmatched_positions = []
-    const clean_text = cleanTextForDelimiterMatching(text)
+    const clean_text = cleanTextForDelimiterMatching(rawText)
     if (textarea.selectionStart == textarea.selectionEnd && ')]}'.includes(clean_text[textarea.selectionStart])) {
       let matchpos = findMatchingOpenDelimiter(clean_text, textarea.selectionStart)
       if (matchpos >= 0) matched_positions.push(matchpos, textarea.selectionStart)
@@ -333,7 +360,7 @@
       '([{'.includes(clean_text[textarea.selectionStart - 1])
     ) {
       let matchpos = findMatchingCloseDelimiter(clean_text, textarea.selectionStart - 1)
-      if (matchpos < text.length) matched_positions.push(textarea.selectionStart - 1, matchpos)
+      if (matchpos < rawText.length) matched_positions.push(textarea.selectionStart - 1, matchpos)
       else unmatched_positions.push(textarea.selectionStart - 1)
     }
 

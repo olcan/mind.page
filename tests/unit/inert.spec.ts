@@ -12,7 +12,7 @@ import {
   INERT_OPEN,
   containsOpaqueMarker,
   decodeInertSource,
-  decorateInertHtml,
+  inertCandidateSpan,
   editInertText,
   encodeInert,
   escapeInertBody,
@@ -227,25 +227,27 @@ test('editInertText: retain, drop, reject duplicate/unsafe move/minted region', 
   expect(() => editInertText(raw, g => g + '\n' + encodeInert('minted'))).toThrow('claimable')
 })
 
-test('decorateInertHtml: classed escaped sources with exact textContent reconstruction', () => {
-  // the 178 §4.2 vectors: hostile html, astral prefix, ZWSP, repeated candidates --
-  // and the backdrop contract: reconstructed textContent equals the scanned input
+test('inertCandidateSpan: classed escaped sources with exact textContent', () => {
+  // the 178 §4.2 vectors at the span level (the editor's line loop emits these
+  // structurally -- the browser witness proves the wiring): hostile html, astral,
+  // ZWSP, repeated candidates; textContent reconstruction is exact per span
   const hostile = encodeInert('<script>alert(1)</script> & "quotes" <img onerror=x>')
   const zwsp = 'https://example.com/very​long​url'
   const text = `\u{1f680} ${zwsp}\n${hostile}\nmid\n${hostile}\n${INERT_OPEN}\nunclosed`
   const scan = scanInert(text)
   expect(scan.candidates).toHaveLength(3)
-  // the editor mini-pipeline: escape the grammar view, then decorate
-  const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
-  const decorated = decorateInertHtml(escapeHtml(scan.grammarText), scan.candidates)
-  expect(decorated).toContain('class="inert-region"') // canonical: dimmed
-  expect(decorated).toContain('class="inert-region inert-invalid"') // unclosed: warning
-  expect(decorated).not.toContain('<script>') // hostile source arrives escaped
-  // textContent reconstruction: strip tags, decode numeric entities
-  const textContent = decorated
-    .replace(/<[^>]*>/g, '')
-    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(+code))
-  expect(textContent).toBe(text)
+  const spans = scan.candidates.map(inertCandidateSpan)
+  expect(spans[0]).toContain('class="inert-region"') // canonical: dimmed
+  expect(spans[2]).toContain('class="inert-region inert-invalid"') // unclosed: warning
+  for (const span of spans) expect(span).not.toContain('<script>') // escaped hostile
+  // numeric-entity escaping: immune to the editor's later `&lt;`-matching passes
+  expect(spans[0]).not.toContain('&lt;')
+  const textContent = (span: string, i: number) => {
+    const inner = span.replace(/<span[^>]*>/, '').replace(/<\/span>$/, '')
+    const decoded = inner.replace(/&#(\d+);/g, (_m, code: string) => String.fromCharCode(+code))
+    expect(decoded, `span ${i} textContent is the exact source`).toBe(scan.candidates[i].source)
+  }
+  spans.forEach((span, i) => textContent(span, i))
 })
 
 test('isVaultRouted: exact roots and descendants over the INERT grammar view', () => {

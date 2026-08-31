@@ -26,7 +26,7 @@
   } from '../util.js'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
-  import { editInertText, scanInert, INVALID_INERT_REGION } from '../inert'
+  import { editInertText, scanInert, INERT_FENCED_PLACEHOLDER, INVALID_INERT_REGION } from '../inert'
   import Editor from './Editor.svelte'
   export let editable = true
   export let pushable = false
@@ -291,11 +291,28 @@
     // via textContent only.
     const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
-      vaultValues = vaultScan.candidates.map(candidate => candidate.value ?? INVALID_INERT_REGION)
+      // the dead frame is guaranteed for TOP-LEVEL placements (the trusted publisher's
+      // shape); a marker inside an ordinary fenced-code context cannot materialize an
+      // element (Marked escapes html there -- 180 §1.1), so those placements render the
+      // fixed, non-leaking INERT_FENCED_PLACEHOLDER text instead. bytes stay claimed
+      // and opaque in every placement.
+      const markerInfo = new Map(vaultScan.candidates.map(candidate => [candidate.marker, candidate]))
+      vaultValues = []
+      let fenced = false
       text = vaultScan.grammarText
-      vaultScan.candidates.forEach((candidate, i) => {
-        text = text.replace(candidate.marker, `<div class="vault-result" data-vault-result="${i}"></div>`)
-      })
+        .split('\n')
+        .map(line => {
+          const candidate = markerInfo.get(line)
+          if (candidate === undefined) {
+            if (line.match(/^\s*(```|~~~)/)) fenced = !fenced
+            return line
+          }
+          if (fenced) return INERT_FENCED_PLACEHOLDER
+          const i = vaultValues.length
+          vaultValues.push(candidate.value ?? INVALID_INERT_REGION)
+          return `<div class="vault-result" data-vault-result="${i}"></div>`
+        })
+        .join('\n')
     } else if (vaultValues.length) vaultValues = []
 
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash

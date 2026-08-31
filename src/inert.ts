@@ -1,9 +1,9 @@
-// Inert-region scanner + wire codec (bridge reviews 177-178) -- NEW-ONLY and UNWIRED.
-// The readable successor to the vault_result_v1 base64 envelope. Nothing on the loaded
-// production path imports this module: the active scanner remains vault_result.ts until
-// the quiescent app-first cutover (178 §2.3), at which point callers switch here and the
-// v1 path is removed. Python twin: the vault's lib/mindpage_inert.py; parity vectors are
-// pinned in both suites.
+// Inert-region scanner + wire codec (bridge reviews 177-180): THE app grammar module.
+// The readable successor to the vault_result_v1 base64 envelope; the TypeScript v1 path
+// (vault_result.ts) is deleted and every app seam (render, editor, edit, routing,
+// capability) consumes this module. Python twin: the vault's lib/mindpage_inert.py;
+// parity vectors are pinned in both suites. NOTE: the app is STAGED -- deployment
+// happens only inside the quiescent app-first cutover (design §2.2a).
 //
 // Wire format (178 §1): exact standalone marker lines (no indentation, no trailing
 // whitespace, LF-boundary recognition only -- a \r anywhere on the line disqualifies
@@ -163,6 +163,14 @@ export function scanInert(text: string): InertScan {
 // noncanonical) -- assigned only via textContent, exactly like the v1 placeholder
 export const INVALID_INERT_REGION = '⟦invalid inert region⟧'
 
+// fixed SAFE TEXT substituted for a claimed region whose marker sits inside an
+// ordinary fenced-code context in the render pipeline (180 §1.1): Marked escapes html
+// there, so the dead-frame element cannot materialize -- the readable dead frame is
+// guaranteed only for TOP-LEVEL placements (the trusted publisher's shape), and every
+// other claimed placement renders this fixed, non-leaking text. Grammar opacity is
+// global regardless: the bytes stay claimed either way.
+export const INERT_FENCED_PLACEHOLDER = '⟦inert region⟧'
+
 // the centralized opaque-marker containment predicate (178 §5.1): whether TEXT (a whole
 // embed/caption/body capture, not one token) contains any generated grammar marker.
 // stored consumers call this through the versioned capability object instead of the
@@ -216,20 +224,18 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 }
 
-// EDITOR BACKDROP DECORATION (178 §4.2): the pure helper of the prescribed seam --
-// highlight the scan's grammar text through the editor's existing transforms, then
-// replace each collision-free marker with its escaped candidate source inside a classed
-// span. NORMAL/dimmed for canonical candidates; WARNING for every claimed candidate
-// without a value (unclosed EOF, missing structural LF, noncanonical escape spelling) --
-// all objectively known from the scanner; no early-close detector (178 §3). The
-// resulting backdrop textContent must equal the scanned input exactly (the span
-// contributes precisely candidate.source).
-export function decorateInertHtml(html: string, candidates: InertCandidate[]): string {
-  for (const candidate of candidates) {
-    const cls = candidate.value !== null ? 'inert-region' : 'inert-region inert-invalid'
-    html = html.replace(candidate.marker, () => `<span class="${cls}">${escapeHtml(candidate.source)}</span>`)
-  }
-  return html
+// EDITOR BACKDROP DECORATION (178 §4.2 as corrected by 180 §1.2): one classed span
+// per candidate, emitted STRUCTURALLY by the editor's line loop in place of the marker
+// line -- never by post-hoc replacement over highlighted html, where highlight.js
+// tokenizes markers into fragments. NORMAL/dimmed for canonical candidates; WARNING for
+// every claimed candidate without a value (unclosed EOF, missing structural LF,
+// noncanonical escape spelling) -- all objectively known from the scanner; no
+// early-close detector (178 §3). The span's textContent is exactly candidate.source,
+// and the NUMERIC entity escaping keeps the content immune to the editor's later
+// entity-matching section/delimiter regex passes (they match `&lt;`, never `&#60;`).
+export function inertCandidateSpan(candidate: InertCandidate): string {
+  const cls = candidate.value !== null ? 'inert-region' : 'inert-region inert-invalid'
+  return `<span class="${cls}">${escapeHtml(candidate.source)}</span>`
 }
 
 // the browser routing predicate over the INERT grammar view -- the successor of the v1

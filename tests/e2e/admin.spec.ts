@@ -419,6 +419,35 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     '<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->'
   )
   expect(afterRefusal.text, 'no literal marker was persisted').not.toContain('\u27e6vault_result_v1:')
+  // OLD-APP SHAPE (review 180 §3.2): with the capability absent, the DEFAULT
+  // check_updates path (mark_pushables = false) on an embed-bearing item must warn and
+  // return false BEFORE any token/network/writer work -- never throw
+  expect(
+    await page.evaluate(async () => {
+      const check_updates = await (window._item('#updater') as any).eval('check_updates', {
+        async: true,
+        async_simple: true,
+      })
+      const grammar = (window as any)._grammar
+      const fetches: string[] = []
+      const realFetch = window.fetch
+      try {
+        delete (window as any)._grammar
+        ;(window as any).fetch = (...args: any[]) => {
+          fetches.push(String(args[0]))
+          return realFetch.apply(window, args as any)
+        }
+        const result = await check_updates(window._item('#e2e_autodep/b/c/d'))
+        return { result, fetches: fetches.length }
+      } catch (e) {
+        return { threw: String(e) }
+      } finally {
+        ;(window as any)._grammar = grammar
+        ;(window as any).fetch = realFetch
+      }
+    }),
+    'stale-app default check_updates fails closed without I/O'
+  ).toEqual({ result: false, fetches: 0 })
 
   // wait for saves before deleting below, so no create can land after its delete
   await expect

@@ -396,6 +396,94 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     await page.evaluate(() => (window._item('#e2e_vault_bad') as any).read()),
     'the read path masks candidate bytes'
   ).not.toContain('window._pwned')
+
+  // (c) FENCED placement (review 180 §1.1): a claimed region inside an ordinary code
+  // fence cannot materialize a dead-frame element (Marked escapes html there), so it
+  // renders the fixed non-leaking placeholder text -- never internal markup, never a
+  // marker, never the body
+  await page.evaluate(
+    () => void window._create('#e2e_vault_fenced\n```js\n<!--inert-->\nfenced body\n<!--/inert-->\n```\nafter')
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_vault_fenced'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_fenced', true)?.elem), { timeout: 15_000 }).toBe(true)
+  const fenced = await page.evaluate(() => {
+    const item = window._item('#e2e_vault_fenced', true) as any
+    return {
+      rendered: item?.elem?.querySelector('.content')?.textContent ?? '',
+      frames: [...(item?.elem?.querySelectorAll('.vault-result') ?? [])].length,
+    }
+  })
+  expect(fenced.rendered, 'the fenced placement renders the fixed placeholder').toContain('⟦inert region⟧')
+  expect(fenced.rendered, 'no internal markup leaked as code text').not.toContain('vault-result')
+  expect(fenced.rendered, 'no marker leaked').not.toContain('vault_result_v1:')
+  expect(fenced.rendered, 'the fenced body is not displayed').not.toContain('fenced body')
+  expect(fenced.frames, 'no dead frame materializes inside the fence').toBe(0)
+
+  // (d) EDITOR witness (review 180 §§1.2+2+4): open the editor on the VALID item --
+  // the backdrop must carry the dimmed source span, reconstruct the exact textarea
+  // text (modulo the synthetic trailing newline), and match caret delimiters in RAW
+  // coordinates after the region
+  await page.evaluate(() => void (location.hash = '#e2e_vault_valid'))
+  const validId = await page.evaluate(() => window._item('#e2e_vault_valid')!.id)
+  const validItem = page.locator(`[data-item-id="${validId}"]`)
+  // click mid-paragraph, past the leading tag (a tag click navigates instead of
+  // opening the editor -- the editor.spec idiom)
+  const validParagraph = validItem.locator('.content p').first()
+  const validBox = (await validParagraph.boundingBox())!
+  await validParagraph.click({ position: { x: validBox.width / 2, y: validBox.height / 2 } })
+  const textarea = validItem.locator('textarea')
+  await expect(textarea).toBeVisible()
+  const editorState = await page.evaluate(id => {
+    const elem = document.querySelector(`[data-item-id="${id}"]`)!
+    const backdrop = elem.querySelector('.backdrop')!
+    const region = backdrop.querySelector('.inert-region')
+    const value = (elem.querySelector('textarea') as HTMLTextAreaElement).value
+    return {
+      regionText: region?.textContent ?? null,
+      invalid: !!backdrop.querySelector('.inert-invalid'),
+      backdropText: backdrop.textContent ?? '',
+      value,
+    }
+  }, validId)
+  expect(editorState.regionText, 'the dimmed span carries the exact region source').toBe(
+    '<!--inert-->\n' + (await page.evaluate(() => (window as any)._hostile)) + '\n<!--/inert-->'
+  )
+  expect(editorState.invalid, 'a canonical region is not warning-tinted').toBe(false)
+  const reconstructed = editorState.backdropText
+  expect(
+    reconstructed === editorState.value || reconstructed === editorState.value + '\n',
+    'backdrop textContent reconstructs the textarea value'
+  ).toBe(true)
+  // caret delimiter matching AFTER the region, in raw coordinates: type a paren pair
+  // at the end and place the caret before the closer
+  await textarea.focus()
+  await page.evaluate(id => {
+    const ta = document.querySelector(`[data-item-id="${id}"] textarea`) as HTMLTextAreaElement
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+  }, validId)
+  await textarea.pressSequentially('\n(x)')
+  await textarea.press('ArrowLeft')
+  await expect(
+    validItem.locator('.backdrop .highlight.matched'),
+    'delimiters after a region match in raw coordinates'
+  ).toHaveCount(2)
+  await textarea.press('Shift+Enter') // save (the appended paren line is harmless)
+  await expect(textarea).toBeHidden()
+
+  // (e) EDITOR warning state: the malformed item's claimed candidate is tinted
+  await page.evaluate(() => void (location.hash = '#e2e_vault_bad'))
+  const badId = await page.evaluate(() => window._item('#e2e_vault_bad')!.id)
+  const badItem = page.locator(`[data-item-id="${badId}"]`)
+  const badParagraph = badItem.locator('.content p').first()
+  const badBox = (await badParagraph.boundingBox())!
+  await badParagraph.click({ position: { x: badBox.width / 2, y: badBox.height / 2 } })
+  await expect(badItem.locator('textarea')).toBeVisible()
+  await expect(
+    badItem.locator('.backdrop .inert-region.inert-invalid'),
+    'a claimed candidate without a value is warning-tinted while editing'
+  ).toHaveCount(1)
+  await badItem.locator('textarea').press('Escape') // no edits: closes silently
+  await expect(badItem.locator('textarea')).toBeHidden()
 })
 
 test('a candidate-bearing item: read/render domains stay separate and idle converges', async ({ page }) => {
