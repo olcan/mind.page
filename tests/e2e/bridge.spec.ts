@@ -9,12 +9,7 @@
 // admin-installed corpus, which contains the #agent/vault provider item itself, and a second
 // visible #agent/vault label would make _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
-import { type Page } from '@playwright/test'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
-
-function itemText(page: Page, name: string): Promise<string> {
-  return page.evaluate(name => window._item(name, true)?.text ?? '', name)
-}
 
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {
   // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO

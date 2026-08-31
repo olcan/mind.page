@@ -1984,7 +1984,11 @@
     // target at first layout. retrying on the next layout pass costs nothing and self-corrects
     if (headerdiv && !headerScrolled) {
       scrollTo(headerdiv.offsetTop)
-      headerScrolled = document.body.scrollTop >= headerdiv.offsetTop - 1
+      // 2px tolerance, not 1: scrollTo lands a FRACTIONAL scrollTop (device-pixel
+      // quantization) while offsetTop is integer-rounded, so the gap can reach ~2px --
+      // observed live 2026-08-31 (scrollTop 1251.82 vs offsetTop 1253), which left
+      // headerScrolled false forever and the loading overlay opaque over a fine page
+      headerScrolled = document.body.scrollTop >= headerdiv.offsetTop - 2
     }
 
     // from this point we try to auto-scroll for layout changes
