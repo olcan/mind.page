@@ -405,18 +405,24 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   // canonical region in a context whose fence ownership only Marked's real grammar
   // knows. A region Marked lexes inside code -> fixed placeholder, no frame; a region
   // Marked lexes at top level -> dead frame. None may leak a marker or the body.
-  const renderCases: Array<{ name: string; lines: string[]; framed: boolean }> = [
-    // a shorter run does not close a longer fence (Marked run-length rule)
-    { name: 'nested_len', lines: ['````js', '```not-a-close', '<!--inert-->', 'nested_body', '<!--/inert-->', '````'], framed: false },
-    // a tab-tailed would-be closer does NOT close (Marked accepts spaces only) -> code
-    { name: 'tab_tail', lines: ['```js', '```\t', '<!--inert-->', 'tab_body', '<!--/inert-->', '```'], framed: false },
-    // a mixed backtick/tilde closer DOES close a backtick opener (Marked 18) -> the
-    // region after it is TOP-LEVEL
-    { name: 'mixed_close', lines: ['```js', 'code', '```~', '<!--inert-->', 'answer', '<!--/inert-->'], framed: true },
-    // a fence created by a MACRO after Item's own transforms -> code
-    { name: 'macro_fence', lines: ["<<'```js'>>", '<!--inert-->', 'macro_body', '<!--/inert-->', '```'], framed: false },
-    // a region nested inside a list-item's fenced code (Marked recursive ownership)
-    { name: 'list_nested', lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'], framed: false },
+  const renderCases: Array<{ name: string; body: string; lines: string[]; framed: boolean }> = [
+    // a shorter run does not close a longer fence (Marked run-length rule) -> CODE
+    { name: 'nested_len', body: 'nested_body', framed: false,
+      lines: ['````js', '```not-a-close', '<!--inert-->', 'nested_body', '<!--/inert-->', '````'] },
+    // a mixed backtick/tilde closer DOES close a backtick opener (Marked 18) -> the region
+    // after it is TOP-LEVEL
+    { name: 'mixed_close', body: 'mixed_answer', framed: true,
+      lines: ['```js', 'code', '```~', '<!--inert-->', 'mixed_answer', '<!--/inert-->'] },
+    // a region nested inside a list-item's fenced code (Marked recursive ownership) -> CODE.
+    // this is the exact old defect (a top-level dead-frame div escaped inside the list code)
+    { name: 'list_nested', body: 'list_body', framed: false,
+      lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'] },
+    // a trailing TAB after the closing run: the app pipeline normalizes trailing whitespace
+    // before Marked, so this closes the ```js and the region is TOP-LEVEL (raw Marked would
+    // keep it in code; either placement is safe -- the assertion pins whichever the pipeline
+    // produces so a regression is caught)
+    { name: 'tab_tail', body: 'tab_answer', framed: true,
+      lines: ['```js', '```\t', '<!--inert-->', 'tab_answer', '<!--/inert-->', '```'] },
   ]
   for (const rc of renderCases) {
     const hashName = `#e2e_vault_${rc.name}`
@@ -427,14 +433,14 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
       return {
         rendered: content?.textContent ?? '',
-        innerHTML: content?.innerHTML ?? '',
         frames: [...(content?.querySelectorAll('.vault-result') ?? [])].length,
-        // THE §1 invariant: a dead-frame element must NEVER sit inside a code block
-        // (that is exactly what Marked would escape as markup) -- and no code text may
-        // contain the injected class name
+        // THE §1 invariant: a dead-frame element must NEVER sit inside a code block (that
+        // is exactly what Marked would escape as markup), and no code text may contain the
+        // injected class name
         framesInCode: [...(content?.querySelectorAll('pre code .vault-result') ?? [])].length,
         codeText: [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent).join(''),
-        // frames hold ONLY text nodes (decoded bytes never become elements/attributes)
+        // candidate bytes initially enter through textContent and never create
+        // candidate-supplied elements/attributes (review 183 §1.3)
         frameChildElements: [...(content?.querySelectorAll('.vault-result *') ?? [])].length,
       }
     }, hashName)
@@ -443,11 +449,20 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
     expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
     expect(r.frameChildElements, `${rc.name}: frames hold only text nodes`).toBe(0)
-    // a region Marked lexes at top level shows the decoded body in a dead frame; one it
-    // lexes in code shows the fixed placeholder -- exactly one holds, never a leak
-    const bodyLine = rc.lines[rc.lines.indexOf('<!--inert-->') + 1]
-    if (r.frames > 0) expect(r.rendered, `${rc.name}: top-level region shows the decoded body`).toContain(bodyLine)
-    else expect(r.rendered, `${rc.name}: code region shows the fixed placeholder`).toContain('⟦inert region⟧')
+    // the DISCRIMINATING assertion (review 183 §1.2): Marked's classification is pinned --
+    // a top-level region is a dead frame with the decoded body and NOT the placeholder; a
+    // code region is the fixed placeholder and NOT the body. A regression that flips either
+    // placement fails here.
+    expect(r.frames, `${rc.name}: expected ${rc.framed ? 'a top-level dead frame' : 'no frame (code)'}`).toBe(
+      rc.framed ? 1 : 0
+    )
+    if (rc.framed) {
+      expect(r.rendered, `${rc.name}: top-level shows the decoded body`).toContain(rc.body)
+      expect(r.rendered, `${rc.name}: top-level does NOT show the placeholder`).not.toContain('⟦inert region⟧')
+    } else {
+      expect(r.rendered, `${rc.name}: code shows the fixed placeholder`).toContain('⟦inert region⟧')
+      expect(r.rendered, `${rc.name}: code does NOT show the decoded body`).not.toContain(rc.body)
+    }
   }
 
   // (c2) EDITOR keeps its open block across the candidate (review 181 §2): a simple

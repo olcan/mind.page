@@ -160,9 +160,10 @@ export function scanInert(text: string): InertScan {
 }
 
 // the ephemeral grammar-marker pattern. Item's Marked extension matches these tokens so
-// MARKED ITSELF decides placement (review 182 §1.3): a marker Marked lexes at top level
-// becomes a dead-frame span, while a marker Marked lexes inside a code token is left as
-// literal text and shown as the fixed INERT_FENCED_PLACEHOLDER -- no pre-parse fence
+// MARKED ITSELF decides placement (reviews 182-183): a marker Marked lexes in an ordinary
+// INLINE context (top-level paragraph, list paragraph, blockquote, heading, table cell)
+// becomes a dead-frame span, while a marker Marked lexes inside a CODE token is shown as
+// the fixed INERT_FENCED_PLACEHOLDER (the trusted publisher's shape is top-level) -- no fence
 // prediction. The pattern is anchored for a tokenizer's `^` match; callers needing a
 // global scan build their own /g copy.
 export const INERT_MARKER_SOURCE = `⟦${MARKER_FENCE}:\\d+:\\d+⟧`
