@@ -29,6 +29,86 @@ test('typing in the mindbox and pressing shift+enter creates an item', async ({ 
   expect(await itemText(page, '#e2e_typed')).toBe('#e2e_typed created via keyboard')
 })
 
+test('failed _tests rank, border, and log with dedup; relog after a healthy interval', async ({ page }) => {
+  // issues/MindPage Failed Tests Pop Items Up With No Error Indication (reviews 192):
+  // failed _tests in an item's global store rank it as an error on every mindbox
+  // change but rendered no border and logged nothing. Now the dedicated failedTests
+  // flag drives the red border AND exactly one deduped console.error summary per item
+  // (base + alias entries normalized to ONE canonical stripped identity) plus one
+  // captured-log replay -- cleared on all-pass so the SAME set failing again relogs.
+  await loadAdmin(page)
+  const name = '#e2e_failed_tests'
+  const errors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && msg.text().includes(name)) errors.push(msg.text())
+  })
+  await page.evaluate(text => void window._create(text), `${name}\nan item with stale failed tests`)
+  // the PRODUCTION shape (tester.js): base result under the STRIPPED name, a
+  // per-function alias entry carrying test:'_test_thing', both sharing get_log's
+  // FORMATTED-STRING array
+  const setTests = (ok: boolean, line: string) =>
+    page.evaluate(([name, ok, line]) => {
+      const gs = (window._item(name as string, true) as any).global_store
+      gs._tests = {
+        thing: { ms: 5, ok, log: [line] },
+        thing_helper: { ms: 5, ok, log: [line], test: '_test_thing' },
+      }
+    }, [name, ok, line] as const)
+  await setTests(false, "ERROR: test 'thing' FAILED in 5ms")
+  await focusMindbox(page)
+  const settle = async () => {
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false)).toBe(true)
+  }
+  await mindbox(page).fill('stale failed tests')
+  await settle()
+  await expect
+    .poll(() => page.evaluate(name => {
+      const item = (window.__items as any[]).find(i => i.labelText == name)
+      return item && { failedTests: !!item.failedTests, hasError: !!item.hasError }
+    }, name))
+    .toMatchObject({ failedTests: true, hasError: true })
+  // the red border: the container carries both error and bordered classes
+  await expect
+    .poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.container.error.bordered'), name), { message: 'container carries the error class' })
+    .toBe(true)
+  // EXACTLY one summary + one replay: base and alias collapse to ONE canonical
+  // identity, and the shared log is replayed once
+  await expect.poll(() => errors.length).toBe(2)
+  expect(errors[0]).toContain('1 failed test')
+  expect(errors[0]).toContain('thing')
+  expect(errors[0]).not.toContain('thing_helper')
+  expect(errors[0]).not.toContain('_test_thing')
+  expect(errors[1]).toContain("test 'thing' captured log")
+  expect(errors[1]).toContain("ERROR: test 'thing' FAILED in 5ms")
+  // dedup: further mindbox passes re-rank but do NOT re-log
+  await mindbox(page).fill('stale failed')
+  await settle()
+  expect(errors.length).toBe(2)
+  // tests pass -> the ranking input and border clear, error count unchanged
+  await setTests(true, "ERROR: test 'thing' FAILED in 5ms")
+  await mindbox(page).fill('stale failed tests')
+  await settle()
+  await expect
+    .poll(() => page.evaluate(name => {
+      const item = (window.__items as any[]).find(i => i.labelText == name)
+      return item && { failedTests: !!item.failedTests, hasError: !!item.hasError }
+    }, name))
+    .toMatchObject({ failedTests: false, hasError: false })
+  await expect
+    .poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.container.error'), name))
+    .toBe(false)
+  expect(errors.length).toBe(2)
+  // the SAME canonical set fails again after the healthy interval: the memo was
+  // cleared, so the second run logs again with the new captured line (review 192 §2.2)
+  await setTests(false, "ERROR: test 'thing' FAILED in 7ms (second run)")
+  await mindbox(page).fill('stale failed')
+  await settle()
+  await expect.poll(() => errors.length).toBe(4)
+  expect(errors[3]).toContain('FAILED in 7ms (second run)')
+  await mindbox(page).fill('')
+  await page.keyboard.press('Escape')
+})
+
 test('searching filters items and puts the tag in the url; escape and shift+backspace clear', async ({ page }) => {
   await loadAdmin(page)
   await focusMindbox(page)

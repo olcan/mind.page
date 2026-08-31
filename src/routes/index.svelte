@@ -2721,10 +2721,16 @@
       // mark 'has error' on any logged errors or warnings
       // also mark if item has any failed _tests in its global store (set by #tester)
       // also mark if item has any macro errors
+      // failed _tests get a DEDICATED flag (issues/MindPage Failed Tests Pop Items Up
+      // With No Error Indication): unlike the other hasError sources they render NO
+      // dom/console trace of their own, so the flag drives the red border in Item
+      // (class:error) and the deduped console diagnostics below -- otherwise the item
+      // inexplicably ranks/pops on every mindbox change
+      const failedTests = _.pickBy(item.global_store?._tests, t => !t?.ok)
+      item.failedTests = !_.isEmpty(failedTests)
       item.hasError =
-        !!text.match(/^(?:ERROR|WARNING):/m) ||
-        _.values(item.global_store?._tests).some(t => !t.ok) ||
-        !!item.expanded?.error
+        !!text.match(/^(?:ERROR|WARNING):/m) || item.failedTests || !!item.expanded?.error
+      logFailedTests(item, failedTests) // always: the empty case clears the memo
     })
 
     // Update (but not save yet) times for editing and running non-log items to maintain ordering
@@ -2773,6 +2779,7 @@
         target: false,
         editing: false,
         hasError: false,
+        failedTests: false,
         previewable: false,
         pushable: false,
         target_nesting: -Infinity,
@@ -3116,6 +3123,42 @@
     if (elapsed > 250) {
       // dispatch warning to avoid writing to items if invoked synchronously, e.g. via _create
       setTimeout(() => console.warn(`onEditorChange took ${elapsed}ms`))
+    }
+  }
+
+  // deduped console diagnostics for items ranked/bordered by failed _tests (see
+  // item.failedTests in updateItems): updateItems runs on every mindbox keystroke, so
+  // log only when an item's failed-test set CHANGES -- and clear the memo on the
+  // all-pass state, so the SAME set failing again after a healthy interval logs again
+  // (review 192 §2.2). One replay per UNDERLYING test: tester stores the base result
+  // under the STRIPPED name ('thing' for test function _test_thing) and per-function
+  // alias entries (e.g. 'thing_helper') carrying `test: '_test_thing'` with the same
+  // captured log, so both spellings normalize to one canonical stripped identity
+  // (review 192 §2.1). The stored _tests[name].log is get_log's return: an array of
+  // FORMATTED STRINGS (the transient in-item ERROR lines are long gone by the time
+  // the item pops; non-string values would be malformed data, formatted defensively).
+  const loggedFailedTests = new Map<string, string>()
+  const canonicalTest = (name: string, t: any) => ((t?.test ?? name) as string).replace(/^_test_/, '')
+  function logFailedTests(item, failed) {
+    if (_.isEmpty(failed)) {
+      loggedFailedTests.delete(item.id)
+      return
+    }
+    const bases = _.uniq(_.map(_.entries(failed), ([name, t]) => canonicalTest(name, t))).sort()
+    const fingerprint = JSON.stringify(bases)
+    if (loggedFailedTests.get(item.id) == fingerprint) return
+    loggedFailedTests.set(item.id, fingerprint)
+    console.error(
+      `[${item.name}] ranked as error due to ${bases.length} failed test${bases.length > 1 ? 's' : ''} ` +
+        `in global_store._tests: ${bases.join(', ')} (re-run /test on the item to refresh, ` +
+        `or clear _tests from its global store)`
+    )
+    for (const base of bases) {
+      // one representative log per canonical identity (base or alias entry)
+      const entry = _.find(_.entries(failed), ([name, t]) => canonicalTest(name, t) == base)?.[1] as any
+      if (!entry?.log?.length) continue
+      const lines = entry.log.map(e => (typeof e == 'string' ? e : JSON.stringify(e)))
+      console.error(`[${item.name}] test '${base}' captured log:\n` + lines.join('\n'))
     }
   }
 
@@ -7727,6 +7770,7 @@
     item.matchingTermsSecondary = []
     item.missingTags = []
     item.hasError = false
+    item.failedTests = false
     // state from updateItemLayout
     item.index = index
     item.aboveFold = false
@@ -10451,6 +10495,7 @@
                 bind:focused={item.focused}
                 editable={item.editable}
                 pushable={item.pushable}
+                failedTests={item.failedTests}
                 previewable={item.previewable}
                 saving={item.saving}
                 running={item.running}

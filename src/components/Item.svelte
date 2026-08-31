@@ -37,6 +37,10 @@
   export let editable = true
   export let pushable = false
   export let previewable = false
+  // failed _tests in the item's global store (computed in index.svelte updateItems,
+  // where the same condition also ranks the item as an error): drives the red border
+  // for a state that renders no dom/console trace of its own
+  export let failedTests = false
   export let editing = false
   export let focused = false
   export let saving = false
@@ -1883,14 +1887,14 @@
     class:editing
     class:focused
     class:saving
-    class:error
+    class:error={error || failedTests}
     class:warning
     class:target
     class:target_context
     class:running
     class:admin
     class:showLogs
-    class:bordered={error || warning || running || target || pushable || previewable}
+    class:bordered={error || failedTests || warning || running || target || pushable || previewable}
     class:editable
     class:pushable
     class:previewable
