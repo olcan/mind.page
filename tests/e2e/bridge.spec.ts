@@ -417,11 +417,16 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     // this is the exact old defect (a top-level dead-frame div escaped inside the list code)
     { name: 'list_nested', body: 'list_body', framed: false,
       lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'] },
-    // a fence created by a MACRO after Item's own transforms -> CODE. the expression has
+    // a fence created by a MACRO after the opaque scan -> CODE. the expression has
     // no raw backtick (so it passes the app's balance predicate) and evaluates to a
     // three-backtick js opener; only Marked-native classification sees this fence
     { name: 'macro_fence', body: 'macro_body', framed: false,
       lines: ["<<String.fromCharCode(96).repeat(3) + 'js'>>", '<!--inert-->', 'macro_body', '<!--/inert-->', '```'] },
+    // a region as an IMAGE DESTINATION (review 186 §4.1): the marker lands in the image
+    // token's href, where Marked's default renderer would percent-encode it into a live
+    // src request -- the renderer.image interception renders the fixed placeholder
+    { name: 'image_dest', body: 'image_body', framed: false,
+      lines: ['![alt](', '<!--inert-->', 'image_body', '<!--/inert-->', ')'] },
     // a trailing TAB after the closing run: the app pipeline normalizes trailing whitespace
     // before Marked, so this closes the ```js and the region is TOP-LEVEL (raw Marked would
     // keep it in code; either placement is safe -- the assertion pins whichever the pipeline
@@ -447,6 +452,11 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
         // candidate bytes initially enter through textContent and never create
         // candidate-supplied elements/attributes (review 183 §1.3)
         frameChildElements: [...(content?.querySelectorAll('.vault-result *') ?? [])].length,
+        // review 186 §4.1: a marker must never survive into a URL attribute (raw or
+        // percent-encoded -- the ascii 'vault_result_v1:' substring survives encodeURI)
+        markerUrls: [...(content?.querySelectorAll('img, a') ?? [])].filter(el =>
+          ((el.getAttribute('src') ?? '') + (el.getAttribute('href') ?? '')).includes('vault_result_v1')
+        ).length,
       }
     }, hashName)
     // invariants that hold for EVERY placement Marked chooses (review 182 §1):
@@ -454,6 +464,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
     expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
     expect(r.frameChildElements, `${rc.name}: candidate bytes create no child elements`).toBe(0)
+    expect(r.markerUrls, `${rc.name}: no marker survives into a src/href attribute`).toBe(0)
     // the DISCRIMINATING assertion (review 183 §1.2): Marked's classification is pinned --
     // a top-level region is a dead frame with the decoded body and NOT the placeholder; a
     // code region is the fixed placeholder and NOT the body. A regression that flips either
@@ -468,6 +479,101 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       expect(r.rendered, `${rc.name}: code shows the fixed placeholder`).toContain('⟦inert region⟧')
       expect(r.rendered, `${rc.name}: code does NOT show the decoded body`).not.toContain(rc.body)
     }
+  }
+
+  // (c1b) encoded marker LOOKALIKE in an ordinary image stays an ordinary image
+  // (review 187 §2): owner text percent-encoding a marker shape must NOT trip the raw
+  // interception -- the real region still frames, and the lookalike renders as an img
+  {
+    const hashName = '#e2e_vault_lookalike'
+    const lines = [
+      hashName,
+      '![ordinary](%E2%9F%A6vault_result_v1%3A0%3A0%E2%9F%A7)',
+      '',
+      '<!--inert-->',
+      'lookalike_body',
+      '<!--/inert-->',
+    ]
+    await page.evaluate(text => void window._create(text), lines.join('\n'))
+    await page.evaluate(name => void (location.hash = name), hashName)
+    await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem, hashName), { timeout: 15_000 }).toBe(true)
+    const r = await page.evaluate(name => {
+      const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+      return {
+        rendered: content?.textContent ?? '',
+        frames: [...(content?.querySelectorAll('.vault-result') ?? [])].length,
+        images: [...(content?.querySelectorAll('img') ?? [])].length,
+      }
+    }, hashName)
+    expect(r.frames, 'lookalike: the real region still frames').toBe(1)
+    expect(r.rendered, 'lookalike: decoded body shown').toContain('lookalike_body')
+    expect(r.images, 'lookalike: the ordinary encoded image is NOT suppressed').toBe(1)
+    expect(r.rendered, 'lookalike: no placeholder for the ordinary image').not.toContain('⟦inert region⟧')
+  }
+
+  // (c1c) SEARCH reaches decoded bodies (owner bug 2026-08-31; review 188 §§2.1-2.3):
+  // a term existing ONLY inside a canonical region body must match the item and
+  // highlight inside its frame -- in visible ORDER (regex terms), and still after a
+  // MACRO forces the expanded-item search path
+  {
+    const hashName = '#e2e_vault_searchable'
+    const lines = [
+      hashName,
+      'prompt text here',
+      '<!--inert-->',
+      'zanzibar_reply_term',
+      '<!--/inert-->',
+      'suffix searchable_suffix <<1+1>>',
+    ]
+    await page.evaluate(text => void window._create(text), lines.join('\n'))
+    // drive the real mindbox search (editor.spec idiom): backdrop click focuses it
+    await page.locator('.header .backdrop').first().click()
+    await page.locator('#textarea-mindbox').fill('zanzibar_reply_term')
+    // the item matches on the decoded body alone (editor.spec matching idiom)...
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            name => window.__items.find(item => item.labelText == name)?.matching ?? false,
+            hashName
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    // ...and the occurrence inside the dead frame is highlight-wrapped
+    await expect
+      .poll(
+        () =>
+          page.evaluate(name => {
+            const elem = window._item(name, true)?.elem
+            return [...(elem?.querySelectorAll('.vault-result .highlight') ?? [])].some(span =>
+              (span.textContent ?? '').includes('zanzibar_reply_term')
+            )
+          }, hashName),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    const matching = () =>
+      page.evaluate(name => window.__items.find(item => item.labelText == name)?.matching ?? false, hashName)
+    // regex ORDER follows the visible text (188 §2.2): body precedes the suffix
+    await page.locator('#textarea-mindbox').fill('regex:zanzibar_reply_term[^]*searchable_suffix')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(true)
+    await page.locator('#textarea-mindbox').fill('regex:searchable_suffix[^]*zanzibar_reply_term')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(false)
+    // the EXPANDED-item path (188 §2.1): force macro expansion, then the same
+    // reply-only term must still match through expanded.item's search text
+    await page.evaluate(name => void (window._item(name, true) as any)?.read('', { eval_macros: true }), hashName)
+    await expect
+      .poll(
+        () => page.evaluate(name => !!(window.__items.find(item => item.labelText == name) as any)?.expanded?.item, hashName),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    await page.locator('#textarea-mindbox').fill('zanzibar_reply_term')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(true)
+    // clear the search for the rows below
+    await page.locator('#textarea-mindbox').fill('')
+    await page.keyboard.press('Escape')
   }
 
   // (c2) EDITOR keeps its open block across the candidate (review 181 §2): a simple

@@ -34,9 +34,9 @@ export const INERT_CLOSE = '<!--/inert-->'
 // applied anywhere in the body, not only line-anchored -- one uniform rule
 const CLOSE_SHAPED = /<!--(\\*)\/inert-->/g
 
-// the app's _log|_output opener grammar, duplicated VERBATIM from vault_result.ts
-// (178 §2.3: the active v1 module stays untouched; this new-only scanner composes with
-// the same landed _log|_output ownership -- ownership only, bytes preserved)
+// the app's _log|_output opener grammar, carried over VERBATIM from the deleted v1
+// module vault_result.ts (178 §2.3): this scanner composes with the same landed
+// _log|_output ownership -- ownership only, bytes preserved
 const LOG_OPEN = /^\s*```(?:\S+:)?(?:_output|_log)(?:_hidden|_removed)?(?::\S*\.\S*)?(?:\s|$)/i
 const LOG_CLOSE = /^\s*```/
 

@@ -2605,9 +2605,11 @@
         labelUnique,
         tagsAlt,
         lctext,
+        lcsearch,
         tagsExpanded,
         text,
       } = item.expanded?.item ?? item
+      const searchText = lcsearch ?? lctext // decoded inert bodies are searchable
 
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(tagsVisibleExpanded, terms).length
@@ -2640,10 +2642,10 @@
         item.matchingTerms = terms.filter(t => t[0] == '#' && tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
 
         // match all terms (tag or non-tag) anywhere in text
-        item.matchingTerms.push(...terms.filter(t => lctext.includes(t)))
+        item.matchingTerms.push(...terms.filter(t => searchText.includes(t)))
 
         // match regex:* terms as regex
-        item.matchingTerms.push(...regexTerms.filter(t => lctext.match(t)))
+        item.matchingTerms.push(...regexTerms.filter(t => searchText.match(t)))
 
         // match id:* terms against id
         const id = 'id:' + item.id.toLowerCase()
@@ -3700,6 +3702,12 @@
     // precompute macro-expanded item state used for search in onEditorChange and store in item.expanded.item
     // we reuse itemTextChanged (w/ update_deps:false) to switch temporarily to expanded text and back
     // this is simpler, ensures consistency, and is also easy to extend to other item state in future
+    // capture the RAW scan's marker -> decoded-value pairs first (review 188 §2.1):
+    // expanded.text is marker-domain, so the temporary rescan below finds no raw inert
+    // candidates and would otherwise lose decoded-body search for macro-bearing items
+    const rawInertValues: [string, string][] = item.vaultScan.candidates
+      .filter(c => typeof c.value == 'string')
+      .map(c => [c.marker, (c.value as string).toLowerCase()])
     itemTextChanged(item.index, item.expanded.text, false /* update_deps */)
     item.expanded.item = _.pick(item, [
       // these names should match destructured item state in onEditorChange
@@ -3712,10 +3720,17 @@
       'labelUnique',
       'tagsAlt',
       'lctext',
+      'lcsearch',
       'tagsExpanded',
       'missingTags',
       'text',
     ])
+    // derive expanded search text from the expanded grammar text plus the ORIGINAL
+    // marker map, position-preserving (markers flow opaque through macro expansion, so
+    // they sit at their visible positions in the expanded lctext); values stay
+    // matcher-only and never re-enter the grammar (review 188 §2.1)
+    for (const [marker, value] of rawInertValues)
+      item.expanded.item.lcsearch = item.expanded.item.lcsearch.replace(marker, () => value)
     // note this call may use item.expanded.item.* to update certain global state, e.g. tagCounts
     itemTextChanged(item.index, item.text, false /* update_deps */)
 
@@ -3751,9 +3766,21 @@
     // ONE scan per text change (bridge design §2.2-2.3): every grammar consumer below
     // (search text, tags, labels, runnable/input detection -- and the read/render paths
     // via item.vaultScan) receives the GRAMMAR VIEW, in which inert-region candidate
-    // ranges are collapsed to inert markers; association decides per-message validity
+    // ranges are collapsed to inert markers; the bridge's Python transcript classifier
+    // alone decides trusted-result validity (TS association was removed at cutover)
     item.vaultScan = scanInert(text)
     item.lctext = item.vaultScan.grammarText.toLowerCase()
+    // SEARCH text (owner bug 2026-08-31; position-preserving per review 188 §2.2): the
+    // grammar view is right for tags/labels/runnable (a route or tag inside a claimed
+    // region must stay invisible), but the readable inert era means search should also
+    // match DECODED canonical bodies. Each marker is replaced by its lowercased decoded
+    // value AT ITS POSITION, so plain terms and regex: terms see the visible order.
+    // Matching only, never parsing: values never re-enter the grammar. Markers are
+    // lowercase-invariant, so substitution into the lowercased text is exact.
+    item.lcsearch = item.lctext
+    for (const candidate of item.vaultScan.candidates)
+      if (typeof candidate.value == 'string')
+        item.lcsearch = item.lcsearch.replace(candidate.marker, () => candidate.value!.toLowerCase())
     item.runnable = item.lctext.match(inputBlockRegExp()) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
