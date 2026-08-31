@@ -417,6 +417,11 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     // this is the exact old defect (a top-level dead-frame div escaped inside the list code)
     { name: 'list_nested', body: 'list_body', framed: false,
       lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'] },
+    // a fence created by a MACRO after Item's own transforms -> CODE. the expression has
+    // no raw backtick (so it passes the app's balance predicate) and evaluates to a
+    // three-backtick js opener; only Marked-native classification sees this fence
+    { name: 'macro_fence', body: 'macro_body', framed: false,
+      lines: ["<<String.fromCharCode(96).repeat(3) + 'js'>>", '<!--inert-->', 'macro_body', '<!--/inert-->', '```'] },
     // a trailing TAB after the closing run: the app pipeline normalizes trailing whitespace
     // before Marked, so this closes the ```js and the region is TOP-LEVEL (raw Marked would
     // keep it in code; either placement is safe -- the assertion pins whichever the pipeline
@@ -448,7 +453,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     expect(r.rendered, `${rc.name}: no marker leaks into rendered text`).not.toContain('vault_result_v1:')
     expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
     expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
-    expect(r.frameChildElements, `${rc.name}: frames hold only text nodes`).toBe(0)
+    expect(r.frameChildElements, `${rc.name}: candidate bytes create no child elements`).toBe(0)
     // the DISCRIMINATING assertion (review 183 §1.2): Marked's classification is pinned --
     // a top-level region is a dead frame with the decoded body and NOT the placeholder; a
     // code region is the fixed placeholder and NOT the body. A regression that flips either

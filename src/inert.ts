@@ -23,8 +23,8 @@ import { parseTags } from './util.js'
 
 // markers keep the existing ephemeral v1-named prefix (178 §2.2): the token is never
 // persisted, and retaining it keeps the already-loaded stored-consumer marker refusals
-// effective across cutover skew. OWNED LOCALLY (179 §3.2): a literal, not an import
-// from the v1 module, so v1 deletion at cutover needs no change here.
+// effective across cutover skew. OWNED LOCALLY (179 §3.2): a literal, not an import from
+// the v1 module (v1 code is retired in a separate post-canary cleanup, review 184 §2.5).
 const MARKER_FENCE = 'vault_result_v1'
 
 export const INERT_OPEN = '<!--inert-->'
@@ -172,12 +172,11 @@ export const INERT_MARKER_SOURCE = `⟦${MARKER_FENCE}:\\d+:\\d+⟧`
 // noncanonical) -- assigned only via textContent, exactly like the v1 placeholder
 export const INVALID_INERT_REGION = '⟦invalid inert region⟧'
 
-// fixed SAFE TEXT substituted for a claimed region whose marker sits inside an
-// ordinary fenced-code context in the render pipeline (180 §1.1): Marked escapes html
-// there, so the dead-frame element cannot materialize -- the readable dead frame is
-// guaranteed only for TOP-LEVEL placements (the trusted publisher's shape), and every
-// other claimed placement renders this fixed, non-leaking text. Grammar opacity is
-// global regardless: the bytes stay claimed either way.
+// fixed SAFE TEXT substituted for a claimed region whose marker Marked lexes inside a
+// CODE token (reviews 180-184 §1.1): Marked escapes html there, so a dead-frame element
+// cannot materialize -- a region in ordinary inline flow gets the readable dead frame,
+// a region in code gets this fixed non-leaking text. Grammar opacity is global either
+// way (the bytes stay claimed regardless of placement).
 export const INERT_FENCED_PLACEHOLDER = '⟦inert region⟧'
 
 // the centralized opaque-marker containment predicate (178 §5.1): whether TEXT (a whole

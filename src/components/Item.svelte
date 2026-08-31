@@ -287,18 +287,7 @@
     dependentsString: string,
     version: number
   ) {
-    // bridge design §2.2-2.3 as revised by reviews 177-181: derive the INERT grammar
-    // view and replace each claimed region's marker before macro/Marked processing --
-    // region bytes never meet the html/macro/tag grammar in ANY placement (global
-    // claiming/opacity). The TRUSTED publisher emits its region in normal TOP-LEVEL
-    // flow, which materializes a dead-frame element populated via textContent; a claimed
-    // region inside ordinary FENCED CODE (where Marked would escape an injected div as
-    // code text) renders the fixed non-leaking INERT_FENCED_PLACEHOLDER instead (181
-    // §§1,3 -- a proportionate first cut, not a promise of decoded display in every
-    // Markdown/raw-HTML owner). Fence state uses Marked's REAL grammar, not a boolean
-    // toggle. Computed before the cache check so values refresh on cached html; values
-    // are assigned post-render via textContent only.
-    // bridge reviews 177-182: the grammar view's opaque markers flow UNCHANGED through
+    // bridge reviews 177-184: the grammar view's opaque markers flow UNCHANGED through
     // macro expansion and every block transform below; MARKED itself then classifies
     // each marker's placement (review 182 §1.3) via the inert extension registered on
     // the parser -- a marker Marked lexes at top level becomes a dead-frame span
@@ -783,13 +772,14 @@
       )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
     marked.use({ renderer }) // note a bare renderer instance is silently ignored by marked.use
-    // the INERT extension (bridge review 182 §1.3): an inline tokenizer for the grammar
-    // markers of THIS render's claimed regions. Marked runs inline tokenizers only where
-    // it lexes ordinary text, NEVER inside a code token, so a marker at top level becomes
-    // a dead-frame span here while a marker inside code is swapped for the fixed
-    // placeholder in the markedHighlight callback below. The span is populated post-render
-    // via textContent by its data-vault-marker (afterUpdate); decoded bytes never enter
-    // html. Only markers of the current scan match (owner-typed lookalikes are ignored).
+    // the INERT extension (bridge reviews 182-184): an inline tokenizer for the grammar
+    // markers of THIS render's claimed regions. Marked runs inline tokenizers wherever it
+    // lexes ORDINARY TEXT (a paragraph, list item, blockquote, heading, table cell) but
+    // NEVER inside a code token, so a marker in ordinary inline flow becomes a dead-frame
+    // span here while a marker inside code is swapped for the fixed placeholder in the
+    // markedHighlight callback below. The span is populated post-render via textContent by
+    // its data-vault-marker (afterUpdate); candidate bytes never enter html. Only markers
+    // of the current scan match (owner-typed lookalikes are ignored).
     const inertGlobal = new RegExp(INERT_MARKER_SOURCE, 'g')
     if (vaultValues.size) {
       const inertOpen = new RegExp('^' + INERT_MARKER_SOURCE)

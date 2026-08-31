@@ -3750,7 +3750,7 @@
     // persistence, raw identity/CAS and deep invalidation retain item.text)
     // ONE scan per text change (bridge design §2.2-2.3): every grammar consumer below
     // (search text, tags, labels, runnable/input detection -- and the read/render paths
-    // via item.vaultScan) receives the GRAMMAR VIEW, in which vault_result_v1 candidate
+    // via item.vaultScan) receives the GRAMMAR VIEW, in which inert-region candidate
     // ranges are collapsed to inert markers; association decides per-message validity
     item.vaultScan = scanInert(text)
     item.lctext = item.vaultScan.grammarText.toLowerCase()
